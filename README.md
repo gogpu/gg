@@ -86,7 +86,7 @@ func main() {
 | Component | Description | Version |
 |-----------|-------------|---------|
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.3.0 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
 | **gogpu/gg** | **2D graphics** | **v0.1.0** |
 
