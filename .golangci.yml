@@ -1,0 +1,172 @@
+# GolangCI-Lint v2 Configuration for gogpu/gg - Pure Go 2D Graphics Library
+# Documentation: https://golangci-lint.run/docs/configuration/
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # Code quality and complexity
+    - gocyclo       # Check cyclomatic complexity
+    - gocognit      # Check cognitive complexity
+    - funlen        # Check function length
+    - maintidx      # Maintainability index
+    - cyclop        # Check cyclomatic complexity (alternative)
+    - nestif        # Reports deeply nested if statements
+
+    # Bug detection
+    - govet         # Standard Go vet
+    - staticcheck   # Comprehensive static analysis
+    - errcheck      # Check that errors are handled
+    - errorlint     # Check error wrapping
+    - gosec         # Security issues
+    - nilnil        # Check that functions don't return nil both ways
+    - nilerr        # Check nil error returns
+    - ineffassign   # Detect ineffectual assignments
+
+    # Code style and consistency
+    - misspell      # Check for misspelled words
+    - whitespace    # Check for trailing whitespace
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Detect unused function parameters
+
+    # Naming conventions
+    - errname       # Check error naming conventions
+    - revive        # Fast, configurable, extensible linter
+
+    # Performance
+    - prealloc      # Find slice declarations that could be preallocated
+    - makezero      # Find slice declarations with non-zero initial length
+
+    # Code practices
+    - goconst       # Find repeated strings that could be constants
+    - gocritic      # Comprehensive code checker
+    - goprintffuncname  # Check printf-like function names
+    - nolintlint    # Check nolint directives are used correctly
+    - nakedret      # Checks for naked returns
+
+    # Additional quality checkers
+    - dupl          # Detect duplicate code
+    - dogsled       # Check for assignments with too many blank identifiers
+    - durationcheck # Check for two durations multiplied together
+
+  settings:
+    govet:
+      enable:
+        - copylocks
+      disable:
+        - fieldalignment
+
+    gocyclo:
+      min-complexity: 20
+
+    cyclop:
+      max-complexity: 20
+
+    funlen:
+      lines: 120
+      statements: 60
+
+    gocognit:
+      min-complexity: 30
+
+    misspell:
+      locale: US
+
+    nestif:
+      min-complexity: 4
+
+    revive:
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+
+      disabled-checks:
+        - commentFormatting
+        - whyNoLint
+        - unnamedResult
+        - commentedOutCode
+        - octalLiteral
+        - paramTypeCombine
+
+      settings:
+        hugeParam:
+          sizeThreshold: 256
+
+  exclusions:
+    rules:
+      # Test files - allow more flexibility
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - cyclop
+          - funlen
+          - maintidx
+          - errcheck
+          - gosec
+          - goconst
+          - dupl
+          - gocognit
+
+      # Internal raster implementation
+      - path: internal/raster/.*\.go
+        linters:
+          - gocyclo      # Rasterization code can be complex
+          - funlen       # Drawing algorithms are verbose
+          - cyclop       # Complex branching in scanline
+          - gocognit     # Raster algorithms are inherently complex
+
+      # Internal font handling
+      - path: internal/fontkit/.*\.go
+        linters:
+          - funlen       # Font parsing is verbose
+          - gocyclo      # Font handling can be complex
+
+      # Example code - demonstration purposes
+      - path: examples?/.*\.go
+        linters:
+          - errcheck
+          - errorlint
+          - funlen
+          - gocyclo
+          - cyclop
+          - gocognit
+          - godot
+          - revive
+          - gosec
+          - gocritic
+
+      # Demo command
+      - path: cmd/.*\.go
+        linters:
+          - errcheck
+          - funlen
+          - gocyclo
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false

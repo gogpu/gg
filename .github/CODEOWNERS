@@ -1,0 +1,53 @@
+# CODEOWNERS for gogpu/gg
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Code owners are automatically requested for review when someone opens a pull request
+# that modifies code they own.
+
+# Default owner for everything in the repo
+* @kolkov
+
+# Core API files - Breaking changes require careful review
+/context.go @kolkov
+/path.go @kolkov
+/paint.go @kolkov
+/pixmap.go @kolkov
+/renderer.go @kolkov
+
+# Geometry types
+/point.go @kolkov
+/matrix.go @kolkov
+
+# Drawing
+/shapes.go @kolkov
+/color.go @kolkov
+/pattern.go @kolkov
+/gradient.go @kolkov
+
+# Renderers
+/software.go @kolkov
+
+# Internal packages
+/internal/ @kolkov
+
+# Examples
+/examples/ @kolkov
+
+# Command-line tools
+/cmd/ @kolkov
+
+# Documentation
+*.md @kolkov
+
+# GitHub configuration and CI/CD
+/.github/ @kolkov
+
+# Code quality and linting configuration
+/.golangci.yml @kolkov
+
+# Tests
+*_test.go @kolkov
+
+# Go module files - Dependency management
+/go.mod @kolkov
+/go.sum @kolkov

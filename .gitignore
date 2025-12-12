@@ -1,0 +1,40 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/ggdemo
+
+# Test binary
+*.test
+
+# Output files
+*.png
+*.jpg
+*.jpeg
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage.txt
+*.coverprofile
+
+# AI settings (private)
+.claude/
+.goco/
+.gode/

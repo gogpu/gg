@@ -1,70 +1,62 @@
-# gg
+# gg - Pure Go 2D Graphics Library
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/gogpu/gg.svg)](https://pkg.go.dev/github.com/gogpu/gg)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Report Card](https://goreportcard.com/badge/github.com/gogpu/gg)](https://goreportcard.com/report/github.com/gogpu/gg)
+[![CI](https://github.com/gogpu/gg/workflows/CI/badge.svg)](https://github.com/gogpu/gg/actions)
 
-**Simple 2D Graphics for Go** — GPU-accelerated, inspired by Processing.
+A simple, elegant 2D graphics library for Go, inspired by [fogleman/gg](https://github.com/fogleman/gg) and designed to integrate with the [GoGPU ecosystem](https://github.com/gogpu).
 
-> 📋 **Planned** — Coming after gogpu v1.0
+## Features
 
----
+- **Simple API** - Immediate-mode drawing API similar to HTML Canvas
+- **Pure Go** - No C dependencies (v0.1 software renderer)
+- **fogleman/gg compatible** - Easy migration from existing code
+- **Dual Renderer** - Software (v0.1) + GPU-accelerated (v0.3+)
+- **Rich Shapes** - Rectangles, circles, ellipses, polygons, arcs, Bezier curves
+- **Transformations** - Translate, rotate, scale, shear with matrix stack
+- **Zero Dependencies** - Software renderer has no external dependencies
 
-## ✨ Vision
+## Installation
 
-A simple, intuitive 2D graphics library built on [gogpu](https://github.com/gogpu/gogpu):
+```bash
+go get github.com/gogpu/gg
+```
+
+**Requirements:** Go 1.25+
+
+## Quick Start
 
 ```go
 package main
 
-import "github.com/gogpu/gg"
+import (
+    "github.com/gogpu/gg"
+    "log"
+)
 
 func main() {
-    ctx := gg.NewContext(800, 600)
+    // Create a 512x512 context
+    ctx := gg.NewContext(512, 512)
 
-    // Draw shapes
-    ctx.SetColor(gg.Red)
-    ctx.DrawCircle(400, 300, 100)
+    // Clear with white background
+    ctx.ClearWithColor(gg.White)
+
+    // Draw a red circle
+    ctx.SetRGB(1, 0, 0)
+    ctx.DrawCircle(256, 256, 100)
     ctx.Fill()
 
-    ctx.SetColor(gg.Blue)
-    ctx.DrawRectangle(100, 100, 200, 150)
-    ctx.Stroke()
-
-    // Save to file
-    ctx.SavePNG("output.png")
+    // Save to PNG
+    if err := ctx.SavePNG("output.png"); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
-## 🎯 Goals
+## Part of GoGPU Ecosystem
 
-- **Simple API** — Like [fogleman/gg](https://github.com/fogleman/gg) but GPU-accelerated
-- **Processing-style** — Familiar to creative coders
-- **GPU Backend** — Fast rendering via gogpu
-- **Export** — PNG, JPEG, SVG output
-
-## 🗺️ Planned Features
-
-- Basic shapes (rect, circle, ellipse, line, polygon)
-- Paths and curves (Bezier, arc)
-- Text rendering (TTF fonts)
-- Image loading and drawing
-- Transformations (translate, rotate, scale)
-- Gradients and patterns
-- Anti-aliasing
-
-## 🔗 Related Projects
-
-| Project | Description |
-|---------|-------------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework (backend) |
-| [fogleman/gg](https://github.com/fogleman/gg) | CPU-based 2D graphics (inspiration) |
-
-## 📄 License
-
-MIT License
+This library is part of the [GoGPU project](https://github.com/gogpu).
 
 ---
 
-<p align="center">
-  <b>gg</b> — 2D Graphics Made Easy
-</p>
+**Status:** v0.1.0-alpha - API unstable, production use not recommended yet.
