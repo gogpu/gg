@@ -1,8 +1,8 @@
 <h1 align="center">gg</h1>
 
 <p align="center">
-  <strong>Pure Go 2D Graphics Library</strong><br>
-  Simple API, zero dependencies. Part of GoGPU ecosystem.
+  <strong>Enterprise-Grade 2D Graphics Library for Go</strong><br>
+  Professional rendering • Pure Go • Part of GoGPU Ecosystem
 </p>
 
 <p align="center">
@@ -16,9 +16,21 @@
 
 ---
 
-## Status: v0.2.0 — Text Rendering
+## Vision
 
-> **Pure Go 2D graphics with TrueType font support!** Inspired by [fogleman/gg](https://github.com/fogleman/gg).
+**gg** is designed to become the **reference 2D graphics library** for the Go ecosystem — capable of powering:
+
+- **IDEs** (GoLAND, VS Code level)
+- **Browsers** (Chrome level)
+- **Professional graphics applications**
+
+Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://github.com/nicotine-scx/tiny-skia), and [vello](https://github.com/linebender/vello).
+
+---
+
+## Current: v0.2.0
+
+> **Pure Go 2D graphics with TrueType font support!**
 >
 > **Star the repo to follow progress!**
 
@@ -26,14 +38,29 @@
 
 ## Features
 
+### Core Graphics
 - **Simple API** — Immediate-mode drawing API similar to HTML Canvas
-- **Pure Go** — No C dependencies, software renderer
-- **Text Rendering** — TrueType fonts, font fallback, Unicode support
+- **Pure Go** — No C dependencies, cross-platform
 - **Rich Shapes** — Rectangles, circles, ellipses, arcs, Bezier curves
 - **Path Operations** — MoveTo, LineTo, QuadraticTo, CubicTo
 - **Transformations** — Translate, rotate, scale with matrix stack
 - **Colors** — RGBA, hex parsing, named colors
-- **Font Composition** — MultiFace for fallback, FilteredFace for Unicode ranges
+
+### Text Rendering (v0.2.0)
+- **TrueType Fonts** — Full TTF support via golang.org/x/image
+- **Font Composition** — MultiFace for fallback chains
+- **Unicode Support** — FilteredFace for emoji and special ranges
+- **Zero-Allocation Iterators** — Go 1.25+ iter.Seq[Glyph]
+
+### Coming Soon (v0.3.0+)
+- **Images** — Loading, drawing, patterns, mipmaps
+- **Clipping** — Edge clipper, mask clipper, clip stack
+- **Compositing** — Porter-Duff, blend modes, layers
+- **SIMD Optimization** — 3-5x faster blending
+- **Parallel Rendering** — Multi-core tile-based rasterization
+- **GPU Acceleration** — via gogpu/wgpu
+
+---
 
 ## Installation
 
@@ -42,6 +69,8 @@ go get github.com/gogpu/gg
 ```
 
 **Requirements:** Go 1.25+
+
+---
 
 ## Quick Start
 
@@ -75,6 +104,8 @@ func main() {
 }
 ```
 
+---
+
 ## Text Rendering
 
 ```go
@@ -103,17 +134,52 @@ ctx.SetFont(multiFace)
 ctx.DrawString("Hello! 🎉", 50, 150)
 ```
 
-## Roadmap
+---
+
+## Roadmap to v1.0.0
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v0.1.0 | Core shapes, software renderer | ✅ Done |
-| v0.2.0 | Text rendering | **Current** |
-| v0.3.0 | Image loading, clipping | Planned |
-| v0.4.0 | Gradients, patterns | Planned |
-| v0.5.0 | GPU acceleration (optional) | Planned |
+| v0.1.0 | Core shapes, software renderer | ✅ Released |
+| v0.2.0 | Text rendering | ✅ **Released** |
+| v0.3.0 | Images, clipping, compositing | 🔵 In Progress |
+| v0.4.0 | Color pipeline (sRGB/Linear) | Planned |
+| v0.5.0 | SIMD optimization | Planned |
+| v0.6.0 | Parallel rendering | Planned |
+| v0.7.0 | Scene graph (retained mode) | Planned |
+| v0.8.0 | Backend abstraction | Planned |
+| v0.9.0 | GPU acceleration | Planned |
+| **v1.0.0** | **Production release** | **Target** |
+
+**Timeline to v1.0.0:** ~7 months
+
+---
+
+## Architecture (v1.0.0 Target)
+
+```
+                         gg (Public API)
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+    Immediate Mode      Retained Mode         Resources
+    (Context API)       (Scene Graph)      (Images, Fonts)
+         │                    │                    │
+         └────────────────────┼────────────────────┘
+                              │
+                     RenderBackend Interface
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+         Software           SIMD             GPU
+         (current)        (v0.5.0)       (gogpu/wgpu)
+```
+
+---
 
 ## Part of GoGPU Ecosystem
+
+**gogpu** is a Pure Go GPU Computing Ecosystem — professional graphics libraries for Go.
 
 | Component | Description | Version |
 |-----------|-------------|---------|
