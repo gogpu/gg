@@ -2,28 +2,113 @@ package main
 
 import (
 	"log"
+	"os"
+	"runtime"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/text"
 )
 
 func main() {
-	ctx := gg.NewContext(400, 300)
-
-	// White background
-	ctx.ClearWithColor(gg.White)
-
-	// Draw a placeholder message since text is not implemented in v0.1
-	ctx.SetRGB(0.5, 0.5, 0.5)
-	ctx.DrawRectangle(50, 125, 300, 50)
-	ctx.Fill()
-
-	// Note: Text rendering will be implemented in v0.2.0+
-	// For now, this example just shows the structure
-	// ctx.DrawString("Hello, World!", 200, 150)
-
-	if err := ctx.SavePNG("text.png"); err != nil {
-		log.Fatalf("Failed to save: %v", err)
+	// Find a system font
+	fontPath := findSystemFont()
+	if fontPath == "" {
+		log.Println("No system font found. Skipping text example.")
+		return
 	}
 
-	log.Println("Created text.png (text rendering coming in v0.2.0)")
+	// Load font source (heavyweight, share across app)
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		log.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	// Create context
+	ctx := gg.NewContext(800, 400)
+	ctx.ClearWithColor(gg.White)
+
+	// Create faces at different sizes
+	face48 := source.Face(48)
+	face24 := source.Face(24)
+	face16 := source.Face(16)
+
+	// Draw title
+	ctx.SetFont(face48)
+	ctx.SetRGB(0.1, 0.1, 0.1)
+	ctx.DrawString("Hello, GoGPU!", 50, 80)
+
+	// Draw subtitle
+	ctx.SetFont(face24)
+	ctx.SetRGB(0.3, 0.3, 0.3)
+	ctx.DrawString("Text rendering with TrueType fonts", 50, 130)
+
+	// Draw aligned text examples
+	ctx.SetFont(face16)
+	ctx.SetRGB(0.5, 0.5, 0.5)
+	ctx.DrawString("Left aligned (default)", 50, 180)
+
+	// Center aligned
+	ctx.SetRGB(0.2, 0.4, 0.8)
+	ctx.DrawStringAnchored("Center aligned", 400, 220, 0.5, 0.5)
+
+	// Right aligned
+	ctx.SetRGB(0.8, 0.2, 0.2)
+	ctx.DrawStringAnchored("Right aligned", 750, 260, 1.0, 0.5)
+
+	// Measure and draw with bounding box
+	ctx.SetFont(face24)
+	testText := "Measured text"
+	w, h := ctx.MeasureString(testText)
+	ctx.SetRGB(0.9, 0.9, 0.9)
+	ctx.DrawRectangle(50, 290, w, h)
+	ctx.Fill()
+	ctx.SetRGB(0.1, 0.5, 0.1)
+	ctx.DrawString(testText, 50, 290+h*0.8) // Adjust for baseline
+
+	// Display font info
+	ctx.SetFont(face16)
+	ctx.SetRGB(0.4, 0.4, 0.4)
+	ctx.DrawString("Font: "+source.Name(), 50, 370)
+
+	// Save to PNG
+	if err := ctx.SavePNG("text.png"); err != nil {
+		log.Fatalf("Failed to save PNG: %v", err)
+	}
+
+	log.Printf("Created text.png using font: %s", source.Name())
+}
+
+// findSystemFont returns path to a system font or empty string.
+func findSystemFont() string {
+	var candidates []string
+
+	switch runtime.GOOS {
+	case "windows":
+		candidates = []string{
+			"C:\\Windows\\Fonts\\arial.ttf",
+			"C:\\Windows\\Fonts\\calibri.ttf",
+			"C:\\Windows\\Fonts\\segoeui.ttf",
+		}
+	case "darwin":
+		candidates = []string{
+			"/System/Library/Fonts/Helvetica.ttc",
+			"/System/Library/Fonts/SFNSText.ttf",
+			"/Library/Fonts/Arial.ttf",
+		}
+	default: // Linux
+		candidates = []string{
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+			"/usr/share/fonts/TTF/DejaVuSans.ttf",
+			"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+		}
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
 }
