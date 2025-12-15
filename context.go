@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+
+	"github.com/gogpu/gg/text"
 )
 
 // Context is the main drawing context.
@@ -17,6 +19,7 @@ type Context struct {
 	// Current state
 	path  *Path
 	paint *Paint
+	face  text.Face // Current font face for text drawing
 
 	// Transform stack
 	matrix Matrix
@@ -359,4 +362,14 @@ func (c *Context) DrawEllipticalArc(x, y, rx, ry, angle1, angle2 float64) {
 	c.Scale(rx, ry)
 	c.DrawArc(0, 0, 1, angle1, angle2)
 	c.Pop()
+}
+
+// currentColor returns the current drawing color from the paint.
+// If the current pattern is a solid color, returns that color.
+// Otherwise returns black as a fallback.
+func (c *Context) currentColor() color.Color {
+	if p, ok := c.paint.Pattern.(*SolidPattern); ok {
+		return p.Color.Color()
+	}
+	return color.Black
 }
