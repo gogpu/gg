@@ -38,3 +38,8 @@ coverage.txt
 .claude/
 .goco/
 .gode/
+
+# Private developer docs
+docs/dev/
+
+tmp/
