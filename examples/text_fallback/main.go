@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"os"
-	"runtime"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
@@ -136,29 +135,24 @@ func drawNoEmojiFallback(ctx *gg.Context, mainSource *text.FontSource) {
 	ctx.DrawString("No emoji font found - fallback not available", 50, 180)
 }
 
-// findMainFont returns path to a main system font.
+// findMainFont returns path to a TTF font (TTC collections not supported).
 func findMainFont() string {
-	var candidates []string
-
-	switch runtime.GOOS {
-	case "windows":
-		candidates = []string{
-			"C:\\Windows\\Fonts\\arial.ttf",
-			"C:\\Windows\\Fonts\\calibri.ttf",
-			"C:\\Windows\\Fonts\\segoeui.ttf",
-		}
-	case "darwin":
-		candidates = []string{
-			"/System/Library/Fonts/Helvetica.ttc",
-			"/System/Library/Fonts/SFNSText.ttf",
-			"/Library/Fonts/Arial.ttf",
-		}
-	default: // Linux
-		candidates = []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",
-			"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-		}
+	// Only TTF files are supported (not TTC font collections)
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"C:\\Windows\\Fonts\\calibri.ttf",
+		"C:\\Windows\\Fonts\\segoeui.ttf",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
 	}
 
 	for _, path := range candidates {
@@ -170,28 +164,19 @@ func findMainFont() string {
 	return ""
 }
 
-// findEmojiFont returns path to an emoji font if available.
+// findEmojiFont returns path to an emoji TTF font if available.
 func findEmojiFont() string {
-	var candidates []string
-
-	switch runtime.GOOS {
-	case "windows":
-		candidates = []string{
-			"C:\\Windows\\Fonts\\seguiemj.ttf", // Segoe UI Emoji
-			"C:\\Windows\\Fonts\\seguisym.ttf", // Segoe UI Symbol
-		}
-	case "darwin":
-		candidates = []string{
-			"/System/Library/Fonts/Apple Color Emoji.ttc",
-			"/System/Library/Fonts/Supplemental/Apple Color Emoji.ttc",
-		}
-	default: // Linux
-		candidates = []string{
-			"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-			"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
-			"/usr/share/fonts/TTF/NotoEmoji-Regular.ttf",
-		}
+	// Only TTF files are supported (TTC like Apple Color Emoji not supported)
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\seguiemj.ttf", // Segoe UI Emoji
+		"C:\\Windows\\Fonts\\seguisym.ttf", // Segoe UI Symbol
+		// Linux
+		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+		"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
+		"/usr/share/fonts/TTF/NotoEmoji-Regular.ttf",
 	}
+	// Note: macOS Apple Color Emoji is TTC, not supported
 
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {

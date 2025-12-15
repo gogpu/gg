@@ -8,25 +8,28 @@ import (
 
 // testFontPath returns the path to a test font.
 // For now, we'll skip tests if no font is available.
-// TODO: Embed a small test font or download Roboto in CI.
+// Note: TTC (font collections) are not supported by golang.org/x/image.
 func testFontPath(t *testing.T) string {
 	t.Helper()
 
-	// Try to find a system font as fallback
-	// Windows: C:\Windows\Fonts\arial.ttf
-	// macOS: /System/Library/Fonts/
-	// Linux: /usr/share/fonts/
-
+	// Only TTF files are supported (not TTC font collections)
+	// macOS system fonts are mostly TTC, so we look for TTF alternatives
 	candidates := []string{
 		// Windows
 		"C:\\Windows\\Fonts\\arial.ttf",
 		"C:\\Windows\\Fonts\\calibri.ttf",
-		// macOS
-		"/System/Library/Fonts/Helvetica.ttc",
-		"/System/Library/Fonts/SFNSText.ttf",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+		"/System/Library/Fonts/Supplemental/Verdana.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
 		// Linux
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 	}
 
 	for _, path := range candidates {
@@ -41,7 +44,7 @@ func testFontPath(t *testing.T) string {
 		return testdataFont
 	}
 
-	t.Skip("No test font available. Install a font or add test.ttf to testdata/")
+	t.Skip("No TTF font available (TTC collections not supported)")
 	return ""
 }
 

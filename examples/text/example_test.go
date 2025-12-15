@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -226,26 +225,23 @@ func BenchmarkMeasureString(b *testing.B) {
 	}
 }
 
-// getSystemFont is duplicated here to make test self-contained.
+// getSystemFont returns a TTF font path (TTC collections not supported).
 func getSystemFont() string {
-	var candidates []string
-
-	switch runtime.GOOS {
-	case "windows":
-		candidates = []string{
-			"C:\\Windows\\Fonts\\arial.ttf",
-			"C:\\Windows\\Fonts\\calibri.ttf",
-		}
-	case "darwin":
-		candidates = []string{
-			"/System/Library/Fonts/Helvetica.ttc",
-			"/Library/Fonts/Arial.ttf",
-		}
-	default:
-		candidates = []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",
-		}
+	// Only TTF files are supported (not TTC font collections)
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"C:\\Windows\\Fonts\\calibri.ttf",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
 	}
 
 	for _, path := range candidates {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -236,26 +235,23 @@ func BenchmarkFilteredFaceRendering(b *testing.B) {
 	}
 }
 
-// getMainFont is duplicated to make test self-contained.
+// getMainFont returns a TTF font path (TTC collections not supported).
 func getMainFont() string {
-	var candidates []string
-
-	switch runtime.GOOS {
-	case "windows":
-		candidates = []string{
-			"C:\\Windows\\Fonts\\arial.ttf",
-			"C:\\Windows\\Fonts\\calibri.ttf",
-		}
-	case "darwin":
-		candidates = []string{
-			"/System/Library/Fonts/Helvetica.ttc",
-			"/Library/Fonts/Arial.ttf",
-		}
-	default:
-		candidates = []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",
-		}
+	// Only TTF files are supported (not TTC font collections)
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"C:\\Windows\\Fonts\\calibri.ttf",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
 	}
 
 	for _, path := range candidates {
@@ -267,26 +263,19 @@ func getMainFont() string {
 	return ""
 }
 
-// getEmojiFont is duplicated to make test self-contained.
+// getEmojiFont returns an emoji TTF font path if available.
 func getEmojiFont() string {
-	var candidates []string
-
-	switch runtime.GOOS {
-	case "windows":
-		candidates = []string{
-			"C:\\Windows\\Fonts\\seguiemj.ttf",
-			"C:\\Windows\\Fonts\\seguisym.ttf",
-		}
-	case "darwin":
-		candidates = []string{
-			"/System/Library/Fonts/Apple Color Emoji.ttc",
-		}
-	default:
-		candidates = []string{
-			"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-			"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
-		}
+	// Only TTF files are supported (TTC like Apple Color Emoji not supported)
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\seguiemj.ttf",
+		"C:\\Windows\\Fonts\\seguisym.ttf",
+		// Linux
+		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+		"/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",
+		"/usr/share/fonts/TTF/NotoEmoji-Regular.ttf",
 	}
+	// Note: macOS Apple Color Emoji is TTC, not supported
 
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {

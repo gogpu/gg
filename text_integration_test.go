@@ -9,11 +9,17 @@ import (
 
 // TestTextIntegration tests the integration of text drawing with Context.
 func TestTextIntegration(t *testing.T) {
-	// Try to get a system font
+	// Only TTF files are supported (not TTC font collections)
 	candidates := []string{
+		// Windows
 		"C:\\Windows\\Fonts\\arial.ttf",
-		"/System/Library/Fonts/Helvetica.ttc",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
 	}
 
 	var fontPath string
@@ -65,10 +71,17 @@ func TestTextIntegration(t *testing.T) {
 
 // TestTextNewAPI tests the new API using FontSource and SetFont.
 func TestTextNewAPI(t *testing.T) {
+	// Only TTF files are supported (not TTC font collections)
 	candidates := []string{
+		// Windows
 		"C:\\Windows\\Fonts\\arial.ttf",
-		"/System/Library/Fonts/Helvetica.ttc",
+		// macOS - Supplemental fonts are TTF
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
 	}
 
 	var fontPath string
