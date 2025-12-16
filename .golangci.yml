@@ -152,6 +152,7 @@ linters:
           - funlen       # Image processing is verbose
           - cyclop       # Complex branching in sampling
           - gocognit     # Bilinear/bicubic inherently complex
+          - gosec        # Integer conversions are intentional in image processing
 
       # Internal clipping (v0.3.0)
       - path: internal/clip/.*\.go

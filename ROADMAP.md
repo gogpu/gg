@@ -51,11 +51,13 @@
 - [x] Image format types (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
 - [x] ImageBuf with lazy premultiplication
 - [x] SubImage zero-copy views
-- [ ] Image pool for memory reuse
+- [x] Image pool for memory reuse (~3x faster)
 - [x] PNG/JPEG I/O with std lib interop
 
+#### Image Core ✅
+- [x] Interpolation modes (Nearest 17ns, Bilinear 67ns, Bicubic 492ns)
+
 #### Image Drawing
-- [ ] Interpolation modes (Nearest, Bilinear, Bicubic)
 - [ ] DrawImage with affine transforms
 - [ ] Mipmap chain generation
 - [ ] ImagePattern for fills

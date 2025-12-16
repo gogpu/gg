@@ -220,7 +220,6 @@ func bicubicInterp(vals [4][4]float64, tx, ty float64) float64 {
 	var result float64
 	for i := range 4 {
 		for j := range 4 {
-			//nolint:gosec // G602: False positive - arrays are fixed size [4][4] and loop is bounded by 4
 			result += vals[i][j] * wx[j] * wy[i]
 		}
 	}
