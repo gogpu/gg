@@ -42,6 +42,7 @@ type BlendFunc func(sr, sg, sb, sa, dr, dg, db, da byte) (r, g, b, a byte)
 // Returns blendSourceOver for unknown modes.
 func GetBlendFunc(mode BlendMode) BlendFunc {
 	switch mode {
+	// Porter-Duff modes
 	case BlendClear:
 		return blendClear
 	case BlendSource:
@@ -70,6 +71,41 @@ func GetBlendFunc(mode BlendMode) BlendFunc {
 		return blendPlus
 	case BlendModulate:
 		return blendModulate
+
+	// Advanced separable blend modes
+	case BlendMultiply:
+		return blendMultiply
+	case BlendScreen:
+		return blendScreen
+	case BlendOverlay:
+		return blendOverlay
+	case BlendDarken:
+		return blendDarken
+	case BlendLighten:
+		return blendLighten
+	case BlendColorDodge:
+		return blendColorDodge
+	case BlendColorBurn:
+		return blendColorBurn
+	case BlendHardLight:
+		return blendHardLight
+	case BlendSoftLight:
+		return blendSoftLight
+	case BlendDifference:
+		return blendDifference
+	case BlendExclusion:
+		return blendExclusion
+
+	// Non-separable blend modes (placeholder implementations)
+	case BlendHue:
+		return blendHue
+	case BlendSaturation:
+		return blendSaturation
+	case BlendColor:
+		return blendColor
+	case BlendLuminosity:
+		return blendLuminosity
+
 	default:
 		return blendSourceOver
 	}

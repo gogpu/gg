@@ -167,6 +167,7 @@ linters:
         linters:
           - gocyclo      # Many blend modes = many branches
           - cyclop       # Porter-Duff has many cases
+          - funlen       # GetBlendFunc is a large switch statement
 
       # Example code - demonstration purposes
       - path: examples?/.*\.go
