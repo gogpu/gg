@@ -7,10 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.4.0
-- Context.PushLayer/PopLayer API (requires rasterizer fix)
-- HSL blend modes (Hue, Saturation, Color, Luminosity)
-- sRGB/Linear color pipeline
+### Planned for v0.5.0
+- SIMD optimization for blend functions
+- Parallel tile-based rendering
+
+## [0.4.0] - 2025-12-17
+
+### Added
+
+#### Color Pipeline (internal/color)
+- **ColorSpace** — sRGB and Linear color space enum
+- **ColorF32** — Float32 color type for precise computation
+- **ColorU8** — Uint8 color type for storage
+- **SRGBToLinear/LinearToSRGB** — Accurate color space conversions
+- **Round-trip accuracy** — Max error < 1/255
+- 100% test coverage
+
+#### HSL Blend Modes (internal/blend/hsl)
+- **Lum, Sat** — Luminance and saturation helpers (BT.601 coefficients)
+- **SetLum, SetSat, ClipColor** — W3C spec helper functions
+- **BlendHue** — Hue of source, saturation/luminosity of backdrop
+- **BlendSaturation** — Saturation of source, hue/luminosity of backdrop
+- **BlendColor** — Hue+saturation of source, luminosity of backdrop
+- **BlendLuminosity** — Luminosity of source, hue+saturation of backdrop
+
+#### Linear Space Blending (internal/blend/linear)
+- **GetBlendFuncLinear** — Blend function with linear color space option
+- **BlendLinear** — Convenience function for linear blending
+- **Correct pipeline** — sRGB → Linear → Blend → sRGB
+- **Alpha preservation** — Alpha channel never gamma-encoded
+- Fixes dark halos and desaturated gradients
+
+#### Layer API (context_layer.go)
+- **PushLayer(blendMode, opacity)** — Create isolated drawing layer
+- **PopLayer()** — Composite layer onto parent with blend mode
+- **SetBlendMode(mode)** — Set blend mode for subsequent operations
+- **Nested layers** — Arbitrary nesting depth support
+- **Opacity control** — Per-layer opacity with automatic clamping
+
+### Testing
+- 83.8% overall coverage
+- internal/color: 100% coverage
+- internal/blend: 92.1% coverage
 
 ## [0.3.0] - 2025-12-16
 
@@ -110,7 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gogpu/gg/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gg/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/gg/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gogpu/gg/releases/tag/v0.1.0

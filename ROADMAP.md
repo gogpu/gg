@@ -17,6 +17,18 @@
 
 ## Released
 
+### v0.4.0 — Color Pipeline & Layers
+
+See section below for details.
+
+### v0.3.0 — Images, Clipping & Compositing
+
+See section below for details.
+
+### v0.2.0 — Text Rendering
+
+See section below for details.
+
 ### v0.1.0 — Core 2D Drawing
 
 - [x] Canvas API (NewContext, SetSize)
@@ -58,23 +70,19 @@
 - [x] Layer system (internal)
 - [x] Context.DrawImage* methods
 - [x] Context.Clip* methods
-- [ ] Context.PushLayer/PopLayer (deferred — requires rasterizer fix)
+
+### v0.4.0 — Color Pipeline & Layers
+
+- [x] Context.PushLayer/PopLayer API
+- [x] HSL blend modes (Hue, Saturation, Color, Luminosity)
+- [x] sRGB ↔ Linear color space conversion
+- [x] ColorF32/ColorU8 types in internal/color
+- [x] Linear space blending pipeline
+- [x] 83.8% test coverage
 
 ---
 
 ## Planned
-
-### v0.4.0 — Color Pipeline & Layers
-
-**Focus:** Complete layer API and color management
-
-- [ ] Context.PushLayer/PopLayer (fix pixmap swap bug)
-- [ ] HSL blend modes (Hue, Saturation, Color, Luminosity)
-- [ ] sRGB ↔ Linear color space conversion
-- [ ] Premultiplied alpha pipeline
-- [ ] ColorF32 computation type
-- [ ] ICC profile support (basic)
-- [ ] Correct blending in linear space
 
 ### v0.5.0 — SIMD Optimization
 
