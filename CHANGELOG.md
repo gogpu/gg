@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (v0.3.0 in progress)
+### Planned for v0.4.0
+- Context.PushLayer/PopLayer API (requires rasterizer fix)
+- HSL blend modes (Hue, Saturation, Color, Luminosity)
+- sRGB/Linear color pipeline
 
-#### Image Foundation (Sprint 1)
+## [0.3.0] - 2025-12-16
+
+### Added
+
+#### Image Foundation
 - **Format** — 7 pixel formats (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
 - **FormatInfo** — Bytes-per-pixel, channel count, alpha detection
 - **ImageBuf** — Core image buffer with lazy premultiplication
@@ -18,9 +25,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PNG/JPEG I/O** — Load, save, encode, decode
 - **FromStdImage/ToStdImage** — Full interoperability with standard library
 
-#### Testing
-- 50+ tests for internal/image package
+#### Image Processing
+- **Pool** — Memory-efficient image reuse (~3x faster allocation)
+- **Interpolation** — Nearest (17ns), Bilinear (67ns), Bicubic (492ns)
+- **Mipmap** — Automatic mipmap chain generation
+- **Pattern** — Image patterns for fills with repeat modes
+- **Affine transforms** — DrawImage with rotation, scale, translation
+
+#### Clipping System (internal/clip)
+- **EdgeClipper** — Cohen-Sutherland for lines, de Casteljau for curves
+- **MaskClipper** — Alpha mask clipping with Gray8 buffers
+- **ClipStack** — Hierarchical push/pop clipping with mask combination
+
+#### Compositing System (internal/blend)
+- **Porter-Duff** — 14 blend modes (Clear, Src, Dst, SrcOver, DstOver, SrcIn, DstIn, SrcOut, DstOut, SrcAtop, DstAtop, Xor, Plus, Modulate)
+- **Advanced Blend** — 11 separable modes (Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion, Multiply)
+- **Layer System** — Isolated drawing surfaces with compositing on pop
+
+#### Public API
+- **DrawImage(img, x, y)** — Draw image at position
+- **DrawImageEx(img, opts)** — Draw with transform, opacity, blend mode
+- **CreateImagePattern** — Create pattern for fills
+- **Clip()** — Clip to current path
+- **ClipPreserve()** — Clip keeping path
+- **ClipRect(x, y, w, h)** — Fast rectangular clipping
+- **ResetClip()** — Clear clipping region
+
+#### Examples
+- `examples/images/` — Image loading and drawing demo
+- `examples/clipping/` — Clipping API demonstration
+
+### Testing
 - 83.8% overall coverage
+- internal/blend: 90.2% coverage
+- internal/clip: 81.7% coverage
+- internal/image: 87.0% coverage
 
 ## [0.2.0] - 2025-12-16
 
@@ -71,11 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-### Coming Soon
-- Image loading (v0.3.0)
-- Gradients and patterns (v0.4.0)
-- GPU renderer via gogpu/wgpu (v0.5.0)
-
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gogpu/gg/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/gg/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gogpu/gg/releases/tag/v0.1.0
