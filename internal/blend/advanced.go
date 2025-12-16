@@ -256,35 +256,8 @@ func blendExclusion(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte
 	})
 }
 
-// Non-separable blend modes (optional, not implemented in v0.3.0)
-
-// blendHue uses the hue of the source with saturation and luminosity of destination.
-// TODO: Implement for future version (requires RGB to HSL conversion)
-func blendHue(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte) {
-	// Placeholder: returns source over for now
-	return blendSourceOver(sr, sg, sb, sa, dr, dg, db, da)
-}
-
-// blendSaturation uses saturation of source with hue and luminosity of destination.
-// TODO: Implement for future version (requires RGB to HSL conversion)
-func blendSaturation(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte) {
-	// Placeholder: returns source over for now
-	return blendSourceOver(sr, sg, sb, sa, dr, dg, db, da)
-}
-
-// blendColor uses hue and saturation of source with luminosity of destination.
-// TODO: Implement for future version (requires RGB to HSL conversion)
-func blendColor(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte) {
-	// Placeholder: returns source over for now
-	return blendSourceOver(sr, sg, sb, sa, dr, dg, db, da)
-}
-
-// blendLuminosity uses luminosity of source with hue and saturation of destination.
-// TODO: Implement for future version (requires RGB to HSL conversion)
-func blendLuminosity(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte) {
-	// Placeholder: returns source over for now
-	return blendSourceOver(sr, sg, sb, sa, dr, dg, db, da)
-}
+// Non-separable blend modes (HSL-based)
+// Implementations are in hsl.go
 
 // Utility functions
 
