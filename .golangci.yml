@@ -145,6 +145,30 @@ linters:
           - funlen       # Font parsing is verbose
           - gocyclo      # Font handling can be complex
 
+      # Internal image processing (v0.3.0)
+      - path: internal/image/.*\.go
+        linters:
+          - gocyclo      # Interpolation algorithms are complex
+          - funlen       # Image processing is verbose
+          - cyclop       # Complex branching in sampling
+          - gocognit     # Bilinear/bicubic inherently complex
+          - gosec        # Integer conversions are intentional in image processing
+
+      # Internal clipping (v0.3.0)
+      - path: internal/clip/.*\.go
+        linters:
+          - gocyclo      # Cohen-Sutherland, curve clipping
+          - funlen       # Clipping algorithms are verbose
+          - cyclop       # Complex edge cases
+          - gocognit     # Geometric algorithms
+
+      # Internal blend modes (v0.3.0)
+      - path: internal/blend/.*\.go
+        linters:
+          - gocyclo      # Many blend modes = many branches
+          - cyclop       # Porter-Duff has many cases
+          - funlen       # GetBlendFunc is a large switch statement
+
       # Example code - demonstration purposes
       - path: examples?/.*\.go
         linters:
