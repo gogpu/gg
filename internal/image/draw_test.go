@@ -76,9 +76,9 @@ func TestDrawImageScale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create source: %v", err)
 	}
-	_ = src.SetRGBA(0, 0, 255, 0, 0, 255)   // Red
-	_ = src.SetRGBA(1, 0, 0, 255, 0, 255)   // Green
-	_ = src.SetRGBA(0, 1, 0, 0, 255, 255)   // Blue
+	_ = src.SetRGBA(0, 0, 255, 0, 0, 255)     // Red
+	_ = src.SetRGBA(1, 0, 0, 255, 0, 255)     // Green
+	_ = src.SetRGBA(0, 1, 0, 0, 255, 255)     // Blue
 	_ = src.SetRGBA(1, 1, 255, 255, 255, 255) // White
 
 	// Create 4x4 destination

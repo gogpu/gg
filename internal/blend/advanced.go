@@ -16,17 +16,17 @@ import "math"
 // Advanced separable blend modes (extend BlendMode enum)
 const (
 	// Separable blend modes
-	BlendMultiply    BlendMode = iota + 14 // Result: S * D
-	BlendScreen                             // Result: 1 - (1-S)*(1-D)
-	BlendOverlay                            // HardLight with swapped layers
-	BlendDarken                             // min(S, D)
-	BlendLighten                            // max(S, D)
-	BlendColorDodge                         // D / (1 - S)
-	BlendColorBurn                          // 1 - (1 - D) / S
-	BlendHardLight                          // Multiply or Screen depending on source
-	BlendSoftLight                          // Soft version of HardLight
-	BlendDifference                         // |S - D|
-	BlendExclusion                          // S + D - 2*S*D
+	BlendMultiply   BlendMode = iota + 14 // Result: S * D
+	BlendScreen                           // Result: 1 - (1-S)*(1-D)
+	BlendOverlay                          // HardLight with swapped layers
+	BlendDarken                           // min(S, D)
+	BlendLighten                          // max(S, D)
+	BlendColorDodge                       // D / (1 - S)
+	BlendColorBurn                        // 1 - (1 - D) / S
+	BlendHardLight                        // Multiply or Screen depending on source
+	BlendSoftLight                        // Soft version of HardLight
+	BlendDifference                       // |S - D|
+	BlendExclusion                        // S + D - 2*S*D
 
 	// Non-separable blend modes (optional)
 	BlendHue        // Hue of source, saturation and luminosity of backdrop
@@ -212,7 +212,7 @@ func blendSoftLight(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte
 			// where D(x) = if x <= 0.25: ((16*x - 12)*x + 4)*x, else: sqrt(x)
 			var dx float64
 			if df <= 0.25 {
-				dx = ((16*df-12)*df+4)*df
+				dx = ((16*df-12)*df + 4) * df
 			} else {
 				dx = math.Sqrt(df)
 			}

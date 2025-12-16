@@ -218,9 +218,9 @@ func TestImagePattern_Tiling(t *testing.T) {
 	}
 
 	// Set distinct colors
-	_ = img.SetRGBA(0, 0, 255, 0, 0, 255) // Red
-	_ = img.SetRGBA(1, 0, 0, 255, 0, 255) // Green
-	_ = img.SetRGBA(0, 1, 0, 0, 255, 255) // Blue
+	_ = img.SetRGBA(0, 0, 255, 0, 0, 255)   // Red
+	_ = img.SetRGBA(1, 0, 0, 255, 0, 255)   // Green
+	_ = img.SetRGBA(0, 1, 0, 0, 255, 255)   // Blue
 	_ = img.SetRGBA(1, 1, 255, 255, 0, 255) // Yellow
 
 	pattern := &ImagePattern{
@@ -240,8 +240,8 @@ func TestImagePattern_Tiling(t *testing.T) {
 		{1, 0, "green"},
 		{0, 1, "blue"},
 		{1, 1, "yellow"},
-		{2, 0, "red"},   // Wraps to (0, 0)
-		{0, 2, "red"},   // Wraps to (0, 0)
+		{2, 0, "red"},    // Wraps to (0, 0)
+		{0, 2, "red"},    // Wraps to (0, 0)
 		{3, 3, "yellow"}, // Wraps to (1, 1)
 	}
 
@@ -256,10 +256,10 @@ func TestImagePattern_Tiling(t *testing.T) {
 
 func TestNewImageBuf(t *testing.T) {
 	tests := []struct {
-		name   string
-		width  int
-		height int
-		format ImageFormat
+		name    string
+		width   int
+		height  int
+		format  ImageFormat
 		wantErr bool
 	}{
 		{"valid RGBA8", 100, 100, FormatRGBA8, false},

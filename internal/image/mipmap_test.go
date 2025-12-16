@@ -312,10 +312,10 @@ func TestDownsample_AveragesCorrectly(t *testing.T) {
 	// Set up a pattern:
 	// (0,0) = black,  (1,0) = red
 	// (0,1) = green,  (1,1) = blue
-	_ = src.SetRGBA(0, 0, 0, 0, 0, 255)       // black
-	_ = src.SetRGBA(1, 0, 255, 0, 0, 255)     // red
-	_ = src.SetRGBA(0, 1, 0, 255, 0, 255)     // green
-	_ = src.SetRGBA(1, 1, 0, 0, 255, 255)     // blue
+	_ = src.SetRGBA(0, 0, 0, 0, 0, 255)   // black
+	_ = src.SetRGBA(1, 0, 255, 0, 0, 255) // red
+	_ = src.SetRGBA(0, 1, 0, 255, 0, 255) // green
+	_ = src.SetRGBA(1, 1, 0, 0, 255, 255) // blue
 
 	dst := downsample(src)
 	if dst == nil {

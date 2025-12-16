@@ -285,11 +285,11 @@ func TestSolveQuadratic(t *testing.T) {
 		a, b, c   float64
 		wantCount int
 	}{
-		{"two roots", 1, 0, -1, 0},        // t^2 - 1 = 0, roots at -1 and 1 (outside [0,1])
-		{"one root", 1, -1, 0, 1},         // t^2 - t = 0, roots at 0 and 1
-		{"no roots", 1, 0, 1, 0},          // t^2 + 1 = 0, no real roots
-		{"linear", 0, 2, -1, 1},           // 2t - 1 = 0, root at 0.5
-		{"root at 0.5", 4, -4, 1, 0},      // 4t^2 - 4t + 1 = (2t-1)^2 = 0, double root at 0.5
+		{"two roots", 1, 0, -1, 0},          // t^2 - 1 = 0, roots at -1 and 1 (outside [0,1])
+		{"one root", 1, -1, 0, 1},           // t^2 - t = 0, roots at 0 and 1
+		{"no roots", 1, 0, 1, 0},            // t^2 + 1 = 0, no real roots
+		{"linear", 0, 2, -1, 1},             // 2t - 1 = 0, root at 0.5
+		{"root at 0.5", 4, -4, 1, 0},        // 4t^2 - 4t + 1 = (2t-1)^2 = 0, double root at 0.5
 		{"interior roots", 1, -1.5, 0.5, 2}, // t^2 - 1.5t + 0.5 = 0, roots at 0.5 and 1
 	}
 
@@ -313,11 +313,11 @@ func TestSolveQuadratic(t *testing.T) {
 
 func TestSolveCubic(t *testing.T) {
 	tests := []struct {
-		name         string
-		a, b, c, d   float64
-		expectedMin  int // minimum expected roots in (0,1)
+		name        string
+		a, b, c, d  float64
+		expectedMin int // minimum expected roots in (0,1)
 	}{
-		{"simple", 1, 0, 0, -0.125, 1}, // t^3 = 0.125, root at 0.5
+		{"simple", 1, 0, 0, -0.125, 1},        // t^3 = 0.125, root at 0.5
 		{"no interior roots", 1, 0, 0, -8, 0}, // t^3 = 8, root at 2 (outside)
 	}
 

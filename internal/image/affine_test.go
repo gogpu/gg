@@ -123,8 +123,8 @@ func TestShear(t *testing.T) {
 		outX float64
 		outY float64
 	}{
-		{"shear-x", 2, 0, 1, 3, 7, 3},  // x' = x + 2*y = 1 + 6 = 7
-		{"shear-y", 0, 2, 3, 1, 3, 7},  // y' = y + 2*x = 1 + 6 = 7
+		{"shear-x", 2, 0, 1, 3, 7, 3},    // x' = x + 2*y = 1 + 6 = 7
+		{"shear-y", 0, 2, 3, 1, 3, 7},    // y' = y + 2*x = 1 + 6 = 7
 		{"shear-both", 1, 1, 2, 3, 5, 5}, // x' = 2+3=5, y' = 3+2=5
 		{"no-shear", 0, 0, 5, 7, 5, 7},
 	}

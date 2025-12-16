@@ -114,12 +114,12 @@ func TestImagePattern_SpreadModePad(t *testing.T) {
 		WithInterpolation(InterpNearest)
 
 	tests := []struct {
-		name     string
-		x, y     float64
-		wantR    byte
-		wantG    byte
-		wantB    byte
-		wantA    byte
+		name  string
+		x, y  float64
+		wantR byte
+		wantG byte
+		wantB byte
+		wantA byte
 	}{
 		{"top-left corner", 0, 0, 255, 0, 0, 255},
 		{"top-right corner", 1, 0, 0, 255, 0, 255},
@@ -127,10 +127,10 @@ func TestImagePattern_SpreadModePad(t *testing.T) {
 		{"bottom-right corner", 1, 1, 255, 255, 0, 255},
 
 		// Out of bounds - should clamp to edges
-		{"left of image", -0.5, 0.25, 255, 0, 0, 255},  // Clamps to left edge
-		{"right of image", 1.5, 0.25, 0, 255, 0, 255},  // Clamps to right edge
-		{"above image", 0.25, -0.5, 255, 0, 0, 255},    // Clamps to top edge
-		{"below image", 0.25, 1.5, 0, 0, 255, 255},     // Clamps to bottom edge
+		{"left of image", -0.5, 0.25, 255, 0, 0, 255}, // Clamps to left edge
+		{"right of image", 1.5, 0.25, 0, 255, 0, 255}, // Clamps to right edge
+		{"above image", 0.25, -0.5, 255, 0, 0, 255},   // Clamps to top edge
+		{"below image", 0.25, 1.5, 0, 0, 255, 255},    // Clamps to bottom edge
 	}
 
 	for _, tt := range tests {
@@ -162,12 +162,12 @@ func TestImagePattern_SpreadModeRepeat(t *testing.T) {
 		WithInterpolation(InterpNearest)
 
 	tests := []struct {
-		name     string
-		x, y     float64
-		wantR    byte
-		wantG    byte
-		wantB    byte
-		wantA    byte
+		name  string
+		x, y  float64
+		wantR byte
+		wantG byte
+		wantB byte
+		wantA byte
 	}{
 		// First tile (0 to 1)
 		{"first tile TL", 0, 0, 255, 0, 0, 255},
@@ -295,7 +295,7 @@ func TestImagePattern_Opacity(t *testing.T) {
 		wantA   byte
 	}{
 		{"full opacity", 1.0, 255},
-		{"half opacity", 0.5, 127}, // 255 * 0.5 = 127.5 -> 127
+		{"half opacity", 0.5, 127},    // 255 * 0.5 = 127.5 -> 127
 		{"quarter opacity", 0.25, 63}, // 255 * 0.25 = 63.75 -> 63
 		{"zero opacity", 0.0, 0},
 		{"over 1.0 clamped", 1.5, 255}, // Should clamp to 1.0

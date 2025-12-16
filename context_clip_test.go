@@ -319,4 +319,3 @@ func TestClipRectTransformed(t *testing.T) {
 		t.Errorf("Expected valid bounds for rotated clip, got %+v", bounds)
 	}
 }
-

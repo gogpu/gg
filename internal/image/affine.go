@@ -8,9 +8,10 @@ import (
 // Affine represents a 2D affine transformation matrix.
 //
 // The transformation is represented as a 3x3 matrix:
-//   | a  b  c |
-//   | d  e  f |
-//   | 0  0  1 |
+//
+//	| a  b  c |
+//	| d  e  f |
+//	| 0  0  1 |
 //
 // This allows for translation, rotation, scaling, and shearing operations.
 type Affine struct {
