@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.2.0
+## Current: v0.3.0
 
-> **Pure Go 2D graphics with TrueType font support!**
+> **Images, Clipping & Compositing!**
 >
 > **Star the repo to follow progress!**
 
@@ -52,10 +52,27 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Unicode Support** — FilteredFace for emoji and special ranges
 - **Zero-Allocation Iterators** — Go 1.25+ iter.Seq[Glyph]
 
-### Coming Soon (v0.3.0+)
-- **Images** — Loading, drawing, patterns, mipmaps
-- **Clipping** — Edge clipper, mask clipper, clip stack
-- **Compositing** — Porter-Duff, blend modes, layers
+### Images (v0.3.0)
+- **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
+- **DrawImage** — Draw images with position, transforms, opacity
+- **Interpolation** — Nearest, Bilinear, Bicubic sampling
+- **Patterns** — Image patterns for fills with repeat modes
+- **Mipmaps** — Automatic mipmap chain generation
+
+### Clipping (v0.3.0)
+- **Clip()** — Clip to current path
+- **ClipRect()** — Fast rectangular clipping
+- **ClipPreserve()** — Clip keeping path for stroke
+- **Hierarchical** — Push/Pop state preserves clip regions
+
+### Compositing (v0.3.0)
+- **Porter-Duff** — 14 blend modes (SrcOver, DstIn, Xor, etc.)
+- **Advanced Blends** — Screen, Overlay, Darken, Lighten, ColorDodge, etc.
+- **Layer System** — Internal support for compositing layers
+
+### Coming Soon (v0.4.0+)
+- **Layer API** — PushLayer/PopLayer for isolated drawing
+- **Color Pipeline** — sRGB/Linear color space
 - **SIMD Optimization** — 3-5x faster blending
 - **Parallel Rendering** — Multi-core tile-based rasterization
 - **GPU Acceleration** — via gogpu/wgpu
@@ -106,6 +123,51 @@ func main() {
 
 ---
 
+## Image Drawing
+
+```go
+// Load image
+img, _ := gg.LoadImage("photo.png")
+
+// Draw at position
+ctx.DrawImage(img, 100, 100)
+
+// Draw with options
+ctx.DrawImageEx(img, gg.DrawImageOptions{
+    X:       200,
+    Y:       200,
+    ScaleX:  0.5,
+    ScaleY:  0.5,
+    Opacity: 0.8,
+})
+```
+
+---
+
+## Clipping
+
+```go
+// Clip to circle
+ctx.DrawCircle(256, 256, 100)
+ctx.Clip()
+
+// Everything drawn now is clipped
+ctx.SetColor(gg.Red)
+ctx.DrawRectangle(0, 0, 512, 512)
+ctx.Fill()
+
+// Reset clip
+ctx.ResetClip()
+
+// Or use Push/Pop for scoped clipping
+ctx.Push()
+ctx.ClipRect(100, 100, 200, 200)
+// ... draw clipped content ...
+ctx.Pop()
+```
+
+---
+
 ## Text Rendering
 
 ```go
@@ -131,7 +193,7 @@ multiFace, _ := text.NewMultiFace(
     text.NewFilteredFace(emoji.Face(24), text.RangeEmoji),
 )
 ctx.SetFont(multiFace)
-ctx.DrawString("Hello! 🎉", 50, 150)
+ctx.DrawString("Hello! :)", 50, 150)
 ```
 
 ---
@@ -140,18 +202,16 @@ ctx.DrawString("Hello! 🎉", 50, 150)
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v0.1.0 | Core shapes, software renderer | ✅ Released |
-| v0.2.0 | Text rendering | ✅ **Released** |
-| v0.3.0 | Images, clipping, compositing | 🔵 In Progress |
-| v0.4.0 | Color pipeline (sRGB/Linear) | Planned |
+| v0.1.0 | Core shapes, software renderer | Released |
+| v0.2.0 | Text rendering | Released |
+| v0.3.0 | Images, clipping, compositing | **Released** |
+| v0.4.0 | Color pipeline, layer API | Planned |
 | v0.5.0 | SIMD optimization | Planned |
 | v0.6.0 | Parallel rendering | Planned |
 | v0.7.0 | Scene graph (retained mode) | Planned |
 | v0.8.0 | Backend abstraction | Planned |
 | v0.9.0 | GPU acceleration | Planned |
 | **v1.0.0** | **Production release** | **Target** |
-
-**Timeline to v1.0.0:** ~7 months
 
 ---
 
@@ -186,7 +246,7 @@ ctx.DrawString("Hello! 🎉", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.2.0** |
+| **gogpu/gg** | **2D graphics** | **v0.3.0** |
 
 ---
 

@@ -28,7 +28,7 @@
 - [x] Image output (SavePNG, SaveJPG)
 - [x] Software rasterizer (scanline algorithm)
 
-### v0.2.0 — Text Rendering ✅
+### v0.2.0 — Text Rendering
 
 - [x] TrueType font loading (FontSource, FontParser)
 - [x] Text rendering (DrawString, DrawStringAnchored)
@@ -39,50 +39,37 @@
 - [x] LRU cache system
 - [x] 64 tests, 83.8% coverage
 
----
-
-## In Progress
-
 ### v0.3.0 — Images, Clipping & Compositing
 
-**Timeline:** ~3 weeks | **Tasks:** 20
-
-#### Foundation
-- [ ] Image format types (Gray8, RGB8, RGBA8, etc.)
-- [ ] ImageBuf with lazy premultiplication
-- [ ] SubImage zero-copy views
-- [ ] Image pool for memory reuse
-- [ ] PNG/JPEG I/O
-
-#### Image Drawing
-- [ ] Interpolation modes (Nearest, Bilinear, Bicubic)
-- [ ] DrawImage with affine transforms
-- [ ] Mipmap chain generation
-- [ ] ImagePattern for fills
-
-#### Clipping
-- [ ] Edge clipper (Cohen-Sutherland + curve extrema)
-- [ ] Mask clipper (alpha masks)
-- [ ] Clip stack (hierarchical clipping)
-
-#### Compositing
-- [ ] Porter-Duff (12+ modes)
-- [ ] Advanced blend modes (15+ modes)
-- [ ] Layer system (push/pop compositing)
-
-#### Public API
-- [ ] Context.DrawImage* methods
-- [ ] Context.Clip* methods
-- [ ] Context.PushLayer/PopLayer
+- [x] Image format types (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
+- [x] ImageBuf with lazy premultiplication
+- [x] SubImage zero-copy views
+- [x] Image pool for memory reuse (~3x faster)
+- [x] PNG/JPEG I/O with std lib interop
+- [x] Interpolation modes (Nearest 17ns, Bilinear 67ns, Bicubic 492ns)
+- [x] Mipmap chain generation
+- [x] ImagePattern for fills
+- [x] DrawImage with affine transforms
+- [x] Edge clipper (Cohen-Sutherland + curve extrema)
+- [x] Mask clipper (alpha masks)
+- [x] Clip stack (hierarchical clipping)
+- [x] Porter-Duff (14 modes)
+- [x] Advanced blend modes (11 modes)
+- [x] Layer system (internal)
+- [x] Context.DrawImage* methods
+- [x] Context.Clip* methods
+- [ ] Context.PushLayer/PopLayer (deferred — requires rasterizer fix)
 
 ---
 
 ## Planned
 
-### v0.4.0 — Color Pipeline
+### v0.4.0 — Color Pipeline & Layers
 
-**Timeline:** +4 weeks
+**Focus:** Complete layer API and color management
 
+- [ ] Context.PushLayer/PopLayer (fix pixmap swap bug)
+- [ ] HSL blend modes (Hue, Saturation, Color, Luminosity)
 - [ ] sRGB ↔ Linear color space conversion
 - [ ] Premultiplied alpha pipeline
 - [ ] ColorF32 computation type
@@ -90,8 +77,6 @@
 - [ ] Correct blending in linear space
 
 ### v0.5.0 — SIMD Optimization
-
-**Timeline:** +3 weeks
 
 - [ ] Go 1.25+ SIMD intrinsics
 - [ ] Batch pixel operations (8-16 pixels)
@@ -102,8 +87,6 @@
 
 ### v0.6.0 — Parallel Rendering
 
-**Timeline:** +4 weeks
-
 - [ ] Tile-based rendering (64x64 tiles)
 - [ ] WorkerPool with work stealing
 - [ ] Parallel tile rasterization
@@ -111,8 +94,6 @@
 - [ ] Tile compositor
 
 ### v0.7.0 — Scene Graph (Retained Mode)
-
-**Timeline:** +4 weeks
 
 - [ ] Encoding (command buffer)
 - [ ] Scene API (retained mode)
@@ -123,8 +104,6 @@
 
 ### v0.8.0 — Backend Abstraction
 
-**Timeline:** +3 weeks
-
 - [ ] RenderBackend interface
 - [ ] SoftwareBackend implementation
 - [ ] Backend auto-selection
@@ -132,8 +111,6 @@
 - [ ] Resource sharing between backends
 
 ### v0.9.0 — GPU Backend
-
-**Timeline:** +6 weeks
 
 - [ ] Integration with gogpu/wgpu
 - [ ] GPU memory management
@@ -148,7 +125,7 @@
 
 ### v1.0.0 — Production Release
 
-**Timeline:** +4 weeks (Total: ~7 months from v0.3.0)
+**Timeline:** ~6 months from v0.4.0
 
 - [ ] API review and cleanup
 - [ ] Comprehensive documentation
@@ -205,8 +182,7 @@
 Help wanted on all phases! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Priority areas:
-- Image loading/drawing implementation
-- Clipping algorithms
+- Layer API implementation
 - SIMD optimization
 - Test cases and benchmarks
 - Documentation and examples
