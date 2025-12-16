@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.3.0 in progress)
+
+#### Image Foundation (Sprint 1)
+- **Format** — 7 pixel formats (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
+- **FormatInfo** — Bytes-per-pixel, channel count, alpha detection
+- **ImageBuf** — Core image buffer with lazy premultiplication
+- **SubImage** — Zero-copy views into parent images
+- **Thread-safe caching** — Premultiplied data computed once, cached with sync.RWMutex
+- **PNG/JPEG I/O** — Load, save, encode, decode
+- **FromStdImage/ToStdImage** — Full interoperability with standard library
+
+#### Testing
+- 50+ tests for internal/image package
+- 83.8% overall coverage
+
 ## [0.2.0] - 2025-12-16
 
 ### Added

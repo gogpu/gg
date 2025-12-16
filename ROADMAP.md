@@ -47,12 +47,12 @@
 
 **Timeline:** ~3 weeks | **Tasks:** 20
 
-#### Foundation
-- [ ] Image format types (Gray8, RGB8, RGBA8, etc.)
-- [ ] ImageBuf with lazy premultiplication
-- [ ] SubImage zero-copy views
+#### Foundation ✅
+- [x] Image format types (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
+- [x] ImageBuf with lazy premultiplication
+- [x] SubImage zero-copy views
 - [ ] Image pool for memory reuse
-- [ ] PNG/JPEG I/O
+- [x] PNG/JPEG I/O with std lib interop
 
 #### Image Drawing
 - [ ] Interpolation modes (Nearest, Bilinear, Bicubic)
