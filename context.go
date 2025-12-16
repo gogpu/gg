@@ -27,6 +27,10 @@ type Context struct {
 	matrix         Matrix
 	stack          []Matrix
 	clipStackDepth []int // Tracks clip stack depth for each Push/Pop
+
+	// Layer support
+	layerStack *layerStack // Layer stack for compositing
+	basePixmap *Pixmap     // Base pixmap when layers are active
 }
 
 // NewContext creates a new drawing context with the given dimensions.
