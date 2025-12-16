@@ -37,6 +37,9 @@ func main() {
 	// Example 5: Complex path clipping
 	example5ComplexClip(dc)
 
+	// Example 6: ResetClip demonstration
+	example6ResetClip(dc)
+
 	// Save the result
 	err := dc.SavePNG("examples/clipping/output.png")
 	if err != nil {
