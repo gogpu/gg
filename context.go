@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 
+	"github.com/gogpu/gg/internal/clip"
 	"github.com/gogpu/gg/text"
 )
 
@@ -17,26 +18,29 @@ type Context struct {
 	renderer Renderer
 
 	// Current state
-	path  *Path
-	paint *Paint
-	face  text.Face // Current font face for text drawing
+	path      *Path
+	paint     *Paint
+	face      text.Face       // Current font face for text drawing
+	clipStack *clip.ClipStack // Clipping stack
 
-	// Transform stack
-	matrix Matrix
-	stack  []Matrix
+	// Transform and state stack
+	matrix         Matrix
+	stack          []Matrix
+	clipStackDepth []int // Tracks clip stack depth for each Push/Pop
 }
 
 // NewContext creates a new drawing context with the given dimensions.
 func NewContext(width, height int) *Context {
 	return &Context{
-		width:    width,
-		height:   height,
-		pixmap:   NewPixmap(width, height),
-		renderer: NewSoftwareRenderer(width, height),
-		path:     NewPath(),
-		paint:    NewPaint(),
-		matrix:   Identity(),
-		stack:    make([]Matrix, 0, 8),
+		width:          width,
+		height:         height,
+		pixmap:         NewPixmap(width, height),
+		renderer:       NewSoftwareRenderer(width, height),
+		path:           NewPath(),
+		paint:          NewPaint(),
+		matrix:         Identity(),
+		stack:          make([]Matrix, 0, 8),
+		clipStackDepth: make([]int, 0, 8),
 	}
 }
 
@@ -48,14 +52,15 @@ func NewContextForImage(img image.Image) *Context {
 	pixmap := FromImage(img)
 
 	return &Context{
-		width:    width,
-		height:   height,
-		pixmap:   pixmap,
-		renderer: NewSoftwareRenderer(width, height),
-		path:     NewPath(),
-		paint:    NewPaint(),
-		matrix:   Identity(),
-		stack:    make([]Matrix, 0, 8),
+		width:          width,
+		height:         height,
+		pixmap:         pixmap,
+		renderer:       NewSoftwareRenderer(width, height),
+		path:           NewPath(),
+		paint:          NewPaint(),
+		matrix:         Identity(),
+		stack:          make([]Matrix, 0, 8),
+		clipStackDepth: make([]int, 0, 8),
 	}
 }
 
@@ -194,9 +199,16 @@ func (c *Context) StrokePreserve() {
 	// Path is preserved
 }
 
-// Push saves the current state (transform and paint).
+// Push saves the current state (transform, paint, and clip).
 func (c *Context) Push() {
 	c.stack = append(c.stack, c.matrix)
+
+	// Save current clip stack depth
+	depth := 0
+	if c.clipStack != nil {
+		depth = c.clipStack.Depth()
+	}
+	c.clipStackDepth = append(c.clipStackDepth, depth)
 }
 
 // Pop restores the last saved state.
@@ -204,8 +216,23 @@ func (c *Context) Pop() {
 	if len(c.stack) == 0 {
 		return
 	}
+
+	// Restore transform matrix
 	c.matrix = c.stack[len(c.stack)-1]
 	c.stack = c.stack[:len(c.stack)-1]
+
+	// Restore clip stack depth
+	if len(c.clipStackDepth) > 0 {
+		targetDepth := c.clipStackDepth[len(c.clipStackDepth)-1]
+		c.clipStackDepth = c.clipStackDepth[:len(c.clipStackDepth)-1]
+
+		// Pop clip stack entries until we reach the target depth
+		if c.clipStack != nil {
+			for c.clipStack.Depth() > targetDepth {
+				c.clipStack.Pop()
+			}
+		}
+	}
 }
 
 // Identity resets the transformation matrix to identity.
