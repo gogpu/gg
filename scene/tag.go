@@ -128,7 +128,7 @@ func (t Tag) String() string {
 	case TagImage:
 		return "Image"
 	default:
-		return "Unknown"
+		return unknownStr
 	}
 }
 
