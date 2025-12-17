@@ -7,9 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.6.0
-- Parallel tile-based rendering
-- Multi-core rasterization
+### Planned for v0.7.0
+- Scene graph (retained mode)
+- GPU acceleration preparation
+
+## [0.6.0] - 2025-12-17
+
+### Added
+
+#### Tile-Based Infrastructure (internal/parallel)
+- **Tile** — 64x64 pixel tile with local data buffer (16KB per tile)
+- **TileGrid** — 2D grid manager with dynamic resizing
+  - TileAt, TileAtPixel — O(1) tile access
+  - TilesInRect — Tiles intersecting a rectangle
+  - MarkDirty, MarkRectDirty — Dirty region tracking
+  - ForEach, ForEachDirty — Tile iteration
+- **TilePool** — sync.Pool-based memory reuse (0 allocs/op in hot path)
+  - Get/Put with automatic data clearing
+  - Edge tile support for non-64-aligned canvases
+
+#### WorkerPool with Work Stealing
+- **WorkerPool** — Goroutine pool for parallel execution
+  - Per-worker buffered channels (256 items)
+  - Work stealing from other workers when idle
+  - ExecuteAll — Distribute work and wait for completion
+  - ExecuteAsync — Fire-and-forget execution
+  - Submit — Single work item submission
+  - Graceful shutdown with Close()
+- No goroutine leaks (verified by tests)
+
+#### ParallelRasterizer
+- **ParallelRasterizer** — High-level parallel rendering coordinator
+  - Clear — Parallel tile clearing with solid color
+  - FillRect — Parallel rectangle filling across tiles
+  - FillTiles — Custom tile processing with callback
+  - Composite — Merge all tiles to output buffer
+  - CompositeDirty — Merge only dirty tiles
+- Automatic tile grid and worker pool management
+- Integration with DirtyRegion for efficient updates
+
+#### Lock-Free DirtyRegion
+- **DirtyRegion** — Atomic bitmap for dirty tile tracking
+  - Mark — O(1) lock-free marking using atomic.Uint64.Or()
+  - MarkRect — Mark all tiles in rectangle
+  - IsDirty — Check single tile status
+  - GetDirtyTiles — Return list of dirty tiles
+  - GetAndClear — Atomic get and reset
+  - Count — Number of dirty tiles
+- Performance: 10.9 ns/mark, 0 allocations
+- Uses bits.TrailingZeros64 for efficient iteration
+
+#### Benchmarks & Visual Tests
+- **Component benchmarks** — TileGrid, WorkerPool, TilePool, DirtyRegion, ParallelRasterizer
+- **Scaling benchmarks** — 1, 2, 4, 8, Max cores with GOMAXPROCS control
+- **Visual regression tests** — 7 test suites comparing parallel vs serial output
+  - ParallelClear, ParallelFillRect, ParallelComposite
+  - TileBoundaries, EdgeTiles, MultipleOperations
+  - Pixel-perfect comparison (tolerance 0)
+
+### Performance
+
+| Operation | Time | Allocations |
+|-----------|------|-------------|
+| DirtyRegion.Mark | 10.9 ns | 0 |
+| TilePool.GetPut | ~50 ns | 0 |
+| WorkerPool.ExecuteAll/100 | ~15 µs | 0 (hot path) |
+| Clear 1920x1080 | ~1.4 ms (1 core) → ~0.7 ms (2 cores) | — |
+
+### Testing
+- 120+ tests in internal/parallel/
+- All tests pass with race detector (-race)
+- 83.8% overall coverage
 
 ## [0.5.0] - 2025-12-17
 
@@ -215,7 +283,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gogpu/gg/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gg/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gg/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gg/compare/v0.2.0...v0.3.0
