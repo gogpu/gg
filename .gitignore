@@ -34,6 +34,10 @@ Thumbs.db
 coverage.txt
 *.coverprofile
 
+# Benchmark results (generated)
+benchmark_results*.txt
+BENCHMARK_RESULTS*.md
+
 # AI settings (private)
 .claude/
 .goco/

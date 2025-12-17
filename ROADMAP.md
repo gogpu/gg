@@ -17,6 +17,10 @@
 
 ## Released
 
+### v0.6.0 — Parallel Rendering
+
+See section below for details.
+
 ### v0.5.0 — SIMD Optimization
 
 See section below for details.
@@ -96,17 +100,21 @@ See section below for details.
 - [x] Comprehensive benchmarks
 - [x] **Achieved: 2-260x faster operations**
 
+### v0.6.0 — Parallel Rendering
+
+- [x] Tile-based rendering (64x64 tiles)
+- [x] TileGrid with dynamic resizing
+- [x] TilePool (sync.Pool, 0 allocs)
+- [x] WorkerPool with work stealing
+- [x] ParallelRasterizer (Clear, FillRect, Composite)
+- [x] Lock-free DirtyRegion (atomic bitmap, 10.9ns/mark)
+- [x] Scaling benchmarks (1, 2, 4, 8+ cores)
+- [x] Visual regression tests (pixel-perfect)
+- [x] **6,372 LOC, 120+ tests, race-free**
+
 ---
 
 ## Planned
-
-### v0.6.0 — Parallel Rendering
-
-- [ ] Tile-based rendering (64x64 tiles)
-- [ ] WorkerPool with work stealing
-- [ ] Parallel tile rasterization
-- [ ] Lock-free dirty region tracking
-- [ ] Tile compositor
 
 ### v0.7.0 — Scene Graph (Retained Mode)
 
@@ -197,7 +205,7 @@ See section below for details.
 Help wanted on all phases! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Priority areas:
-- Parallel rendering implementation
+- Scene graph implementation
 - GPU backend integration
 - Test cases and benchmarks
 - Documentation and examples
