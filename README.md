@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.7.0
+## Current: v0.8.0
 
-> **Scene Graph — Retained mode rendering with enterprise-grade features!**
+> **Backend Abstraction — Pluggable rendering backends for CPU and GPU!**
 >
 > **Star the repo to follow progress!**
 
@@ -101,9 +101,14 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **SceneBuilder** — Fluent API for ergonomic scene construction
 - **Parallel Renderer** — TileGrid + WorkerPool integration
 
-### Coming Soon (v0.8.0+)
-- **Backend Abstraction** — RenderBackend interface
-- **GPU Acceleration** — via gogpu/wgpu
+### Backend Abstraction (v0.8.0)
+- **RenderBackend Interface** — Pluggable rendering backends
+- **SoftwareBackend** — CPU-based rendering (default)
+- **Backend Registry** — Auto-selection with priority (wgpu > software)
+- **Fallback Mechanism** — Graceful degradation when GPU unavailable
+
+### Coming Soon (v0.9.0+)
+- **GPU Backend** — Hardware acceleration via gogpu/wgpu
 
 ---
 
@@ -237,7 +242,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.5.0 | SIMD optimization | Released |
 | v0.6.0 | Parallel rendering | Released |
 | v0.7.0 | Scene graph (retained mode) | **Released** |
-| v0.8.0 | Backend abstraction | Planned |
+| **v0.8.0** | Backend abstraction | **In Progress** |
 | v0.9.0 | GPU acceleration | Planned |
 | **v1.0.0** | **Production release** | **Target** |
 

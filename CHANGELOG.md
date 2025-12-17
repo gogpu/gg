@@ -7,11 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.8.0
-- Backend abstraction (RenderBackend interface)
-- GPU acceleration preparation
+### Planned for v0.9.0
+- GPU backend (gogpu/wgpu integration)
+- GPU memory management
+- Compute shader rasterization
 
-## [0.7.0] - 2025-12-17
+## [0.8.0] - 2025-12-18
+
+### Added
+
+#### Backend Abstraction (backend/)
+
+**RenderBackend Interface**
+- **RenderBackend** — Pluggable interface for rendering backends
+  - Name() — Backend identifier
+  - Init()/Close() — Lifecycle management
+  - NewRenderer() — Create immediate mode renderer
+  - RenderScene() — Retained mode scene rendering
+- **Common errors** — ErrBackendNotAvailable, ErrNotInitialized
+
+**Backend Registry**
+- **Register/Unregister** — Backend factory registration
+- **Get** — Get backend by name
+- **Default** — Priority-based selection (wgpu > software)
+- **MustDefault** — Panic on missing backend
+- **Available** — List registered backends
+- **IsRegistered** — Check backend availability
+
+**SoftwareBackend**
+- **SoftwareBackend** — CPU-based rendering implementation
+- **Auto-registration** — Registered on package import
+- **Lazy scene renderer** — Created on first RenderScene call
+- **Resize support** — Recreates renderer on target size change
+
+### Statistics
+- **595 LOC added** across 5 files
+- **89.4% test coverage** (16 tests)
+- **0 linter issues**
+
+## [0.7.0] - 2025-12-18
 
 ### Added
 
