@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.4.0
+## Current: v0.5.0
 
-> **Color Pipeline & Layers!**
+> **SIMD Optimization — 3-5x faster blending!**
 >
 > **Star the repo to follow progress!**
 
@@ -75,8 +75,15 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Linear Blending** — Correct sRGB ↔ Linear color space pipeline
 - **ColorSpace Package** — ColorF32/ColorU8 types with conversions
 
-### Coming Soon (v0.5.0+)
-- **SIMD Optimization** — 3-5x faster blending
+### SIMD Optimization (v0.5.0)
+- **Fast div255** — Shift approximation, no division (2.4x faster)
+- **sRGB LUTs** — Pre-computed lookup tables (260x faster than math.Pow)
+- **Wide Types** — U16x16/F32x8 for batch processing (16 pixels at once)
+- **Batch Blending** — All 14 Porter-Duff modes + 7 advanced modes
+- **Auto-vectorization** — Fixed-size arrays trigger Go compiler SIMD
+- **FillSpan** — Optimized span filling for rasterizer integration
+
+### Coming Soon (v0.6.0+)
 - **Parallel Rendering** — Multi-core tile-based rasterization
 - **GPU Acceleration** — via gogpu/wgpu
 
@@ -208,8 +215,8 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.1.0 | Core shapes, software renderer | Released |
 | v0.2.0 | Text rendering | Released |
 | v0.3.0 | Images, clipping, compositing | Released |
-| v0.4.0 | Color pipeline, layer API | **Released** |
-| v0.5.0 | SIMD optimization | Planned |
+| v0.4.0 | Color pipeline, layer API | Released |
+| v0.5.0 | SIMD optimization | **Released** |
 | v0.6.0 | Parallel rendering | Planned |
 | v0.7.0 | Scene graph (retained mode) | Planned |
 | v0.8.0 | Backend abstraction | Planned |
@@ -249,7 +256,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.4.0** |
+| **gogpu/gg** | **2D graphics** | **v0.5.0** |
 
 ---
 

@@ -17,6 +17,10 @@
 
 ## Released
 
+### v0.5.0 — SIMD Optimization
+
+See section below for details.
+
 ### v0.4.0 — Color Pipeline & Layers
 
 See section below for details.
@@ -80,18 +84,21 @@ See section below for details.
 - [x] Linear space blending pipeline
 - [x] 83.8% test coverage
 
+### v0.5.0 — SIMD Optimization
+
+- [x] Fast div255 (shift approximation, 2.4x faster)
+- [x] sRGB LUTs (260x faster than math.Pow)
+- [x] Wide types: U16x16 (16 pixels), F32x8 (8 pixels)
+- [x] Batch blending (14 Porter-Duff + 7 advanced modes)
+- [x] Auto-vectorization via fixed-size arrays
+- [x] Rasterizer integration (SpanFiller, FillSpan, FillSpanBlend)
+- [x] Visual regression tests
+- [x] Comprehensive benchmarks
+- [x] **Achieved: 2-260x faster operations**
+
 ---
 
 ## Planned
-
-### v0.5.0 — SIMD Optimization
-
-- [ ] Go 1.25+ SIMD intrinsics
-- [ ] Batch pixel operations (8-16 pixels)
-- [ ] SIMD blend functions
-- [ ] SIMD sRGB conversion
-- [ ] Scalar fallback for compatibility
-- [ ] **Target: 3-5x faster blending**
 
 ### v0.6.0 — Parallel Rendering
 
@@ -190,7 +197,7 @@ See section below for details.
 Help wanted on all phases! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Priority areas:
-- Layer API implementation
-- SIMD optimization
+- Parallel rendering implementation
+- GPU backend integration
 - Test cases and benchmarks
 - Documentation and examples
