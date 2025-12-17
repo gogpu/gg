@@ -2,36 +2,6 @@ package blend
 
 import "testing"
 
-// TestMulDiv255 tests the multiply and divide by 255 helper function.
-func TestMulDiv255(t *testing.T) {
-	tests := []struct {
-		name string
-		a, b byte
-		want byte
-	}{
-		{"zero * zero", 0, 0, 0},
-		{"zero * max", 0, 255, 0},
-		{"max * zero", 255, 0, 0},
-		{"max * max", 255, 255, 255},
-		{"half * half", 128, 128, 64},
-		{"255 * 128", 255, 128, 128},
-		{"128 * 255", 128, 255, 128},
-		{"1 * 1", 1, 1, 0},     // Rounds down
-		{"10 * 10", 10, 10, 0}, // 100/255 = 0.39 -> 0
-		{"100 * 100", 100, 100, 39},
-		{"200 * 200", 200, 200, 157},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mulDiv255(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("mulDiv255(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestAddDiv255 tests the add with clamping helper function.
 func TestAddDiv255(t *testing.T) {
 	tests := []struct {

@@ -219,13 +219,6 @@ func blendModulate(sr, sg, sb, sa, dr, dg, db, da byte) (byte, byte, byte, byte)
 
 // Utility functions
 
-// mulDiv255 multiplies two byte values and divides by 255 with proper rounding.
-// Formula: (a * b + 127) / 255
-// The +127 provides correct rounding (equivalent to adding 0.5 before truncation).
-func mulDiv255(a, b byte) byte {
-	return byte((uint16(a)*uint16(b) + 127) / 255)
-}
-
 // addDiv255 adds two byte values with clamping to 255.
 func addDiv255(a, b byte) byte {
 	sum := uint16(a) + uint16(b)
