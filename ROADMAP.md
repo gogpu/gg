@@ -17,6 +17,10 @@
 
 ## Released
 
+### v0.7.0 — Scene Graph (Retained Mode)
+
+See section below for details.
+
 ### v0.6.0 — Parallel Rendering
 
 See section below for details.
@@ -114,16 +118,21 @@ See section below for details.
 
 ---
 
-## Planned
-
 ### v0.7.0 — Scene Graph (Retained Mode)
 
-- [ ] Encoding (command buffer)
-- [ ] Scene API (retained mode)
-- [ ] Layer stack with blending
-- [ ] Layer caching
-- [ ] Dirty region optimization
-- [ ] SceneBuilder fluent API
+- [x] Dual-stream Encoding (command buffer, vello pattern)
+- [x] Scene API (Fill, Stroke, DrawImage, PushLayer/PopLayer)
+- [x] 13 Shape types (Rect, Circle, Ellipse, Polygon, Star, etc.)
+- [x] Layer stack with blending (29 blend modes)
+- [x] Filter effects (Blur, DropShadow, ColorMatrix)
+- [x] Layer caching (64MB LRU, 90ns Get)
+- [x] SceneBuilder fluent API
+- [x] Parallel Renderer (TileGrid + WorkerPool integration)
+- [x] **15,376 LOC, 89% coverage, 25 benchmarks**
+
+---
+
+## Planned
 
 ### v0.8.0 — Backend Abstraction
 
@@ -187,6 +196,7 @@ See section below for details.
 | Document | Purpose |
 |----------|---------|
 | `docs/dev/research/DESIGN-001-images-clipping-v3.md` | v0.3.0 design |
+| `docs/dev/research/RESEARCH-006-scene-graph.md` | v0.7.0 scene graph research |
 | `docs/dev/research/ARCHITECTURE-001-enterprise-grade.md` | v1.0.0 blueprint |
 
 ---
