@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"image/color"
+	"sync/atomic"
 	"testing"
 )
 
@@ -462,10 +463,10 @@ func TestParallelRasterizer_FillTiles(t *testing.T) {
 	pr.Clear(color.Black)
 
 	tiles := pr.Grid().AllTiles()
-	callCount := 0
+	var callCount atomic.Int32
 
 	pr.FillTiles(tiles, func(tile *Tile) {
-		callCount++
+		callCount.Add(1)
 		// Fill first pixel with red
 		tile.Data[0] = 255
 		tile.Data[1] = 0
@@ -473,8 +474,12 @@ func TestParallelRasterizer_FillTiles(t *testing.T) {
 		tile.Data[3] = 255
 	})
 
-	// Note: We can't check callCount directly due to parallel execution,
-	// but we can verify all tiles were modified
+	// Verify all tiles were called
+	if int(callCount.Load()) != len(tiles) {
+		t.Errorf("FillTiles called %d times, expected %d", callCount.Load(), len(tiles))
+	}
+
+	// Verify all tiles were modified
 	for _, tile := range tiles {
 		if tile.Data[0] != 255 {
 			t.Error("FillTiles did not modify all tiles")
