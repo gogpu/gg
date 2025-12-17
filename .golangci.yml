@@ -169,6 +169,19 @@ linters:
           - cyclop       # Porter-Duff has many cases
           - funlen       # GetBlendFunc is a large switch statement
 
+      # Scene package blend mode mapping (TASK-099)
+      - path: scene/encoding\.go
+        linters:
+          - gocyclo      # String() for 28 blend modes is a large switch
+          - cyclop       # Same reason - mode classification methods
+          - funlen       # String() is necessarily large with 28 cases
+
+      - path: scene/blend_integration\.go
+        linters:
+          - gocyclo      # Mode mapping switch statements are necessarily large
+          - cyclop       # Same reason
+          - funlen       # Conversion functions map all 28+ modes
+
       # Example code - demonstration purposes
       - path: examples?/.*\.go
         linters:

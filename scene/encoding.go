@@ -43,6 +43,91 @@ const (
 	BlendPlus
 )
 
+// String returns a human-readable name for the blend mode.
+func (mode BlendMode) String() string {
+	switch mode {
+	// Standard blend modes
+	case BlendNormal:
+		return "Normal"
+	case BlendMultiply:
+		return "Multiply"
+	case BlendScreen:
+		return "Screen"
+	case BlendOverlay:
+		return "Overlay"
+	case BlendDarken:
+		return "Darken"
+	case BlendLighten:
+		return "Lighten"
+	case BlendColorDodge:
+		return "ColorDodge"
+	case BlendColorBurn:
+		return "ColorBurn"
+	case BlendHardLight:
+		return "HardLight"
+	case BlendSoftLight:
+		return "SoftLight"
+	case BlendDifference:
+		return "Difference"
+	case BlendExclusion:
+		return "Exclusion"
+	// HSL blend modes
+	case BlendHue:
+		return "Hue"
+	case BlendSaturation:
+		return "Saturation"
+	case BlendColor:
+		return "Color"
+	case BlendLuminosity:
+		return "Luminosity"
+	// Porter-Duff modes
+	case BlendClear:
+		return "Clear"
+	case BlendCopy:
+		return "Copy"
+	case BlendDestination:
+		return "Destination"
+	case BlendSourceOver:
+		return "SourceOver"
+	case BlendDestinationOver:
+		return "DestinationOver"
+	case BlendSourceIn:
+		return "SourceIn"
+	case BlendDestinationIn:
+		return "DestinationIn"
+	case BlendSourceOut:
+		return "SourceOut"
+	case BlendDestinationOut:
+		return "DestinationOut"
+	case BlendSourceAtop:
+		return "SourceAtop"
+	case BlendDestinationAtop:
+		return "DestinationAtop"
+	case BlendXor:
+		return "Xor"
+	case BlendPlus:
+		return "Plus"
+	default:
+		return unknownStr
+	}
+}
+
+// IsPorterDuff returns true if this is a Porter-Duff compositing mode.
+func (mode BlendMode) IsPorterDuff() bool {
+	return mode >= BlendClear && mode <= BlendPlus
+}
+
+// IsAdvanced returns true if this is an advanced separable blend mode.
+func (mode BlendMode) IsAdvanced() bool {
+	return (mode >= BlendMultiply && mode <= BlendExclusion) ||
+		mode == BlendNormal
+}
+
+// IsHSL returns true if this is an HSL-based non-separable blend mode.
+func (mode BlendMode) IsHSL() bool {
+	return mode >= BlendHue && mode <= BlendLuminosity
+}
+
 // FillStyle represents the fill rule for paths.
 type FillStyle uint32
 

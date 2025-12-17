@@ -197,10 +197,12 @@ func (s *Scene) DrawImage(img *Image, transform Affine) {
 // All subsequent drawing operations will be rendered to this layer.
 // Call PopLayer to composite the layer with the content below.
 func (s *Scene) PushLayer(blend BlendMode, alpha float32, clip Shape) {
+	clampedAlpha := clampAlpha(alpha)
+
 	layer := s.layerStack.AcquireLayer()
 	layer.Kind = LayerRegular
 	layer.BlendMode = blend
-	layer.Alpha = clampAlpha(alpha)
+	layer.Alpha = clampedAlpha
 	layer.Clip = clip
 	layer.Transform = s.currentTransform
 	layer.ClipStackDepth = s.clipStack.Depth()
@@ -214,7 +216,7 @@ func (s *Scene) PushLayer(blend BlendMode, alpha float32, clip Shape) {
 
 	// Encode push layer in parent
 	parentEnc := s.currentEncoding()
-	parentEnc.EncodePushLayer(blend, alpha)
+	parentEnc.EncodePushLayer(blend, clampedAlpha)
 
 	// If there's a clip, encode it
 	if clip != nil {
@@ -365,6 +367,36 @@ func (s *Scene) Encoding() *Encoding {
 	// Flatten all layers into root encoding
 	s.flattenLayers()
 	return s.encoding
+}
+
+// Flatten composites all layers into a single encoding.
+// This is useful for rendering the complete scene as a single
+// flattened representation.
+//
+// Unlike Encoding(), this method returns a new cloned encoding
+// that is independent of the scene's internal state. This allows
+// the scene to be modified after calling Flatten() without
+// affecting the returned encoding.
+//
+// The flattening process:
+//  1. All open layers are popped and composited
+//  2. Layer blend modes and alpha values are applied
+//  3. The result is a single encoding with all content merged
+//
+// Example:
+//
+//	scene := NewScene()
+//	scene.Fill(FillNonZero, IdentityAffine(), SolidBrush(gg.Red), rect)
+//	scene.PushLayer(BlendMultiply, 0.5, nil)
+//	scene.Fill(FillNonZero, IdentityAffine(), SolidBrush(gg.Blue), circle)
+//	flat := scene.Flatten()
+//	// flat contains both shapes with layer compositing applied
+func (s *Scene) Flatten() *Encoding {
+	// First ensure all layers are flattened
+	s.flattenLayers()
+
+	// Return a clone so caller can't affect internal state
+	return s.encoding.Clone()
 }
 
 // Bounds returns the cumulative bounding box of all scene content.
