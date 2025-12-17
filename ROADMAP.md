@@ -17,6 +17,10 @@
 
 ## Released
 
+### v0.8.0 — Backend Abstraction
+
+See section below for details.
+
 ### v0.7.0 — Scene Graph (Retained Mode)
 
 See section below for details.
@@ -130,17 +134,17 @@ See section below for details.
 - [x] Parallel Renderer (TileGrid + WorkerPool integration)
 - [x] **15,376 LOC, 89% coverage, 25 benchmarks**
 
+### v0.8.0 — Backend Abstraction
+
+- [x] RenderBackend interface
+- [x] SoftwareBackend implementation (wraps existing renderer)
+- [x] Backend registry with auto-selection
+- [x] Priority-based fallback (wgpu > software)
+- [x] **595 LOC, 89.4% coverage, 16 tests**
+
 ---
 
 ## Planned
-
-### v0.8.0 — Backend Abstraction
-
-- [ ] RenderBackend interface
-- [ ] SoftwareBackend implementation
-- [ ] Backend auto-selection
-- [ ] Fallback mechanism
-- [ ] Resource sharing between backends
 
 ### v0.9.0 — GPU Backend
 
