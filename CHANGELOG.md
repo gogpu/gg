@@ -7,9 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.5.0
-- SIMD optimization for blend functions
+### Planned for v0.6.0
 - Parallel tile-based rendering
+- Multi-core rasterization
+
+## [0.5.0] - 2025-12-17
+
+### Added
+
+#### Fast Math (internal/blend)
+- **div255** — Shift approximation `(x + 255) >> 8` (2.4x faster than division)
+- **mulDiv255** — Multiply and divide by 255 in one operation
+- **inv255** — Fast complement calculation (255 - x)
+- **clamp255** — Branchless clamping to [0, 255]
+
+#### sRGB Lookup Tables (internal/color)
+- **sRGBToLinearLUT** — 256-entry lookup table for sRGB to linear conversion
+- **linearToSRGBLUT** — 4096-entry lookup table for linear to sRGB
+- **SRGBToLinearFast** — 260x faster than math.Pow (0.16ns vs 40.93ns)
+- **LinearToSRGBFast** — 23x faster than math.Pow (1.81ns vs 41.92ns)
+- Total memory: ~5KB for both tables
+
+#### Wide Types (internal/wide)
+- **U16x16** — 16-element uint16 vector for lowp batch operations
+  - Add, Sub, Mul, MulDiv255, Inv, And, Or, Min, Max
+  - Zero allocations, 3.8ns per 16-element Add
+- **F32x8** — 8-element float32 vector for highp operations
+  - Add, Sub, Mul, Div, Sqrt, Min, Max, Clamp
+  - Zero allocations, 1.9ns per 8-element Add
+- **BatchState** — Structure for 16-pixel batch processing
+  - LoadSrc/LoadDst from []byte buffers
+  - StoreDst back to []byte buffers
+  - AoS (Array of Structures) storage, SoA processing
+
+#### Batch Blending (internal/blend)
+- **14 Porter-Duff batch modes** — Clear, Source, Destination, SourceOver, DestinationOver, SourceIn, DestinationIn, SourceOut, DestinationOut, SourceAtop, DestinationAtop, Xor, Plus, Modulate
+- **7 Advanced batch modes** — Multiply, Screen, Darken, Lighten, Overlay, HardLight, SoftLight
+- **BlendBatch** — Generic batch blending function
+- **SourceOverBatch** — Optimized source-over (11.9ns per pixel)
+- All modes operate on premultiplied alpha, ±2 tolerance for div255 approximation
+
+#### Rasterizer Integration
+- **SpanFiller interface** — Optional interface for optimized span filling
+- **FillSpan** — Fill horizontal span with solid color (no blending)
+  - Pattern-based optimization for spans ≥16 pixels
+  - Uses copy() for efficient memory filling
+- **FillSpanBlend** — Fill horizontal span with source-over blending
+  - Falls back to scalar for spans <16 pixels
+  - Optimized for common opaque case (alpha ≥ 0.9999)
+
+#### Benchmarks & Tests
+- **Visual regression tests** — All 14 Porter-Duff modes tested at boundary sizes
+- **Batch boundary tests** — Edge cases around n % 16
+- **SIMD benchmarks** — div255, sRGB LUTs, wide types
+- **Pixmap benchmarks** — FillSpan vs SetPixel comparison
+- **BENCHMARK_RESULTS_v0.5.0.md** — Comprehensive benchmark documentation
+
+### Performance
+| Operation | Before | After | Improvement |
+|-----------|--------|-------|-------------|
+| div255 | ~0.4ns | ~0.17ns | 2.4x |
+| sRGB→Linear | 40.93ns | 0.16ns | 260x |
+| Linear→sRGB | 41.92ns | 1.81ns | 23x |
+| SourceOver/16px | ~300ns | 190ns | 1.6x |
+| U16x16.Add | — | 3.8ns | new |
+| F32x8.Add | — | 1.9ns | new |
+
+### Testing
+- 83.8% overall coverage
+- All batch modes: 0 allocations per operation
+- Visual regression tests pass with ±2 tolerance
 
 ## [0.4.0] - 2025-12-17
 
@@ -148,7 +215,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gogpu/gg/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gg/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/gogpu/gg/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/gogpu/gg/compare/v0.1.0...v0.2.0

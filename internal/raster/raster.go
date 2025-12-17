@@ -148,6 +148,11 @@ func (r *Rasterizer) fillEvenOdd(pixmap Pixmap, edges []ActiveEdge, y int, color
 	}
 }
 
+// SpanFiller is an optional interface that pixmaps can implement for optimized span filling.
+type SpanFiller interface {
+	FillSpan(x1, x2, y int, c RGBA)
+}
+
 // fillSpan fills a horizontal span of pixels.
 func (r *Rasterizer) fillSpan(pixmap Pixmap, x1, x2, y int, color RGBA) {
 	if y < 0 || y >= pixmap.Height() {
@@ -165,6 +170,13 @@ func (r *Rasterizer) fillSpan(pixmap Pixmap, x1, x2, y int, color RGBA) {
 		x2 = pixmap.Width()
 	}
 
+	// Try to use optimized FillSpan if available
+	if spanFiller, ok := pixmap.(SpanFiller); ok {
+		spanFiller.FillSpan(x1, x2, y, color)
+		return
+	}
+
+	// Fallback to scalar SetPixel
 	for x := x1; x < x2; x++ {
 		pixmap.SetPixel(x, y, color)
 	}
