@@ -7,9 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.7.0
-- Scene graph (retained mode)
+### Planned for v0.8.0
+- Backend abstraction (RenderBackend interface)
 - GPU acceleration preparation
+
+## [0.7.0] - 2025-12-17
+
+### Added
+
+#### Scene Graph (Retained Mode)
+
+**Encoding System (scene/)**
+- **Tag** — 22 command types (0x01-0x51) for path, draw, layer, clip operations
+- **Encoding** — Dual-stream command buffer (vello pattern)
+  - Separate streams: tags, pathData, drawData, transforms, brushes
+  - Hash() for cache keys (FNV-64a)
+  - Append() for encoding composition
+  - Clone() for independent copies
+- **EncodingPool** — sync.Pool-based zero-allocation reuse
+
+**Scene API**
+- **Scene** — Retained mode drawing surface
+  - Fill(style, transform, brush, shape) — Fill shape
+  - Stroke(style, transform, brush, shape) — Stroke shape
+  - DrawImage(img, transform) — Draw image
+  - PushLayer/PopLayer — Compositing layers
+  - PushClip/PopClip — Clipping regions
+  - PushTransform/PopTransform — Transform stack
+  - Flatten() — Composite all layers to encoding
+- **13 Shape types** — Rect, Circle, Ellipse, Line, Polygon, RoundedRect, Star, Arc, Sector, Ring, Capsule, Triangle, PathShape
+- **Path** — float32 points with MoveTo, LineTo, QuadTo, CubicTo, Close
+- **29 BlendModes** — 14 Porter-Duff + 11 Advanced + 4 HSL
+
+**Layer System**
+- **LayerKind** — Regular, Filtered, Clip (memory-optimized)
+- **LayerStack** — Nested layer management with pooling
+- **LayerState** — Blend mode, alpha, clip, encoding per layer
+- **ClipStack** — Hierarchical clip region management
+- 100-level nesting tested
+
+**Filter Effects (internal/filter/)**
+- **BlurFilter** — Separable Gaussian blur, O(n) per radius
+- **DropShadowFilter** — Offset + blur + colorize
+- **ColorMatrixFilter** — 4x5 matrix with 10 presets
+  - Grayscale, Sepia, Invert, Brightness, Contrast
+  - Saturation, HueRotate, Opacity, Tint
+- **FilterChain** — Sequential filter composition
+- **GaussianKernel** — Cached kernel generation
+
+**Layer Caching**
+- **LayerCache** — LRU cache for rendered layers
+  - 64MB default, configurable via NewLayerCache(mb)
+  - Thread-safe with sync.RWMutex
+  - Atomic statistics (hits, misses, evictions)
+  - Performance: Get 90ns, Put 393ns, Stats 26ns
+
+**SceneBuilder (Fluent API)**
+- **NewSceneBuilder()** — Create builder
+- **Fill/Stroke** — Drawing operations
+- **FillRect/StrokeRect/FillCircle/StrokeCircle** — Convenience methods
+- **Layer/Clip/Group** — Nested operations with callbacks
+- **Transform/Translate/Scale/Rotate** — Transform operations
+- **Build()** — Return scene and reset builder
+
+**Renderer & Integration**
+- **Renderer** — Parallel tile-based scene renderer
+  - Render(target, scene) — Full scene rendering
+  - RenderDirty(target, scene, dirty) — Incremental rendering
+  - Stats() — Render statistics
+  - CacheStats() — Cache statistics
+- **Decoder** — Sequential encoding command reader
+  - Next(), Tag(), MoveTo(), LineTo(), etc.
+  - CollectPath() — Read complete path
+- Integration with TileGrid, WorkerPool, DirtyRegion
+
+**Examples**
+- **examples/scene/** — Scene API demonstration
+
+### Performance
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| LayerCache.Get | 90ns | 4x faster than target |
+| LayerCache.Put | 393ns | 25x faster than target |
+| LayerCache.Stats | 26ns | Atomic reads |
+| Blur (r=5, 1080p) | ~5ms | Separable algorithm |
+| ColorMatrix (1080p) | ~2ms | Per-pixel |
+
+### Statistics
+- **15,376 LOC added** across 37 files
+- **scene package**: 89% coverage
+- **internal/filter**: 93% coverage
+- **25 benchmarks** for performance validation
+- **0 linter issues**
 
 ## [0.6.0] - 2025-12-17
 
@@ -283,7 +373,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/gogpu/gg/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gogpu/gg/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gg/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gogpu/gg/compare/v0.3.0...v0.4.0

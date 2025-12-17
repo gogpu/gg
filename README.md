@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.6.0
+## Current: v0.7.0
 
-> **Parallel Rendering — Multi-core tile-based rasterization!**
+> **Scene Graph — Retained mode rendering with enterprise-grade features!**
 >
 > **Star the repo to follow progress!**
 
@@ -91,8 +91,18 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Visual Regression Tests** — Pixel-perfect comparison of parallel vs serial
 - **Scaling Benchmarks** — Linear scaling with 1, 2, 4, 8+ cores
 
-### Coming Soon (v0.7.0+)
-- **Scene Graph** — Retained mode rendering
+### Scene Graph (v0.7.0)
+- **Dual-Stream Encoding** — GPU-ready command buffer (vello pattern)
+- **Scene API** — Fill, Stroke, PushLayer, PopLayer, PushClip, transforms
+- **13 Shape Types** — Rect, Circle, Ellipse, Line, Polygon, RoundedRect...
+- **29 Blend Modes** — 14 Porter-Duff + 11 Advanced + 4 HSL
+- **Filter Effects** — Gaussian blur, drop shadow, color matrix (10 presets)
+- **LRU Layer Cache** — 64MB default, configurable, 90ns Get / 393ns Put
+- **SceneBuilder** — Fluent API for ergonomic scene construction
+- **Parallel Renderer** — TileGrid + WorkerPool integration
+
+### Coming Soon (v0.8.0+)
+- **Backend Abstraction** — RenderBackend interface
 - **GPU Acceleration** — via gogpu/wgpu
 
 ---
@@ -225,8 +235,8 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.3.0 | Images, clipping, compositing | Released |
 | v0.4.0 | Color pipeline, layer API | Released |
 | v0.5.0 | SIMD optimization | Released |
-| v0.6.0 | Parallel rendering | **Released** |
-| v0.7.0 | Scene graph (retained mode) | Planned |
+| v0.6.0 | Parallel rendering | Released |
+| v0.7.0 | Scene graph (retained mode) | **Released** |
 | v0.8.0 | Backend abstraction | Planned |
 | v0.9.0 | GPU acceleration | Planned |
 | **v1.0.0** | **Production release** | **Target** |
@@ -264,7 +274,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.6.0** |
+| **gogpu/gg** | **2D graphics** | **v0.7.0** |
 
 ---
 
