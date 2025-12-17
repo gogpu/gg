@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.5.0
+## Current: v0.6.0
 
-> **SIMD Optimization — 3-5x faster blending!**
+> **Parallel Rendering — Multi-core tile-based rasterization!**
 >
 > **Star the repo to follow progress!**
 
@@ -83,8 +83,16 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Auto-vectorization** — Fixed-size arrays trigger Go compiler SIMD
 - **FillSpan** — Optimized span filling for rasterizer integration
 
-### Coming Soon (v0.6.0+)
-- **Parallel Rendering** — Multi-core tile-based rasterization
+### Parallel Rendering (v0.6.0)
+- **TileGrid** — Canvas divided into 64x64 pixel tiles for independent rendering
+- **WorkerPool** — Goroutine pool with work stealing for load balancing
+- **ParallelRasterizer** — Clear, FillRect, Composite operations across tiles
+- **Lock-Free DirtyRegion** — Atomic bitmap tracking for changed tiles (10.9ns/mark)
+- **Visual Regression Tests** — Pixel-perfect comparison of parallel vs serial
+- **Scaling Benchmarks** — Linear scaling with 1, 2, 4, 8+ cores
+
+### Coming Soon (v0.7.0+)
+- **Scene Graph** — Retained mode rendering
 - **GPU Acceleration** — via gogpu/wgpu
 
 ---
@@ -216,8 +224,8 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.2.0 | Text rendering | Released |
 | v0.3.0 | Images, clipping, compositing | Released |
 | v0.4.0 | Color pipeline, layer API | Released |
-| v0.5.0 | SIMD optimization | **Released** |
-| v0.6.0 | Parallel rendering | Planned |
+| v0.5.0 | SIMD optimization | Released |
+| v0.6.0 | Parallel rendering | **Released** |
 | v0.7.0 | Scene graph (retained mode) | Planned |
 | v0.8.0 | Backend abstraction | Planned |
 | v0.9.0 | GPU acceleration | Planned |
@@ -256,7 +264,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.5.0** |
+| **gogpu/gg** | **2D graphics** | **v0.6.0** |
 
 ---
 
