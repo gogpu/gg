@@ -507,3 +507,157 @@ func (pp *PathPool) Put(p *Path) {
 	}
 	pp.paths = append(pp.paths, p)
 }
+
+// Contains returns true if the point (px, py) is inside the path.
+// This uses the non-zero winding rule to determine containment.
+// The test is performed by casting a ray from the point to infinity
+// and counting the number of times the path crosses the ray.
+func (p *Path) Contains(px, py float32) bool {
+	// Quick bounds check
+	if !p.bounds.IsEmpty() {
+		if px < p.bounds.MinX || px > p.bounds.MaxX ||
+			py < p.bounds.MinY || py > p.bounds.MaxY {
+			return false
+		}
+	}
+
+	// Count winding number
+	winding := 0
+
+	// Track current position and subpath start
+	var curX, curY float32
+	var startX, startY float32
+
+	pointIdx := 0
+
+	for _, verb := range p.verbs {
+		switch verb {
+		case VerbMoveTo:
+			// Close previous subpath if any
+			if curX != startX || curY != startY {
+				winding += windingSegment(curX, curY, startX, startY, px, py)
+			}
+			startX = p.points[pointIdx]
+			startY = p.points[pointIdx+1]
+			curX, curY = startX, startY
+			pointIdx += 2
+
+		case VerbLineTo:
+			nextX := p.points[pointIdx]
+			nextY := p.points[pointIdx+1]
+			winding += windingSegment(curX, curY, nextX, nextY, px, py)
+			curX, curY = nextX, nextY
+			pointIdx += 2
+
+		case VerbQuadTo:
+			// Approximate quad with lines for containment test
+			cx := p.points[pointIdx]
+			cy := p.points[pointIdx+1]
+			x := p.points[pointIdx+2]
+			y := p.points[pointIdx+3]
+
+			// Subdivide quadratic into lines
+			winding += windingQuad(curX, curY, cx, cy, x, y, px, py)
+			curX, curY = x, y
+			pointIdx += 4
+
+		case VerbCubicTo:
+			// Approximate cubic with lines for containment test
+			c1x := p.points[pointIdx]
+			c1y := p.points[pointIdx+1]
+			c2x := p.points[pointIdx+2]
+			c2y := p.points[pointIdx+3]
+			x := p.points[pointIdx+4]
+			y := p.points[pointIdx+5]
+
+			winding += windingCubic(curX, curY, c1x, c1y, c2x, c2y, x, y, px, py)
+			curX, curY = x, y
+			pointIdx += 6
+
+		case VerbClose:
+			// Close the subpath
+			if curX != startX || curY != startY {
+				winding += windingSegment(curX, curY, startX, startY, px, py)
+			}
+			curX, curY = startX, startY
+		}
+	}
+
+	// Close final subpath if not explicitly closed
+	if curX != startX || curY != startY {
+		winding += windingSegment(curX, curY, startX, startY, px, py)
+	}
+
+	return winding != 0
+}
+
+// windingSegment calculates the winding number contribution of a line segment.
+// This counts crossings of a horizontal ray from (px, py) to (+inf, py).
+func windingSegment(x1, y1, x2, y2, px, py float32) int {
+	// Upward crossing: y1 <= py < y2
+	if y1 <= py && y2 > py && isLeft(x1, y1, x2, y2, px, py) > 0 {
+		return 1
+	}
+	// Downward crossing: y1 > py >= y2
+	if y1 > py && y2 <= py && isLeft(x1, y1, x2, y2, px, py) < 0 {
+		return -1
+	}
+	return 0
+}
+
+// isLeft returns:
+//
+//	> 0 if (px, py) is left of the line from (x1, y1) to (x2, y2)
+//	= 0 if on the line
+//	< 0 if right of the line
+func isLeft(x1, y1, x2, y2, px, py float32) float32 {
+	return (x2-x1)*(py-y1) - (px-x1)*(y2-y1)
+}
+
+// windingQuad calculates winding number for a quadratic curve by subdivision.
+func windingQuad(x0, y0, cx, cy, x1, y1, px, py float32) int {
+	// Subdivide into line segments
+	winding := 0
+	const steps = 4
+
+	prevX, prevY := x0, y0
+	for i := 1; i <= steps; i++ {
+		t := float32(i) / float32(steps)
+		t2 := t * t
+		mt := 1 - t
+		mt2 := mt * mt
+
+		x := mt2*x0 + 2*mt*t*cx + t2*x1
+		y := mt2*y0 + 2*mt*t*cy + t2*y1
+
+		winding += windingSegment(prevX, prevY, x, y, px, py)
+		prevX, prevY = x, y
+	}
+
+	return winding
+}
+
+// windingCubic calculates winding number for a cubic curve by subdivision.
+func windingCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1, px, py float32) int {
+	// Subdivide into line segments
+	winding := 0
+	const steps = 8
+
+	prevX, prevY := x0, y0
+	for i := 1; i <= steps; i++ {
+		t := float32(i) / float32(steps)
+		t2 := t * t
+		t3 := t2 * t
+		mt := 1 - t
+		mt2 := mt * mt
+		mt3 := mt2 * mt
+
+		x := mt3*x0 + 3*mt2*t*c1x + 3*mt*t2*c2x + t3*x1
+		y := mt3*y0 + 3*mt2*t*c1y + 3*mt*t2*c2y + t3*y1
+
+		winding += windingSegment(prevX, prevY, x, y, px, py)
+		prevX, prevY = x, y
+	}
+
+	return winding
+}
