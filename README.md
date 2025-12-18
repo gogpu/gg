@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.8.0
+## Current: v0.9.0
 
-> **Backend Abstraction — Pluggable rendering backends for CPU and GPU!**
+> **GPU Backend — Hardware acceleration via gogpu/wgpu with Sparse Strips!**
 >
 > **Star the repo to follow progress!**
 
@@ -107,8 +107,17 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Backend Registry** — Auto-selection with priority (wgpu > software)
 - **Fallback Mechanism** — Graceful degradation when GPU unavailable
 
-### Coming Soon (v0.9.0+)
-- **GPU Backend** — Hardware acceleration via gogpu/wgpu
+### GPU Backend (v0.9.0)
+- **WGPUBackend** — Hardware acceleration via gogpu/wgpu integration
+- **Sparse Strips Algorithm** — CPU tessellates paths to strips, GPU rasterizes (vello pattern)
+- **GPU Memory Management** — LRU eviction, 256MB+ budget, texture atlas with shelf packing
+- **WGSL Shaders** — 4 compute/fragment shaders (blit, blend, strip, composite)
+- **29 Blend Modes** — All Porter-Duff + Advanced + HSL modes on GPU
+- **Render Pipeline** — PipelineCache, GPUSceneRenderer, CommandEncoder pattern
+- **9,930 LOC** — Complete GPU rendering infrastructure
+
+### Coming Soon (v0.10.0+)
+- **Text Rendering on GPU** — Glyph atlas and SDF fonts
 
 ---
 
@@ -241,9 +250,10 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.4.0 | Color pipeline, layer API | Released |
 | v0.5.0 | SIMD optimization | Released |
 | v0.6.0 | Parallel rendering | Released |
-| v0.7.0 | Scene graph (retained mode) | **Released** |
-| **v0.8.0** | Backend abstraction | **In Progress** |
-| v0.9.0 | GPU acceleration | Planned |
+| v0.7.0 | Scene graph (retained mode) | Released |
+| v0.8.0 | Backend abstraction | Released |
+| **v0.9.0** | **GPU acceleration (Sparse Strips)** | **Released** |
+| v0.10.0 | GPU text rendering | Planned |
 | **v1.0.0** | **Production release** | **Target** |
 
 ---
@@ -279,7 +289,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.4.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.7.0** |
+| **gogpu/gg** | **2D graphics** | **v0.9.0** |
 
 ---
 
