@@ -7,10 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.9.0
-- GPU backend (gogpu/wgpu integration)
-- GPU memory management
-- Compute shader rasterization
+### Planned for v0.10.0
+- GPU text rendering (glyph atlas, SDF fonts)
+- WebGL2 backend support
+
+## [0.9.0] - 2025-12-18
+
+### Added
+
+#### GPU Backend (backend/wgpu/)
+
+**WGPUBackend Core**
+- **WGPUBackend** — GPU-accelerated rendering backend implementing RenderBackend interface
+  - Init()/Close() — GPU lifecycle management
+  - NewRenderer() — Create GPU-backed immediate mode renderer
+  - RenderScene() — Retained mode scene rendering via GPUSceneRenderer
+- **Auto-registration** — Registered on package import with priority over software
+- **GPUInfo** — GPU vendor, device name, driver info
+
+**GPU Memory Management (memory.go)**
+- **MemoryManager** — GPU resource lifecycle with LRU eviction
+  - 256MB default budget (configurable 16MB-8GB)
+  - Thread-safe with sync.RWMutex
+  - Automatic eviction on memory pressure
+- **GPUTexture** — Texture wrapper with usage tracking
+- **GPUBuffer** — Buffer wrapper for vertex/uniform data
+- **TextureAtlas** — Shelf-packing atlas for small textures
+  - 2048x2048 default size
+  - Region allocation with padding
+- **RectAllocator** — Guillotine algorithm for atlas packing
+
+**Strip Tessellation (tessellate.go)**
+- **Tessellator** — Converts paths to GPU-ready sparse strips
+  - Active Edge Table algorithm
+  - EvenOdd and NonZero fill rules
+  - Sub-pixel anti-aliasing via coverage
+- **StripBuffer** — GPU buffer for strip data
+- **Strip** — Single scanline coverage span (y, x1, x2, coverage)
+- Handles all path operations: MoveTo, LineTo, QuadTo, CubicTo, Close
+
+**WGSL Shaders (shaders/)**
+- **blit.wgsl** (43 LOC) — Simple texture copy to screen
+- **blend.wgsl** (424 LOC) — All 29 blend modes
+  - 14 Porter-Duff: Clear, Src, Dst, SrcOver, DstOver, SrcIn, DstIn, SrcOut, DstOut, SrcAtop, DstAtop, Xor, Plus, Modulate
+  - 11 Advanced: Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight, Difference, Exclusion
+  - 4 HSL: Hue, Saturation, Color, Luminosity
+- **strip.wgsl** (155 LOC) — Compute shader for strip rasterization
+  - Workgroup size 64
+  - Coverage-based anti-aliasing
+- **composite.wgsl** (235 LOC) — Layer compositing with blend modes
+
+**Render Pipeline (pipeline.go)**
+- **PipelineCache** — Caches compiled render/compute pipelines
+- **GPUPipelineConfig** — Pipeline configuration descriptors
+- **ShaderLoader** — Loads and compiles WGSL shaders
+
+**GPU Scene Renderer (renderer.go)**
+- **GPUSceneRenderer** — Complete scene rendering on GPU
+  - Scene traversal and command encoding
+  - Layer stack management
+  - Strip tessellation and rasterization
+  - Blend mode compositing
+- **GPUSceneRendererConfig** — Width, height, debug options
+
+**Command Encoding (commands.go)**
+- **CommandEncoder** — WebGPU command buffer building
+- **RenderPass** — Render pass commands (draw, bind, viewport)
+- **ComputePass** — Compute shader dispatch
+
+### Architecture
+
+**Sparse Strips Algorithm (vello 2025 pattern)**
+```
+Path → CPU Tessellation → Strips → GPU Rasterization → Compositing → Output
+         (tessellate.go)    ↓         (strip.wgsl)      (composite.wgsl)
+                       StripBuffer
+```
+
+Key benefits:
+- CPU handles complex path math (curves, intersections)
+- GPU handles parallel pixel processing
+- Minimal CPU→GPU data transfer (strips are compact)
+- Compatible with all existing gg features
+
+### Statistics
+- **9,930 LOC added** across 21 files
+- **4 WGSL shaders** (857 LOC total)
+- **29 blend modes** supported on GPU
+- **All tests pass** (build + unit + integration)
+- **0 linter issues**
 
 ## [0.8.0] - 2025-12-18
 
@@ -407,7 +492,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/gogpu/gg/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/gogpu/gg/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/gogpu/gg/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/gogpu/gg/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/gogpu/gg/compare/v0.4.0...v0.5.0

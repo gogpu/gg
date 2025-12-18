@@ -17,6 +17,10 @@
 
 ## Released
 
+### v0.9.0 — GPU Backend (Sparse Strips)
+
+See section below for details.
+
 ### v0.8.0 — Backend Abstraction
 
 See section below for details.
@@ -134,6 +138,19 @@ See section below for details.
 - [x] Parallel Renderer (TileGrid + WorkerPool integration)
 - [x] **15,376 LOC, 89% coverage, 25 benchmarks**
 
+### v0.9.0 — GPU Backend (Sparse Strips)
+
+- [x] WGPUBackend — gogpu/wgpu integration
+- [x] GPU memory management (LRU eviction, 256MB budget)
+- [x] Strip tessellation (Active Edge Table algorithm)
+- [x] WGSL shaders (blit, blend, strip, composite)
+- [x] 29 blend modes on GPU
+- [x] PipelineCache for compiled shaders
+- [x] GPUSceneRenderer for scene traversal
+- [x] CommandEncoder for GPU command building
+- [x] TextureAtlas with shelf packing
+- [x] **9,930 LOC, 21 files, 4 WGSL shaders**
+
 ### v0.8.0 — Backend Abstraction
 
 - [x] RenderBackend interface
@@ -146,14 +163,12 @@ See section below for details.
 
 ## Planned
 
-### v0.9.0 — GPU Backend
+### v0.10.0 — GPU Text Rendering
 
-- [ ] Integration with gogpu/wgpu
-- [ ] GPU memory management
-- [ ] Coarse rasterization (compute shader)
-- [ ] Fine rasterization (compute shader)
-- [ ] Texture atlas management
-- [ ] GPU/CPU synchronization
+- [ ] Glyph atlas on GPU
+- [ ] SDF (Signed Distance Field) fonts
+- [ ] Text layout on GPU
+- [ ] Font caching and management
 
 ---
 
@@ -190,7 +205,7 @@ See section below for details.
               ┌───────────────┼───────────────┐
               │               │               │
          Software          SIMD           GPU
-         (v0.1.0+)       (v0.5.0)     (gogpu/wgpu)
+         (v0.1.0+)       (v0.5.0)       (v0.9.0)
 ```
 
 ---
@@ -219,7 +234,7 @@ See section below for details.
 Help wanted on all phases! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 Priority areas:
-- Scene graph implementation
-- GPU backend integration
+- GPU text rendering (v0.10.0)
 - Test cases and benchmarks
 - Documentation and examples
+- Cross-platform testing
