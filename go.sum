@@ -1,5 +1,5 @@
-github.com/gogpu/wgpu v0.4.0 h1:lFpJzOUJu/7iPr30zcTJ1+gfXwwl/ZMeLEvYH8OAEpo=
-github.com/gogpu/wgpu v0.4.0/go.mod h1:LM+xYpxVOZ0U2D+RmMYoLQcZXu4h96LJJM0z+BpXkuE=
+github.com/gogpu/wgpu v0.5.0 h1:Wy285FqBIH+OK+CDFIf4ulOgy1iVOSKxcrm01blFHdg=
+github.com/gogpu/wgpu v0.5.0/go.mod h1:LM+xYpxVOZ0U2D+RmMYoLQcZXu4h96LJJM0z+BpXkuE=
 golang.org/x/image v0.34.0 h1:33gCkyw9hmwbZJeZkct8XyR11yH889EQt/QH4VmXMn8=
 golang.org/x/image v0.34.0/go.mod h1:2RNFBZRB+vnwwFil8GkMdRvrJOFd1AzdZI6vOY+eJVU=
 golang.org/x/text v0.32.0 h1:ZD01bjUt1FQ9WJ0ClOL5vxgxOI/sVCNgX1YtKwcY0mU=
