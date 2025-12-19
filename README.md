@@ -28,7 +28,7 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.9.0
+## Current: v0.9.2
 
 > **GPU Backend — Hardware acceleration via gogpu/wgpu with Sparse Strips!**
 >
@@ -289,7 +289,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.5.0** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.9.0** |
+| **gogpu/gg** | **2D graphics** | **v0.9.2** |
 
 ---
 
