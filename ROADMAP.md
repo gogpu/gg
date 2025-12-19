@@ -163,12 +163,50 @@ See section below for details.
 
 ## Planned
 
-### v0.10.0 — GPU Text Rendering
+### v0.10.0 — GPU Text Rendering (~9,600 LOC)
 
-- [ ] Glyph atlas on GPU
-- [ ] SDF (Signed Distance Field) fonts
-- [ ] Text layout on GPU
-- [ ] Font caching and management
+Enterprise-grade GPU text rendering with hybrid architecture.
+
+**Included:**
+- [x] TASK-049: Curve Integration (~3,300 LOC) — **MERGED**
+
+**P0 — Critical:**
+- [ ] TASK-050a: Text Shaping Integration (go-text/typesetting) — 1,500 LOC
+- [ ] TASK-050b: Glyph-as-Path Rendering (sparse strips) — 2,000 LOC
+- [ ] TASK-050c: Glyph Cache (LRU, 64-frame lifetime) — 800 LOC
+- [ ] TASK-050d: Text Benchmarks — 600 LOC
+- [ ] TASK-050e: Visual Regression Tests — 500 LOC
+
+**P1 — Important:**
+- [ ] TASK-050f: MSDF Generator (Pure Go) — 1,500 LOC
+- [ ] TASK-050g: MSDF Atlas Manager — 1,000 LOC
+- [ ] TASK-050h: MSDF WGSL Shader — 200 LOC
+- [ ] TASK-050i: Bitmap/Emoji Support (COLRv1, ZWJ) — 1,000 LOC
+
+**P2 — Nice to have:**
+- [ ] TASK-050j: Subpixel Text Positioning — 400 LOC
+
+**Architecture:**
+```
+Text Input → go-text/typesetting (Pure Go HarfBuzz)
+                     │
+     ┌───────────────┼───────────────┐
+     │               │               │
+Vector Path    MSDF Atlas    Bitmap Atlas
+(quality)     (performance)    (emoji)
+     │               │               │
+     └───────────────┴───────────────┘
+                     │
+          Sparse Strips Pipeline
+```
+
+**Performance Targets:**
+- Shape 100 chars: < 100µs
+- Cache hit: < 50ns
+- Render 1000 glyphs: < 1ms
+- 60fps with 10,000+ glyphs
+
+**Research:** `docs/dev/research/RESEARCH-009-gpu-text-rendering.md`
 
 ---
 
