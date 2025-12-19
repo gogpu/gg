@@ -132,6 +132,73 @@ func TestTextNewAPI(t *testing.T) {
 	}
 }
 
+// TestTextDrawsPixels verifies that text drawing actually modifies pixels.
+// This is a regression test for issue #11 where text was drawn to a copy
+// of the pixmap instead of the actual pixmap.
+func TestTextDrawsPixels(t *testing.T) {
+	// Find a system font
+	candidates := []string{
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+	}
+
+	var fontPath string
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			fontPath = path
+			break
+		}
+	}
+
+	if fontPath == "" {
+		t.Skip("No system font available")
+	}
+
+	// Create context with white background
+	ctx := NewContext(200, 100)
+	ctx.ClearWithColor(White)
+
+	// Verify background is white
+	initialPixel := ctx.pixmap.GetPixel(100, 50)
+	if initialPixel.R != 1 || initialPixel.G != 1 || initialPixel.B != 1 {
+		t.Fatalf("Expected white background, got %+v", initialPixel)
+	}
+
+	// Load font and draw black text
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	ctx.SetFont(source.Face(48)) // Large font for easy detection
+	ctx.SetRGB(0, 0, 0)          // Black text
+	ctx.DrawString("X", 80, 70)  // Draw near center
+
+	// Count non-white pixels in the area where text should be
+	nonWhiteCount := 0
+	for y := 20; y < 80; y++ {
+		for x := 70; x < 130; x++ {
+			pixel := ctx.pixmap.GetPixel(x, y)
+			// Check if pixel is not pure white (text was drawn)
+			if pixel.R < 0.99 || pixel.G < 0.99 || pixel.B < 0.99 {
+				nonWhiteCount++
+			}
+		}
+	}
+
+	// With a 48pt "X", we expect significant number of non-white pixels
+	if nonWhiteCount == 0 {
+		t.Errorf("Text drawing produced no visible pixels! Expected text to modify pixmap. (issue #11 regression)")
+	}
+
+	t.Logf("Text drew %d non-white pixels", nonWhiteCount)
+}
+
 // TestTextNoFont tests behavior when no font is set.
 func TestTextNoFont(t *testing.T) {
 	ctx := NewContext(200, 100)
