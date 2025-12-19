@@ -15,20 +15,17 @@ type Edge struct {
 
 // NewEdge creates a new edge from two points.
 func NewEdge(p0, p1 Point) Edge {
-	// Ensure y0 < y1
+	// Determine direction BEFORE swap (for non-zero winding rule)
+	dir := 1
 	if p0.Y > p1.Y {
-		p0, p1 = p1, p0
+		dir = -1
+		p0, p1 = p1, p0 // Swap to ensure y0 < y1
 	}
 
 	dy := p1.Y - p0.Y
 	var dx float64
 	if dy != 0 {
 		dx = (p1.X - p0.X) / dy
-	}
-
-	dir := 1
-	if p0.Y > p1.Y {
-		dir = -1
 	}
 
 	return Edge{
