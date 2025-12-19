@@ -31,7 +31,7 @@ func (c *Context) DrawString(s string, x, y float64) {
 	if c.face == nil {
 		return
 	}
-	text.Draw(c.pixmap.ToImage(), s, c.face, x, y, c.currentColor())
+	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
 }
 
 // DrawStringAnchored draws text with an anchor point.
@@ -55,7 +55,7 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	y += h * ay // Note: y is baseline, so we adjust upward for top alignment
 
 	// Draw the text
-	text.Draw(c.pixmap.ToImage(), s, c.face, x, y, c.currentColor())
+	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
 }
 
 // MeasureString returns the dimensions of text in pixels.

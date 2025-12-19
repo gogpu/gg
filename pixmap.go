@@ -3,11 +3,21 @@ package gg
 import (
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 )
 
+// Compile-time interface checks.
+var (
+	_ image.Image = (*Pixmap)(nil)
+	_ draw.Image  = (*Pixmap)(nil)
+)
+
 // Pixmap represents a rectangular pixel buffer.
+// It implements both image.Image (read-only) and draw.Image (read-write)
+// interfaces, making it compatible with Go's standard image ecosystem
+// including text rendering via golang.org/x/image/font.
 type Pixmap struct {
 	width  int
 	height int
@@ -120,6 +130,13 @@ func (p *Pixmap) SavePNG(path string) error {
 // At implements the image.Image interface.
 func (p *Pixmap) At(x, y int) color.Color {
 	return p.GetPixel(x, y).Color()
+}
+
+// Set implements the draw.Image interface.
+// This allows Pixmap to be used as a destination for image drawing operations,
+// including text rendering via golang.org/x/image/font.
+func (p *Pixmap) Set(x, y int, c color.Color) {
+	p.SetPixel(x, y, FromColor(c))
 }
 
 // Bounds implements the image.Image interface.
