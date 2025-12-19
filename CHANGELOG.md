@@ -8,8 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned for v0.10.0
-- GPU text rendering (glyph atlas, SDF fonts)
-- WebGL2 backend support
+- GPU text rendering with hybrid architecture:
+  - Glyph-as-Path rendering through sparse strips
+  - MSDF atlas for performance
+  - Bitmap atlas for emoji (COLRv1)
+- Text shaping via go-text/typesetting (Pure Go HarfBuzz)
+
+## [0.9.1] - 2025-12-19
+
+### Fixed
+- **Text rendering blank images** — Text was drawn to a copy of the pixmap instead of the actual pixmap ([#11](https://github.com/gogpu/gg/issues/11), [#12](https://github.com/gogpu/gg/pull/12))
+  - Added `Set()` method to `Pixmap` to implement `draw.Image` interface
+  - Added `TestTextDrawsPixels` regression test
 
 ## [0.9.0] - 2025-12-18
 
