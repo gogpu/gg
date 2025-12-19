@@ -28,9 +28,11 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.9.0
+## Current: v0.9.1
 
 > **GPU Backend — Hardware acceleration via gogpu/wgpu with Sparse Strips!**
+>
+> v0.9.1 includes hotfix for text rendering ([#11](https://github.com/gogpu/gg/issues/11))
 >
 > **Star the repo to follow progress!**
 
@@ -252,7 +254,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.6.0 | Parallel rendering | Released |
 | v0.7.0 | Scene graph (retained mode) | Released |
 | v0.8.0 | Backend abstraction | Released |
-| **v0.9.0** | **GPU acceleration (Sparse Strips)** | **Released** |
+| **v0.9.1** | **GPU acceleration + text fix** | **Released** |
 | v0.10.0 | GPU text rendering | Planned |
 | **v1.0.0** | **Production release** | **Target** |
 
@@ -289,7 +291,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.3.0 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.5.0** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
-| **gogpu/gg** | **2D graphics** | **v0.9.0** |
+| **gogpu/gg** | **2D graphics** | **v0.9.1** |
 
 ---
 
