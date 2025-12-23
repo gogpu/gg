@@ -1,5 +1,8 @@
 package text
 
+// unknownStr is the string returned for unknown enum values.
+const unknownStr = "Unknown"
+
 // Direction specifies text direction.
 type Direction int
 
@@ -26,8 +29,18 @@ func (d Direction) String() string {
 	case DirectionBTT:
 		return "BTT"
 	default:
-		return "Unknown"
+		return unknownStr
 	}
+}
+
+// IsHorizontal returns true if the direction is horizontal (LTR or RTL).
+func (d Direction) IsHorizontal() bool {
+	return d == DirectionLTR || d == DirectionRTL
+}
+
+// IsVertical returns true if the direction is vertical (TTB or BTT).
+func (d Direction) IsVertical() bool {
+	return d == DirectionTTB || d == DirectionBTT
 }
 
 // Hinting specifies font hinting mode.
@@ -52,7 +65,7 @@ func (h Hinting) String() string {
 	case HintingFull:
 		return "Full"
 	default:
-		return "Unknown"
+		return unknownStr
 	}
 }
 

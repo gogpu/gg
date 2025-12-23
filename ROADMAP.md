@@ -17,6 +17,17 @@
 
 ## Released
 
+### v0.10.0 — GPU Text Pipeline
+
+- [x] Pluggable Shaper interface (BuiltinShaper + custom)
+- [x] Extended shaping types (Direction, GlyphType, GlyphFlags, ShapedRun)
+- [x] Sharded LRU shaping cache (16 shards, 16K entries)
+- [x] Bidi/Script segmentation (25+ scripts, Unicode compliant)
+- [x] Multi-line Layout Engine (alignment, wrapping, line spacing)
+- [x] Zero new dependencies (uses golang.org/x/text)
+- [x] 87% test coverage, 0 linter issues
+- [x] **~2,500 LOC across 12 files**
+
 ### v0.9.0 — GPU Backend (Sparse Strips)
 
 See section below for details.
@@ -163,15 +174,12 @@ See section below for details.
 
 ## Planned
 
-### v0.10.0 — GPU Text Rendering (~9,600 LOC)
+### v0.11.0 — GPU Text Rendering Phase 2 (~6,000 LOC)
 
-Enterprise-grade GPU text rendering with hybrid architecture.
-
-**Included:**
-- [x] TASK-049: Curve Integration (~3,300 LOC) — **MERGED**
+GPU-accelerated text rendering with hybrid architecture.
 
 **P0 — Critical:**
-- [ ] TASK-050a: Text Shaping Integration (go-text/typesetting) — 1,500 LOC
+- [ ] TASK-050a: go-text/typesetting Integration (Pure Go HarfBuzz) — 1,500 LOC
 - [ ] TASK-050b: Glyph-as-Path Rendering (sparse strips) — 2,000 LOC
 - [ ] TASK-050c: Glyph Cache (LRU, 64-frame lifetime) — 800 LOC
 - [ ] TASK-050d: Text Benchmarks — 600 LOC
@@ -188,20 +196,20 @@ Enterprise-grade GPU text rendering with hybrid architecture.
 
 **Architecture:**
 ```
-Text Input → go-text/typesetting (Pure Go HarfBuzz)
-                     │
-     ┌───────────────┼───────────────┐
-     │               │               │
-Vector Path    MSDF Atlas    Bitmap Atlas
-(quality)     (performance)    (emoji)
-     │               │               │
-     └───────────────┴───────────────┘
-                     │
-          Sparse Strips Pipeline
+Text Input → Shaper (v0.10.0) → Layout (v0.10.0)
+                                      │
+                   ┌──────────────────┼──────────────────┐
+                   │                  │                  │
+             Vector Path        MSDF Atlas        Bitmap Atlas
+             (quality)        (performance)         (emoji)
+                   │                  │                  │
+                   └──────────────────┴──────────────────┘
+                                      │
+                          Sparse Strips Pipeline (v0.9.0)
 ```
 
 **Performance Targets:**
-- Shape 100 chars: < 100µs
+- Shape 100 chars: < 100µs (achieved via cache)
 - Cache hit: < 50ns
 - Render 1000 glyphs: < 1ms
 - 60fps with 10,000+ glyphs
