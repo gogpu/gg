@@ -286,9 +286,9 @@ ctx.DrawString("Hello! :)", 50, 150)
 
 | Component | Description | Version |
 |-----------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | **v0.4.0** |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.5.0** |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.4.0 |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | **v0.5.0** |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.6.0** |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | **v0.5.0** |
 | **gogpu/gg** | **2D graphics** | **v0.9.2** |
 
 ---
