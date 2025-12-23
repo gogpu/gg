@@ -7,12 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.10.0
-- GPU text rendering with hybrid architecture:
-  - Glyph-as-Path rendering through sparse strips
-  - MSDF atlas for performance
-  - Bitmap atlas for emoji (COLRv1)
-- Text shaping via go-text/typesetting (Pure Go HarfBuzz)
+### Planned for v0.11.0
+- MSDF text rendering for GPU
+- Glyph-as-Path through sparse strips
+- Bitmap atlas for emoji (COLRv1)
+- go-text/typesetting integration (Pure Go HarfBuzz)
+
+## [0.10.0] - 2025-12-24
+
+### Added
+
+#### GPU Text Pipeline (text/)
+
+**Pluggable Shaper Interface (TEXT-001)**
+- **Shaper interface** — Converts text to positioned glyphs
+  - Shape(text, face, size) → []ShapedGlyph
+  - Pluggable architecture for custom shapers
+- **BuiltinShaper** — Default implementation using golang.org/x/image
+- **SetShaper/GetShaper** — Global shaper management (thread-safe)
+- **ShapedGlyph** — GPU-ready glyph with GID, Cluster, X, Y, XAdvance, YAdvance
+
+**Extended Shaping Types (TEXT-002)**
+- **Direction** — LTR, RTL, TTB, BTT with IsHorizontal/IsVertical methods
+- **GlyphType** — Simple, Ligature, Mark, Component classification
+- **GlyphFlags** — Cluster boundaries, safe-to-break, whitespace markers
+- **ShapedRun** — Sequence of glyphs with uniform style (direction, face, size)
+  - Width(), Height(), LineHeight(), Bounds() methods
+
+**Sharded LRU Shaping Cache (TEXT-003)**
+- **ShapingCache** — Thread-safe 16-shard LRU cache
+  - 1024 entries per shard (16K total)
+  - FNV-64a hashing for even distribution
+  - Get/Put with zero-allocation hot path
+- **ShapingResult** — Cached shaped glyphs with metrics
+- **93.7% test coverage**, 0 linter issues
+
+**Bidi/Script Segmentation (TEXT-004)**
+- **Script enum** — 25+ Unicode scripts (Latin, Arabic, Hebrew, Han, Cyrillic, etc.)
+- **DetectScript(rune)** — Pure Go script detection from Unicode ranges
+- **Segmenter interface** — Splits text into direction/script runs
+- **BuiltinSegmenter** — Uses golang.org/x/text/unicode/bidi
+  - Correct rune-based indexing (not byte indices)
+  - Script inheritance for Common/Inherited characters
+  - Numbers in RTL text: inherit script, keep LTR direction
+- **Segment** — Text run with Direction, Script, Level
+
+**Multi-line Layout Engine (TEXT-005)**
+- **Alignment** — Left, Center, Right, Justify (placeholder)
+- **LayoutOptions** — MaxWidth, LineSpacing, Alignment, Direction
+- **Line** — Positioned line with runs, glyphs, width, ascent, descent, Y
+- **Layout** — Complete layout result with lines, total width/height
+- **LayoutText(text, face, size, opts)** — Full layout with options
+- **LayoutTextSimple(text, face, size)** — Convenience wrapper
+- **Features:**
+  - Hard line break handling (\\n, \\r\\n, \\r)
+  - Bidi-aware paragraph segmentation
+  - Greedy line wrapping at word boundaries
+  - CJK character break opportunities
+  - Proper alignment with container width
+
+### Statistics
+- **5 major features** implemented (TEXT-001 through TEXT-005)
+- **~2,500 LOC added** across 12 files
+- **87.0% text package coverage** (93.7% cache package)
+- **0 linter issues**
+- **Zero new dependencies** — Uses existing golang.org/x/text
+
+### Architecture
+
+**GPU Text Pipeline**
+```
+Text → Segmenter → Shaper → Layout → GPU Renderer
+         │           │        │
+    Bidi/Script    Cache    Lines
+```
+
+Key design decisions:
+- Pluggable Shaper allows future go-text/typesetting integration
+- Sharded cache prevents lock contention
+- Bidi segmentation uses Unicode standard via golang.org/x/text
+- Layout engine ready for GPU rendering pipeline
 
 ## [0.9.1] - 2025-12-19
 
@@ -502,7 +576,9 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/gogpu/gg/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/gogpu/gg/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/gg/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gogpu/gg/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/gogpu/gg/compare/v0.6.0...v0.7.0

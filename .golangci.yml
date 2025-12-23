@@ -178,6 +178,13 @@ linters:
           - gocognit     # Separable blur inherently complex
           - gosec        # Integer conversions are intentional in filter processing
 
+      # Text script detection (TEXT-004)
+      - path: text/script\.go
+        linters:
+          - gocyclo      # Unicode script detection requires many branches
+          - cyclop       # Many Unicode ranges to check
+          - gocognit     # Inherently complex due to Unicode
+
       # Scene package blend mode mapping (TASK-099)
       - path: scene/encoding\.go
         linters:
