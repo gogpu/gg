@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.9.2
+## Current: v0.10.0
 
-> **GPU Backend — Hardware acceleration via gogpu/wgpu with Sparse Strips!**
+> **GPU Text Pipeline — Shaper, Layout, Bidi/Script segmentation!**
 >
 > **Star the repo to follow progress!**
 
@@ -46,11 +46,18 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Transformations** — Translate, rotate, scale with matrix stack
 - **Colors** — RGBA, hex parsing, named colors
 
-### Text Rendering (v0.2.0)
+### Text Rendering (v0.2.0+)
 - **TrueType Fonts** — Full TTF support via golang.org/x/image
 - **Font Composition** — MultiFace for fallback chains
 - **Unicode Support** — FilteredFace for emoji and special ranges
 - **Zero-Allocation Iterators** — Go 1.25+ iter.Seq[Glyph]
+
+### GPU Text Pipeline (v0.10.0)
+- **Pluggable Shaper** — BuiltinShaper or custom HarfBuzz-compatible
+- **Bidi/Script Segmentation** — Full Unicode Bidirectional Algorithm
+- **25+ Scripts** — Latin, Arabic, Hebrew, Han, Devanagari, Thai, etc.
+- **Multi-line Layout** — Alignment, word wrapping, line spacing
+- **Sharded LRU Cache** — 16-shard concurrent cache (93.7% coverage)
 
 ### Images (v0.3.0)
 - **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
@@ -117,7 +124,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **9,930 LOC** — Complete GPU rendering infrastructure
 
 ### Coming Soon (v0.10.0+)
-- **Text Rendering on GPU** — Glyph atlas and SDF fonts
+- **MSDF Text Rendering** — Signed distance field fonts for GPU
+- **Emoji Support** — COLRv1 bitmap atlas for color emoji
+- **Glyph-as-Path** — Vector text through sparse strips pipeline
 
 ---
 
@@ -252,9 +261,9 @@ ctx.DrawString("Hello! :)", 50, 150)
 | v0.6.0 | Parallel rendering | Released |
 | v0.7.0 | Scene graph (retained mode) | Released |
 | v0.8.0 | Backend abstraction | Released |
-| **v0.9.0** | **GPU acceleration (Sparse Strips)** | **Released** |
-| v0.10.0 | GPU text rendering | Planned |
-| **v1.0.0** | **Production release** | **Target** |
+| v0.9.0 | GPU acceleration (Sparse Strips) | Released |
+| **v0.10.0** | **GPU text pipeline** | **Released** |
+| v1.0.0 | Production release | Target |
 
 ---
 
@@ -289,7 +298,7 @@ ctx.DrawString("Hello! :)", 50, 150)
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | **v0.5.0** |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.6.0** |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | **v0.5.0** |
-| **gogpu/gg** | **2D graphics** | **v0.9.2** |
+| **gogpu/gg** | **2D graphics** | **v0.10.0** |
 
 ---
 
