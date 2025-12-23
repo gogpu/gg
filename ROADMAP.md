@@ -178,21 +178,22 @@ See section below for details.
 
 GPU-accelerated text rendering with hybrid architecture.
 
-**P0 — Critical:**
-- [ ] TASK-050a: go-text/typesetting Integration (Pure Go HarfBuzz) — 1,500 LOC
+**P0 — Critical (Glyph-as-Path):**
 - [ ] TASK-050b: Glyph-as-Path Rendering (sparse strips) — 2,000 LOC
 - [ ] TASK-050c: Glyph Cache (LRU, 64-frame lifetime) — 800 LOC
 - [ ] TASK-050d: Text Benchmarks — 600 LOC
-- [ ] TASK-050e: Visual Regression Tests — 500 LOC
+- [ ] TASK-050e: Visual Regression Tests — 400 LOC
 
-**P1 — Important:**
+**P1 — Important (MSDF & Emoji):**
 - [ ] TASK-050f: MSDF Generator (Pure Go) — 1,500 LOC
 - [ ] TASK-050g: MSDF Atlas Manager — 1,000 LOC
 - [ ] TASK-050h: MSDF WGSL Shader — 200 LOC
-- [ ] TASK-050i: Bitmap/Emoji Support (COLRv1, ZWJ) — 1,000 LOC
+- [ ] TASK-050i: Emoji Support (COLRv1, ZWJ) — 1,100 LOC
 
 **P2 — Nice to have:**
 - [ ] TASK-050j: Subpixel Text Positioning — 400 LOC
+
+**Note:** ~~TASK-050a~~ removed — go-text/typesetting is USER responsibility via `text.SetShaper()`
 
 **Architecture:**
 ```
