@@ -3,6 +3,9 @@ package text
 // unknownStr is the string returned for unknown enum values.
 const unknownStr = "Unknown"
 
+// noneStr is the string returned for "None" enum values.
+const noneStr = "None"
+
 // Direction specifies text direction.
 type Direction int
 
@@ -59,7 +62,7 @@ const (
 func (h Hinting) String() string {
 	switch h {
 	case HintingNone:
-		return "None"
+		return noneStr
 	case HintingVertical:
 		return "Vertical"
 	case HintingFull:

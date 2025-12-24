@@ -384,8 +384,8 @@ func TestSwitchColor(t *testing.T) {
 		{ColorCyan, 0, ColorMagenta},
 		{ColorMagenta, 0, ColorYellow},
 		{ColorYellow, 0, ColorCyan},
-		{ColorCyan, 1, ColorYellow},  // Different seed
-		{ColorBlack, 0, ColorCyan},   // Unknown color
+		{ColorCyan, 1, ColorYellow}, // Different seed
+		{ColorBlack, 0, ColorCyan},  // Unknown color
 	}
 
 	for _, tt := range tests {

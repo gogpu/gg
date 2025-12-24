@@ -6,9 +6,9 @@ import (
 
 func TestIsEmoji(t *testing.T) {
 	tests := []struct {
-		name  string
-		rune  rune
-		want  bool
+		name string
+		rune rune
+		want bool
 	}{
 		{"grinning face", 0x1F600, true},
 		{"thumbs up", 0x1F44D, true},

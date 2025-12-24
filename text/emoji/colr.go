@@ -118,9 +118,9 @@ type COLRParser struct {
 
 // baseGlyphRecord from COLRv0.
 type baseGlyphRecord struct {
-	glyphID     uint16
-	firstLayer  uint16
-	numLayers   uint16
+	glyphID    uint16
+	firstLayer uint16
+	numLayers  uint16
 }
 
 // layerRecord from COLRv0.

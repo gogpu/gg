@@ -377,13 +377,13 @@ func TestDistanceToPixel(t *testing.T) {
 		distance, pixelRange, scale float64
 		wantMin, wantMax            byte
 	}{
-		{0, 4.0, 1.0, 126, 130},     // On edge ~128
-		{4, 4.0, 1.0, 190, 255},     // Inside by range
-		{-4, 4.0, 1.0, 0, 65},       // Outside by range
-		{2, 4.0, 1.0, 155, 195},     // Half inside
-		{-2, 4.0, 1.0, 60, 100},     // Half outside
-		{100, 4.0, 1.0, 250, 255},   // Far inside (clamped)
-		{-100, 4.0, 1.0, 0, 5},      // Far outside (clamped)
+		{0, 4.0, 1.0, 126, 130},   // On edge ~128
+		{4, 4.0, 1.0, 190, 255},   // Inside by range
+		{-4, 4.0, 1.0, 0, 65},     // Outside by range
+		{2, 4.0, 1.0, 155, 195},   // Half inside
+		{-2, 4.0, 1.0, 60, 100},   // Half outside
+		{100, 4.0, 1.0, 250, 255}, // Far inside (clamped)
+		{-100, 4.0, 1.0, 0, 5},    // Far outside (clamped)
 	}
 
 	for _, tt := range tests {

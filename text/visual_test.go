@@ -353,8 +353,8 @@ func TestVisual_TransformedText(t *testing.T) {
 			Segments: []OutlineSegment{
 				{Op: OutlineOpMoveTo, Points: [3]OutlinePoint{{X: 0, Y: 0}}},
 				{Op: OutlineOpQuadTo, Points: [3]OutlinePoint{
-					{X: 5, Y: 10},  // Control
-					{X: 10, Y: 0},  // Target
+					{X: 5, Y: 10}, // Control
+					{X: 10, Y: 0}, // Target
 				}},
 			},
 			Advance: 10,
@@ -383,9 +383,9 @@ func TestVisual_TransformedText(t *testing.T) {
 			Segments: []OutlineSegment{
 				{Op: OutlineOpMoveTo, Points: [3]OutlinePoint{{X: 0, Y: 0}}},
 				{Op: OutlineOpCubicTo, Points: [3]OutlinePoint{
-					{X: 3, Y: 5},   // Control 1
-					{X: 7, Y: 5},   // Control 2
-					{X: 10, Y: 0},  // Target
+					{X: 3, Y: 5},  // Control 1
+					{X: 7, Y: 5},  // Control 2
+					{X: 10, Y: 0}, // Target
 				}},
 			},
 			Advance: 10,

@@ -48,8 +48,8 @@ func TestEdgeColorString(t *testing.T) {
 
 func TestEdgeColorChannels(t *testing.T) {
 	tests := []struct {
-		c                  EdgeColor
-		hasR, hasG, hasB   bool
+		c                EdgeColor
+		hasR, hasG, hasB bool
 	}{
 		{ColorBlack, false, false, false},
 		{ColorRed, true, false, false},
@@ -245,9 +245,9 @@ func TestQuadraticSignedDistance(t *testing.T) {
 	edge := NewQuadraticEdge(Point{0, 0}, Point{5, 10}, Point{10, 0})
 
 	tests := []struct {
-		name     string
-		p        Point
-		maxDist  float64 // max expected distance
+		name    string
+		p       Point
+		maxDist float64 // max expected distance
 	}{
 		{"on curve start", Point{0, 0}, 0.1},
 		{"on curve end", Point{10, 0}, 0.1},
@@ -347,9 +347,9 @@ func TestEdgeClone(t *testing.T) {
 
 func TestSolveQuadratic(t *testing.T) {
 	tests := []struct {
-		name   string
+		name    string
 		a, b, c float64
-		want   []float64 // roots in [0, 1]
+		want    []float64 // roots in [0, 1]
 	}{
 		{"two roots in range", 1, -1.5, 0.5, []float64{0.5, 1.0}},
 		{"one root", 1, -1, 0, []float64{0, 1}},

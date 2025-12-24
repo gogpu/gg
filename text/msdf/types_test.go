@@ -70,7 +70,7 @@ func TestConfigValidate(t *testing.T) {
 		},
 		{
 			name:    "valid custom config",
-			config:  Config{Size: 64, Range: 8.0, AngleThreshold: math.Pi/4, EdgeThreshold: 1.5},
+			config:  Config{Size: 64, Range: 8.0, AngleThreshold: math.Pi / 4, EdgeThreshold: 1.5},
 			wantErr: false,
 		},
 	}
@@ -126,8 +126,8 @@ func TestMSDFPixelOffset(t *testing.T) {
 	}{
 		{0, 0, 0},
 		{1, 0, 3},
-		{0, 1, 96},  // 32 * 3
-		{1, 1, 99},  // 32 * 3 + 3
+		{0, 1, 96},     // 32 * 3
+		{1, 1, 99},     // 32 * 3 + 3
 		{31, 31, 3069}, // (31*32 + 31) * 3
 	}
 
@@ -245,7 +245,7 @@ func TestAngleBetween(t *testing.T) {
 		a, b Point
 		want float64
 	}{
-		{Point{1, 0}, Point{1, 0}, 0},         // Same direction
+		{Point{1, 0}, Point{1, 0}, 0},           // Same direction
 		{Point{1, 0}, Point{0, 1}, math.Pi / 2}, // 90 degrees
 		{Point{1, 0}, Point{-1, 0}, math.Pi},    // 180 degrees
 		{Point{1, 0}, Point{0, 0}, 0},           // Zero vector

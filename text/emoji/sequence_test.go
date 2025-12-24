@@ -309,7 +309,7 @@ func TestGetTagSequenceCode(t *testing.T) {
 			name: "Scotland flag",
 			seq: Sequence{
 				Codepoints: []rune{
-					0x1F3F4,  // Black flag
+					0x1F3F4, // Black flag
 					0xE0067, // g
 					0xE0062, // b
 					0xE0073, // s

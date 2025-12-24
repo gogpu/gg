@@ -12,14 +12,14 @@ type mockParsedFont struct {
 	numGlyphs  int
 }
 
-func (m *mockParsedFont) Name() string                                { return m.name }
-func (m *mockParsedFont) FullName() string                            { return m.name + " Regular" }
-func (m *mockParsedFont) UnitsPerEm() int                             { return m.unitsPerEm }
-func (m *mockParsedFont) NumGlyphs() int                              { return m.numGlyphs }
-func (m *mockParsedFont) GlyphIndex(_ rune) uint16                    { return 1 }
-func (m *mockParsedFont) GlyphAdvance(_ uint16, _ float64) float64    { return 10.0 }
-func (m *mockParsedFont) GlyphBounds(_ uint16, _ float64) Rect        { return Rect{0, 0, 10, 10} }
-func (m *mockParsedFont) Metrics(_ float64) FontMetrics               { return FontMetrics{} }
+func (m *mockParsedFont) Name() string                             { return m.name }
+func (m *mockParsedFont) FullName() string                         { return m.name + " Regular" }
+func (m *mockParsedFont) UnitsPerEm() int                          { return m.unitsPerEm }
+func (m *mockParsedFont) NumGlyphs() int                           { return m.numGlyphs }
+func (m *mockParsedFont) GlyphIndex(_ rune) uint16                 { return 1 }
+func (m *mockParsedFont) GlyphAdvance(_ uint16, _ float64) float64 { return 10.0 }
+func (m *mockParsedFont) GlyphBounds(_ uint16, _ float64) Rect     { return Rect{0, 0, 10, 10} }
+func (m *mockParsedFont) Metrics(_ float64) FontMetrics            { return FontMetrics{} }
 
 func TestRenderParams_Defaults(t *testing.T) {
 	params := DefaultRenderParams()

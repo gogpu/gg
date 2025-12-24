@@ -332,14 +332,14 @@ type benchmarkMockFont struct {
 	numGlyphs  int
 }
 
-func (m *benchmarkMockFont) Name() string                                { return m.name }
-func (m *benchmarkMockFont) FullName() string                            { return m.name + " Regular" }
-func (m *benchmarkMockFont) UnitsPerEm() int                             { return m.unitsPerEm }
-func (m *benchmarkMockFont) NumGlyphs() int                              { return m.numGlyphs }
-func (m *benchmarkMockFont) GlyphIndex(_ rune) uint16                    { return 1 }
-func (m *benchmarkMockFont) GlyphAdvance(_ uint16, _ float64) float64    { return 10.0 }
-func (m *benchmarkMockFont) GlyphBounds(_ uint16, _ float64) Rect        { return Rect{0, 0, 10, 10} }
-func (m *benchmarkMockFont) Metrics(_ float64) FontMetrics               { return FontMetrics{} }
+func (m *benchmarkMockFont) Name() string                             { return m.name }
+func (m *benchmarkMockFont) FullName() string                         { return m.name + " Regular" }
+func (m *benchmarkMockFont) UnitsPerEm() int                          { return m.unitsPerEm }
+func (m *benchmarkMockFont) NumGlyphs() int                           { return m.numGlyphs }
+func (m *benchmarkMockFont) GlyphIndex(_ rune) uint16                 { return 1 }
+func (m *benchmarkMockFont) GlyphAdvance(_ uint16, _ float64) float64 { return 10.0 }
+func (m *benchmarkMockFont) GlyphBounds(_ uint16, _ float64) Rect     { return Rect{0, 0, 10, 10} }
+func (m *benchmarkMockFont) Metrics(_ float64) FontMetrics            { return FontMetrics{} }
 
 // BenchmarkConcurrentCacheAccess benchmarks concurrent cache operations.
 func BenchmarkConcurrentCacheAccess(b *testing.B) {

@@ -393,7 +393,7 @@ func TestGlyphCache_HitRate(t *testing.T) {
 
 	// 1 miss, 1 hit = 50%
 	_ = cache.Get(OutlineCacheKey{FontID: 999, GID: 999}) // miss
-	_ = cache.Get(key)                              // hit
+	_ = cache.Get(key)                                    // hit
 
 	rate = cache.HitRate()
 	if rate != 50.0 {
