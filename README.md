@@ -28,9 +28,9 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 
 ---
 
-## Current: v0.10.0
+## Current: v0.11.0
 
-> **GPU Text Pipeline — Shaper, Layout, Bidi/Script segmentation!**
+> **GPU Text Rendering Phase 2 — MSDF, Emoji, Subpixel positioning!**
 >
 > **Star the repo to follow progress!**
 
@@ -123,10 +123,14 @@ Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://g
 - **Render Pipeline** — PipelineCache, GPUSceneRenderer, CommandEncoder pattern
 - **9,930 LOC** — Complete GPU rendering infrastructure
 
-### Coming Soon (v0.10.0+)
-- **MSDF Text Rendering** — Signed distance field fonts for GPU
-- **Emoji Support** — COLRv1 bitmap atlas for color emoji
-- **Glyph-as-Path** — Vector text through sparse strips pipeline
+### GPU Text Rendering (v0.11.0)
+- **Glyph-as-Path** — Vector text through sparse strips pipeline (vello pattern)
+- **GlyphCache** — 16-shard LRU with 64-frame lifetime (<50ns cache hit)
+- **MSDF Generator** — Pure Go multi-channel signed distance field
+- **MSDF Atlas** — Shelf packing, LRU eviction, GPU upload tracking
+- **Emoji Support** — COLRv1/sbix/CBDT, ZWJ sequences, flags, skin tones
+- **Subpixel Positioning** — 4 or 10 subpixel levels for sharp text
+- **WGSL Text Shader** — Anti-aliased GPU text with outline/shadow effects
 
 ---
 

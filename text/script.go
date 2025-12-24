@@ -108,7 +108,7 @@ func (s Script) String() string {
 	if int(s) < len(scriptNames) {
 		return scriptNames[s]
 	}
-	return "Unknown"
+	return unknownStr
 }
 
 // IsRTL returns true if the script is typically written right-to-left.
