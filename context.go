@@ -100,22 +100,57 @@ func (c *Context) ClearWithColor(col RGBA) {
 
 // SetColor sets the current drawing color.
 func (c *Context) SetColor(col color.Color) {
-	c.paint.Pattern = NewSolidPattern(FromColor(col))
+	c.paint.SetBrush(Solid(FromColor(col)))
 }
 
 // SetRGB sets the current color using RGB values (0-1).
 func (c *Context) SetRGB(r, g, b float64) {
-	c.paint.Pattern = NewSolidPattern(RGB(r, g, b))
+	c.paint.SetBrush(SolidRGB(r, g, b))
 }
 
 // SetRGBA sets the current color using RGBA values (0-1).
 func (c *Context) SetRGBA(r, g, b, a float64) {
-	c.paint.Pattern = NewSolidPattern(RGBA2(r, g, b, a))
+	c.paint.SetBrush(SolidRGBA(r, g, b, a))
 }
 
 // SetHexColor sets the current color using a hex string.
 func (c *Context) SetHexColor(hex string) {
-	c.paint.Pattern = NewSolidPattern(Hex(hex))
+	c.paint.SetBrush(SolidHex(hex))
+}
+
+// SetFillBrush sets the brush used for fill operations.
+// This is the preferred way to set fill styling in new code.
+//
+// Example:
+//
+//	ctx.SetFillBrush(gg.Solid(gg.Red))
+//	ctx.SetFillBrush(gg.SolidHex("#FF5733"))
+//	ctx.SetFillBrush(gg.HorizontalGradient(gg.Red, gg.Blue, 0, 100))
+func (c *Context) SetFillBrush(b Brush) {
+	c.paint.SetBrush(b)
+}
+
+// SetStrokeBrush sets the brush used for stroke operations.
+// Note: In the current implementation, fill and stroke share the same brush.
+// This method is provided for API symmetry and future extensibility.
+//
+// Example:
+//
+//	ctx.SetStrokeBrush(gg.Solid(gg.Black))
+//	ctx.SetStrokeBrush(gg.SolidRGB(0.5, 0.5, 0.5))
+func (c *Context) SetStrokeBrush(b Brush) {
+	c.paint.SetBrush(b)
+}
+
+// FillBrush returns the current fill brush.
+func (c *Context) FillBrush() Brush {
+	return c.paint.GetBrush()
+}
+
+// StrokeBrush returns the current stroke brush.
+// Note: In the current implementation, fill and stroke share the same brush.
+func (c *Context) StrokeBrush() Brush {
+	return c.paint.GetBrush()
 }
 
 // SetLineWidth sets the line width for stroking.
