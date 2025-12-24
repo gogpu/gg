@@ -17,6 +17,18 @@
 
 ## Released
 
+### v0.11.0 — GPU Text Rendering Phase 2
+
+- [x] Glyph-as-Path rendering (OutlineExtractor, GlyphOutline, AffineTransform)
+- [x] GlyphCache LRU (16-shard, 64-frame lifetime, <50ns hit)
+- [x] Pure Go MSDF generator (edge coloring, distance field)
+- [x] MSDF Atlas Manager (shelf packing, LRU eviction, GPU tracking)
+- [x] WGSL text shader (median3, screen-space AA, outline/shadow)
+- [x] Emoji support (COLRv1, sbix, CBDT, ZWJ sequences, flags)
+- [x] Subpixel positioning (Subpixel4, Subpixel10 modes)
+- [x] 87.6% test coverage, 0 linter issues
+- [x] **~16,200 LOC across 40+ files**
+
 ### v0.10.0 — GPU Text Pipeline
 
 - [x] Pluggable Shaper interface (BuiltinShaper + custom)
@@ -172,60 +184,11 @@ See section below for details.
 
 ---
 
-## Planned
-
-### v0.11.0 — GPU Text Rendering Phase 2 (~6,000 LOC)
-
-GPU-accelerated text rendering with hybrid architecture.
-
-**P0 — Critical (Glyph-as-Path):**
-- [ ] TASK-050b: Glyph-as-Path Rendering (sparse strips) — 2,000 LOC
-- [ ] TASK-050c: Glyph Cache (LRU, 64-frame lifetime) — 800 LOC
-- [ ] TASK-050d: Text Benchmarks — 600 LOC
-- [ ] TASK-050e: Visual Regression Tests — 400 LOC
-
-**P1 — Important (MSDF & Emoji):**
-- [ ] TASK-050f: MSDF Generator (Pure Go) — 1,500 LOC
-- [ ] TASK-050g: MSDF Atlas Manager — 1,000 LOC
-- [ ] TASK-050h: MSDF WGSL Shader — 200 LOC
-- [ ] TASK-050i: Emoji Support (COLRv1, ZWJ) — 1,100 LOC
-
-**P2 — Nice to have:**
-- [ ] TASK-050j: Subpixel Text Positioning — 400 LOC
-
-**Note:** ~~TASK-050a~~ removed — go-text/typesetting is USER responsibility via `text.SetShaper()`
-
-**Architecture:**
-```
-Text Input → Shaper (v0.10.0) → Layout (v0.10.0)
-                                      │
-                   ┌──────────────────┼──────────────────┐
-                   │                  │                  │
-             Vector Path        MSDF Atlas        Bitmap Atlas
-             (quality)        (performance)         (emoji)
-                   │                  │                  │
-                   └──────────────────┴──────────────────┘
-                                      │
-                          Sparse Strips Pipeline (v0.9.0)
-```
-
-**Performance Targets:**
-- Shape 100 chars: < 100µs (achieved via cache)
-- Cache hit: < 50ns
-- Render 1000 glyphs: < 1ms
-- 60fps with 10,000+ glyphs
-
-**Research:** `docs/dev/research/RESEARCH-009-gpu-text-rendering.md`
-
----
-
 ## Target
 
 ### v1.0.0 — Production Release
 
-**Timeline:** ~6 months from v0.4.0
-
-- [ ] API review and cleanup
+- [ ] API review and cleanup (TASK-115)
 - [ ] Comprehensive documentation
 - [ ] Performance benchmarks
 - [ ] Cross-platform testing

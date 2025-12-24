@@ -1,8 +1,8 @@
 # text — GPU Text Pipeline for gg
 
-**Status:** v0.10.0 (Released)
+**Status:** v0.11.0 (Released)
 
-This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2 and go-text/typesetting.
+This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2, go-text/typesetting, and vello.
 
 ## Architecture
 
@@ -11,9 +11,16 @@ FontSource (heavyweight, shared)
     ↓
 Face (lightweight, per-size)
     ↓
-Segmenter → Shaper → Layout → GPU Renderer
-    │           │        │
-Bidi/Script  Cache    Lines
+Segmenter → Shaper → Layout → GlyphRenderer
+    │           │        │          │
+Bidi/Script  Cache    Lines    ┌────┴────┐
+                               │         │
+                          Vector Path  MSDF
+                          (quality)   (perf)
+                               │         │
+                               └────┬────┘
+                                    ↓
+                              GPU Rendering
 ```
 
 ## Features
@@ -171,23 +178,47 @@ type Line struct {
 - `golang.org/x/image/font/opentype` — TTF/OTF parsing
 - `golang.org/x/text/unicode/bidi` — Unicode Bidirectional Algorithm
 
+## Subpackages
+
+### text/cache
+LRU caching infrastructure for shaping results.
+
+### text/msdf (v0.11.0)
+Multi-channel Signed Distance Field generation for GPU text rendering.
+
+- **Generator** — Pure Go MSDF with edge coloring algorithm
+- **AtlasManager** — Multi-atlas management with shelf packing
+- **ConcurrentAtlasManager** — High-throughput sharded variant
+
+### text/emoji (v0.11.0)
+Emoji and color font support.
+
+- **Detection** — IsEmoji, IsZWJ, IsRegionalIndicator
+- **Sequences** — ZWJ, flags, skin tones, keycaps
+- **COLRv0/v1** — Color glyph parsing and rendering
+- **sbix/CBDT** — Bitmap emoji (PNG, JPEG, TIFF)
+
 ## Test Coverage
 
-- **text package**: 87.0%
+- **text package**: 87.6%
 - **text/cache package**: 93.7%
+- **text/msdf package**: 87.0%
+- **text/emoji package**: 85.0%
 - **0 linter issues**
 
-## Roadmap
+## Versions
 
-### v0.10.0 (Current)
+### v0.11.0 (Current)
+- [x] Glyph-as-Path rendering (OutlineExtractor)
+- [x] GlyphCache LRU (16-shard, <50ns hit)
+- [x] MSDF generator (Pure Go)
+- [x] MSDF atlas with shelf packing
+- [x] Emoji support (COLRv1, sbix, ZWJ)
+- [x] Subpixel positioning (4/10 levels)
+
+### v0.10.0
 - [x] Pluggable Shaper interface
 - [x] Extended shaping types
 - [x] Sharded LRU shaping cache
 - [x] Bidi/Script segmentation
 - [x] Multi-line Layout Engine
-
-### v0.11.0 (Planned)
-- [ ] go-text/typesetting integration
-- [ ] Glyph-as-Path rendering
-- [ ] MSDF atlas for GPU
-- [ ] Emoji support (COLRv1)

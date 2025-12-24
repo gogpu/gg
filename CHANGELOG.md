@@ -7,10 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.11.0
-- Glyph-as-Path rendering through sparse strips
-- MSDF text rendering for GPU
-- Bitmap atlas for emoji (COLRv1)
+### Planned for v1.0.0
+- API Review and cleanup
+- Comprehensive documentation
+- Performance benchmarks
+
+## [0.11.0] - 2025-12-24
+
+### Added
+
+#### Glyph-as-Path Rendering (TASK-050b)
+- **OutlineExtractor** — Extracts bezier outlines from fonts via sfnt
+- **GlyphOutline** — Segments, Bounds, Advance, Clone/Scale/Translate/Transform
+- **AffineTransform** — 2D affine matrix operations
+- **GlyphRenderer** — Converts shaped glyphs to renderable outlines
+
+#### Glyph Cache LRU (TASK-050c)
+- **GlyphCache** — Thread-safe 16-shard LRU cache
+- **OutlineCacheKey** — FontID, GlyphID, Size, Hinting
+- **64-frame lifetime** — Automatic eviction via Maintain()
+- **Cache hit: <50ns** — Zero-allocation hot path
+- **GlyphCachePool** — Per-thread cache instances
+
+#### MSDF Text Rendering (TASK-050f, 050g, 050h)
+- **text/msdf package** — Pure Go MSDF generator
+  - Edge detection: Linear, Quadratic, Cubic bezier
+  - Edge coloring algorithm for corner preservation
+  - Distance field computation with configurable range
+  - MedianFilter and ErrorCorrection post-processing
+- **AtlasManager** — Multi-atlas management with shelf packing
+  - GridAllocator for uniform glyph cells
+  - LRU eviction for large glyph sets
+  - Dirty tracking for GPU upload
+  - ConcurrentAtlasManager for high-throughput scenarios
+- **WGSL Shader** — GPU text rendering
+  - median3() for SDF reconstruction
+  - Screen-space anti-aliasing via fwidth
+  - Outline and shadow shader variants
+- **TextPipeline** — GPU rendering integration
+  - TextQuad/TextVertex for instanced rendering
+  - TextRenderer combining pipeline with atlas
+
+#### Emoji and Color Fonts (TASK-050i)
+- **text/emoji package** — Full emoji support
+  - IsEmoji, IsEmojiModifier, IsZWJ, IsRegionalIndicator
+  - Segment() — Split text into emoji/non-emoji runs
+  - Parse() — ZWJ sequence parsing (family, profession, etc.)
+  - Flag sequences (regional indicators, subdivision tags)
+  - Skin tone modifiers (U+1F3FB-U+1F3FF)
+- **COLRv0/v1 support** — Color glyph parsing and rendering
+- **sbix/CBDT support** — Bitmap emoji (PNG, JPEG, TIFF)
+
+#### Subpixel Text Positioning (TASK-050j)
+- **SubpixelMode** — None, Subpixel4, Subpixel10
+- **Quantize()** — Fractional position to integer + subpixel
+- **SubpixelCache** — Subpixel-aware glyph caching
+- **~2ns overhead** — Zero-allocation quantization
+
+### Statistics
+- **16,200 LOC added** across 40+ files
+- **87.6% test coverage** overall
+- **0 linter issues**
+- **4 new subpackages**: text/msdf, text/emoji, scene/text, backend/wgpu/text
 
 ## [0.10.1] - 2025-12-24
 
