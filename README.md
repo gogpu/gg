@@ -243,7 +243,8 @@ ctx.PopLayer() // Composite with overlay blend
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with WebGPU, windowing, input |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation (Vulkan/Metal/DX12) |
 | [gogpu/naga](https://github.com/gogpu/naga) | WGSL shader compiler (WGSL → SPIR-V) |
-| [**gogpu/gg**](https://github.com/gogpu/gg) | **2D graphics library (this repo)** |
+| **gogpu/gg** | **2D graphics library (this repo)** |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (coming soon) |
 
 ---
 
