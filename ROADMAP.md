@@ -28,16 +28,24 @@
 
 ---
 
-## Current State: v0.11.0
+## Current State: v0.12.0
 
-**42,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
+**46,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
 
-```
-v0.1.0 ─── v0.2.0 ─── v0.3.0 ─── v0.4.0 ─── v0.5.0 ─── v0.6.0 ─── v0.7.0 ─── v0.8.0 ─── v0.9.0 ─── v0.10.0 ─── v0.11.0
-  │          │          │          │          │          │          │          │          │           │           │
-Canvas     Text      Images    Colors     SIMD     Parallel  Scene    Backend    GPU      Text      MSDF
-API      Rendering  Clipping  Layers    Optim    Rendering  Graph    Abstract  Backend  Pipeline  Emoji
-```
+| Version | Focus |
+|---------|-------|
+| v0.1.0 | Canvas API |
+| v0.2.0 | Text Rendering |
+| v0.3.0 | Images, Clipping |
+| v0.4.0 | Colors, Layers |
+| v0.5.0 | SIMD Optimization |
+| v0.6.0 | Parallel Rendering |
+| v0.7.0 | Scene Graph |
+| v0.8.0 | Backend Abstraction |
+| v0.9.0 | GPU Backend |
+| v0.10.0 | Text Pipeline |
+| v0.11.0 | MSDF, Emoji |
+| **v0.12.0** | **Brush, Gradients, Stroke** |
 
 ---
 
@@ -45,7 +53,7 @@ API      Rendering  Clipping  Layers    Optim    Rendering  Graph    Abstract  B
 
 ### v0.12.0 — Rust-First API Modernization
 
-**Status:** In Development | **Target:** Q1 2025
+**Status:** Released | **Date:** 2025-12-24
 
 Complete API modernization following Rust 2D graphics best practices.
 
@@ -183,6 +191,7 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
+| v0.12.0 | 2025-12-24 | Brush, Gradients, Stroke, Dash | +4,337 |
 | v0.11.0 | 2025-12-24 | MSDF, Emoji, Subpixel text | +16,200 |
 | v0.10.0 | 2025-12-24 | GPU Text Pipeline | +2,500 |
 | v0.9.0 | 2025-12-18 | GPU Backend (Sparse Strips) | +9,930 |
