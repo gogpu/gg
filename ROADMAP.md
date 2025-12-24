@@ -28,9 +28,7 @@
 
 ---
 
-## Current State: v0.13.0
-
-**47,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
+## Current State: v0.14.0
 
 | Version | Focus |
 |---------|-------|
@@ -46,7 +44,8 @@
 | v0.10.0 | Text Pipeline |
 | v0.11.0 | MSDF, Emoji |
 | v0.12.0 | Brush, Gradients, Stroke |
-| **v0.13.0** | **Go 1.25+ Modernization** |
+| v0.13.0 | Go 1.25+ Modernization |
+| **v0.14.0** | **Advanced Features** |
 
 ---
 
@@ -115,16 +114,42 @@ opts := text.LayoutOptions{
 
 ### v0.14.0 — Advanced Features
 
-**Status:** Planned | **Target:** Q2 2025
+**Status:** Released | **Date:** 2025-12-24
 
 Professional graphics features for complex applications.
 
 | Feature | Description |
 |---------|-------------|
-| **Masks** | AsMask, SetMask, InvertMask operations |
-| **PathBuilder** | Fluent path construction pattern |
-| **Resource Cleanup** | Context.Close() for deterministic cleanup |
-| **Streaming PNG** | EncodePNG(io.Writer) for large images |
+| **Alpha Masks** | AsMask, SetMask, GetMask, InvertMask, ClearMask |
+| **PathBuilder** | Fluent path construction with 13 shape methods |
+| **Context.Close()** | io.Closer implementation for deterministic cleanup |
+| **Path Helpers** | GetCurrentPoint(), HasCurrentPoint(), Path.Clone() |
+| **Streaming I/O** | EncodePNG/EncodeJPEG to io.Writer |
+
+```go
+// PathBuilder — fluent API
+path := gg.BuildPath().
+    MoveTo(100, 100).
+    LineTo(200, 100).
+    Circle(150, 150, 50).
+    Star(250, 150, 40, 20, 5).
+    Build()
+
+// Alpha Masks
+ctx.DrawCircle(200, 200, 100)
+ctx.Fill()
+mask := ctx.AsMask()
+
+ctx2 := gg.NewContext(400, 400)
+ctx2.SetMask(mask)
+ctx2.DrawRectangle(0, 0, 400, 400)
+ctx2.Fill() // Only visible through mask
+
+// Streaming output
+file, _ := os.Create("output.png")
+defer file.Close()
+ctx.EncodePNG(file) // Write directly to file
+```
 
 ### v0.15.0 — Documentation & RC
 
@@ -198,7 +223,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.13.0** | **2025-12-24** | **Go 1.25+: Iterators, Cache, Context, Wrapping** | **+1,700** |
+| **v0.14.0** | **2025-12-24** | **Masks, PathBuilder, Close, EncodePNG** | **+800** |
+| v0.13.0 | 2025-12-24 | Go 1.25+: Iterators, Cache, Context, Wrapping | +1,700 |
 | v0.12.0 | 2025-12-24 | Brush, Gradients, Stroke, Dash | +4,337 |
 | v0.11.0 | 2025-12-24 | MSDF, Emoji, Subpixel text | +16,200 |
 | v0.10.0 | 2025-12-24 | GPU Text Pipeline | +2,500 |

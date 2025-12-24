@@ -4,7 +4,9 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 )
 
@@ -293,4 +295,15 @@ func (p *Pixmap) FillSpanBlend(x1, x2, y int, c RGBA) {
 		p.data[idx+2] = b + uint8((uint32(db)*uint32(invSa)+127)/255) //nolint:gosec // bounded by 255
 		p.data[idx+3] = a + uint8((uint32(da)*uint32(invSa)+127)/255) //nolint:gosec // bounded by 255
 	}
+}
+
+// EncodePNG writes the pixmap as PNG to the given writer.
+// This is useful for streaming, network output, or custom storage.
+func (p *Pixmap) EncodePNG(w io.Writer) error {
+	return png.Encode(w, p.ToImage())
+}
+
+// EncodeJPEG writes the pixmap as JPEG with the given quality (1-100).
+func (p *Pixmap) EncodeJPEG(w io.Writer, quality int) error {
+	return jpeg.Encode(w, p.ToImage(), &jpeg.Options{Quality: quality})
 }

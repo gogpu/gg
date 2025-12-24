@@ -3,6 +3,9 @@ package gg
 import (
 	"image"
 	"image/color"
+	"image/jpeg"
+	"image/png"
+	"io"
 	"math"
 
 	"github.com/gogpu/gg/internal/clip"
@@ -11,6 +14,7 @@ import (
 
 // Context is the main drawing context.
 // It maintains a pixmap, current path, paint state, and transformation stack.
+// Context implements io.Closer for proper resource cleanup.
 type Context struct {
 	width    int
 	height   int
@@ -31,7 +35,17 @@ type Context struct {
 	// Layer support
 	layerStack *layerStack // Layer stack for compositing
 	basePixmap *Pixmap     // Base pixmap when layers are active
+
+	// Mask support
+	mask      *Mask   // Current alpha mask
+	maskStack []*Mask // Mask stack for Push/Pop
+
+	// Lifecycle
+	closed bool // Indicates whether Close has been called
 }
+
+// Ensure Context implements io.Closer
+var _ io.Closer = (*Context)(nil)
 
 // NewContext creates a new drawing context with the given dimensions.
 func NewContext(width, height int) *Context {
@@ -66,6 +80,28 @@ func NewContextForImage(img image.Image) *Context {
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
 	}
+}
+
+// Close releases resources associated with the Context.
+// After Close, the Context should not be used.
+// Close is idempotent - multiple calls are safe.
+// Implements io.Closer.
+func (c *Context) Close() error {
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+
+	// Clear path to release memory
+	c.ClearPath()
+
+	// Clear state stack
+	c.stack = nil
+	c.clipStackDepth = nil
+	c.maskStack = nil
+	c.mask = nil
+
+	return nil
 }
 
 // Width returns the width of the context.
@@ -313,7 +349,7 @@ func (c *Context) StrokePreserve() {
 	// Path is preserved
 }
 
-// Push saves the current state (transform, paint, and clip).
+// Push saves the current state (transform, paint, clip, and mask).
 func (c *Context) Push() {
 	c.stack = append(c.stack, c.matrix)
 
@@ -323,6 +359,13 @@ func (c *Context) Push() {
 		depth = c.clipStack.Depth()
 	}
 	c.clipStackDepth = append(c.clipStackDepth, depth)
+
+	// Save current mask (clone if exists)
+	var maskCopy *Mask
+	if c.mask != nil {
+		maskCopy = c.mask.Clone()
+	}
+	c.maskStack = append(c.maskStack, maskCopy)
 }
 
 // Pop restores the last saved state.
@@ -346,6 +389,12 @@ func (c *Context) Pop() {
 				c.clipStack.Pop()
 			}
 		}
+	}
+
+	// Restore mask
+	if len(c.maskStack) > 0 {
+		c.mask = c.maskStack[len(c.maskStack)-1]
+		c.maskStack = c.maskStack[:len(c.maskStack)-1]
 	}
 }
 
@@ -513,4 +562,25 @@ func (c *Context) currentColor() color.Color {
 		return p.Color.Color()
 	}
 	return color.Black
+}
+
+// GetCurrentPoint returns the current point of the path.
+// Returns (0, 0, false) if there is no current point.
+func (c *Context) GetCurrentPoint() (x, y float64, ok bool) {
+	if c.path == nil || !c.path.HasCurrentPoint() {
+		return 0, 0, false
+	}
+	pt := c.path.CurrentPoint()
+	return pt.X, pt.Y, true
+}
+
+// EncodePNG writes the image as PNG to the given writer.
+// This is useful for streaming, network output, or custom storage.
+func (c *Context) EncodePNG(w io.Writer) error {
+	return png.Encode(w, c.Image())
+}
+
+// EncodeJPEG writes the image as JPEG with the given quality (1-100).
+func (c *Context) EncodeJPEG(w io.Writer, quality int) error {
+	return jpeg.Encode(w, c.Image(), &jpeg.Options{Quality: quality})
 }

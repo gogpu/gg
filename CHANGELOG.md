@@ -12,6 +12,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.14.0] - 2025-12-24
+
+### Added
+
+#### Alpha Mask System (TASK-118a)
+- **Mask** — Alpha mask type for compositing operations
+  - `NewMask(width, height)` — Create empty mask
+  - `NewMaskFromAlpha(img)` — Create mask from image alpha channel
+  - `At(x, y)`, `Set(x, y, value)` — Pixel access
+  - `Fill(value)` — Fill entire mask with value
+  - `Invert()` — Invert all mask values
+  - `Clone()` — Create independent copy
+  - `Width()`, `Height()`, `Bounds()` — Dimension queries
+- **Context mask methods**
+  - `SetMask(mask)` — Set current mask for drawing
+  - `GetMask()` — Get current mask
+  - `InvertMask()` — Invert current mask in-place
+  - `ClearMask()` — Remove mask
+  - `AsMask()` — Convert current drawing to mask
+- **Push/Pop integration** — Mask state saved/restored with context stack
+
+#### Fluent PathBuilder (TASK-118b)
+- **PathBuilder** — Fluent API for path construction
+  - `BuildPath()` — Start building a path
+  - `MoveTo(x, y)`, `LineTo(x, y)` — Basic path commands
+  - `QuadTo(cx, cy, x, y)` — Quadratic bezier
+  - `CubicTo(c1x, c1y, c2x, c2y, x, y)` — Cubic bezier
+  - `Close()` — Close current subpath
+  - **13 shape methods:**
+    - `Rect(x, y, w, h)` — Rectangle
+    - `RoundRect(x, y, w, h, r)` — Rounded rectangle
+    - `Circle(cx, cy, r)` — Circle
+    - `Ellipse(cx, cy, rx, ry)` — Ellipse
+    - `Arc(cx, cy, r, startAngle, endAngle)` — Arc
+    - `Polygon(cx, cy, r, sides)` — Regular polygon
+    - `Star(cx, cy, outerR, innerR, points)` — Star shape
+    - `Line(x1, y1, x2, y2)` — Line segment
+    - `Triangle(x1, y1, x2, y2, x3, y3)` — Triangle
+    - `RegularPolygon(cx, cy, r, sides, rotation)` — Rotated polygon
+    - `RoundedLine(x1, y1, x2, y2, width)` — Line with round caps
+  - `Build()` — Return completed Path
+- Method chaining for concise path construction
+
+#### Resource Cleanup (TASK-118c)
+- **Context.Close()** — Implements `io.Closer` interface
+  - Clears all internal state (pixmap, path, font, mask, stacks)
+  - Safe to call multiple times (idempotent)
+  - Enables `defer ctx.Close()` pattern
+
+#### Path Helpers (TASK-118d)
+- **Context.GetCurrentPoint()** — Returns current path point and validity
+- **Path.HasCurrentPoint()** — Check if path has a current point
+- **Path.Clone()** — Create independent copy of path
+
+#### Streaming I/O (TASK-118e)
+- **Context.EncodePNG(w io.Writer)** — Encode to any writer
+- **Context.EncodeJPEG(w io.Writer, quality)** — Encode JPEG to writer
+- **Pixmap.EncodePNG(w io.Writer)** — Direct pixmap encoding
+- **Pixmap.EncodeJPEG(w io.Writer, quality)** — Direct JPEG encoding
+
+### Statistics
+
+- **~800 LOC added** across 8 files
+- **16 tests** for mask functionality
+- **11 tests** for PathBuilder
+- **0 linter issues**
+- **Fully backward compatible** — No breaking changes
+
 ## [0.13.0] - 2025-12-24
 
 ### Added
@@ -721,7 +789,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/gogpu/gg/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/gogpu/gg/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/gogpu/gg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/gogpu/gg/compare/v0.10.1...v0.11.0
