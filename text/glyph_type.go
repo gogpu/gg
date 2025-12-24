@@ -67,7 +67,7 @@ func (f GlyphFlags) Has(flag GlyphFlags) bool {
 // String returns a human-readable representation of the flags.
 func (f GlyphFlags) String() string {
 	if f == 0 {
-		return "None"
+		return noneStr
 	}
 
 	var result string

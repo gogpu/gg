@@ -185,6 +185,15 @@ linters:
           - cyclop       # Many Unicode ranges to check
           - gocognit     # Inherently complex due to Unicode
 
+      # Emoji detection and sequence handling (TASK-050i)
+      - path: text/emoji/.*\.go
+        linters:
+          - gocyclo      # Emoji Unicode ranges require many branches
+          - cyclop       # Many emoji ranges to check
+          - gocognit     # Inherently complex due to Unicode spec
+          - funlen       # Emoji range functions are necessarily verbose
+          - maintidx     # Unicode lookups inherently complex
+
       # Scene package blend mode mapping (TASK-099)
       - path: scene/encoding\.go
         linters:

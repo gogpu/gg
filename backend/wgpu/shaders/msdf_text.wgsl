@@ -1,0 +1,209 @@
+// msdf_text.wgsl - Multi-channel Signed Distance Field Text Rendering Shader
+//
+// This shader renders text using MSDF technique for crisp, resolution-independent
+// text rendering. MSDF encodes directional distance in RGB channels to preserve
+// sharp corners that would be lost with single-channel SDF.
+//
+// References:
+// - https://github.com/Chlumsky/msdfgen (original MSDF algorithm)
+// - W3C WebGPU Shading Language spec
+
+// ============================================================================
+// Uniform structures matching Go TextUniforms type
+// ============================================================================
+
+struct TextUniforms {
+    // Transform matrix (4x4 for alignment, only 3x3 used for 2D transform)
+    // Row-major: [a, b, c, 0, d, e, f, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    // Transforms: x' = a*x + b*y + c, y' = d*x + e*y + f
+    transform: mat4x4<f32>,
+
+    // Text color (RGBA, premultiplied alpha)
+    color: vec4<f32>,
+
+    // MSDF parameters
+    // x: px_range - Distance range in pixels (typically 4.0)
+    //    Controls how far from the edge the SDF extends in the texture
+    // y: atlas_size - Texture size for screen-space derivative calculation
+    // z: unused (reserved for future: outline width)
+    // w: unused (reserved for future: outline softness)
+    msdf_params: vec4<f32>,
+}
+
+// ============================================================================
+// Vertex input/output structures
+// ============================================================================
+
+struct VertexInput {
+    // Position of quad vertex in local space
+    @location(0) position: vec2<f32>,
+
+    // UV coordinates for sampling MSDF atlas
+    @location(1) tex_coord: vec2<f32>,
+}
+
+struct VertexOutput {
+    // Clip-space position for rasterization
+    @builtin(position) position: vec4<f32>,
+
+    // Interpolated UV for fragment shader
+    @location(0) tex_coord: vec2<f32>,
+
+    // Text color passed to fragment shader
+    @location(1) color: vec4<f32>,
+}
+
+// ============================================================================
+// Bindings
+// ============================================================================
+
+@group(0) @binding(0) var<uniform> uniforms: TextUniforms;
+@group(0) @binding(1) var msdf_atlas: texture_2d<f32>;
+@group(0) @binding(2) var msdf_sampler: sampler;
+
+// ============================================================================
+// Vertex shader
+// ============================================================================
+
+// vs_main: Transform quad vertices and pass through UV coordinates.
+// Each glyph is rendered as a textured quad with 4 vertices.
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+
+    // Apply 2D transform (using mat4x4 for alignment, treating as affine 2D)
+    let pos = uniforms.transform * vec4<f32>(in.position, 0.0, 1.0);
+    out.position = pos;
+
+    // Pass through texture coordinates
+    out.tex_coord = in.tex_coord;
+
+    // Pass through color (premultiplied)
+    out.color = uniforms.color;
+
+    return out;
+}
+
+// ============================================================================
+// MSDF sampling functions
+// ============================================================================
+
+// median3: Compute median of three values.
+// This is the key MSDF operation that recovers the signed distance from
+// the three directional distance channels (R, G, B).
+// Sharp corners are preserved because each channel encodes distance to
+// different edge segments.
+fn median3(r: f32, g: f32, b: f32) -> f32 {
+    return max(min(r, g), min(max(r, g), b));
+}
+
+// ============================================================================
+// Fragment shader
+// ============================================================================
+
+// fs_main: Sample MSDF atlas and compute anti-aliased alpha.
+// Uses screen-space derivatives for proper scaling at any zoom level.
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Sample the MSDF atlas texture
+    let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
+
+    // Recover signed distance from median of RGB channels
+    // MSDF stores distance as [0, 1] range, 0.5 = on edge
+    // Signed distance: negative = inside, positive = outside
+    let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
+
+    // Get texture dimensions for screen-space derivative calculation
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+
+    // Calculate screen-space derivatives of UV coordinates
+    // fwidth gives the rate of change of UV across the pixel
+    // This allows proper anti-aliasing at any scale
+    let dx_dy = fwidth(in.tex_coord) * tex_size;
+
+    // Get the distance range from uniforms (typically 4.0 pixels)
+    let px_range = uniforms.msdf_params.x;
+
+    // Convert to screen pixel range
+    // This normalizes the signed distance to screen pixels
+    let screen_px_range = px_range / length(dx_dy);
+
+    // Scale signed distance to screen pixels
+    let screen_px_distance = screen_px_range * sd;
+
+    // Compute anti-aliased alpha using smoothstep-like function
+    // +0.5 centers the edge at the glyph boundary
+    // clamp ensures alpha stays in [0, 1]
+    let alpha = clamp(screen_px_distance + 0.5, 0.0, 1.0);
+
+    // Apply alpha to text color (premultiplied alpha output)
+    return vec4<f32>(in.color.rgb * alpha, in.color.a * alpha);
+}
+
+// ============================================================================
+// Alternative entry points for different rendering modes
+// ============================================================================
+
+// fs_main_outline: Render text with outline effect.
+// Uses the SDF to render both fill and outline in a single pass.
+@fragment
+fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
+    let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
+    let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
+
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+    let dx_dy = fwidth(in.tex_coord) * tex_size;
+    let px_range = uniforms.msdf_params.x;
+    let screen_px_range = px_range / length(dx_dy);
+    let screen_px_distance = screen_px_range * sd;
+
+    // Outline width in screen pixels (stored in msdf_params.z)
+    let outline_width = uniforms.msdf_params.z;
+
+    // Fill alpha (inner glyph)
+    let fill_alpha = clamp(screen_px_distance + 0.5, 0.0, 1.0);
+
+    // Outline alpha (ring around glyph)
+    let outline_alpha = clamp(screen_px_distance + outline_width + 0.5, 0.0, 1.0);
+
+    // Blend: outline color where outline but not fill
+    // For simplicity, using inverted fill color for outline
+    let outline_color = vec4<f32>(1.0 - in.color.rgb, 1.0);
+
+    // Composite: fill over outline
+    let fill = vec4<f32>(in.color.rgb * fill_alpha, in.color.a * fill_alpha);
+    let outline = vec4<f32>(outline_color.rgb * (outline_alpha - fill_alpha), outline_color.a * (outline_alpha - fill_alpha));
+
+    return fill + outline;
+}
+
+// fs_main_shadow: Render text with drop shadow effect.
+// Samples the SDF twice with offset for shadow.
+@fragment
+fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Shadow offset in UV space (could be uniform parameter)
+    let shadow_offset = vec2<f32>(0.002, 0.002);
+    let shadow_color = vec4<f32>(0.0, 0.0, 0.0, 0.5);
+
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+    let dx_dy = fwidth(in.tex_coord) * tex_size;
+    let px_range = uniforms.msdf_params.x;
+    let screen_px_range = px_range / length(dx_dy);
+
+    // Sample shadow (offset)
+    let shadow_msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord - shadow_offset).rgb;
+    let shadow_sd = median3(shadow_msdf.r, shadow_msdf.g, shadow_msdf.b) - 0.5;
+    let shadow_alpha = clamp(screen_px_range * shadow_sd + 0.5, 0.0, 1.0);
+
+    // Sample fill (no offset)
+    let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
+    let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
+    let fill_alpha = clamp(screen_px_range * sd + 0.5, 0.0, 1.0);
+
+    // Composite: fill over shadow
+    let shadow = vec4<f32>(shadow_color.rgb * shadow_alpha, shadow_color.a * shadow_alpha);
+    let fill = vec4<f32>(in.color.rgb * fill_alpha, in.color.a * fill_alpha);
+
+    // Fill over shadow compositing (Porter-Duff Source Over)
+    return fill + shadow * (1.0 - fill.a);
+}
