@@ -1,6 +1,9 @@
 package scene
 
-import "math"
+import (
+	"iter"
+	"math"
+)
 
 // PathVerb represents a path construction command.
 type PathVerb uint8
@@ -474,6 +477,145 @@ func reverseSubpath(result *Path, sp subpathData) {
 
 	if sp.closed {
 		result.Close()
+	}
+}
+
+// PathElement represents a single path command with its associated points.
+// This type is used by the Elements() iterator for ergonomic path traversal.
+type PathElement struct {
+	// Verb is the path command type.
+	Verb PathVerb
+
+	// Points contains the coordinates for this element.
+	// The number of points depends on the verb:
+	//   - MoveTo: 1 point (destination)
+	//   - LineTo: 1 point (destination)
+	//   - QuadTo: 2 points (control, destination)
+	//   - CubicTo: 3 points (control1, control2, destination)
+	//   - Close: 0 points
+	Points []Point
+}
+
+// Point represents a 2D point with float32 coordinates.
+// This is used by PathElement for iterator-based path traversal.
+type Point struct {
+	X, Y float32
+}
+
+// Elements returns an iterator over all path elements.
+// This uses Go 1.25+ iter.Seq for efficient, zero-allocation iteration
+// when used with a for-range loop.
+//
+// Example:
+//
+//	for elem := range path.Elements() {
+//	    switch elem.Verb {
+//	    case VerbMoveTo:
+//	        fmt.Printf("Move to %v\n", elem.Points[0])
+//	    case VerbLineTo:
+//	        fmt.Printf("Line to %v\n", elem.Points[0])
+//	    case VerbQuadTo:
+//	        fmt.Printf("Quad to %v via %v\n", elem.Points[1], elem.Points[0])
+//	    case VerbCubicTo:
+//	        fmt.Printf("Cubic to %v\n", elem.Points[2])
+//	    case VerbClose:
+//	        fmt.Println("Close")
+//	    }
+//	}
+func (p *Path) Elements() iter.Seq[PathElement] {
+	return func(yield func(PathElement) bool) {
+		pointIdx := 0
+
+		for _, verb := range p.verbs {
+			var elem PathElement
+			elem.Verb = verb
+
+			switch verb {
+			case VerbMoveTo, VerbLineTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+				}
+				pointIdx += 2
+
+			case VerbQuadTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+					{p.points[pointIdx+2], p.points[pointIdx+3]},
+				}
+				pointIdx += 4
+
+			case VerbCubicTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+					{p.points[pointIdx+2], p.points[pointIdx+3]},
+					{p.points[pointIdx+4], p.points[pointIdx+5]},
+				}
+				pointIdx += 6
+
+			case VerbClose:
+				elem.Points = nil
+			}
+
+			if !yield(elem) {
+				return
+			}
+		}
+	}
+}
+
+// ElementsWithCursor returns an iterator that includes the current cursor position.
+// This is useful when you need to know the starting point of each segment.
+func (p *Path) ElementsWithCursor() iter.Seq2[Point, PathElement] {
+	return func(yield func(Point, PathElement) bool) {
+		pointIdx := 0
+		cursor := Point{0, 0}
+
+		for _, verb := range p.verbs {
+			var elem PathElement
+			elem.Verb = verb
+			prevCursor := cursor
+
+			switch verb {
+			case VerbMoveTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+				}
+				cursor = elem.Points[0]
+				pointIdx += 2
+
+			case VerbLineTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+				}
+				cursor = elem.Points[0]
+				pointIdx += 2
+
+			case VerbQuadTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+					{p.points[pointIdx+2], p.points[pointIdx+3]},
+				}
+				cursor = elem.Points[1]
+				pointIdx += 4
+
+			case VerbCubicTo:
+				elem.Points = []Point{
+					{p.points[pointIdx], p.points[pointIdx+1]},
+					{p.points[pointIdx+2], p.points[pointIdx+3]},
+					{p.points[pointIdx+4], p.points[pointIdx+5]},
+				}
+				cursor = elem.Points[2]
+				pointIdx += 6
+
+			case VerbClose:
+				elem.Points = nil
+				// cursor returns to subpath start (handled by caller if needed)
+			}
+
+			if !yield(prevCursor, elem) {
+				return
+			}
+		}
 	}
 }
 

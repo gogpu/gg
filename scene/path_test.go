@@ -441,3 +441,189 @@ func BenchmarkPathPoolGetPut(b *testing.B) {
 		pool.Put(p)
 	}
 }
+
+// Tests for iter.Seq-based Elements() iterator (Go 1.25+)
+
+func TestPathElements(t *testing.T) {
+	// Create a path with all verb types
+	p := NewPath()
+	p.MoveTo(10, 20)
+	p.LineTo(30, 40)
+	p.QuadTo(50, 60, 70, 80)
+	p.CubicTo(90, 100, 110, 120, 130, 140)
+	p.Close()
+
+	// Collect elements (5 expected: MoveTo, LineTo, QuadTo, CubicTo, Close)
+	elements := make([]PathElement, 0, 5)
+	for elem := range p.Elements() {
+		elements = append(elements, elem)
+	}
+
+	// Verify element count
+	if len(elements) != 5 {
+		t.Fatalf("expected 5 elements, got %d", len(elements))
+	}
+
+	// Verify MoveTo
+	if elements[0].Verb != VerbMoveTo {
+		t.Errorf("element 0: expected MoveTo, got %v", elements[0].Verb)
+	}
+	if len(elements[0].Points) != 1 {
+		t.Errorf("element 0: expected 1 point, got %d", len(elements[0].Points))
+	}
+	if elements[0].Points[0].X != 10 || elements[0].Points[0].Y != 20 {
+		t.Errorf("element 0: expected (10, 20), got (%v, %v)", elements[0].Points[0].X, elements[0].Points[0].Y)
+	}
+
+	// Verify LineTo
+	if elements[1].Verb != VerbLineTo {
+		t.Errorf("element 1: expected LineTo, got %v", elements[1].Verb)
+	}
+	if len(elements[1].Points) != 1 {
+		t.Errorf("element 1: expected 1 point, got %d", len(elements[1].Points))
+	}
+
+	// Verify QuadTo
+	if elements[2].Verb != VerbQuadTo {
+		t.Errorf("element 2: expected QuadTo, got %v", elements[2].Verb)
+	}
+	if len(elements[2].Points) != 2 {
+		t.Errorf("element 2: expected 2 points, got %d", len(elements[2].Points))
+	}
+	if elements[2].Points[0].X != 50 || elements[2].Points[0].Y != 60 {
+		t.Errorf("element 2 control: expected (50, 60), got (%v, %v)", elements[2].Points[0].X, elements[2].Points[0].Y)
+	}
+	if elements[2].Points[1].X != 70 || elements[2].Points[1].Y != 80 {
+		t.Errorf("element 2 end: expected (70, 80), got (%v, %v)", elements[2].Points[1].X, elements[2].Points[1].Y)
+	}
+
+	// Verify CubicTo
+	if elements[3].Verb != VerbCubicTo {
+		t.Errorf("element 3: expected CubicTo, got %v", elements[3].Verb)
+	}
+	if len(elements[3].Points) != 3 {
+		t.Errorf("element 3: expected 3 points, got %d", len(elements[3].Points))
+	}
+
+	// Verify Close
+	if elements[4].Verb != VerbClose {
+		t.Errorf("element 4: expected Close, got %v", elements[4].Verb)
+	}
+	if len(elements[4].Points) != 0 {
+		t.Errorf("element 4: expected 0 points, got %d", len(elements[4].Points))
+	}
+}
+
+func TestPathElementsWithCursor(t *testing.T) {
+	p := NewPath()
+	p.MoveTo(10, 20)
+	p.LineTo(30, 40)
+	p.LineTo(50, 60)
+
+	// Pre-allocate for 3 elements (MoveTo, LineTo, LineTo)
+	cursors := make([]Point, 0, 3)
+	elements := make([]PathElement, 0, 3)
+
+	for cursor, elem := range p.ElementsWithCursor() {
+		cursors = append(cursors, cursor)
+		elements = append(elements, elem)
+	}
+
+	if len(cursors) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(cursors))
+	}
+
+	// First cursor is (0, 0) - initial position
+	if cursors[0].X != 0 || cursors[0].Y != 0 {
+		t.Errorf("cursor 0: expected (0, 0), got (%v, %v)", cursors[0].X, cursors[0].Y)
+	}
+
+	// After MoveTo(10, 20), next cursor is (10, 20)
+	if cursors[1].X != 10 || cursors[1].Y != 20 {
+		t.Errorf("cursor 1: expected (10, 20), got (%v, %v)", cursors[1].X, cursors[1].Y)
+	}
+
+	// After LineTo(30, 40), next cursor is (30, 40)
+	if cursors[2].X != 30 || cursors[2].Y != 40 {
+		t.Errorf("cursor 2: expected (30, 40), got (%v, %v)", cursors[2].X, cursors[2].Y)
+	}
+}
+
+func TestPathElementsEmpty(t *testing.T) {
+	p := NewPath()
+
+	count := 0
+	for range p.Elements() {
+		count++
+	}
+
+	if count != 0 {
+		t.Errorf("expected 0 elements for empty path, got %d", count)
+	}
+}
+
+func TestPathElementsEarlyBreak(t *testing.T) {
+	p := NewPath()
+	p.MoveTo(0, 0)
+	p.LineTo(10, 10)
+	p.LineTo(20, 20)
+	p.LineTo(30, 30)
+	p.LineTo(40, 40)
+
+	// Break after 2 elements
+	count := 0
+	for range p.Elements() {
+		count++
+		if count >= 2 {
+			break
+		}
+	}
+
+	if count != 2 {
+		t.Errorf("expected 2 elements after early break, got %d", count)
+	}
+}
+
+func BenchmarkPathElements(b *testing.B) {
+	p := NewPath()
+	for i := 0; i < 100; i++ {
+		p.MoveTo(float32(i), float32(i))
+		p.LineTo(float32(i+10), float32(i+10))
+		p.QuadTo(float32(i+20), float32(i+20), float32(i+30), float32(i+30))
+		p.CubicTo(float32(i+40), float32(i+40), float32(i+50), float32(i+50), float32(i+60), float32(i+60))
+		p.Close()
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		count := 0
+		for range p.Elements() {
+			count++
+		}
+		if count != 500 {
+			b.Fatalf("unexpected count: %d", count)
+		}
+	}
+}
+
+func BenchmarkPathElementsWithCursor(b *testing.B) {
+	p := NewPath()
+	for i := 0; i < 100; i++ {
+		p.MoveTo(float32(i), float32(i))
+		p.LineTo(float32(i+10), float32(i+10))
+		p.Close()
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		count := 0
+		for range p.ElementsWithCursor() {
+			count++
+		}
+		if count != 300 {
+			b.Fatalf("unexpected count: %d", count)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package text
 
 import (
+	"context"
 	"strings"
 	"unicode"
 )
@@ -51,15 +52,21 @@ type LayoutOptions struct {
 	// Direction is the base text direction (LTR or RTL).
 	// Used for paragraph-level direction when no strong directional text is present.
 	Direction Direction
+
+	// WrapMode specifies how text is wrapped when it exceeds MaxWidth.
+	// Default is WrapWordChar which breaks at word boundaries first,
+	// then falls back to character boundaries for long words.
+	WrapMode WrapMode
 }
 
 // DefaultLayoutOptions returns sensible default layout options.
 func DefaultLayoutOptions() LayoutOptions {
 	return LayoutOptions{
-		MaxWidth:    0, // No wrapping
+		MaxWidth:    0, // No wrapping (no MaxWidth constraint)
 		LineSpacing: 1.0,
 		Alignment:   AlignLeft,
 		Direction:   DirectionLTR,
+		// WrapMode defaults to WrapWordChar (zero value)
 	}
 }
 
@@ -106,12 +113,32 @@ type Layout struct {
 // LayoutText performs text layout with the given options.
 // It segments text by direction/script, shapes each segment,
 // wraps lines if MaxWidth > 0, and positions lines with alignment.
+//
+// For cancellable layout, use LayoutTextWithContext.
 func LayoutText(text string, face Face, size float64, opts LayoutOptions) *Layout {
+	layout, _ := LayoutTextWithContext(context.Background(), text, face, size, opts)
+	return layout
+}
+
+// LayoutTextWithContext performs text layout with the given options and cancellation support.
+// It segments text by direction/script, shapes each segment,
+// wraps lines if MaxWidth > 0, and positions lines with alignment.
+//
+// The context can be used to cancel long-running layout operations.
+// When canceled, returns nil and ctx.Err().
+func LayoutTextWithContext(ctx context.Context, text string, face Face, size float64, opts LayoutOptions) (*Layout, error) {
 	if text == "" {
-		return &Layout{}
+		return &Layout{}, nil
 	}
 	if face == nil {
-		return &Layout{}
+		return &Layout{}, nil
+	}
+
+	// Check for cancellation at start
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	// Apply defaults for zero values
@@ -131,11 +158,20 @@ func LayoutText(text string, face Face, size float64, opts LayoutOptions) *Layou
 
 	var y float64
 
-	for _, para := range paragraphs {
+	for i, para := range paragraphs {
+		// Check for cancellation periodically (every 8 paragraphs)
+		if i%8 == 0 && i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+
 		paraLines := layoutParagraph(para, face, size, opts, metrics)
 
-		for i := range paraLines {
-			line := &paraLines[i]
+		for j := range paraLines {
+			line := &paraLines[j]
 
 			// Calculate baseline position: previous Y + line ascent
 			if len(layout.Lines) == 0 {
@@ -167,7 +203,7 @@ func LayoutText(text string, face Face, size float64, opts LayoutOptions) *Layou
 		layout.Height = lastLine.Y + lastLine.Descent
 	}
 
-	return layout
+	return layout, nil
 }
 
 // LayoutTextSimple is a convenience wrapper with default options.
@@ -208,13 +244,13 @@ func layoutParagraph(para string, face Face, size float64, opts LayoutOptions, m
 	// Shape each segment
 	runs := shapeSegments(segments, face, size, metrics)
 
-	// If no wrapping needed, return as single line
-	if opts.MaxWidth <= 0 {
+	// If no wrapping needed or WrapNone, return as single line
+	if opts.MaxWidth <= 0 || opts.WrapMode == WrapNone {
 		return []Line{createLine(runs)}
 	}
 
-	// Wrap lines at MaxWidth
-	return wrapLines(runs, opts.MaxWidth, metrics)
+	// Wrap lines at MaxWidth using the specified wrap mode
+	return wrapLinesWithMode(runs, para, opts.MaxWidth, opts.WrapMode, metrics)
 }
 
 // shapeSegments shapes each segment and returns ShapedRuns.
@@ -289,8 +325,8 @@ type glyphInfo struct {
 	isBreak bool
 }
 
-// wrapLines wraps runs into lines at maxWidth.
-func wrapLines(runs []ShapedRun, maxWidth float64, metrics Metrics) []Line {
+// wrapLinesWithMode wraps runs into lines at maxWidth using the specified wrap mode.
+func wrapLinesWithMode(runs []ShapedRun, text string, maxWidth float64, mode WrapMode, metrics Metrics) []Line {
 	if len(runs) == 0 {
 		return nil
 	}
@@ -314,8 +350,12 @@ func wrapLines(runs []ShapedRun, maxWidth float64, metrics Metrics) []Line {
 		}}
 	}
 
-	// Mark break opportunities (after spaces)
-	markBreakOpportunities(infos)
+	// Mark break opportunities based on wrap mode
+	if text != "" && mode != WrapNone {
+		markBreakOpportunitiesEnhanced(infos, text, mode)
+	} else {
+		markBreakOpportunities(infos)
+	}
 
 	// Greedy line breaking
 	lines := make([]Line, 0)
@@ -331,24 +371,26 @@ func wrapLines(runs []ShapedRun, maxWidth float64, metrics Metrics) []Line {
 			lastBreak = i
 		}
 
-		if glyphEnd > maxWidth && lineStart < i {
-			// Line exceeds max width, need to break
-			breakAt := i
-			if lastBreak > lineStart {
-				// Break at last break opportunity
-				breakAt = lastBreak + 1
-			}
+		// Check if line exceeds max width
+		if glyphEnd <= maxWidth || lineStart >= i {
+			continue
+		}
 
-			// Create line from lineStart to breakAt
-			line := createLineFromGlyphs(infos[lineStart:breakAt], runs, startX, metrics)
-			lines = append(lines, line)
+		// Calculate break position based on mode
+		breakAt, shouldBreak := calculateBreakPosition(i, lineStart, lastBreak, mode)
+		if !shouldBreak {
+			continue
+		}
 
-			// Start new line
-			lineStart = breakAt
-			lastBreak = -1
-			if lineStart < len(infos) {
-				startX = infos[lineStart].glyph.X
-			}
+		// Create line from lineStart to breakAt
+		line := createLineFromGlyphs(infos[lineStart:breakAt], runs, startX, metrics)
+		lines = append(lines, line)
+
+		// Start new line
+		lineStart = breakAt
+		lastBreak = -1
+		if lineStart < len(infos) {
+			startX = infos[lineStart].glyph.X
 		}
 	}
 
@@ -359,6 +401,24 @@ func wrapLines(runs []ShapedRun, maxWidth float64, metrics Metrics) []Line {
 	}
 
 	return lines
+}
+
+// calculateBreakPosition determines where to break a line based on wrap mode.
+// Returns (breakPosition, shouldBreak).
+func calculateBreakPosition(currentPos, lineStart, lastBreak int, mode WrapMode) (int, bool) {
+	switch {
+	case lastBreak > lineStart:
+		// Break at last break opportunity
+		return lastBreak + 1, true
+	case mode == WrapWordChar || mode == WrapChar:
+		// Fall back to character break
+		return currentPos, true
+	case mode == WrapWord:
+		// Don't break, let it overflow until we find a break point
+		return 0, false
+	default:
+		return currentPos, true
+	}
 }
 
 // markBreakOpportunities marks positions where line breaks can occur.
