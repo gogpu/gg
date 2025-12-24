@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong>42,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
+  <strong>46,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
 </p>
 
 ---
@@ -37,7 +37,7 @@
 | **29 Blend Modes** | vello, W3C | Implemented |
 | **Layer Compositing** | Skia, vello | Implemented |
 | **MSDF Text** | Industry standard | Implemented |
-| **Brush/Pattern System** | [tiny-skia](https://github.com/nicotine-scx/tiny-skia), [peniko](https://github.com/linebender/peniko) | Implementing |
+| **Brush/Pattern System** | [tiny-skia](https://github.com/nicotine-scx/tiny-skia), [peniko](https://github.com/linebender/peniko) | Implemented |
 
 ---
 
@@ -223,8 +223,7 @@ ctx.SavePNG("layers.png")
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v0.1.0 - v0.11.0 | Core features | Released |
-| **v0.12.0** | **Rust-First API (Brush, Gradients, Stroke)** | **In Development** |
+| v0.1.0 - v0.12.0 | Core features | Released |
 | v0.13.0 | Go 1.25+ (context.Context, Generics) | Planned |
 | v0.14.0 | Advanced Features (Masks, PathBuilder) | Planned |
 | v0.15.0 | Documentation & RC | Planned |
@@ -243,7 +242,7 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.6.1 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.6.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.5.0 |
-| **gogpu/gg** | **2D graphics** | **v0.11.0** |
+| **gogpu/gg** | **2D graphics** | **v0.12.0** |
 
 ---
 

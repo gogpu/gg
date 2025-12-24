@@ -100,22 +100,57 @@ func (c *Context) ClearWithColor(col RGBA) {
 
 // SetColor sets the current drawing color.
 func (c *Context) SetColor(col color.Color) {
-	c.paint.Pattern = NewSolidPattern(FromColor(col))
+	c.paint.SetBrush(Solid(FromColor(col)))
 }
 
 // SetRGB sets the current color using RGB values (0-1).
 func (c *Context) SetRGB(r, g, b float64) {
-	c.paint.Pattern = NewSolidPattern(RGB(r, g, b))
+	c.paint.SetBrush(SolidRGB(r, g, b))
 }
 
 // SetRGBA sets the current color using RGBA values (0-1).
 func (c *Context) SetRGBA(r, g, b, a float64) {
-	c.paint.Pattern = NewSolidPattern(RGBA2(r, g, b, a))
+	c.paint.SetBrush(SolidRGBA(r, g, b, a))
 }
 
 // SetHexColor sets the current color using a hex string.
 func (c *Context) SetHexColor(hex string) {
-	c.paint.Pattern = NewSolidPattern(Hex(hex))
+	c.paint.SetBrush(SolidHex(hex))
+}
+
+// SetFillBrush sets the brush used for fill operations.
+// This is the preferred way to set fill styling in new code.
+//
+// Example:
+//
+//	ctx.SetFillBrush(gg.Solid(gg.Red))
+//	ctx.SetFillBrush(gg.SolidHex("#FF5733"))
+//	ctx.SetFillBrush(gg.HorizontalGradient(gg.Red, gg.Blue, 0, 100))
+func (c *Context) SetFillBrush(b Brush) {
+	c.paint.SetBrush(b)
+}
+
+// SetStrokeBrush sets the brush used for stroke operations.
+// Note: In the current implementation, fill and stroke share the same brush.
+// This method is provided for API symmetry and future extensibility.
+//
+// Example:
+//
+//	ctx.SetStrokeBrush(gg.Solid(gg.Black))
+//	ctx.SetStrokeBrush(gg.SolidRGB(0.5, 0.5, 0.5))
+func (c *Context) SetStrokeBrush(b Brush) {
+	c.paint.SetBrush(b)
+}
+
+// FillBrush returns the current fill brush.
+func (c *Context) FillBrush() Brush {
+	return c.paint.GetBrush()
+}
+
+// StrokeBrush returns the current stroke brush.
+// Note: In the current implementation, fill and stroke share the same brush.
+func (c *Context) StrokeBrush() Brush {
+	return c.paint.GetBrush()
 }
 
 // SetLineWidth sets the line width for stroking.
@@ -136,6 +171,81 @@ func (c *Context) SetLineJoin(join LineJoin) {
 // SetFillRule sets the fill rule.
 func (c *Context) SetFillRule(rule FillRule) {
 	c.paint.FillRule = rule
+}
+
+// SetMiterLimit sets the miter limit for line joins.
+func (c *Context) SetMiterLimit(limit float64) {
+	c.paint.MiterLimit = limit
+}
+
+// SetStroke sets the complete stroke style.
+// This is the preferred way to configure stroke properties.
+//
+// Example:
+//
+//	ctx.SetStroke(gg.DefaultStroke().WithWidth(2).WithCap(gg.LineCapRound))
+//	ctx.SetStroke(gg.DashedStroke(5, 3))
+func (c *Context) SetStroke(stroke Stroke) {
+	c.paint.SetStroke(stroke)
+}
+
+// GetStroke returns the current stroke style.
+func (c *Context) GetStroke() Stroke {
+	return c.paint.GetStroke()
+}
+
+// SetDash sets the dash pattern for stroking.
+// Pass alternating dash and gap lengths.
+// Passing no arguments clears the dash pattern (returns to solid lines).
+//
+// Example:
+//
+//	ctx.SetDash(5, 3)       // 5 units dash, 3 units gap
+//	ctx.SetDash(10, 5, 2, 5) // complex pattern
+//	ctx.SetDash()           // clear dash (solid line)
+func (c *Context) SetDash(lengths ...float64) {
+	if len(lengths) == 0 {
+		c.ClearDash()
+		return
+	}
+
+	dash := NewDash(lengths...)
+	if dash == nil {
+		c.ClearDash()
+		return
+	}
+
+	// Ensure we have a Stroke to set the dash on
+	if c.paint.Stroke == nil {
+		stroke := c.paint.GetStroke()
+		c.paint.Stroke = &stroke
+	}
+	c.paint.Stroke.Dash = dash
+}
+
+// SetDashOffset sets the starting offset into the dash pattern.
+// This has no effect if no dash pattern is set.
+func (c *Context) SetDashOffset(offset float64) {
+	if c.paint.Stroke == nil {
+		// Create stroke from legacy fields if needed
+		stroke := c.paint.GetStroke()
+		c.paint.Stroke = &stroke
+	}
+	if c.paint.Stroke.Dash != nil {
+		c.paint.Stroke.Dash = c.paint.Stroke.Dash.WithOffset(offset)
+	}
+}
+
+// ClearDash removes the dash pattern, returning to solid lines.
+func (c *Context) ClearDash() {
+	if c.paint.Stroke != nil {
+		c.paint.Stroke.Dash = nil
+	}
+}
+
+// IsDashed returns true if the current stroke uses a dash pattern.
+func (c *Context) IsDashed() bool {
+	return c.paint.IsDashed()
 }
 
 // MoveTo starts a new subpath at the given point.

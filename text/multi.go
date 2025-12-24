@@ -1,7 +1,6 @@
 package text
 
 import (
-	"fmt"
 	"iter"
 	"unicode/utf8"
 )
@@ -19,15 +18,18 @@ type MultiFace struct {
 // Returns error if faces is empty or directions don't match.
 func NewMultiFace(faces ...Face) (*MultiFace, error) {
 	if len(faces) == 0 {
-		return nil, fmt.Errorf("NewMultiFace: faces cannot be empty")
+		return nil, ErrEmptyFaces
 	}
 
 	// Check that all faces have the same direction
 	direction := faces[0].Direction()
 	for i, face := range faces[1:] {
 		if face.Direction() != direction {
-			return nil, fmt.Errorf("NewMultiFace: face %d has direction %v, expected %v",
-				i+1, face.Direction(), direction)
+			return nil, &DirectionMismatchError{
+				Index:    i + 1,
+				Got:      face.Direction(),
+				Expected: direction,
+			}
 		}
 	}
 

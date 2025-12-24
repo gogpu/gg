@@ -12,6 +12,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.12.0] - 2025-12-24
+
+### Added
+
+#### Brush Enum System (vello/peniko pattern)
+- **Brush interface** — Sealed interface with `brushMarker()` for type safety
+- **SolidBrush** — Single-color brush with `Solid()`, `SolidRGB()`, `SolidHex()`
+- **CustomBrush** — Extensibility escape hatch for user-defined patterns
+- **Pattern compatibility** — `BrushFromPattern()`, `PatternFromBrush()`
+
+#### Gradient Types (tiny-skia/vello pattern)
+- **LinearGradientBrush** — Linear gradient with start/end points
+- **RadialGradientBrush** — Radial gradient with center, radius, optional focus
+- **SweepGradientBrush** — Conic/sweep gradient with angle range
+- **ExtendMode** — Pad, Repeat, Reflect for gradient extension
+- **Linear sRGB interpolation** — Correct color blending
+
+#### Stroke Struct (tiny-skia/kurbo pattern)
+- **Stroke** — Unified stroke parameters (Width, Cap, Join, MiterLimit, Dash)
+- **Dash** — Dash pattern support with offset
+- **Fluent API** — `WithWidth()`, `WithCap()`, `WithJoin()`, `WithDash()`
+- **Context integration** — `SetStroke()`, `GetStroke()`, `StrokeWithStyle()`
+
+#### Error Handling (Go 1.13+ best practices)
+- **text/errors.go** — `ErrEmptyFontData`, `ErrEmptyFaces`, `DirectionMismatchError`
+- **text/msdf/errors.go** — `ErrAllocationFailed`, `ErrLengthMismatch`
+- All errors support `errors.Is()` and `errors.As()`
+
+### Statistics
+- **4,337 LOC added** across 22 files
+- **87.6% test coverage** maintained
+- **0 linter issues**
+
 ## [0.11.0] - 2025-12-24
 
 ### Added
