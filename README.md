@@ -11,33 +11,49 @@
   <a href="https://pkg.go.dev/github.com/gogpu/gg"><img src="https://pkg.go.dev/badge/github.com/gogpu/gg.svg" alt="Go Reference"></a>
   <a href="https://goreportcard.com/report/github.com/gogpu/gg"><img src="https://goreportcard.com/badge/github.com/gogpu/gg" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
-  <a href="https://github.com/gogpu/gg"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
+  <a href="https://github.com/gogpu/gg/releases"><img src="https://img.shields.io/github/v/release/gogpu/gg" alt="Latest Release"></a>
 </p>
 
 <p align="center">
-  <strong>47,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
+  <strong>Go 1.25+ Required</strong>
 </p>
 
 ---
 
-## Why gg?
+## Overview
 
-**gg** is designed to become the **reference 2D graphics library** for Go — capable of powering:
+**gg** is a professional 2D graphics library for Go, designed to power IDEs, browsers, and graphics-intensive applications. Built with modern Rust-inspired patterns from [vello](https://github.com/linebender/vello) and [tiny-skia](https://github.com/RazrFalcon/tiny-skia), it delivers enterprise-grade rendering with zero CGO dependencies.
 
-- **IDEs** (GoLand, VS Code level)
-- **Browsers** (Chrome rendering quality)
-- **Professional graphics applications**
+### Key Features
 
-### Architecture Inspired by Best-in-Class Rust Libraries
+| Category | Capabilities |
+|----------|--------------|
+| **Rendering** | Immediate & retained mode, GPU acceleration via WebGPU, CPU fallback |
+| **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
+| **Text** | TrueType fonts, MSDF rendering, emoji/COLRv1, bidirectional text, CJK |
+| **Compositing** | 29 blend modes (Porter-Duff + Advanced + HSL), layer isolation |
+| **Images** | 7 pixel formats, PNG/JPEG I/O, mipmaps, affine transforms |
+| **Performance** | Sparse strips GPU, tile-based parallel rendering, LRU caching |
 
-| Feature | Inspiration | Status |
-|---------|-------------|--------|
-| **Dual-Stream Encoding** | [vello](https://github.com/linebender/vello) | Implemented |
-| **Sparse Strips GPU** | vello 2025 | Implemented |
-| **29 Blend Modes** | vello, W3C | Implemented |
-| **Layer Compositing** | Skia, vello | Implemented |
-| **MSDF Text** | Industry standard | Implemented |
-| **Brush/Pattern System** | [tiny-skia](https://github.com/nicotine-scx/tiny-skia), [peniko](https://github.com/linebender/peniko) | Implemented |
+### Architecture Highlights
+
+```
+                         gg (Public API)
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+    Immediate Mode       Retained Mode        Resources
+    (Context API)        (Scene Graph)     (Images, Fonts)
+          │                   │                   │
+          └───────────────────┼───────────────────┘
+                              │
+                     RenderBackend Interface
+                              │
+             ┌────────────────┼────────────────┐
+             │                                 │
+        Software                             GPU
+        (CPU SIMD)                    (gogpu/wgpu WebGPU)
+```
 
 ---
 
@@ -46,8 +62,6 @@
 ```bash
 go get github.com/gogpu/gg
 ```
-
-**Requirements:** Go 1.25+
 
 ---
 
@@ -64,14 +78,16 @@ import (
 func main() {
     // Create a 512x512 context
     ctx := gg.NewContext(512, 512)
+    defer ctx.Close() // Clean resource release
+
     ctx.ClearWithColor(gg.White)
 
-    // Draw shapes
+    // Draw a gradient circle
     ctx.SetHexColor("#3498db")
     ctx.DrawCircle(256, 256, 100)
     ctx.Fill()
 
-    // Load font and draw text
+    // Text rendering with font fallback
     source, _ := text.NewFontSourceFromFile("arial.ttf")
     defer source.Close()
 
@@ -85,119 +101,125 @@ func main() {
 
 ---
 
-## Features
+## Core APIs
 
-### Core Graphics (v0.1.0+)
-- **Simple API** — Immediate-mode drawing similar to HTML Canvas
-- **Pure Go** — No CGO, cross-platform, single binary
-- **Rich Shapes** — Rectangles, circles, ellipses, arcs, Bezier curves
-- **Transformations** — Translate, rotate, scale with matrix stack
+### Immediate Mode (Context)
 
-### Text Rendering (v0.2.0+)
-- **TrueType Fonts** — Full TTF support
-- **Font Composition** — MultiFace for fallback chains
-- **Unicode Support** — FilteredFace for emoji and special ranges
-- **Zero-Allocation Iterators** — Go 1.25+ `iter.Seq[Glyph]`
-
-### GPU Text Pipeline (v0.10.0+)
-- **Pluggable Shaper** — BuiltinShaper or custom HarfBuzz-compatible
-- **Bidi/Script Segmentation** — Full Unicode Bidirectional Algorithm
-- **25+ Scripts** — Latin, Arabic, Hebrew, Han, Devanagari, Thai, etc.
-- **MSDF Text Rendering** — Sharp text at any scale (v0.11.0)
-- **Emoji Support** — COLRv1, sbix, ZWJ sequences (v0.11.0)
-- **Unicode Text Wrapping** — WrapWord, WrapChar, WrapWordChar modes (v0.13.0)
-
-### Images & Clipping (v0.3.0+)
-- **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
-- **Interpolation** — Nearest, Bilinear, Bicubic sampling
-- **Clipping** — Path-based and rectangular clipping
-- **Mipmaps** — Automatic mipmap chain generation
-
-### Compositing (v0.3.0+)
-- **Porter-Duff** — 14 blend modes (SrcOver, DstIn, Xor, etc.)
-- **Advanced Blends** — Screen, Overlay, ColorDodge, etc.
-- **HSL Blend Modes** — Hue, Saturation, Color, Luminosity (W3C spec)
-
-### Scene Graph (v0.7.0+)
-- **Dual-Stream Encoding** — GPU-ready command buffer (vello pattern)
-- **13 Shape Types** — Rect, Circle, Ellipse, Polygon, Star, etc.
-- **Filter Effects** — Gaussian blur, drop shadow, color matrix
-- **LRU Layer Cache** — 64MB default, 90ns Get / 393ns Put
-
-### Go 1.25+ Features (v0.13.0+)
-- **Path Iterators** — `iter.Seq[PathElement]`, zero-allocation (438 ns/op)
-- **Generic Cache** — `Cache[K,V]` and `ShardedCache[K,V]` in `cache/` package
-- **Context Support** — Cancellable rendering via `context.Context`
-- **Unicode Wrapping** — UAX #14 simplified line breaking with CJK support
-
-### GPU Acceleration (v0.9.0+)
-- **WGPUBackend** — Hardware acceleration via gogpu/wgpu
-- **Sparse Strips Algorithm** — CPU tessellates, GPU rasterizes (vello pattern)
-- **WGSL Shaders** — blit, blend, strip, composite
-- **GPU Memory Management** — LRU eviction, 256MB+ budget
-
----
-
-## Examples
-
-### Drawing Shapes
+Classic canvas-style drawing with transformation stack:
 
 ```go
-ctx := gg.NewContext(400, 400)
-ctx.ClearWithColor(gg.White)
+ctx := gg.NewContext(800, 600)
+defer ctx.Close()
 
-// Rectangle
+// Shapes with transforms
+ctx.Push()
+ctx.Translate(400, 300)
+ctx.Rotate(math.Pi / 4)
+ctx.DrawRectangle(-50, -50, 100, 100)
 ctx.SetRGB(0.2, 0.5, 0.8)
-ctx.DrawRectangle(50, 50, 100, 80)
 ctx.Fill()
+ctx.Pop()
 
-// Circle with stroke
-ctx.SetRGB(0.8, 0.2, 0.2)
+// Bezier paths
+ctx.MoveTo(100, 100)
+ctx.QuadraticTo(200, 50, 300, 100)
+ctx.CubicTo(350, 150, 350, 250, 300, 300)
 ctx.SetLineWidth(3)
-ctx.DrawCircle(250, 150, 60)
 ctx.Stroke()
-
-// Rounded rectangle
-ctx.SetRGBA(0.2, 0.8, 0.2, 0.7)
-ctx.DrawRoundedRectangle(150, 250, 120, 80, 15)
-ctx.Fill()
-
-ctx.SavePNG("shapes.png")
 ```
 
-### Text with Fallback
+### Fluent Path Builder
+
+Type-safe path construction with method chaining:
 
 ```go
-// Load fonts
+path := gg.BuildPath().
+    MoveTo(100, 100).
+    LineTo(200, 100).
+    QuadTo(250, 150, 200, 200).
+    CubicTo(150, 250, 100, 250, 50, 200).
+    Close().
+    Circle(300, 150, 50).
+    Star(400, 150, 40, 20, 5).
+    Build()
+
+ctx.SetPath(path)
+ctx.Fill()
+```
+
+### Retained Mode (Scene Graph)
+
+GPU-optimized scene graph for complex applications:
+
+```go
+scene := gg.NewScene()
+
+// Build scene with layers
+scene.PushLayer(gg.BlendMultiply, 0.8)
+scene.Fill(style, transform, gg.Solid(gg.Red), gg.Circle(150, 200, 100))
+scene.Fill(style, transform, gg.Solid(gg.Blue), gg.Circle(250, 200, 100))
+scene.PopLayer()
+
+// Render to pixmap
+renderer := scene.NewRenderer()
+renderer.Render(target, scene)
+```
+
+### Text Rendering
+
+Full Unicode support with bidirectional text:
+
+```go
+// Font composition with fallback
 mainFont, _ := text.NewFontSourceFromFile("Roboto.ttf")
 emojiFont, _ := text.NewFontSourceFromFile("NotoEmoji.ttf")
 defer mainFont.Close()
 defer emojiFont.Close()
 
-// Create fallback chain
 multiFace, _ := text.NewMultiFace(
     mainFont.Face(24),
     text.NewFilteredFace(emojiFont.Face(24), text.RangeEmoji),
 )
 
 ctx.SetFont(multiFace)
-ctx.SetColor(gg.Black)
-ctx.DrawString("Hello! Nice to meet you!", 50, 100)
+ctx.DrawString("Hello World! Nice day!", 50, 100)
+
+// Layout with wrapping
+opts := text.LayoutOptions{
+    MaxWidth: 400,
+    WrapMode: text.WrapWordChar,
+    Alignment: text.AlignCenter,
+}
+layout := text.LayoutText("Long text...", face, 16, opts)
+```
+
+### Alpha Masks
+
+Sophisticated compositing with alpha masks:
+
+```go
+// Create mask from current drawing
+ctx.DrawCircle(200, 200, 100)
+ctx.Fill()
+mask := ctx.AsMask()
+
+// Apply mask to new context
+ctx2 := gg.NewContext(400, 400)
+ctx2.SetMask(mask)
+ctx2.DrawRectangle(0, 0, 400, 400)
+ctx2.Fill() // Only visible through mask
+
+// Mask operations
+ctx2.InvertMask()
+ctx2.ClearMask()
 ```
 
 ### Layer Compositing
 
+29 blend modes with isolated layers:
+
 ```go
-ctx := gg.NewContext(400, 400)
-ctx.ClearWithColor(gg.White)
-
-// Draw background
-ctx.SetRGB(0.9, 0.9, 0.9)
-ctx.DrawRectangle(0, 0, 400, 400)
-ctx.Fill()
-
-// Create layer with blend mode
-ctx.PushLayer(gg.BlendMultiply, 0.8)
+ctx.PushLayer(gg.BlendOverlay, 0.7)
 
 ctx.SetRGB(1, 0, 0)
 ctx.DrawCircle(150, 200, 100)
@@ -207,10 +229,21 @@ ctx.SetRGB(0, 0, 1)
 ctx.DrawCircle(250, 200, 100)
 ctx.Fill()
 
-ctx.PopLayer()
-
-ctx.SavePNG("layers.png")
+ctx.PopLayer() // Composite with overlay blend
 ```
+
+---
+
+## Ecosystem
+
+**gg** is part of the [GoGPU](https://github.com/gogpu) ecosystem — Pure Go GPU computing libraries.
+
+| Component | Description |
+|-----------|-------------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with WebGPU, windowing, input |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation (Vulkan/Metal/DX12) |
+| [gogpu/naga](https://github.com/gogpu/naga) | WGSL shader compiler (WGSL → SPIR-V) |
+| [**gogpu/gg**](https://github.com/gogpu/gg) | **2D graphics library (this repo)** |
 
 ---
 
@@ -221,34 +254,17 @@ ctx.SavePNG("layers.png")
 | sRGB → Linear | 0.16ns | 260x faster than math.Pow |
 | LayerCache.Get | 90ns | Thread-safe LRU |
 | DirtyRegion.Mark | 10.9ns | Lock-free atomic |
-| MSDF lookup | <10ns | Atomic + HashMap |
-| Cache hit | <30ns | Lock-free read path |
+| MSDF lookup | <10ns | Zero-allocation |
+| Path iteration | 438ns | iter.Seq, 0 allocs |
 
 ---
 
-## Roadmap
+## Documentation
 
-| Version | Focus | Status |
-|---------|-------|--------|
-| v0.1.0 - v0.13.0 | Core features | Released |
-| v0.14.0 | Advanced Features (Masks, PathBuilder) | Planned |
-| v0.15.0 | Documentation & RC | Planned |
-| v1.0.0 | Production Release | Target |
-
-See [ROADMAP.md](ROADMAP.md) for detailed plans.
-
----
-
-## Part of GoGPU Ecosystem
-
-**gogpu** is a Pure Go GPU Computing Ecosystem — professional graphics libraries for Go.
-
-| Component | Description | Version |
-|-----------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.7.0 |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.6.0 |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.5.0 |
-| **gogpu/gg** | **2D graphics** | **v0.13.0** |
+- **[ROADMAP.md](ROADMAP.md)** — Development roadmap and version history
+- **[CHANGELOG.md](CHANGELOG.md)** — Detailed release notes
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/gg)** — API reference
 
 ---
 

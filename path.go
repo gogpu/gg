@@ -116,6 +116,12 @@ func (p *Path) CurrentPoint() Point {
 	return p.current
 }
 
+// HasCurrentPoint returns true if the path has a current point.
+// A path has a current point after MoveTo, LineTo, or any curve operation.
+func (p *Path) HasCurrentPoint() bool {
+	return len(p.elements) > 0
+}
+
 // Transform applies a transformation matrix to all points in the path.
 func (p *Path) Transform(m Matrix) *Path {
 	result := NewPath()
@@ -245,4 +251,14 @@ func (p *Path) RoundedRectangle(x, y, w, h, r float64) {
 	p.LineTo(x, y+r)
 	p.Arc(x+r, y+r, r, math.Pi, 3*math.Pi/2)
 	p.Close()
+}
+
+// Clone creates a deep copy of the path.
+func (p *Path) Clone() *Path {
+	result := NewPath()
+	result.elements = make([]PathElement, len(p.elements))
+	copy(result.elements, p.elements)
+	result.start = p.start
+	result.current = p.current
+	return result
 }
