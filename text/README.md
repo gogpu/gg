@@ -1,6 +1,6 @@
 # text — GPU Text Pipeline for gg
 
-**Status:** v0.11.0 (Released)
+**Status:** v0.13.0 (Released)
 
 This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2, go-text/typesetting, and vello.
 
@@ -35,11 +35,17 @@ Bidi/Script  Cache    Lines    ┌────┴────┐
 - **Full Unicode Bidi Algorithm** — Via golang.org/x/text/unicode/bidi
 - **Script inheritance** — Common/Inherited characters resolved from context
 
-### Multi-line Layout (v0.10.0)
+### Multi-line Layout (v0.10.0+)
 - **Alignment** — Left, Center, Right, Justify (placeholder)
 - **Line wrapping** — At MaxWidth with word boundaries
 - **Line spacing** — Configurable multiplier
 - **Bidi-aware** — Proper RTL/LTR segment ordering
+
+### Unicode Text Wrapping (v0.13.0)
+- **WrapMode enum** — WrapWordChar (default), WrapNone, WrapWord, WrapChar
+- **UAX #14 simplified** — Break classification (Space, Zero, Open, Close, Hyphen, Ideographic)
+- **CJK support** — Break opportunities at ideograph boundaries
+- **Performance** — 1,185 ns/op FindBreakOpportunities, 0 allocs
 
 ### Shaping Cache (v0.10.0)
 - **16-shard LRU** — Concurrent access without lock contention
@@ -100,6 +106,7 @@ opts := text.LayoutOptions{
     LineSpacing: 1.2,
     Alignment:   text.AlignCenter,
     Direction:   text.DirectionLTR,
+    WrapMode:    text.WrapWordChar, // Word-first, char fallback (default)
 }
 layout := text.LayoutText(longText, face, 16, opts)
 
@@ -111,6 +118,34 @@ for _, line := range layout.Lines {
 
 // Simple layout (no wrapping)
 layout = text.LayoutTextSimple("Hello\nWorld", face, 16)
+```
+
+### Text Wrapping Modes
+
+```go
+// WrapWordChar (default) — Word boundaries first, character fallback for long words
+opts := text.LayoutOptions{
+    MaxWidth: 200,
+    WrapMode: text.WrapWordChar,
+}
+
+// WrapWord — Word boundaries only, long words overflow
+opts.WrapMode = text.WrapWord
+
+// WrapChar — Character boundaries, any character can break
+opts.WrapMode = text.WrapChar
+
+// WrapNone — No wrapping, text may exceed MaxWidth
+opts.WrapMode = text.WrapNone
+
+// Standalone wrapping API
+results := text.WrapText("Hello World", face, 16, 100, text.WrapWordChar)
+for _, r := range results {
+    fmt.Printf("Line: '%s' (%d-%d)\n", r.Text, r.Start, r.End)
+}
+
+// Measure text width
+width := text.MeasureText("Hello World", face, 16)
 ```
 
 ### Custom Shaper
@@ -208,7 +243,15 @@ Emoji and color font support.
 
 ## Versions
 
-### v0.11.0 (Current)
+### v0.13.0 (Current)
+- [x] **WrapMode enum** — WrapWordChar, WrapNone, WrapWord, WrapChar
+- [x] **BreakClass** — UAX #14 simplified line breaking
+- [x] **WrapText()** — Standalone wrapping API
+- [x] **MeasureText()** — Measure text advance width
+- [x] **CJK support** — Ideograph break opportunities
+- [x] **context.Context** — LayoutTextWithContext() cancellation
+
+### v0.11.0
 - [x] Glyph-as-Path rendering (OutlineExtractor)
 - [x] GlyphCache LRU (16-shard, <50ns hit)
 - [x] MSDF generator (Pure Go)

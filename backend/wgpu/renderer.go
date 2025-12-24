@@ -1,6 +1,7 @@
 package wgpu
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -161,9 +162,27 @@ func NewGPUSceneRenderer(backend *WGPUBackend, config GPUSceneRendererConfig) (*
 
 // RenderScene renders a complete scene to the internal target texture.
 // After rendering, use DownloadPixmap to retrieve the result.
+//
+// For cancellable rendering, use RenderSceneWithContext.
 func (r *GPUSceneRenderer) RenderScene(s *scene.Scene) error {
+	return r.RenderSceneWithContext(context.Background(), s)
+}
+
+// RenderSceneWithContext renders a complete scene to the internal target texture
+// with cancellation support.
+//
+// The context can be used to cancel long-running renders. When canceled,
+// the function returns ctx.Err() and the texture may contain partial results.
+func (r *GPUSceneRenderer) RenderSceneWithContext(ctx context.Context, s *scene.Scene) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Check for cancellation at start
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	if r.closed {
 		return ErrRendererClosed
@@ -179,6 +198,13 @@ func (r *GPUSceneRenderer) RenderScene(s *scene.Scene) error {
 		return ErrEmptyScene
 	}
 
+	// Check for cancellation after encoding
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Clear target texture
 	r.clearTexture(r.targetTex)
 
@@ -187,17 +213,35 @@ func (r *GPUSceneRenderer) RenderScene(s *scene.Scene) error {
 	r.layerStack = r.layerStack[:0]
 	r.clipStack = r.clipStack[:0]
 
-	// Create decoder and process commands
+	// Create decoder and process commands with context
 	decoder := scene.NewDecoder(enc)
 
-	return r.processCommands(decoder)
+	return r.processCommandsWithContext(ctx, decoder)
 }
 
 // RenderToPixmap renders a scene directly to a pixmap.
 // This is a convenience method that renders and downloads in one call.
+//
+// For cancellable rendering, use RenderToPixmapWithContext.
 func (r *GPUSceneRenderer) RenderToPixmap(target *gg.Pixmap, s *scene.Scene) error {
+	return r.RenderToPixmapWithContext(context.Background(), target, s)
+}
+
+// RenderToPixmapWithContext renders a scene directly to a pixmap with cancellation support.
+// This is a convenience method that renders and downloads in one call.
+//
+// The context can be used to cancel long-running renders. When canceled,
+// the function returns ctx.Err() and the target may contain partial results.
+func (r *GPUSceneRenderer) RenderToPixmapWithContext(ctx context.Context, target *gg.Pixmap, s *scene.Scene) error {
 	if target == nil {
 		return ErrNilTarget
+	}
+
+	// Check for cancellation at start
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	// Check dimensions match
@@ -206,9 +250,16 @@ func (r *GPUSceneRenderer) RenderToPixmap(target *gg.Pixmap, s *scene.Scene) err
 			ErrTextureSizeMismatch, r.width, r.height, target.Width(), target.Height())
 	}
 
-	// Render scene
-	if err := r.RenderScene(s); err != nil {
+	// Render scene with context
+	if err := r.RenderSceneWithContext(ctx, s); err != nil {
 		return err
+	}
+
+	// Check for cancellation before download
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	// Download result
@@ -295,11 +346,24 @@ func (cp *commandProcessor) processClipCommand(tag scene.Tag) {
 	}
 }
 
-// processCommands processes all commands from the decoder.
-func (r *GPUSceneRenderer) processCommands(dec *scene.Decoder) error {
+// processCommandsWithContext processes all commands from the decoder with cancellation support.
+func (r *GPUSceneRenderer) processCommandsWithContext(ctx context.Context, dec *scene.Decoder) error {
 	cp := &commandProcessor{r: r}
 
+	// Check context less frequently for performance (every 16 commands)
+	cmdCount := 0
+
 	for dec.Next() {
+		// Check for cancellation periodically
+		cmdCount++
+		if cmdCount%16 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
 		tag := dec.Tag()
 
 		switch {
@@ -319,6 +383,13 @@ func (r *GPUSceneRenderer) processCommands(dec *scene.Decoder) error {
 			imageIdx, transform := dec.Image()
 			r.renderImage(imageIdx, transform)
 		}
+	}
+
+	// Check for cancellation before final composite
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	// Composite final result

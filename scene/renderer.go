@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"time"
@@ -138,9 +139,27 @@ func NewRenderer(width, height int, opts ...RendererOption) *Renderer {
 
 // Render renders the entire scene to the target pixmap.
 // This processes all tiles regardless of dirty state.
+//
+// For cancellable rendering, use RenderWithContext.
 func (r *Renderer) Render(target *gg.Pixmap, scene *Scene) error {
+	return r.RenderWithContext(context.Background(), target, scene)
+}
+
+// RenderWithContext renders the entire scene to the target pixmap with cancellation support.
+// This processes all tiles regardless of dirty state.
+//
+// The context can be used to cancel long-running renders. When canceled,
+// the function returns ctx.Err() and the target may contain partial results.
+func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, scene *Scene) error {
 	if target == nil || scene == nil {
 		return nil
+	}
+
+	// Check for cancellation at start
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	startTotal := time.Now()
@@ -156,14 +175,30 @@ func (r *Renderer) Render(target *gg.Pixmap, scene *Scene) error {
 	enc := scene.Encoding()
 	encodeTime := time.Since(startEncode)
 
+	// Check for cancellation after encoding
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Get all tiles for rendering
 	tiles := r.tileGrid.AllTiles()
 	tilesTotal := len(tiles)
 
-	// Render tiles in parallel
+	// Render tiles in parallel with context
 	startRaster := time.Now()
-	r.renderTiles(tiles, enc, target)
+	if err := r.renderTilesWithContext(ctx, tiles, enc, target); err != nil {
+		return err
+	}
 	rasterTime := time.Since(startRaster)
+
+	// Check for cancellation before compositing
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	// Composite tiles to target
 	startComposite := time.Now()
@@ -184,9 +219,28 @@ func (r *Renderer) Render(target *gg.Pixmap, scene *Scene) error {
 // RenderDirty renders only the dirty regions of the scene.
 // This is more efficient when only parts of the scene have changed.
 // The dirty parameter specifies which tiles need re-rendering.
+//
+// For cancellable rendering, use RenderDirtyWithContext.
 func (r *Renderer) RenderDirty(target *gg.Pixmap, scene *Scene, dirty *parallel.DirtyRegion) error {
+	return r.RenderDirtyWithContext(context.Background(), target, scene, dirty)
+}
+
+// RenderDirtyWithContext renders only the dirty regions of the scene with cancellation support.
+// This is more efficient when only parts of the scene have changed.
+// The dirty parameter specifies which tiles need re-rendering.
+//
+// The context can be used to cancel long-running renders. When canceled,
+// the function returns ctx.Err() and the target may contain partial results.
+func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap, scene *Scene, dirty *parallel.DirtyRegion) error {
 	if target == nil || scene == nil {
 		return nil
+	}
+
+	// Check for cancellation at start
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
 	}
 
 	startTotal := time.Now()
@@ -205,6 +259,13 @@ func (r *Renderer) RenderDirty(target *gg.Pixmap, scene *Scene, dirty *parallel.
 	enc := scene.Encoding()
 	encodeTime := time.Since(startEncode)
 
+	// Check for cancellation after encoding
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	// Get dirty tile coordinates
 	dirtyCoords := dirtyRegion.GetAndClear()
 	tilesDirty := len(dirtyCoords)
@@ -221,10 +282,19 @@ func (r *Renderer) RenderDirty(target *gg.Pixmap, scene *Scene, dirty *parallel.
 		}
 	}
 
-	// Render dirty tiles in parallel
+	// Render dirty tiles in parallel with context
 	startRaster := time.Now()
-	r.renderTiles(tiles, enc, target)
+	if err := r.renderTilesWithContext(ctx, tiles, enc, target); err != nil {
+		return err
+	}
 	rasterTime := time.Since(startRaster)
+
+	// Check for cancellation before compositing
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
 	// Composite dirty tiles to target
 	startComposite := time.Now()
@@ -239,21 +309,52 @@ func (r *Renderer) RenderDirty(target *gg.Pixmap, scene *Scene, dirty *parallel.
 	return nil
 }
 
-// renderTiles renders the scene encoding to the specified tiles in parallel.
-func (r *Renderer) renderTiles(tiles []*parallel.Tile, enc *Encoding, target *gg.Pixmap) {
+// renderTilesWithContext renders the scene encoding to the specified tiles in parallel
+// with cancellation support.
+func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel.Tile, enc *Encoding, target *gg.Pixmap) error {
 	if len(tiles) == 0 || enc == nil || enc.IsEmpty() {
-		return
+		return nil
+	}
+
+	// Check for cancellation before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// For small tile counts, check context less frequently
+	checkInterval := 1
+	if len(tiles) > 16 {
+		checkInterval = len(tiles) / 16
 	}
 
 	work := make([]func(), len(tiles))
 	for i, tile := range tiles {
 		t := tile
+		idx := i
 		work[i] = func() {
+			// Check for cancellation periodically
+			if idx%checkInterval == 0 {
+				select {
+				case <-ctx.Done():
+					return // Stop processing on cancellation
+				default:
+				}
+			}
 			r.renderTile(t, enc, target)
 		}
 	}
 
 	r.workerPool.ExecuteAll(work)
+
+	// Check if context was canceled during execution
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
 }
 
 // renderTile renders the scene encoding to a single tile.

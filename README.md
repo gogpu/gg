@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong>46,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
+  <strong>47,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
 </p>
 
 ---
@@ -105,6 +105,7 @@ func main() {
 - **25+ Scripts** — Latin, Arabic, Hebrew, Han, Devanagari, Thai, etc.
 - **MSDF Text Rendering** — Sharp text at any scale (v0.11.0)
 - **Emoji Support** — COLRv1, sbix, ZWJ sequences (v0.11.0)
+- **Unicode Text Wrapping** — WrapWord, WrapChar, WrapWordChar modes (v0.13.0)
 
 ### Images & Clipping (v0.3.0+)
 - **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
@@ -122,6 +123,12 @@ func main() {
 - **13 Shape Types** — Rect, Circle, Ellipse, Polygon, Star, etc.
 - **Filter Effects** — Gaussian blur, drop shadow, color matrix
 - **LRU Layer Cache** — 64MB default, 90ns Get / 393ns Put
+
+### Go 1.25+ Features (v0.13.0+)
+- **Path Iterators** — `iter.Seq[PathElement]`, zero-allocation (438 ns/op)
+- **Generic Cache** — `Cache[K,V]` and `ShardedCache[K,V]` in `cache/` package
+- **Context Support** — Cancellable rendering via `context.Context`
+- **Unicode Wrapping** — UAX #14 simplified line breaking with CJK support
 
 ### GPU Acceleration (v0.9.0+)
 - **WGPUBackend** — Hardware acceleration via gogpu/wgpu
@@ -223,8 +230,7 @@ ctx.SavePNG("layers.png")
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v0.1.0 - v0.12.0 | Core features | Released |
-| v0.13.0 | Go 1.25+ (context.Context, Generics) | Planned |
+| v0.1.0 - v0.13.0 | Core features | Released |
 | v0.14.0 | Advanced Features (Masks, PathBuilder) | Planned |
 | v0.15.0 | Documentation & RC | Planned |
 | v1.0.0 | Production Release | Target |
@@ -242,7 +248,7 @@ See [ROADMAP.md](ROADMAP.md) for detailed plans.
 | [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.6.1 |
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.6.0 |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.5.0 |
-| **gogpu/gg** | **2D graphics** | **v0.12.0** |
+| **gogpu/gg** | **2D graphics** | **v0.13.0** |
 
 ---
 
