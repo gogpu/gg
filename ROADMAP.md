@@ -28,9 +28,9 @@
 
 ---
 
-## Current State: v0.12.0
+## Current State: v0.13.0
 
-**46,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
+**47,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
 
 | Version | Focus |
 |---------|-------|
@@ -45,7 +45,8 @@
 | v0.9.0 | GPU Backend |
 | v0.10.0 | Text Pipeline |
 | v0.11.0 | MSDF, Emoji |
-| **v0.12.0** | **Brush, Gradients, Stroke** |
+| v0.12.0 | Brush, Gradients, Stroke |
+| **v0.13.0** | **Go 1.25+ Modernization** |
 
 ---
 
@@ -80,7 +81,7 @@ ctx.Fill()
 
 ### v0.13.0 — Go 1.25+ Modernization
 
-**Status:** Planned | **Target:** Q1 2025
+**Status:** Released | **Date:** 2025-12-24
 
 Full adoption of Go 1.25+ features for modern, idiomatic API.
 
@@ -88,8 +89,8 @@ Full adoption of Go 1.25+ features for modern, idiomatic API.
 |---------|-------------|
 | **context.Context** | Cancellation for long operations |
 | **Generic Cache** | `Cache[K, V]` type-safe caching |
-| **iter.Seq** | Shape interface with iterator protocol |
-| **Text Wrapping** | Word-wrap with configurable break points |
+| **iter.Seq** | Path iterators with zero allocation |
+| **Text Wrapping** | UAX #14 line breaking with CJK support |
 
 ```go
 // Context support
@@ -98,11 +99,17 @@ defer cancel()
 err := renderer.RenderWithContext(ctx, scene) // Cancellable!
 
 // Generic cache
-cache := gg.NewCache[string, *gg.Texture](100)
+cache := cache.New[string, *Texture](1024, 2048)
 
-// Iterator-based shapes
+// Iterator-based paths
 for elem := range path.Elements() {
     // Process path elements
+}
+
+// Unicode-aware text wrapping
+opts := text.LayoutOptions{
+    MaxWidth: 400,
+    WrapMode: text.WrapWordChar, // Word-first, char fallback
 }
 ```
 
@@ -191,6 +198,7 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
+| **v0.13.0** | **2025-12-24** | **Go 1.25+: Iterators, Cache, Context, Wrapping** | **+1,700** |
 | v0.12.0 | 2025-12-24 | Brush, Gradients, Stroke, Dash | +4,337 |
 | v0.11.0 | 2025-12-24 | MSDF, Emoji, Subpixel text | +16,200 |
 | v0.10.0 | 2025-12-24 | GPU Text Pipeline | +2,500 |

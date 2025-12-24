@@ -1,11 +1,8 @@
-package text
+package cache
 
 import "sync"
 
 // Cache is a generic thread-safe LRU cache with soft limit.
-//
-// Deprecated: For new code, use github.com/gogpu/gg/cache.Cache or
-// cache.ShardedCache which offer better performance and more features.
 // When the cache exceeds softLimit, oldest entries are evicted.
 //
 // Cache is safe for concurrent use.
@@ -23,9 +20,9 @@ type cacheEntry[V any] struct {
 	atime int64 // Access time (tick value)
 }
 
-// NewCache creates a new cache with the given soft limit.
+// New creates a new cache with the given soft limit.
 // A softLimit of 0 means unlimited.
-func NewCache[K comparable, V any](softLimit int) *Cache[K, V] {
+func New[K comparable, V any](softLimit int) *Cache[K, V] {
 	return &Cache[K, V]{
 		entries:   make(map[K]*cacheEntry[V]),
 		softLimit: softLimit,
@@ -102,6 +99,19 @@ func (c *Cache[K, V]) GetOrCreate(key K, create func() V) V {
 	return value
 }
 
+// Delete removes an entry from the cache.
+// Returns true if the entry was found and removed.
+func (c *Cache[K, V]) Delete(key K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.entries[key]; ok {
+		delete(c.entries, key)
+		return true
+	}
+	return false
+}
+
 // Clear removes all entries from the cache.
 func (c *Cache[K, V]) Clear() {
 	c.mu.Lock()
@@ -117,6 +127,22 @@ func (c *Cache[K, V]) Len() int {
 	defer c.mu.Unlock()
 
 	return len(c.entries)
+}
+
+// Capacity returns the soft limit of the cache.
+func (c *Cache[K, V]) Capacity() int {
+	return c.softLimit
+}
+
+// Stats returns cache statistics.
+func (c *Cache[K, V]) Stats() Stats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return Stats{
+		Len:      len(c.entries),
+		Capacity: c.softLimit,
+	}
 }
 
 // evictOldest removes entries until under softLimit.
@@ -146,30 +172,35 @@ func (c *Cache[K, V]) evictOldest() {
 	}
 
 	// Sort by access time (oldest first)
-	// Simple bubble sort for small slices, good enough for eviction
-	for i := 0; i < len(entries)-1; i++ {
-		for j := 0; j < len(entries)-i-1; j++ {
-			if entries[j].atime > entries[j+1].atime {
-				entries[j], entries[j+1] = entries[j+1], entries[j]
+	// Simple selection sort for eviction - good enough for small batches
+	for i := 0; i < toEvict && i < len(entries); i++ {
+		minIdx := i
+		for j := i + 1; j < len(entries); j++ {
+			if entries[j].atime < entries[minIdx].atime {
+				minIdx = j
 			}
 		}
-	}
-
-	// Evict oldest entries
-	for i := 0; i < toEvict && i < len(entries); i++ {
+		if minIdx != i {
+			entries[i], entries[minIdx] = entries[minIdx], entries[i]
+		}
 		delete(c.entries, entries[i].key)
 	}
 }
 
-// ShapingKey identifies shaped text in the shaping cache.
-type ShapingKey struct {
-	Text      string
-	Size      float64
-	Direction Direction
-}
-
-// GlyphKey identifies a rasterized glyph in the glyph cache.
-type GlyphKey struct {
-	GID  GlyphID
-	Size float64
+// Stats contains cache statistics.
+type Stats struct {
+	// Len is the current number of entries.
+	Len int
+	// Capacity is the cache capacity (soft limit, or per-shard for ShardedCache).
+	Capacity int
+	// TotalCapacity is the total capacity across all shards (ShardedCache only).
+	TotalCapacity int
+	// Hits is the number of cache hits (ShardedCache only).
+	Hits uint64
+	// Misses is the number of cache misses (ShardedCache only).
+	Misses uint64
+	// HitRate is the cache hit rate 0.0 to 1.0 (ShardedCache only).
+	HitRate float64
+	// Evictions is the number of evicted entries (ShardedCache only).
+	Evictions uint64
 }

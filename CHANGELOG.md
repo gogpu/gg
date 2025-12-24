@@ -12,6 +12,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.13.0] - 2025-12-24
+
+### Added
+
+#### Go 1.25+ Modernization
+
+**Path Iterators (TASK-117c)**
+- **Path.Elements()** — `iter.Seq[PathElement]` for path iteration
+- **Path.ElementsWithCursor()** — `iter.Seq2[PathElement, Point]` with cursor position
+- **PathElement** — Typed element with MoveTo, LineTo, QuadTo, CubicTo, Close
+- **Zero-allocation** — 438 ns/op, 0 B/op benchmarks
+
+**Generic Cache Package (TASK-117b)**
+- **cache/** — New top-level package extracted from text/cache
+- **Cache[K, V]** — Thread-safe LRU cache with soft limit eviction
+- **ShardedCache[K, V]** — 16-shard cache for reduced lock contention
+- **Hasher functions** — StringHasher, IntHasher, Uint64Hasher for shard selection
+- **Atomic statistics** — Zero-allocation stat reads via atomic.Uint64
+- **Performance** — GetHit: 23ns, Put: 34ns, 0 allocs/op
+
+**Context Support (TASK-117a)**
+- **scene/Renderer** — `RenderWithContext()`, `RenderDirtyWithContext()`
+- **backend/wgpu** — `RenderSceneWithContext()`, `RenderToPixmapWithContext()`
+- **text/Layout** — `LayoutTextWithContext()` with cancellation
+- **Periodic checks** — Every 8 paragraphs, 32 tiles for responsive cancellation
+
+**Unicode-Aware Text Wrapping (TASK-117d)**
+- **WrapMode enum** — WrapWordChar (default), WrapNone, WrapWord, WrapChar
+- **BreakClass** — UAX #14 simplified line breaking (Space, Zero, Open, Close, Hyphen, Ideographic)
+- **WrapText()** — Wrap text to fit maxWidth with specified mode
+- **MeasureText()** — Measure total advance width
+- **LayoutOptions.WrapMode** — Integration with layout engine
+- **CJK support** — Break opportunities at ideograph boundaries
+- **Performance** — FindBreakOpportunities: 1,185 ns/op, ClassifyRune: 174 ns/op, 0 allocs
+
+### Changed
+
+- **DefaultLayoutOptions()** — WrapMode defaults to WrapWordChar for backward compatibility
+- **text/cache.go** — Marked as deprecated in favor of cache/ package
+
+### Statistics
+
+- **~1,700 LOC added** across 15 files
+- **87.6% test coverage** maintained
+- **0 linter issues**
+- **Fully backward compatible** — No breaking changes
+
 ## [0.12.0] - 2025-12-24
 
 ### Added
@@ -674,7 +721,11 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/gogpu/gg/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/gogpu/gg/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/gogpu/gg/compare/v0.10.1...v0.11.0
+[0.10.1]: https://github.com/gogpu/gg/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/gogpu/gg/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/gogpu/gg/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/gg/compare/v0.8.0...v0.9.0
