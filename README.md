@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Enterprise-Grade 2D Graphics Library for Go</strong><br>
-  Professional rendering • Pure Go • Part of GoGPU Ecosystem
+  Pure Go | GPU Accelerated | Rust-Inspired Architecture
 </p>
 
 <p align="center">
@@ -14,123 +14,30 @@
   <a href="https://github.com/gogpu/gg"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
 </p>
 
+<p align="center">
+  <strong>42,000+ LOC</strong> | <strong>87.6% Coverage</strong> | <strong>0 Linter Issues</strong>
+</p>
+
 ---
 
-## Vision
+## Why gg?
 
-**gg** is designed to become the **reference 2D graphics library** for the Go ecosystem — capable of powering:
+**gg** is designed to become the **reference 2D graphics library** for Go — capable of powering:
 
-- **IDEs** (GoLAND, VS Code level)
-- **Browsers** (Chrome level)
+- **IDEs** (GoLand, VS Code level)
+- **Browsers** (Chrome rendering quality)
 - **Professional graphics applications**
 
-Inspired by [fogleman/gg](https://github.com/fogleman/gg), [tiny-skia](https://github.com/nicotine-scx/tiny-skia), and [vello](https://github.com/linebender/vello).
+### Architecture Inspired by Best-in-Class Rust Libraries
 
----
-
-## Current: v0.11.0
-
-> **GPU Text Rendering Phase 2 — MSDF, Emoji, Subpixel positioning!**
->
-> **Star the repo to follow progress!**
-
----
-
-## Features
-
-### Core Graphics
-- **Simple API** — Immediate-mode drawing API similar to HTML Canvas
-- **Pure Go** — No C dependencies, cross-platform
-- **Rich Shapes** — Rectangles, circles, ellipses, arcs, Bezier curves
-- **Path Operations** — MoveTo, LineTo, QuadraticTo, CubicTo
-- **Transformations** — Translate, rotate, scale with matrix stack
-- **Colors** — RGBA, hex parsing, named colors
-
-### Text Rendering (v0.2.0+)
-- **TrueType Fonts** — Full TTF support via golang.org/x/image
-- **Font Composition** — MultiFace for fallback chains
-- **Unicode Support** — FilteredFace for emoji and special ranges
-- **Zero-Allocation Iterators** — Go 1.25+ iter.Seq[Glyph]
-
-### GPU Text Pipeline (v0.10.0)
-- **Pluggable Shaper** — BuiltinShaper or custom HarfBuzz-compatible
-- **Bidi/Script Segmentation** — Full Unicode Bidirectional Algorithm
-- **25+ Scripts** — Latin, Arabic, Hebrew, Han, Devanagari, Thai, etc.
-- **Multi-line Layout** — Alignment, word wrapping, line spacing
-- **Sharded LRU Cache** — 16-shard concurrent cache (93.7% coverage)
-
-### Images (v0.3.0)
-- **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
-- **DrawImage** — Draw images with position, transforms, opacity
-- **Interpolation** — Nearest, Bilinear, Bicubic sampling
-- **Patterns** — Image patterns for fills with repeat modes
-- **Mipmaps** — Automatic mipmap chain generation
-
-### Clipping (v0.3.0)
-- **Clip()** — Clip to current path
-- **ClipRect()** — Fast rectangular clipping
-- **ClipPreserve()** — Clip keeping path for stroke
-- **Hierarchical** — Push/Pop state preserves clip regions
-
-### Compositing (v0.3.0)
-- **Porter-Duff** — 14 blend modes (SrcOver, DstIn, Xor, etc.)
-- **Advanced Blends** — Screen, Overlay, Darken, Lighten, ColorDodge, etc.
-
-### Color Pipeline & Layers (v0.4.0)
-- **Layer API** — PushLayer/PopLayer for isolated drawing with blend modes
-- **HSL Blend Modes** — Hue, Saturation, Color, Luminosity (W3C spec)
-- **Linear Blending** — Correct sRGB ↔ Linear color space pipeline
-- **ColorSpace Package** — ColorF32/ColorU8 types with conversions
-
-### SIMD Optimization (v0.5.0)
-- **Fast div255** — Shift approximation, no division (2.4x faster)
-- **sRGB LUTs** — Pre-computed lookup tables (260x faster than math.Pow)
-- **Wide Types** — U16x16/F32x8 for batch processing (16 pixels at once)
-- **Batch Blending** — All 14 Porter-Duff modes + 7 advanced modes
-- **Auto-vectorization** — Fixed-size arrays trigger Go compiler SIMD
-- **FillSpan** — Optimized span filling for rasterizer integration
-
-### Parallel Rendering (v0.6.0)
-- **TileGrid** — Canvas divided into 64x64 pixel tiles for independent rendering
-- **WorkerPool** — Goroutine pool with work stealing for load balancing
-- **ParallelRasterizer** — Clear, FillRect, Composite operations across tiles
-- **Lock-Free DirtyRegion** — Atomic bitmap tracking for changed tiles (10.9ns/mark)
-- **Visual Regression Tests** — Pixel-perfect comparison of parallel vs serial
-- **Scaling Benchmarks** — Linear scaling with 1, 2, 4, 8+ cores
-
-### Scene Graph (v0.7.0)
-- **Dual-Stream Encoding** — GPU-ready command buffer (vello pattern)
-- **Scene API** — Fill, Stroke, PushLayer, PopLayer, PushClip, transforms
-- **13 Shape Types** — Rect, Circle, Ellipse, Line, Polygon, RoundedRect...
-- **29 Blend Modes** — 14 Porter-Duff + 11 Advanced + 4 HSL
-- **Filter Effects** — Gaussian blur, drop shadow, color matrix (10 presets)
-- **LRU Layer Cache** — 64MB default, configurable, 90ns Get / 393ns Put
-- **SceneBuilder** — Fluent API for ergonomic scene construction
-- **Parallel Renderer** — TileGrid + WorkerPool integration
-
-### Backend Abstraction (v0.8.0)
-- **RenderBackend Interface** — Pluggable rendering backends
-- **SoftwareBackend** — CPU-based rendering (default)
-- **Backend Registry** — Auto-selection with priority (wgpu > software)
-- **Fallback Mechanism** — Graceful degradation when GPU unavailable
-
-### GPU Backend (v0.9.0)
-- **WGPUBackend** — Hardware acceleration via gogpu/wgpu integration
-- **Sparse Strips Algorithm** — CPU tessellates paths to strips, GPU rasterizes (vello pattern)
-- **GPU Memory Management** — LRU eviction, 256MB+ budget, texture atlas with shelf packing
-- **WGSL Shaders** — 4 compute/fragment shaders (blit, blend, strip, composite)
-- **29 Blend Modes** — All Porter-Duff + Advanced + HSL modes on GPU
-- **Render Pipeline** — PipelineCache, GPUSceneRenderer, CommandEncoder pattern
-- **9,930 LOC** — Complete GPU rendering infrastructure
-
-### GPU Text Rendering (v0.11.0)
-- **Glyph-as-Path** — Vector text through sparse strips pipeline (vello pattern)
-- **GlyphCache** — 16-shard LRU with 64-frame lifetime (<50ns cache hit)
-- **MSDF Generator** — Pure Go multi-channel signed distance field
-- **MSDF Atlas** — Shelf packing, LRU eviction, GPU upload tracking
-- **Emoji Support** — COLRv1/sbix/CBDT, ZWJ sequences, flags, skin tones
-- **Subpixel Positioning** — 4 or 10 subpixel levels for sharp text
-- **WGSL Text Shader** — Anti-aliased GPU text with outline/shadow effects
+| Feature | Inspiration | Status |
+|---------|-------------|--------|
+| **Dual-Stream Encoding** | [vello](https://github.com/linebender/vello) | Implemented |
+| **Sparse Strips GPU** | vello 2025 | Implemented |
+| **29 Blend Modes** | vello, W3C | Implemented |
+| **Layer Compositing** | Skia, vello | Implemented |
+| **MSDF Text** | Industry standard | Implemented |
+| **Brush/Pattern System** | [tiny-skia](https://github.com/nicotine-scx/tiny-skia), [peniko](https://github.com/linebender/peniko) | Implementing |
 
 ---
 
@@ -160,7 +67,7 @@ func main() {
     ctx.ClearWithColor(gg.White)
 
     // Draw shapes
-    ctx.SetColor(gg.Hex("#3498db"))
+    ctx.SetHexColor("#3498db")
     ctx.DrawCircle(256, 256, 100)
     ctx.Fill()
 
@@ -178,118 +85,152 @@ func main() {
 
 ---
 
-## Image Drawing
+## Features
 
-```go
-// Load image
-img, _ := gg.LoadImage("photo.png")
+### Core Graphics (v0.1.0+)
+- **Simple API** — Immediate-mode drawing similar to HTML Canvas
+- **Pure Go** — No CGO, cross-platform, single binary
+- **Rich Shapes** — Rectangles, circles, ellipses, arcs, Bezier curves
+- **Transformations** — Translate, rotate, scale with matrix stack
 
-// Draw at position
-ctx.DrawImage(img, 100, 100)
+### Text Rendering (v0.2.0+)
+- **TrueType Fonts** — Full TTF support
+- **Font Composition** — MultiFace for fallback chains
+- **Unicode Support** — FilteredFace for emoji and special ranges
+- **Zero-Allocation Iterators** — Go 1.25+ `iter.Seq[Glyph]`
 
-// Draw with options
-ctx.DrawImageEx(img, gg.DrawImageOptions{
-    X:       200,
-    Y:       200,
-    ScaleX:  0.5,
-    ScaleY:  0.5,
-    Opacity: 0.8,
-})
-```
+### GPU Text Pipeline (v0.10.0+)
+- **Pluggable Shaper** — BuiltinShaper or custom HarfBuzz-compatible
+- **Bidi/Script Segmentation** — Full Unicode Bidirectional Algorithm
+- **25+ Scripts** — Latin, Arabic, Hebrew, Han, Devanagari, Thai, etc.
+- **MSDF Text Rendering** — Sharp text at any scale (v0.11.0)
+- **Emoji Support** — COLRv1, sbix, ZWJ sequences (v0.11.0)
+
+### Images & Clipping (v0.3.0+)
+- **7 Pixel Formats** — Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul
+- **Interpolation** — Nearest, Bilinear, Bicubic sampling
+- **Clipping** — Path-based and rectangular clipping
+- **Mipmaps** — Automatic mipmap chain generation
+
+### Compositing (v0.3.0+)
+- **Porter-Duff** — 14 blend modes (SrcOver, DstIn, Xor, etc.)
+- **Advanced Blends** — Screen, Overlay, ColorDodge, etc.
+- **HSL Blend Modes** — Hue, Saturation, Color, Luminosity (W3C spec)
+
+### Scene Graph (v0.7.0+)
+- **Dual-Stream Encoding** — GPU-ready command buffer (vello pattern)
+- **13 Shape Types** — Rect, Circle, Ellipse, Polygon, Star, etc.
+- **Filter Effects** — Gaussian blur, drop shadow, color matrix
+- **LRU Layer Cache** — 64MB default, 90ns Get / 393ns Put
+
+### GPU Acceleration (v0.9.0+)
+- **WGPUBackend** — Hardware acceleration via gogpu/wgpu
+- **Sparse Strips Algorithm** — CPU tessellates, GPU rasterizes (vello pattern)
+- **WGSL Shaders** — blit, blend, strip, composite
+- **GPU Memory Management** — LRU eviction, 256MB+ budget
 
 ---
 
-## Clipping
+## Examples
+
+### Drawing Shapes
 
 ```go
-// Clip to circle
-ctx.DrawCircle(256, 256, 100)
-ctx.Clip()
+ctx := gg.NewContext(400, 400)
+ctx.ClearWithColor(gg.White)
 
-// Everything drawn now is clipped
-ctx.SetColor(gg.Red)
-ctx.DrawRectangle(0, 0, 512, 512)
+// Rectangle
+ctx.SetRGB(0.2, 0.5, 0.8)
+ctx.DrawRectangle(50, 50, 100, 80)
 ctx.Fill()
 
-// Reset clip
-ctx.ResetClip()
+// Circle with stroke
+ctx.SetRGB(0.8, 0.2, 0.2)
+ctx.SetLineWidth(3)
+ctx.DrawCircle(250, 150, 60)
+ctx.Stroke()
 
-// Or use Push/Pop for scoped clipping
-ctx.Push()
-ctx.ClipRect(100, 100, 200, 200)
-// ... draw clipped content ...
-ctx.Pop()
+// Rounded rectangle
+ctx.SetRGBA(0.2, 0.8, 0.2, 0.7)
+ctx.DrawRoundedRectangle(150, 250, 120, 80, 15)
+ctx.Fill()
+
+ctx.SavePNG("shapes.png")
 ```
 
----
-
-## Text Rendering
+### Text with Fallback
 
 ```go
-// Load font (heavyweight, share across app)
-source, err := text.NewFontSourceFromFile("Roboto.ttf")
-defer source.Close()
+// Load fonts
+mainFont, _ := text.NewFontSourceFromFile("Roboto.ttf")
+emojiFont, _ := text.NewFontSourceFromFile("NotoEmoji.ttf")
+defer mainFont.Close()
+defer emojiFont.Close()
 
-// Create face (lightweight, per size)
-face := source.Face(24)
-
-// Draw text
-ctx.SetFont(face)
-ctx.DrawString("Hello World!", 50, 100)
-ctx.DrawStringAnchored("Centered", 256, 256, 0.5, 0.5)
-
-// Measure text
-w, h := ctx.MeasureString("Hello")
-
-// Font fallback for emoji
-emoji, _ := text.NewFontSourceFromFile("NotoEmoji.ttf")
+// Create fallback chain
 multiFace, _ := text.NewMultiFace(
-    source.Face(24),
-    text.NewFilteredFace(emoji.Face(24), text.RangeEmoji),
+    mainFont.Face(24),
+    text.NewFilteredFace(emojiFont.Face(24), text.RangeEmoji),
 )
+
 ctx.SetFont(multiFace)
-ctx.DrawString("Hello! :)", 50, 150)
+ctx.SetColor(gg.Black)
+ctx.DrawString("Hello! Nice to meet you!", 50, 100)
+```
+
+### Layer Compositing
+
+```go
+ctx := gg.NewContext(400, 400)
+ctx.ClearWithColor(gg.White)
+
+// Draw background
+ctx.SetRGB(0.9, 0.9, 0.9)
+ctx.DrawRectangle(0, 0, 400, 400)
+ctx.Fill()
+
+// Create layer with blend mode
+ctx.PushLayer(gg.BlendMultiply, 0.8)
+
+ctx.SetRGB(1, 0, 0)
+ctx.DrawCircle(150, 200, 100)
+ctx.Fill()
+
+ctx.SetRGB(0, 0, 1)
+ctx.DrawCircle(250, 200, 100)
+ctx.Fill()
+
+ctx.PopLayer()
+
+ctx.SavePNG("layers.png")
 ```
 
 ---
 
-## Roadmap to v1.0.0
+## Performance
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| sRGB → Linear | 0.16ns | 260x faster than math.Pow |
+| LayerCache.Get | 90ns | Thread-safe LRU |
+| DirtyRegion.Mark | 10.9ns | Lock-free atomic |
+| MSDF lookup | <10ns | Atomic + HashMap |
+| Cache hit | <30ns | Lock-free read path |
+
+---
+
+## Roadmap
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v0.1.0 | Core shapes, software renderer | Released |
-| v0.2.0 | Text rendering | Released |
-| v0.3.0 | Images, clipping, compositing | Released |
-| v0.4.0 | Color pipeline, layer API | Released |
-| v0.5.0 | SIMD optimization | Released |
-| v0.6.0 | Parallel rendering | Released |
-| v0.7.0 | Scene graph (retained mode) | Released |
-| v0.8.0 | Backend abstraction | Released |
-| v0.9.0 | GPU acceleration (Sparse Strips) | Released |
-| **v0.10.0** | **GPU text pipeline** | **Released** |
-| v1.0.0 | Production release | Target |
+| v0.1.0 - v0.11.0 | Core features | Released |
+| **v0.12.0** | **Rust-First API (Brush, Gradients, Stroke)** | **In Development** |
+| v0.13.0 | Go 1.25+ (context.Context, Generics) | Planned |
+| v0.14.0 | Advanced Features (Masks, PathBuilder) | Planned |
+| v0.15.0 | Documentation & RC | Planned |
+| v1.0.0 | Production Release | Target |
 
----
-
-## Architecture (v1.0.0 Target)
-
-```
-                         gg (Public API)
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-    Immediate Mode      Retained Mode         Resources
-    (Context API)       (Scene Graph)      (Images, Fonts)
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-                     RenderBackend Interface
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-         Software           SIMD             GPU
-         (current)        (v0.5.0)       (gogpu/wgpu)
-```
+See [ROADMAP.md](ROADMAP.md) for detailed plans.
 
 ---
 
@@ -299,10 +240,30 @@ ctx.DrawString("Hello! :)", 50, 150)
 
 | Component | Description | Version |
 |-----------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | **v0.5.0** |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | **v0.6.0** |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | **v0.5.0** |
-| **gogpu/gg** | **2D graphics** | **v0.10.0** |
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework | v0.6.1 |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | v0.6.0 |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | v0.5.0 |
+| **gogpu/gg** | **2D graphics** | **v0.11.0** |
+
+---
+
+## Articles
+
+- [GoGPU: From Idea to 100K Lines in Two Weeks](https://dev.to/kolkov/gogpu-from-idea-to-100k-lines-in-two-weeks-building-gos-gpu-ecosystem-3b2)
+- [Pure Go 2D Graphics Library with GPU Acceleration](https://dev.to/kolkov/pure-go-2d-graphics-library-with-gpu-acceleration-introducing-gogpugg-538h)
+- [GoGPU Announcement](https://dev.to/kolkov/gogpu-a-pure-go-graphics-library-for-gpu-programming-2j5d)
+
+---
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+Priority areas:
+- API feedback and testing
+- Examples and documentation
+- Performance benchmarks
+- Cross-platform testing
 
 ---
 

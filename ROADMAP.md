@@ -6,245 +6,231 @@
 
 ---
 
-## Vision
+## Design Philosophy
 
-**gg** aims to become the **reference 2D graphics library** for the Go ecosystem — comparable to:
-- **tiny-skia** (Rust) — Software rendering
-- **vello** (Rust) — GPU rendering
-- **Skia** (C++) — Industry standard
+**gg** is built from the ground up following **modern Rust 2D graphics patterns**:
 
----
+| Pattern | Inspiration | Implementation |
+|---------|-------------|----------------|
+| **Dual-Stream Encoding** | vello | Scene graph with GPU-ready command buffers |
+| **Sparse Strips** | vello 2025 | CPU tessellation → GPU rasterization |
+| **Paint/Brush System** | tiny-skia, peniko | Pattern interface with extensible types |
+| **29 Blend Modes** | vello, W3C | Porter-Duff + Advanced + HSL modes |
+| **Layer Compositing** | Skia, vello | Isolated layers with blend/opacity |
+| **LRU Caching** | Industry standard | Sharded thread-safe caches |
 
-## Released
+### Core Principles
 
-### v0.11.0 — GPU Text Rendering Phase 2
-
-- [x] Glyph-as-Path rendering (OutlineExtractor, GlyphOutline, AffineTransform)
-- [x] GlyphCache LRU (16-shard, 64-frame lifetime, <50ns hit)
-- [x] Pure Go MSDF generator (edge coloring, distance field)
-- [x] MSDF Atlas Manager (shelf packing, LRU eviction, GPU tracking)
-- [x] WGSL text shader (median3, screen-space AA, outline/shadow)
-- [x] Emoji support (COLRv1, sbix, CBDT, ZWJ sequences, flags)
-- [x] Subpixel positioning (Subpixel4, Subpixel10 modes)
-- [x] 87.6% test coverage, 0 linter issues
-- [x] **~16,200 LOC across 40+ files**
-
-### v0.10.0 — GPU Text Pipeline
-
-- [x] Pluggable Shaper interface (BuiltinShaper + custom)
-- [x] Extended shaping types (Direction, GlyphType, GlyphFlags, ShapedRun)
-- [x] Sharded LRU shaping cache (16 shards, 16K entries)
-- [x] Bidi/Script segmentation (25+ scripts, Unicode compliant)
-- [x] Multi-line Layout Engine (alignment, wrapping, line spacing)
-- [x] Zero new dependencies (uses golang.org/x/text)
-- [x] 87% test coverage, 0 linter issues
-- [x] **~2,500 LOC across 12 files**
-
-### v0.9.0 — GPU Backend (Sparse Strips)
-
-See section below for details.
-
-### v0.8.0 — Backend Abstraction
-
-See section below for details.
-
-### v0.7.0 — Scene Graph (Retained Mode)
-
-See section below for details.
-
-### v0.6.0 — Parallel Rendering
-
-See section below for details.
-
-### v0.5.0 — SIMD Optimization
-
-See section below for details.
-
-### v0.4.0 — Color Pipeline & Layers
-
-See section below for details.
-
-### v0.3.0 — Images, Clipping & Compositing
-
-See section below for details.
-
-### v0.2.0 — Text Rendering
-
-See section below for details.
-
-### v0.1.0 — Core 2D Drawing
-
-- [x] Canvas API (NewContext, SetSize)
-- [x] Basic shapes (Rectangle, Circle, Ellipse, Line, Arc)
-- [x] Path operations (MoveTo, LineTo, QuadraticTo, CubicTo)
-- [x] Fill and stroke (Fill, Stroke, SetColor, SetLineWidth)
-- [x] Transformations (Translate, Scale, Rotate, Push/Pop)
-- [x] Color support (RGBA, Hex parsing, named colors)
-- [x] Image output (SavePNG, SaveJPG)
-- [x] Software rasterizer (scanline algorithm)
-
-### v0.2.0 — Text Rendering
-
-- [x] TrueType font loading (FontSource, FontParser)
-- [x] Text rendering (DrawString, DrawStringAnchored)
-- [x] Font metrics (MeasureString, Metrics)
-- [x] Face interface with Go 1.25+ iterators
-- [x] MultiFace for font fallback
-- [x] FilteredFace for Unicode ranges
-- [x] LRU cache system
-- [x] 64 tests, 83.8% coverage
-
-### v0.3.0 — Images, Clipping & Compositing
-
-- [x] Image format types (Gray8, Gray16, RGB8, RGBA8, RGBAPremul, BGRA8, BGRAPremul)
-- [x] ImageBuf with lazy premultiplication
-- [x] SubImage zero-copy views
-- [x] Image pool for memory reuse (~3x faster)
-- [x] PNG/JPEG I/O with std lib interop
-- [x] Interpolation modes (Nearest 17ns, Bilinear 67ns, Bicubic 492ns)
-- [x] Mipmap chain generation
-- [x] ImagePattern for fills
-- [x] DrawImage with affine transforms
-- [x] Edge clipper (Cohen-Sutherland + curve extrema)
-- [x] Mask clipper (alpha masks)
-- [x] Clip stack (hierarchical clipping)
-- [x] Porter-Duff (14 modes)
-- [x] Advanced blend modes (11 modes)
-- [x] Layer system (internal)
-- [x] Context.DrawImage* methods
-- [x] Context.Clip* methods
-
-### v0.4.0 — Color Pipeline & Layers
-
-- [x] Context.PushLayer/PopLayer API
-- [x] HSL blend modes (Hue, Saturation, Color, Luminosity)
-- [x] sRGB ↔ Linear color space conversion
-- [x] ColorF32/ColorU8 types in internal/color
-- [x] Linear space blending pipeline
-- [x] 83.8% test coverage
-
-### v0.5.0 — SIMD Optimization
-
-- [x] Fast div255 (shift approximation, 2.4x faster)
-- [x] sRGB LUTs (260x faster than math.Pow)
-- [x] Wide types: U16x16 (16 pixels), F32x8 (8 pixels)
-- [x] Batch blending (14 Porter-Duff + 7 advanced modes)
-- [x] Auto-vectorization via fixed-size arrays
-- [x] Rasterizer integration (SpanFiller, FillSpan, FillSpanBlend)
-- [x] Visual regression tests
-- [x] Comprehensive benchmarks
-- [x] **Achieved: 2-260x faster operations**
-
-### v0.6.0 — Parallel Rendering
-
-- [x] Tile-based rendering (64x64 tiles)
-- [x] TileGrid with dynamic resizing
-- [x] TilePool (sync.Pool, 0 allocs)
-- [x] WorkerPool with work stealing
-- [x] ParallelRasterizer (Clear, FillRect, Composite)
-- [x] Lock-free DirtyRegion (atomic bitmap, 10.9ns/mark)
-- [x] Scaling benchmarks (1, 2, 4, 8+ cores)
-- [x] Visual regression tests (pixel-perfect)
-- [x] **6,372 LOC, 120+ tests, race-free**
+1. **Pure Go** — No CGO, easy cross-compilation, single binary deployment
+2. **GPU-First** — Designed for GPU acceleration from day one
+3. **Production-Ready** — Enterprise-grade error handling, logging, monitoring
+4. **API Stability** — Semantic versioning, deprecation policy, migration guides
 
 ---
 
-### v0.7.0 — Scene Graph (Retained Mode)
+## Current State: v0.11.0
 
-- [x] Dual-stream Encoding (command buffer, vello pattern)
-- [x] Scene API (Fill, Stroke, DrawImage, PushLayer/PopLayer)
-- [x] 13 Shape types (Rect, Circle, Ellipse, Polygon, Star, etc.)
-- [x] Layer stack with blending (29 blend modes)
-- [x] Filter effects (Blur, DropShadow, ColorMatrix)
-- [x] Layer caching (64MB LRU, 90ns Get)
-- [x] SceneBuilder fluent API
-- [x] Parallel Renderer (TileGrid + WorkerPool integration)
-- [x] **15,376 LOC, 89% coverage, 25 benchmarks**
+**42,000+ LOC** | **87.6% Coverage** | **0 Linter Issues**
 
-### v0.9.0 — GPU Backend (Sparse Strips)
-
-- [x] WGPUBackend — gogpu/wgpu integration
-- [x] GPU memory management (LRU eviction, 256MB budget)
-- [x] Strip tessellation (Active Edge Table algorithm)
-- [x] WGSL shaders (blit, blend, strip, composite)
-- [x] 29 blend modes on GPU
-- [x] PipelineCache for compiled shaders
-- [x] GPUSceneRenderer for scene traversal
-- [x] CommandEncoder for GPU command building
-- [x] TextureAtlas with shelf packing
-- [x] **9,930 LOC, 21 files, 4 WGSL shaders**
-
-### v0.8.0 — Backend Abstraction
-
-- [x] RenderBackend interface
-- [x] SoftwareBackend implementation (wraps existing renderer)
-- [x] Backend registry with auto-selection
-- [x] Priority-based fallback (wgpu > software)
-- [x] **595 LOC, 89.4% coverage, 16 tests**
+```
+v0.1.0 ─── v0.2.0 ─── v0.3.0 ─── v0.4.0 ─── v0.5.0 ─── v0.6.0 ─── v0.7.0 ─── v0.8.0 ─── v0.9.0 ─── v0.10.0 ─── v0.11.0
+  │          │          │          │          │          │          │          │          │           │           │
+Canvas     Text      Images    Colors     SIMD     Parallel  Scene    Backend    GPU      Text      MSDF
+API      Rendering  Clipping  Layers    Optim    Rendering  Graph    Abstract  Backend  Pipeline  Emoji
+```
 
 ---
 
-## Target
+## Roadmap to v1.0.0
+
+### v0.12.0 — Rust-First API Modernization
+
+**Status:** In Development | **Target:** Q1 2025
+
+Complete API modernization following Rust 2D graphics best practices.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **Brush Enum** | vello/peniko | Replace Pattern with sealed Brush interface |
+| **Gradients** | vello/tiny-skia | Linear, Radial, Sweep with ExtendMode |
+| **Stroke Struct** | tiny-skia/kurbo | Unified stroke parameters with Dash |
+| **Error Wrapping** | Go 1.13+ | All errors use `%w` with context |
+
+```go
+// Before (v0.11.0)
+ctx.SetColor(gg.Red)
+ctx.Fill()
+
+// After (v0.12.0) — Same simple API, more powerful internals
+ctx.SetColor(gg.Red)                    // Still works!
+ctx.SetFillBrush(gg.Solid(gg.Red))     // Or use Brush directly
+ctx.SetFillBrush(gg.NewLinearGradient(0, 0, 100, 0).
+    AddColorStop(0, gg.Red).
+    AddColorStop(1, gg.Blue))
+ctx.Fill()
+```
+
+### v0.13.0 — Go 1.25+ Modernization
+
+**Status:** Planned | **Target:** Q1 2025
+
+Full adoption of Go 1.25+ features for modern, idiomatic API.
+
+| Feature | Description |
+|---------|-------------|
+| **context.Context** | Cancellation for long operations |
+| **Generic Cache** | `Cache[K, V]` type-safe caching |
+| **iter.Seq** | Shape interface with iterator protocol |
+| **Text Wrapping** | Word-wrap with configurable break points |
+
+```go
+// Context support
+ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+defer cancel()
+err := renderer.RenderWithContext(ctx, scene) // Cancellable!
+
+// Generic cache
+cache := gg.NewCache[string, *gg.Texture](100)
+
+// Iterator-based shapes
+for elem := range path.Elements() {
+    // Process path elements
+}
+```
+
+### v0.14.0 — Advanced Features
+
+**Status:** Planned | **Target:** Q2 2025
+
+Professional graphics features for complex applications.
+
+| Feature | Description |
+|---------|-------------|
+| **Masks** | AsMask, SetMask, InvertMask operations |
+| **PathBuilder** | Fluent path construction pattern |
+| **Resource Cleanup** | Context.Close() for deterministic cleanup |
+| **Streaming PNG** | EncodePNG(io.Writer) for large images |
+
+### v0.15.0 — Documentation & RC
+
+**Status:** Planned | **Target:** Q2 2025
+
+Comprehensive documentation and release candidate.
+
+| Deliverable | Description |
+|-------------|-------------|
+| **API Documentation** | Every public symbol documented |
+| **Migration Guide** | fogleman/gg → gogpu/gg |
+| **Examples** | 20+ working examples |
+| **Benchmarks** | Performance comparison suite |
 
 ### v1.0.0 — Production Release
 
-- [ ] API review and cleanup (TASK-115)
-- [ ] Comprehensive documentation
-- [ ] Performance benchmarks
-- [ ] Cross-platform testing
-- [ ] Example applications
-- [ ] 90%+ test coverage
-- [ ] Stable public API
+**Status:** Target | **ETA:** After community validation
+
+- API stability guarantee
+- Semantic versioning commitment
+- Long-term support plan
+- Enterprise deployment guide
 
 ---
 
-## Architecture (v1.0.0 Target)
+## Architecture
 
 ```
-                         gg (Public API)
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-    Immediate Mode      Retained Mode         Resources
-    (Context API)       (Scene Graph)      (Images, Fonts)
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-                     RenderBackend Interface
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-         Software          SIMD           GPU
-         (v0.1.0+)       (v0.5.0)       (v0.9.0)
+                           gg (Public API)
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+      Immediate Mode       Retained Mode        Resources
+      (Context API)        (Scene Graph)     (Images, Fonts)
+            │                   │                   │
+            └───────────────────┼───────────────────┘
+                                │
+                       RenderBackend Interface
+                                │
+               ┌────────────────┼────────────────┐
+               │                │                │
+          Software            SIMD              GPU
+          (v0.1.0+)         (v0.5.0)         (v0.9.0)
+               │                │                │
+               └────────────────┴────────────────┘
+                                │
+                     gogpu/wgpu (Pure Go WebGPU)
+```
+
+### Key Patterns (Rust-Inspired)
+
+**Dual-Stream Encoding (vello)**
+```
+Scene → Tags Stream + Data Stream → GPU Commands
+         [Fill, Stroke, Layer...]   [coords, colors, transforms...]
+```
+
+**Sparse Strips (vello 2025)**
+```
+Path → CPU Tessellation → Strips → GPU Rasterization → Composite
+```
+
+**Layer Compositing (Skia/vello)**
+```
+PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 ```
 
 ---
 
-## Reference Documents
+## Released Versions
+
+| Version | Date | Highlights | LOC |
+|---------|------|------------|-----|
+| v0.11.0 | 2025-12-24 | MSDF, Emoji, Subpixel text | +16,200 |
+| v0.10.0 | 2025-12-24 | GPU Text Pipeline | +2,500 |
+| v0.9.0 | 2025-12-18 | GPU Backend (Sparse Strips) | +9,930 |
+| v0.8.0 | 2025-12-18 | Backend Abstraction | +595 |
+| v0.7.0 | 2025-12-18 | Scene Graph (Retained Mode) | +15,376 |
+| v0.6.0 | 2025-12-17 | Parallel Rendering | +6,372 |
+| v0.5.0 | 2025-12-17 | SIMD Optimization | +3,200 |
+| v0.4.0 | 2025-12-17 | Color Pipeline, Layers | +1,500 |
+| v0.3.0 | 2025-12-16 | Images, Clipping, Compositing | +4,800 |
+| v0.2.0 | 2025-12-16 | Text Rendering | +2,200 |
+| v0.1.0 | 2025-12-12 | Core 2D Drawing | +3,500 |
+
+---
+
+## Research Documents
 
 | Document | Purpose |
 |----------|---------|
-| `docs/dev/research/DESIGN-001-images-clipping-v3.md` | v0.3.0 design |
-| `docs/dev/research/RESEARCH-006-scene-graph.md` | v0.7.0 scene graph research |
-| `docs/dev/research/ARCHITECTURE-001-enterprise-grade.md` | v1.0.0 blueprint |
+| `RESEARCH-010-api-review-v1.0.0.md` | API compatibility analysis |
+| `RESEARCH-011-rust-2d-deep-dive.md` | Rust patterns deep dive (vello, tiny-skia, kurbo) |
+| `RESEARCH-007-gpu-backend.md` | GPU backend architecture |
+| `RESEARCH-006-scene-graph.md` | Scene graph design |
 
 ---
 
-## Non-Goals (for now)
+## Non-Goals
 
-- 3D graphics (see gogpu/gogpu)
-- Animation system
-- GUI widgets (see gogpu/ui)
-- Platform-specific rendering
+- **3D graphics** — See gogpu/gogpu
+- **Animation system** — Application layer concern
+- **GUI widgets** — See gogpu/ui (planned)
+- **Platform rendering** — Pure Go, platform-independent
 
 ---
 
 ## Contributing
 
-Help wanted on all phases! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! Priority areas:
 
-Priority areas:
-- GPU text rendering (v0.10.0)
-- Test cases and benchmarks
-- Documentation and examples
-- Cross-platform testing
+1. **API Feedback** — Try the library and report pain points
+2. **Test Cases** — Expand test coverage
+3. **Examples** — Real-world usage examples
+4. **Documentation** — Improve docs and guides
+5. **Performance** — Benchmark and optimize hot paths
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
