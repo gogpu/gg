@@ -173,6 +173,81 @@ func (c *Context) SetFillRule(rule FillRule) {
 	c.paint.FillRule = rule
 }
 
+// SetMiterLimit sets the miter limit for line joins.
+func (c *Context) SetMiterLimit(limit float64) {
+	c.paint.MiterLimit = limit
+}
+
+// SetStroke sets the complete stroke style.
+// This is the preferred way to configure stroke properties.
+//
+// Example:
+//
+//	ctx.SetStroke(gg.DefaultStroke().WithWidth(2).WithCap(gg.LineCapRound))
+//	ctx.SetStroke(gg.DashedStroke(5, 3))
+func (c *Context) SetStroke(stroke Stroke) {
+	c.paint.SetStroke(stroke)
+}
+
+// GetStroke returns the current stroke style.
+func (c *Context) GetStroke() Stroke {
+	return c.paint.GetStroke()
+}
+
+// SetDash sets the dash pattern for stroking.
+// Pass alternating dash and gap lengths.
+// Passing no arguments clears the dash pattern (returns to solid lines).
+//
+// Example:
+//
+//	ctx.SetDash(5, 3)       // 5 units dash, 3 units gap
+//	ctx.SetDash(10, 5, 2, 5) // complex pattern
+//	ctx.SetDash()           // clear dash (solid line)
+func (c *Context) SetDash(lengths ...float64) {
+	if len(lengths) == 0 {
+		c.ClearDash()
+		return
+	}
+
+	dash := NewDash(lengths...)
+	if dash == nil {
+		c.ClearDash()
+		return
+	}
+
+	// Ensure we have a Stroke to set the dash on
+	if c.paint.Stroke == nil {
+		stroke := c.paint.GetStroke()
+		c.paint.Stroke = &stroke
+	}
+	c.paint.Stroke.Dash = dash
+}
+
+// SetDashOffset sets the starting offset into the dash pattern.
+// This has no effect if no dash pattern is set.
+func (c *Context) SetDashOffset(offset float64) {
+	if c.paint.Stroke == nil {
+		// Create stroke from legacy fields if needed
+		stroke := c.paint.GetStroke()
+		c.paint.Stroke = &stroke
+	}
+	if c.paint.Stroke.Dash != nil {
+		c.paint.Stroke.Dash = c.paint.Stroke.Dash.WithOffset(offset)
+	}
+}
+
+// ClearDash removes the dash pattern, returning to solid lines.
+func (c *Context) ClearDash() {
+	if c.paint.Stroke != nil {
+		c.paint.Stroke.Dash = nil
+	}
+}
+
+// IsDashed returns true if the current stroke uses a dash pattern.
+func (c *Context) IsDashed() bool {
+	return c.paint.IsDashed()
+}
+
 // MoveTo starts a new subpath at the given point.
 func (c *Context) MoveTo(x, y float64) {
 	p := c.matrix.TransformPoint(Pt(x, y))

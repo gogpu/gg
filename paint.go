@@ -46,16 +46,24 @@ type Paint struct {
 	// Use SetBrush() to set the brush, which also updates Pattern for compatibility.
 	Brush Brush
 
-	// LineWidth is the width of strokes
+	// LineWidth is the width of strokes.
+	//
+	// Deprecated: Use Stroke.Width instead. Maintained for backward compatibility.
 	LineWidth float64
 
-	// LineCap is the shape of line endpoints
+	// LineCap is the shape of line endpoints.
+	//
+	// Deprecated: Use Stroke.Cap instead. Maintained for backward compatibility.
 	LineCap LineCap
 
-	// LineJoin is the shape of line joins
+	// LineJoin is the shape of line joins.
+	//
+	// Deprecated: Use Stroke.Join instead. Maintained for backward compatibility.
 	LineJoin LineJoin
 
-	// MiterLimit is the miter limit for sharp joins
+	// MiterLimit is the miter limit for sharp joins.
+	//
+	// Deprecated: Use Stroke.MiterLimit instead. Maintained for backward compatibility.
 	MiterLimit float64
 
 	// FillRule is the fill rule for paths
@@ -63,6 +71,12 @@ type Paint struct {
 
 	// Antialias enables anti-aliasing
 	Antialias bool
+
+	// Stroke is the unified stroke style configuration.
+	// This is the preferred way to configure stroke properties.
+	// When Stroke is set, it takes precedence over the individual
+	// LineWidth, LineCap, LineJoin, and MiterLimit fields.
+	Stroke *Stroke
 }
 
 // NewPaint creates a new Paint with default values.
@@ -81,7 +95,7 @@ func NewPaint() *Paint {
 
 // Clone creates a copy of the Paint.
 func (p *Paint) Clone() *Paint {
-	return &Paint{
+	clone := &Paint{
 		Pattern:    p.Pattern,
 		Brush:      p.Brush,
 		LineWidth:  p.LineWidth,
@@ -91,6 +105,11 @@ func (p *Paint) Clone() *Paint {
 		FillRule:   p.FillRule,
 		Antialias:  p.Antialias,
 	}
+	if p.Stroke != nil {
+		strokeClone := p.Stroke.Clone()
+		clone.Stroke = &strokeClone
+	}
+	return clone
 }
 
 // SetBrush sets the brush for this Paint.
@@ -122,4 +141,83 @@ func (p *Paint) ColorAt(x, y float64) RGBA {
 		return p.Pattern.ColorAt(x, y)
 	}
 	return Black
+}
+
+// GetStroke returns the effective stroke style.
+// If Stroke is set, returns a copy of it.
+// Otherwise, constructs a Stroke from the legacy fields.
+func (p *Paint) GetStroke() Stroke {
+	if p.Stroke != nil {
+		return p.Stroke.Clone()
+	}
+	return Stroke{
+		Width:      p.LineWidth,
+		Cap:        p.LineCap,
+		Join:       p.LineJoin,
+		MiterLimit: p.MiterLimit,
+		Dash:       nil,
+	}
+}
+
+// SetStroke sets the stroke style.
+// This also updates the legacy fields for backward compatibility.
+func (p *Paint) SetStroke(s Stroke) {
+	strokeCopy := s.Clone()
+	p.Stroke = &strokeCopy
+
+	// Update legacy fields for backward compatibility
+	p.LineWidth = s.Width
+	p.LineCap = s.Cap
+	p.LineJoin = s.Join
+	p.MiterLimit = s.MiterLimit
+}
+
+// EffectiveLineWidth returns the effective line width.
+// If Stroke is set, uses Stroke.Width; otherwise uses LineWidth.
+func (p *Paint) EffectiveLineWidth() float64 {
+	if p.Stroke != nil {
+		return p.Stroke.Width
+	}
+	return p.LineWidth
+}
+
+// EffectiveLineCap returns the effective line cap.
+// If Stroke is set, uses Stroke.Cap; otherwise uses LineCap.
+func (p *Paint) EffectiveLineCap() LineCap {
+	if p.Stroke != nil {
+		return p.Stroke.Cap
+	}
+	return p.LineCap
+}
+
+// EffectiveLineJoin returns the effective line join.
+// If Stroke is set, uses Stroke.Join; otherwise uses LineJoin.
+func (p *Paint) EffectiveLineJoin() LineJoin {
+	if p.Stroke != nil {
+		return p.Stroke.Join
+	}
+	return p.LineJoin
+}
+
+// EffectiveMiterLimit returns the effective miter limit.
+// If Stroke is set, uses Stroke.MiterLimit; otherwise uses MiterLimit.
+func (p *Paint) EffectiveMiterLimit() float64 {
+	if p.Stroke != nil {
+		return p.Stroke.MiterLimit
+	}
+	return p.MiterLimit
+}
+
+// EffectiveDash returns the effective dash pattern.
+// Returns nil if no dash is set (solid line).
+func (p *Paint) EffectiveDash() *Dash {
+	if p.Stroke != nil && p.Stroke.Dash != nil {
+		return p.Stroke.Dash.Clone()
+	}
+	return nil
+}
+
+// IsDashed returns true if the current stroke uses a dash pattern.
+func (p *Paint) IsDashed() bool {
+	return p.Stroke != nil && p.Stroke.IsDashed()
 }
