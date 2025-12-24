@@ -42,7 +42,7 @@ type FontSource struct {
 // Options can be used to configure caching and parser backend.
 func NewFontSource(data []byte, opts ...SourceOption) (*FontSource, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("text: empty font data")
+		return nil, ErrEmptyFontData
 	}
 
 	// Apply options first to get parser name

@@ -280,7 +280,7 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 	x, y, ok := atlas.allocator.Allocate()
 	if !ok {
 		// This shouldn't happen if findOrCreateAtlas works correctly
-		return Region{}, fmt.Errorf("failed to allocate glyph in atlas")
+		return Region{}, ErrAllocationFailed
 	}
 
 	// Copy MSDF data to atlas
@@ -314,7 +314,7 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 // reduces lock contention and can batch MSDF generation.
 func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) ([]Region, error) {
 	if len(keys) != len(outlines) {
-		return nil, fmt.Errorf("keys and outlines must have same length")
+		return nil, ErrLengthMismatch
 	}
 
 	results := make([]Region, len(keys))
@@ -367,7 +367,7 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 		// Allocate cell in atlas
 		x, y, ok := atlas.allocator.Allocate()
 		if !ok {
-			return nil, fmt.Errorf("failed to allocate glyph in atlas")
+			return nil, ErrAllocationFailed
 		}
 
 		// Copy MSDF data to atlas
