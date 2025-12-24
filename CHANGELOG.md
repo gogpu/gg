@@ -8,10 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned for v0.11.0
+- Glyph-as-Path rendering through sparse strips
 - MSDF text rendering for GPU
-- Glyph-as-Path through sparse strips
 - Bitmap atlas for emoji (COLRv1)
-- go-text/typesetting integration (Pure Go HarfBuzz)
+
+## [0.10.1] - 2025-12-24
+
+### Fixed
+- **deps:** Update gogpu/wgpu to v0.6.0
+
+### Changed
+- **go.mod:** Clean up Go version (1.25.0 → 1.25)
 
 ## [0.10.0] - 2025-12-24
 
