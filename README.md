@@ -240,13 +240,15 @@ ctx.PopLayer() // Composite with overlay blend
 
 **gg** is part of the [GoGPU](https://github.com/gogpu) ecosystem — Pure Go GPU computing libraries.
 
-| Component | Description |
-|-----------|-------------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with WebGPU, windowing, input |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation (Vulkan/Metal/DX12) |
-| [gogpu/naga](https://github.com/gogpu/naga) | WGSL shader compiler (WGSL → SPIR-V) |
-| **gogpu/gg** | **2D graphics library (this repo)** |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (coming soon) |
+| Project | Description | Purpose |
+|---------|-------------|---------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | GPU abstraction, windowing, input |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | Vulkan, Metal, GLES, Software backends |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | WGSL → SPIR-V, MSL, GLSL |
+| **gogpu/gg** | **2D graphics (this repo)** | Canvas API, scene graph, GPU text |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | Widgets, layouts, themes (planned) |
+
+> **Note:** Always use the latest versions. Check each repository for current releases.
 
 ---
 
