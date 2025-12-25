@@ -156,10 +156,10 @@ func TestPaintColorAt(t *testing.T) {
 
 // TestContextSetFillBrush tests the SetFillBrush method.
 func TestContextSetFillBrush(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetFillBrush(Solid(Magenta))
+	dc := NewContext(100, 100)
+	dc.SetFillBrush(Solid(Magenta))
 
-	brush := ctx.FillBrush()
+	brush := dc.FillBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Magenta {
 		t.Errorf("FillBrush color = %v, want Magenta", c)
@@ -168,10 +168,10 @@ func TestContextSetFillBrush(t *testing.T) {
 
 // TestContextSetStrokeBrush tests the SetStrokeBrush method.
 func TestContextSetStrokeBrush(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetStrokeBrush(Solid(Cyan))
+	dc := NewContext(100, 100)
+	dc.SetStrokeBrush(Solid(Cyan))
 
-	brush := ctx.StrokeBrush()
+	brush := dc.StrokeBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Cyan {
 		t.Errorf("StrokeBrush color = %v, want Cyan", c)
@@ -180,9 +180,9 @@ func TestContextSetStrokeBrush(t *testing.T) {
 
 // TestContextFillBrush tests the FillBrush getter.
 func TestContextFillBrush(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 	// Default should be black
-	brush := ctx.FillBrush()
+	brush := dc.FillBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Black {
 		t.Errorf("default FillBrush color = %v, want Black", c)
@@ -191,9 +191,9 @@ func TestContextFillBrush(t *testing.T) {
 
 // TestContextStrokeBrush tests the StrokeBrush getter.
 func TestContextStrokeBrush(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 	// Default should be black
-	brush := ctx.StrokeBrush()
+	brush := dc.StrokeBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Black {
 		t.Errorf("default StrokeBrush color = %v, want Black", c)
@@ -202,18 +202,18 @@ func TestContextStrokeBrush(t *testing.T) {
 
 // TestContextSetColorUpdatesPatternAndBrush tests that SetColor updates both.
 func TestContextSetColorUpdatesPatternAndBrush(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetRGB(1, 0, 0) // Red
+	dc := NewContext(100, 100)
+	dc.SetRGB(1, 0, 0) // Red
 
 	// Check brush
-	brush := ctx.FillBrush()
+	brush := dc.FillBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Red {
 		t.Errorf("brush color = %v, want Red", c)
 	}
 
 	// Check pattern (for backward compatibility)
-	if ctx.paint.Pattern == nil {
+	if dc.paint.Pattern == nil {
 		t.Error("Pattern is nil after SetRGB")
 	}
 }

@@ -6,94 +6,94 @@ import (
 )
 
 func TestNewContext(t *testing.T) {
-	ctx := NewContext(100, 100)
-	if ctx == nil {
+	dc := NewContext(100, 100)
+	if dc == nil {
 		t.Fatal("NewContext returned nil")
 	}
-	if ctx.Width() != 100 {
-		t.Errorf("Width = %d, want 100", ctx.Width())
+	if dc.Width() != 100 {
+		t.Errorf("Width = %d, want 100", dc.Width())
 	}
-	if ctx.Height() != 100 {
-		t.Errorf("Height = %d, want 100", ctx.Height())
+	if dc.Height() != 100 {
+		t.Errorf("Height = %d, want 100", dc.Height())
 	}
 }
 
 func TestClear(t *testing.T) {
-	ctx := NewContext(10, 10)
-	ctx.ClearWithColor(Red)
+	dc := NewContext(10, 10)
+	dc.ClearWithColor(Red)
 
 	// Check a pixel
-	pixel := ctx.pixmap.GetPixel(5, 5)
+	pixel := dc.pixmap.GetPixel(5, 5)
 	if pixel.R != 1.0 || pixel.G != 0.0 || pixel.B != 0.0 {
 		t.Errorf("Pixel color = %+v, want Red", pixel)
 	}
 }
 
 func TestDrawRectangle(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.ClearWithColor(White)
-	ctx.SetRGB(1, 0, 0)
-	ctx.DrawRectangle(10, 10, 50, 50)
-	ctx.Fill()
+	dc := NewContext(100, 100)
+	dc.ClearWithColor(White)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(10, 10, 50, 50)
+	dc.Fill()
 
 	// Check pixel inside rectangle (should be red)
-	pixel := ctx.pixmap.GetPixel(30, 30)
+	pixel := dc.pixmap.GetPixel(30, 30)
 	if pixel.R < 0.9 { // Allow some tolerance
 		t.Errorf("Pixel inside rectangle not red: %+v", pixel)
 	}
 
 	// Check pixel outside rectangle (should still be white)
-	pixel = ctx.pixmap.GetPixel(5, 5)
+	pixel = dc.pixmap.GetPixel(5, 5)
 	if pixel.R < 0.9 || pixel.G < 0.9 || pixel.B < 0.9 {
 		t.Errorf("Pixel outside rectangle not white: %+v", pixel)
 	}
 }
 
 func TestDrawCircle(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.ClearWithColor(White)
-	ctx.SetRGB(0, 0, 1)
-	ctx.DrawCircle(50, 50, 25)
-	ctx.Fill()
+	dc := NewContext(100, 100)
+	dc.ClearWithColor(White)
+	dc.SetRGB(0, 0, 1)
+	dc.DrawCircle(50, 50, 25)
+	dc.Fill()
 
 	// Check pixel inside circle
-	pixel := ctx.pixmap.GetPixel(50, 50)
+	pixel := dc.pixmap.GetPixel(50, 50)
 	if pixel.B < 0.9 {
 		t.Errorf("Pixel at center not blue: %+v", pixel)
 	}
 
 	// Check pixel outside circle (should still be white)
-	pixel = ctx.pixmap.GetPixel(10, 10)
+	pixel = dc.pixmap.GetPixel(10, 10)
 	if pixel.R < 0.9 || pixel.G < 0.9 || pixel.B < 0.9 {
 		t.Errorf("Pixel outside circle not white: %+v", pixel)
 	}
 }
 
 func TestTransformations(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 
 	// Push/Pop
-	ctx.Push()
-	ctx.Translate(50, 50)
-	if ctx.matrix.C != 50 || ctx.matrix.F != 50 {
-		t.Errorf("Translate failed: %+v", ctx.matrix)
+	dc.Push()
+	dc.Translate(50, 50)
+	if dc.matrix.C != 50 || dc.matrix.F != 50 {
+		t.Errorf("Translate failed: %+v", dc.matrix)
 	}
-	ctx.Pop()
-	if !ctx.matrix.IsIdentity() {
-		t.Errorf("Pop didn't restore identity: %+v", ctx.matrix)
+	dc.Pop()
+	if !dc.matrix.IsIdentity() {
+		t.Errorf("Pop didn't restore identity: %+v", dc.matrix)
 	}
 
 	// Rotate
-	ctx.Rotate(math.Pi / 2)
-	if math.Abs(ctx.matrix.A) > 0.001 { // Should be ~0
-		t.Errorf("Rotation incorrect: %+v", ctx.matrix)
+	dc.Rotate(math.Pi / 2)
+	if math.Abs(dc.matrix.A) > 0.001 { // Should be ~0
+		t.Errorf("Rotation incorrect: %+v", dc.matrix)
 	}
 
 	// Scale
-	ctx.Identity()
-	ctx.Scale(2, 3)
-	if ctx.matrix.A != 2 || ctx.matrix.E != 3 {
-		t.Errorf("Scale failed: %+v", ctx.matrix)
+	dc.Identity()
+	dc.Scale(2, 3)
+	if dc.matrix.A != 2 || dc.matrix.E != 3 {
+		t.Errorf("Scale failed: %+v", dc.matrix)
 	}
 }
 
@@ -186,25 +186,25 @@ func TestMatrix(t *testing.T) {
 }
 
 func BenchmarkDrawCircle(b *testing.B) {
-	ctx := NewContext(512, 512)
-	ctx.SetRGB(1, 0, 0)
+	dc := NewContext(512, 512)
+	dc.SetRGB(1, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.ClearPath()
-		ctx.DrawCircle(256, 256, 100)
-		ctx.Fill()
+		dc.ClearPath()
+		dc.DrawCircle(256, 256, 100)
+		dc.Fill()
 	}
 }
 
 func BenchmarkDrawRectangle(b *testing.B) {
-	ctx := NewContext(512, 512)
-	ctx.SetRGB(0, 1, 0)
+	dc := NewContext(512, 512)
+	dc.SetRGB(0, 1, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.ClearPath()
-		ctx.DrawRectangle(100, 100, 300, 300)
-		ctx.Fill()
+		dc.ClearPath()
+		dc.DrawRectangle(100, 100, 300, 300)
+		dc.Fill()
 	}
 }

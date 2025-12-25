@@ -5,12 +5,12 @@ import (
 )
 
 func TestContext_SetStroke(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 
 	stroke := DefaultStroke().WithWidth(3).WithCap(LineCapRound)
-	ctx.SetStroke(stroke)
+	dc.SetStroke(stroke)
 
-	got := ctx.GetStroke()
+	got := dc.GetStroke()
 	if got.Width != 3 {
 		t.Errorf("GetStroke().Width = %v, want 3", got.Width)
 	}
@@ -20,15 +20,15 @@ func TestContext_SetStroke(t *testing.T) {
 }
 
 func TestContext_GetStroke_Legacy(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 
 	// Set using legacy methods
-	ctx.SetLineWidth(5)
-	ctx.SetLineCap(LineCapSquare)
-	ctx.SetLineJoin(LineJoinBevel)
-	ctx.SetMiterLimit(8)
+	dc.SetLineWidth(5)
+	dc.SetLineCap(LineCapSquare)
+	dc.SetLineJoin(LineJoinBevel)
+	dc.SetMiterLimit(8)
 
-	got := ctx.GetStroke()
+	got := dc.GetStroke()
 	if got.Width != 5 {
 		t.Errorf("GetStroke().Width = %v, want 5", got.Width)
 	}
@@ -45,14 +45,14 @@ func TestContext_GetStroke_Legacy(t *testing.T) {
 
 func TestContext_SetDash(t *testing.T) {
 	t.Run("simple dash pattern", func(t *testing.T) {
-		ctx := NewContext(100, 100)
-		ctx.SetDash(5, 3)
+		dc := NewContext(100, 100)
+		dc.SetDash(5, 3)
 
-		if !ctx.IsDashed() {
+		if !dc.IsDashed() {
 			t.Error("IsDashed() = false, want true")
 		}
 
-		stroke := ctx.GetStroke()
+		stroke := dc.GetStroke()
 		if stroke.Dash == nil {
 			t.Fatal("GetStroke().Dash = nil")
 		}
@@ -62,10 +62,10 @@ func TestContext_SetDash(t *testing.T) {
 	})
 
 	t.Run("complex dash pattern", func(t *testing.T) {
-		ctx := NewContext(100, 100)
-		ctx.SetDash(10, 5, 2, 5)
+		dc := NewContext(100, 100)
+		dc.SetDash(10, 5, 2, 5)
 
-		stroke := ctx.GetStroke()
+		stroke := dc.GetStroke()
 		if stroke.Dash == nil {
 			t.Fatal("GetStroke().Dash = nil")
 		}
@@ -75,32 +75,32 @@ func TestContext_SetDash(t *testing.T) {
 	})
 
 	t.Run("empty dash clears pattern", func(t *testing.T) {
-		ctx := NewContext(100, 100)
-		ctx.SetDash(5, 3)
-		ctx.SetDash() // clear
+		dc := NewContext(100, 100)
+		dc.SetDash(5, 3)
+		dc.SetDash() // clear
 
-		if ctx.IsDashed() {
+		if dc.IsDashed() {
 			t.Error("IsDashed() = true after clear")
 		}
 	})
 
 	t.Run("all zeros clears pattern", func(t *testing.T) {
-		ctx := NewContext(100, 100)
-		ctx.SetDash(5, 3)
-		ctx.SetDash(0, 0, 0)
+		dc := NewContext(100, 100)
+		dc.SetDash(5, 3)
+		dc.SetDash(0, 0, 0)
 
-		if ctx.IsDashed() {
+		if dc.IsDashed() {
 			t.Error("IsDashed() = true after all zeros")
 		}
 	})
 }
 
 func TestContext_SetDashOffset(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetDash(5, 3)
-	ctx.SetDashOffset(2)
+	dc := NewContext(100, 100)
+	dc.SetDash(5, 3)
+	dc.SetDashOffset(2)
 
-	stroke := ctx.GetStroke()
+	stroke := dc.GetStroke()
 	if stroke.Dash == nil {
 		t.Fatal("GetStroke().Dash = nil")
 	}
@@ -110,68 +110,68 @@ func TestContext_SetDashOffset(t *testing.T) {
 }
 
 func TestContext_SetDashOffset_NoDash(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetDashOffset(2) // No dash set - should not panic
+	dc := NewContext(100, 100)
+	dc.SetDashOffset(2) // No dash set - should not panic
 
 	// Should still be solid line
-	if ctx.IsDashed() {
+	if dc.IsDashed() {
 		t.Error("IsDashed() = true, want false")
 	}
 }
 
 func TestContext_ClearDash(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetDash(5, 3)
+	dc := NewContext(100, 100)
+	dc.SetDash(5, 3)
 
-	if !ctx.IsDashed() {
+	if !dc.IsDashed() {
 		t.Fatal("IsDashed() = false before clear")
 	}
 
-	ctx.ClearDash()
+	dc.ClearDash()
 
-	if ctx.IsDashed() {
+	if dc.IsDashed() {
 		t.Error("IsDashed() = true after ClearDash()")
 	}
 }
 
 func TestContext_ClearDash_NoStroke(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.ClearDash() // Should not panic
+	dc := NewContext(100, 100)
+	dc.ClearDash() // Should not panic
 }
 
 func TestContext_IsDashed(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 
-	if ctx.IsDashed() {
+	if dc.IsDashed() {
 		t.Error("IsDashed() = true for new context")
 	}
 
-	ctx.SetDash(5, 3)
-	if !ctx.IsDashed() {
+	dc.SetDash(5, 3)
+	if !dc.IsDashed() {
 		t.Error("IsDashed() = false after SetDash")
 	}
 
-	ctx.ClearDash()
-	if ctx.IsDashed() {
+	dc.ClearDash()
+	if dc.IsDashed() {
 		t.Error("IsDashed() = true after ClearDash")
 	}
 }
 
 func TestContext_StrokeWithDash(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetRGB(1, 0, 0)
-	ctx.SetLineWidth(2)
-	ctx.SetDash(5, 3)
+	dc := NewContext(100, 100)
+	dc.SetRGB(1, 0, 0)
+	dc.SetLineWidth(2)
+	dc.SetDash(5, 3)
 
-	ctx.DrawLine(10, 50, 90, 50)
-	ctx.Stroke()
+	dc.DrawLine(10, 50, 90, 50)
+	dc.Stroke()
 
 	// Verify stroke was executed (basic sanity check)
 	// The actual dashing implementation is in the renderer
 }
 
 func TestContext_SetStroke_UpdatesLegacyFields(t *testing.T) {
-	ctx := NewContext(100, 100)
+	dc := NewContext(100, 100)
 
 	stroke := Stroke{
 		Width:      7,
@@ -179,46 +179,46 @@ func TestContext_SetStroke_UpdatesLegacyFields(t *testing.T) {
 		Join:       LineJoinBevel,
 		MiterLimit: 5,
 	}
-	ctx.SetStroke(stroke)
+	dc.SetStroke(stroke)
 
 	// Legacy fields should be updated for backward compatibility
-	if ctx.paint.LineWidth != 7 {
-		t.Errorf("paint.LineWidth = %v, want 7", ctx.paint.LineWidth)
+	if dc.paint.LineWidth != 7 {
+		t.Errorf("paint.LineWidth = %v, want 7", dc.paint.LineWidth)
 	}
-	if ctx.paint.LineCap != LineCapSquare {
-		t.Errorf("paint.LineCap = %v, want LineCapSquare", ctx.paint.LineCap)
+	if dc.paint.LineCap != LineCapSquare {
+		t.Errorf("paint.LineCap = %v, want LineCapSquare", dc.paint.LineCap)
 	}
-	if ctx.paint.LineJoin != LineJoinBevel {
-		t.Errorf("paint.LineJoin = %v, want LineJoinBevel", ctx.paint.LineJoin)
+	if dc.paint.LineJoin != LineJoinBevel {
+		t.Errorf("paint.LineJoin = %v, want LineJoinBevel", dc.paint.LineJoin)
 	}
-	if ctx.paint.MiterLimit != 5 {
-		t.Errorf("paint.MiterLimit = %v, want 5", ctx.paint.MiterLimit)
+	if dc.paint.MiterLimit != 5 {
+		t.Errorf("paint.MiterLimit = %v, want 5", dc.paint.MiterLimit)
 	}
 }
 
 func TestContext_DashedLinePreset(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetStroke(DashedStroke(10, 5))
+	dc := NewContext(100, 100)
+	dc.SetStroke(DashedStroke(10, 5))
 
-	if !ctx.IsDashed() {
+	if !dc.IsDashed() {
 		t.Error("IsDashed() = false for DashedStroke")
 	}
 
-	stroke := ctx.GetStroke()
+	stroke := dc.GetStroke()
 	if stroke.Width != 1.0 {
 		t.Errorf("Width = %v, want 1.0", stroke.Width)
 	}
 }
 
 func TestContext_DottedLinePreset(t *testing.T) {
-	ctx := NewContext(100, 100)
-	ctx.SetStroke(DottedStroke())
+	dc := NewContext(100, 100)
+	dc.SetStroke(DottedStroke())
 
-	if !ctx.IsDashed() {
+	if !dc.IsDashed() {
 		t.Error("IsDashed() = false for DottedStroke")
 	}
 
-	stroke := ctx.GetStroke()
+	stroke := dc.GetStroke()
 	if stroke.Width != 2.0 {
 		t.Errorf("Width = %v, want 2.0", stroke.Width)
 	}

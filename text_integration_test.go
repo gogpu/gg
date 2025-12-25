@@ -35,38 +35,38 @@ func TestTextIntegration(t *testing.T) {
 	}
 
 	// Create context
-	ctx := NewContext(400, 200)
-	ctx.SetRGB(1, 1, 1) // White background
-	ctx.Clear()
+	dc := NewContext(400, 200)
+	dc.SetRGB(1, 1, 1) // White background
+	dc.Clear()
 
 	// Load font
-	err := ctx.LoadFontFace(fontPath, 24.0)
+	err := dc.LoadFontFace(fontPath, 24.0)
 	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
 
 	// Set text color
-	ctx.SetRGB(0, 0, 0) // Black text
+	dc.SetRGB(0, 0, 0) // Black text
 
 	// Draw string
-	ctx.DrawString("Hello, World!", 50, 100)
+	dc.DrawString("Hello, World!", 50, 100)
 
 	// Verify font is set
-	if ctx.Font() == nil {
+	if dc.Font() == nil {
 		t.Error("Expected font to be set")
 	}
 
 	// Measure string
-	w, h := ctx.MeasureString("Hello, World!")
+	w, h := dc.MeasureString("Hello, World!")
 	if w <= 0 || h <= 0 {
 		t.Errorf("Expected positive dimensions, got (%f, %f)", w, h)
 	}
 
 	// Draw anchored string
-	ctx.DrawStringAnchored("Centered", 200, 150, 0.5, 0.5)
+	dc.DrawStringAnchored("Centered", 200, 150, 0.5, 0.5)
 
 	// Save (optional for visual verification)
-	// _ = ctx.SavePNG("test_output.png")
+	// _ = dc.SavePNG("test_output.png")
 }
 
 // TestTextNewAPI tests the new API using FontSource and SetFont.
@@ -97,7 +97,7 @@ func TestTextNewAPI(t *testing.T) {
 	}
 
 	// Create context
-	ctx := NewContext(400, 200)
+	dc := NewContext(400, 200)
 
 	// Load font using new API
 	source, err := text.NewFontSourceFromFile(fontPath)
@@ -110,23 +110,23 @@ func TestTextNewAPI(t *testing.T) {
 
 	// Create face
 	face := source.Face(18.0)
-	ctx.SetFont(face)
+	dc.SetFont(face)
 
 	// Verify face is set
-	if ctx.Font() == nil {
+	if dc.Font() == nil {
 		t.Error("Expected font to be set")
 	}
 
-	if ctx.Font().Size() != 18.0 {
-		t.Errorf("Expected size 18.0, got %f", ctx.Font().Size())
+	if dc.Font().Size() != 18.0 {
+		t.Errorf("Expected size 18.0, got %f", dc.Font().Size())
 	}
 
 	// Draw text
-	ctx.SetRGB(0, 0, 0)
-	ctx.DrawString("New API Test", 10, 50)
+	dc.SetRGB(0, 0, 0)
+	dc.DrawString("New API Test", 10, 50)
 
 	// Measure
-	w, h := ctx.MeasureString("New API Test")
+	w, h := dc.MeasureString("New API Test")
 	if w <= 0 || h <= 0 {
 		t.Errorf("Expected positive dimensions, got (%f, %f)", w, h)
 	}
@@ -159,11 +159,11 @@ func TestTextDrawsPixels(t *testing.T) {
 	}
 
 	// Create context with white background
-	ctx := NewContext(200, 100)
-	ctx.ClearWithColor(White)
+	dc := NewContext(200, 100)
+	dc.ClearWithColor(White)
 
 	// Verify background is white
-	initialPixel := ctx.pixmap.GetPixel(100, 50)
+	initialPixel := dc.pixmap.GetPixel(100, 50)
 	if initialPixel.R != 1 || initialPixel.G != 1 || initialPixel.B != 1 {
 		t.Fatalf("Expected white background, got %+v", initialPixel)
 	}
@@ -175,15 +175,15 @@ func TestTextDrawsPixels(t *testing.T) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx.SetFont(source.Face(48)) // Large font for easy detection
-	ctx.SetRGB(0, 0, 0)          // Black text
-	ctx.DrawString("X", 80, 70)  // Draw near center
+	dc.SetFont(source.Face(48)) // Large font for easy detection
+	dc.SetRGB(0, 0, 0)          // Black text
+	dc.DrawString("X", 80, 70)  // Draw near center
 
 	// Count non-white pixels in the area where text should be
 	nonWhiteCount := 0
 	for y := 20; y < 80; y++ {
 		for x := 70; x < 130; x++ {
-			pixel := ctx.pixmap.GetPixel(x, y)
+			pixel := dc.pixmap.GetPixel(x, y)
 			// Check if pixel is not pure white (text was drawn)
 			if pixel.R < 0.99 || pixel.G < 0.99 || pixel.B < 0.99 {
 				nonWhiteCount++
@@ -201,16 +201,16 @@ func TestTextDrawsPixels(t *testing.T) {
 
 // TestTextNoFont tests behavior when no font is set.
 func TestTextNoFont(t *testing.T) {
-	ctx := NewContext(200, 100)
+	dc := NewContext(200, 100)
 
 	// DrawString with no font (should not panic)
-	ctx.DrawString("Test", 10, 50)
+	dc.DrawString("Test", 10, 50)
 
 	// DrawStringAnchored with no font (should not panic)
-	ctx.DrawStringAnchored("Test", 100, 50, 0.5, 0.5)
+	dc.DrawStringAnchored("Test", 100, 50, 0.5, 0.5)
 
 	// MeasureString with no font (should return 0, 0)
-	w, h := ctx.MeasureString("Test")
+	w, h := dc.MeasureString("Test")
 	if w != 0 || h != 0 {
 		t.Errorf("Expected (0, 0) with no font, got (%f, %f)", w, h)
 	}

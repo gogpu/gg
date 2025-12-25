@@ -41,20 +41,20 @@ func TestTextRendering(t *testing.T) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx := gg.NewContext(400, 200)
-	ctx.ClearWithColor(gg.White)
+	dc := gg.NewContext(400, 200)
+	dc.ClearWithColor(gg.White)
 
 	face := source.Face(24)
-	ctx.SetFont(face)
-	ctx.SetRGB(0, 0, 0)
-	ctx.DrawString("Test", 50, 50)
+	dc.SetFont(face)
+	dc.SetRGB(0, 0, 0)
+	dc.DrawString("Test", 50, 50)
 
 	// Verify context dimensions
-	if ctx.Width() != 400 {
-		t.Errorf("Expected width 400, got %d", ctx.Width())
+	if dc.Width() != 400 {
+		t.Errorf("Expected width 400, got %d", dc.Width())
 	}
-	if ctx.Height() != 200 {
-		t.Errorf("Expected height 200, got %d", ctx.Height())
+	if dc.Height() != 200 {
+		t.Errorf("Expected height 200, got %d", dc.Height())
 	}
 }
 
@@ -71,9 +71,9 @@ func TestMeasureString(t *testing.T) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx := gg.NewContext(100, 100)
+	dc := gg.NewContext(100, 100)
 	face := source.Face(24)
-	ctx.SetFont(face)
+	dc.SetFont(face)
 
 	tests := []struct {
 		text string
@@ -87,7 +87,7 @@ func TestMeasureString(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.text, func(t *testing.T) {
-			w, h := ctx.MeasureString(tc.text)
+			w, h := dc.MeasureString(tc.text)
 
 			if tc.text == "" {
 				if w != 0 {
@@ -119,12 +119,12 @@ func TestDrawStringAnchored(t *testing.T) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx := gg.NewContext(200, 200)
-	ctx.ClearWithColor(gg.White)
+	dc := gg.NewContext(200, 200)
+	dc.ClearWithColor(gg.White)
 
 	face := source.Face(16)
-	ctx.SetFont(face)
-	ctx.SetRGB(0, 0, 0)
+	dc.SetFont(face)
+	dc.SetRGB(0, 0, 0)
 
 	// Test various anchor positions
 	anchors := []struct {
@@ -138,7 +138,7 @@ func TestDrawStringAnchored(t *testing.T) {
 
 	for _, a := range anchors {
 		t.Run(a.name, func(t *testing.T) {
-			ctx.DrawStringAnchored("X", 100, 100, a.ax, a.ay)
+			dc.DrawStringAnchored("X", 100, 100, a.ax, a.ay)
 			// If we get here without panic, the anchoring works
 		})
 	}
@@ -189,14 +189,14 @@ func BenchmarkTextRendering(b *testing.B) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx := gg.NewContext(800, 600)
+	dc := gg.NewContext(800, 600)
 	face := source.Face(24)
-	ctx.SetFont(face)
-	ctx.SetRGB(0, 0, 0)
+	dc.SetFont(face)
+	dc.SetRGB(0, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.DrawString("Hello, World!", 100, 100)
+		dc.DrawString("Hello, World!", 100, 100)
 	}
 }
 
@@ -213,15 +213,15 @@ func BenchmarkMeasureString(b *testing.B) {
 	}
 	defer func() { _ = source.Close() }()
 
-	ctx := gg.NewContext(100, 100)
+	dc := gg.NewContext(100, 100)
 	face := source.Face(24)
-	ctx.SetFont(face)
+	dc.SetFont(face)
 
 	testText := "Hello, World! This is a longer string for benchmarking."
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = ctx.MeasureString(testText)
+		_, _ = dc.MeasureString(testText)
 	}
 }
 

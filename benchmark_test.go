@@ -74,8 +74,8 @@ func BenchmarkPixmap_FillSpanVsSetPixel(b *testing.B) {
 
 // BenchmarkDraw_FillRect benchmarks rectangle filling at various sizes.
 func BenchmarkDraw_FillRect(b *testing.B) {
-	ctx := NewContext(2000, 2000)
-	ctx.SetRGBA(1, 0, 0, 1)
+	dc := NewContext(2000, 2000)
+	dc.SetRGBA(1, 0, 0, 1)
 
 	rects := []struct {
 		name string
@@ -92,8 +92,8 @@ func BenchmarkDraw_FillRect(b *testing.B) {
 		b.Run(rect.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				ctx.DrawRectangle(0, 0, float64(rect.size), float64(rect.size))
-				ctx.Fill()
+				dc.DrawRectangle(0, 0, float64(rect.size), float64(rect.size))
+				dc.Fill()
 			}
 			pixels := int64(rect.size * rect.size)
 			b.SetBytes(pixels * 4)
@@ -103,8 +103,8 @@ func BenchmarkDraw_FillRect(b *testing.B) {
 
 // BenchmarkDraw_FillCircle benchmarks circle filling at various sizes.
 func BenchmarkDraw_FillCircle(b *testing.B) {
-	ctx := NewContext(2000, 2000)
-	ctx.SetRGBA(0, 0, 1, 1)
+	dc := NewContext(2000, 2000)
+	dc.SetRGBA(0, 0, 1, 1)
 
 	circles := []struct {
 		name   string
@@ -121,8 +121,8 @@ func BenchmarkDraw_FillCircle(b *testing.B) {
 		b.Run(circle.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				ctx.DrawCircle(1000, 1000, circle.radius)
-				ctx.Fill()
+				dc.DrawCircle(1000, 1000, circle.radius)
+				dc.Fill()
 			}
 			// Approximate area for bytes calculation
 			area := int64(3.14159 * circle.radius * circle.radius)
@@ -133,9 +133,9 @@ func BenchmarkDraw_FillCircle(b *testing.B) {
 
 // BenchmarkDraw_StrokePath benchmarks path stroking.
 func BenchmarkDraw_StrokePath(b *testing.B) {
-	ctx := NewContext(1000, 1000)
-	ctx.SetRGBA(0, 1, 0, 1)
-	ctx.SetLineWidth(5)
+	dc := NewContext(1000, 1000)
+	dc.SetRGBA(0, 1, 0, 1)
+	dc.SetLineWidth(5)
 
 	paths := []struct {
 		name     string
@@ -153,16 +153,16 @@ func BenchmarkDraw_StrokePath(b *testing.B) {
 				x := float64(i * 10)
 				y := float64((i % 2) * 100)
 				if i == 0 {
-					ctx.MoveTo(x, y)
+					dc.MoveTo(x, y)
 				} else {
-					ctx.LineTo(x, y)
+					dc.LineTo(x, y)
 				}
 			}
 
 			b.ResetTimer()
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				ctx.Stroke()
+				dc.Stroke()
 			}
 		})
 	}
@@ -172,58 +172,58 @@ func BenchmarkDraw_StrokePath(b *testing.B) {
 func BenchmarkDraw_ComplexScene(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		ctx := NewContext(1000, 1000)
+		dc := NewContext(1000, 1000)
 
 		// Background
-		ctx.SetRGBA(1, 1, 1, 1)
-		ctx.Clear()
+		dc.SetRGBA(1, 1, 1, 1)
+		dc.Clear()
 
 		// Draw multiple shapes
-		ctx.SetRGBA(1, 0, 0, 0.8)
-		ctx.DrawRectangle(100, 100, 200, 150)
-		ctx.Fill()
+		dc.SetRGBA(1, 0, 0, 0.8)
+		dc.DrawRectangle(100, 100, 200, 150)
+		dc.Fill()
 
-		ctx.SetRGBA(0, 1, 0, 0.8)
-		ctx.DrawCircle(500, 500, 100)
-		ctx.Fill()
+		dc.SetRGBA(0, 1, 0, 0.8)
+		dc.DrawCircle(500, 500, 100)
+		dc.Fill()
 
-		ctx.SetRGBA(0, 0, 1, 0.8)
-		ctx.DrawRegularPolygon(6, 700, 300, 80, 0)
-		ctx.Fill()
+		dc.SetRGBA(0, 0, 1, 0.8)
+		dc.DrawRegularPolygon(6, 700, 300, 80, 0)
+		dc.Fill()
 
 		// Stroked path
-		ctx.SetRGBA(0, 0, 0, 1)
-		ctx.SetLineWidth(3)
-		ctx.MoveTo(100, 800)
-		ctx.LineTo(300, 900)
-		ctx.LineTo(500, 850)
-		ctx.LineTo(700, 900)
-		ctx.Stroke()
+		dc.SetRGBA(0, 0, 0, 1)
+		dc.SetLineWidth(3)
+		dc.MoveTo(100, 800)
+		dc.LineTo(300, 900)
+		dc.LineTo(500, 850)
+		dc.LineTo(700, 900)
+		dc.Stroke()
 	}
 	b.SetBytes(1000 * 1000 * 4) // Full canvas
 }
 
 // BenchmarkAlphaBlending benchmarks transparent shape compositing.
 func BenchmarkAlphaBlending(b *testing.B) {
-	ctx := NewContext(1000, 1000)
-	ctx.SetRGBA(1, 1, 1, 1)
-	ctx.Clear()
+	dc := NewContext(1000, 1000)
+	dc.SetRGBA(1, 1, 1, 1)
+	dc.Clear()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		// Draw overlapping semi-transparent rectangles
-		ctx.SetRGBA(1, 0, 0, 0.5)
-		ctx.DrawRectangle(100, 100, 400, 400)
-		ctx.Fill()
+		dc.SetRGBA(1, 0, 0, 0.5)
+		dc.DrawRectangle(100, 100, 400, 400)
+		dc.Fill()
 
-		ctx.SetRGBA(0, 1, 0, 0.5)
-		ctx.DrawRectangle(200, 200, 400, 400)
-		ctx.Fill()
+		dc.SetRGBA(0, 1, 0, 0.5)
+		dc.DrawRectangle(200, 200, 400, 400)
+		dc.Fill()
 
-		ctx.SetRGBA(0, 0, 1, 0.5)
-		ctx.DrawRectangle(300, 300, 400, 400)
-		ctx.Fill()
+		dc.SetRGBA(0, 0, 1, 0.5)
+		dc.DrawRectangle(300, 300, 400, 400)
+		dc.Fill()
 	}
 	b.SetBytes(1000 * 1000 * 4)
 }

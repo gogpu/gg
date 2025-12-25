@@ -144,15 +144,15 @@ func TestMultiFaceRendering(t *testing.T) {
 		t.Fatalf("NewMultiFace failed: %v", err)
 	}
 
-	ctx := gg.NewContext(400, 200)
-	ctx.ClearWithColor(gg.White)
-	ctx.SetFont(multiFace)
-	ctx.SetRGB(0, 0, 0)
+	dc := gg.NewContext(400, 200)
+	dc.ClearWithColor(gg.White)
+	dc.SetFont(multiFace)
+	dc.SetRGB(0, 0, 0)
 
 	// Should not panic
-	ctx.DrawString("Hello World", 50, 100)
+	dc.DrawString("Hello World", 50, 100)
 
-	w, h := ctx.MeasureString("Hello World")
+	w, h := dc.MeasureString("Hello World")
 	if w <= 0 || h <= 0 {
 		t.Errorf("Expected positive dimensions, got w=%f, h=%f", w, h)
 	}
@@ -174,13 +174,13 @@ func TestFilteredFaceRendering(t *testing.T) {
 	face := source.Face(24)
 	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
 
-	ctx := gg.NewContext(400, 200)
-	ctx.ClearWithColor(gg.White)
-	ctx.SetFont(filtered)
-	ctx.SetRGB(0, 0, 0)
+	dc := gg.NewContext(400, 200)
+	dc.ClearWithColor(gg.White)
+	dc.SetFont(filtered)
+	dc.SetRGB(0, 0, 0)
 
 	// ASCII text should render fine
-	ctx.DrawString("Hello ASCII", 50, 100)
+	dc.DrawString("Hello ASCII", 50, 100)
 }
 
 // BenchmarkMultiFaceRendering benchmarks MultiFace drawing.
@@ -199,13 +199,13 @@ func BenchmarkMultiFaceRendering(b *testing.B) {
 	face := source.Face(24)
 	multiFace, _ := text.NewMultiFace(face)
 
-	ctx := gg.NewContext(800, 600)
-	ctx.SetFont(multiFace)
-	ctx.SetRGB(0, 0, 0)
+	dc := gg.NewContext(800, 600)
+	dc.SetFont(multiFace)
+	dc.SetRGB(0, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.DrawString("Hello World!", 100, 100)
+		dc.DrawString("Hello World!", 100, 100)
 	}
 }
 
@@ -225,13 +225,13 @@ func BenchmarkFilteredFaceRendering(b *testing.B) {
 	face := source.Face(24)
 	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
 
-	ctx := gg.NewContext(800, 600)
-	ctx.SetFont(filtered)
-	ctx.SetRGB(0, 0, 0)
+	dc := gg.NewContext(800, 600)
+	dc.SetFont(filtered)
+	dc.SetRGB(0, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.DrawString("Hello ASCII World!", 100, 100)
+		dc.DrawString("Hello ASCII World!", 100, 100)
 	}
 }
 
