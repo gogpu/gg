@@ -207,6 +207,11 @@ linters:
           - cyclop       # Same reason
           - funlen       # Conversion functions map all 28+ modes
 
+      # GPU compute shaders - similar initialization patterns (Phase 6)
+      - path: backend/wgpu/gpu_.*.go
+        linters:
+          - dupl          # Fine, coarse, flatten have similar WebGPU init patterns
+
       # Example code - demonstration purposes
       - path: examples?/.*\.go
         linters:

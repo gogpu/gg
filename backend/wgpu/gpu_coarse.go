@@ -1,8 +1,6 @@
 //go:build !nogpu
 
 // Package wgpu provides GPU-accelerated rendering using WebGPU.
-//
-//nolint:dupl // GPU coarse and fine share similar initialization patterns by design
 package wgpu
 
 import (
