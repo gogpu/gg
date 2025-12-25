@@ -59,6 +59,29 @@
 
 ---
 
+## Why "Context" Instead of "Canvas"?
+
+The main drawing type is named `Context` following industry standards:
+
+| Library | Drawing Type |
+|---------|-------------|
+| HTML5 Canvas API | `CanvasRenderingContext2D` |
+| Cairo | `cairo_t` (context) |
+| Apple CoreGraphics | `CGContext` |
+| piet (Rust) | `RenderContext` |
+| fogleman/gg | `Context` |
+
+In HTML5, the Canvas is just the HTML element (surface), while the **Context** is what performs all drawing operations (`canvas.getContext("2d")`). This semantic distinction applies here: `Context` contains drawing state (colors, transforms, fonts) and provides the drawing API.
+
+**Variable naming convention:**
+```go
+dc := gg.NewContext(512, 512)  // dc = drawing context
+```
+
+This convention (`dc` for drawing, `ctx` for `context.Context`) avoids confusion with Go's standard library and is used throughout fogleman/gg, Cairo, and CoreGraphics codebases.
+
+---
+
 ## Installation
 
 ```bash
@@ -78,26 +101,26 @@ import (
 )
 
 func main() {
-    // Create a 512x512 context
-    ctx := gg.NewContext(512, 512)
-    defer ctx.Close() // Clean resource release
+    // Create a 512x512 drawing context
+    dc := gg.NewContext(512, 512)
+    defer dc.Close() // Clean resource release
 
-    ctx.ClearWithColor(gg.White)
+    dc.ClearWithColor(gg.White)
 
     // Draw a gradient circle
-    ctx.SetHexColor("#3498db")
-    ctx.DrawCircle(256, 256, 100)
-    ctx.Fill()
+    dc.SetHexColor("#3498db")
+    dc.DrawCircle(256, 256, 100)
+    dc.Fill()
 
     // Text rendering with font fallback
     source, _ := text.NewFontSourceFromFile("arial.ttf")
     defer source.Close()
 
-    ctx.SetFont(source.Face(32))
-    ctx.SetColor(gg.Black)
-    ctx.DrawString("Hello, GoGPU!", 180, 260)
+    dc.SetFont(source.Face(32))
+    dc.SetColor(gg.Black)
+    dc.DrawString("Hello, GoGPU!", 180, 260)
 
-    ctx.SavePNG("output.png")
+    dc.SavePNG("output.png")
 }
 ```
 
@@ -110,24 +133,24 @@ func main() {
 Classic canvas-style drawing with transformation stack:
 
 ```go
-ctx := gg.NewContext(800, 600)
-defer ctx.Close()
+dc := gg.NewContext(800, 600)
+defer dc.Close()
 
 // Shapes with transforms
-ctx.Push()
-ctx.Translate(400, 300)
-ctx.Rotate(math.Pi / 4)
-ctx.DrawRectangle(-50, -50, 100, 100)
-ctx.SetRGB(0.2, 0.5, 0.8)
-ctx.Fill()
-ctx.Pop()
+dc.Push()
+dc.Translate(400, 300)
+dc.Rotate(math.Pi / 4)
+dc.DrawRectangle(-50, -50, 100, 100)
+dc.SetRGB(0.2, 0.5, 0.8)
+dc.Fill()
+dc.Pop()
 
 // Bezier paths
-ctx.MoveTo(100, 100)
-ctx.QuadraticTo(200, 50, 300, 100)
-ctx.CubicTo(350, 150, 350, 250, 300, 300)
-ctx.SetLineWidth(3)
-ctx.Stroke()
+dc.MoveTo(100, 100)
+dc.QuadraticTo(200, 50, 300, 100)
+dc.CubicTo(350, 150, 350, 250, 300, 300)
+dc.SetLineWidth(3)
+dc.Stroke()
 ```
 
 ### Fluent Path Builder
@@ -145,8 +168,8 @@ path := gg.BuildPath().
     Star(400, 150, 40, 20, 5).
     Build()
 
-ctx.SetPath(path)
-ctx.Fill()
+dc.SetPath(path)
+dc.Fill()
 ```
 
 ### Retained Mode (Scene Graph)
@@ -183,8 +206,8 @@ multiFace, _ := text.NewMultiFace(
     text.NewFilteredFace(emojiFont.Face(24), text.RangeEmoji),
 )
 
-ctx.SetFont(multiFace)
-ctx.DrawString("Hello World! Nice day!", 50, 100)
+dc.SetFont(multiFace)
+dc.DrawString("Hello World! Nice day!", 50, 100)
 
 // Layout with wrapping
 opts := text.LayoutOptions{
@@ -201,19 +224,19 @@ Sophisticated compositing with alpha masks:
 
 ```go
 // Create mask from current drawing
-ctx.DrawCircle(200, 200, 100)
-ctx.Fill()
-mask := ctx.AsMask()
+dc.DrawCircle(200, 200, 100)
+dc.Fill()
+mask := dc.AsMask()
 
 // Apply mask to new context
-ctx2 := gg.NewContext(400, 400)
-ctx2.SetMask(mask)
-ctx2.DrawRectangle(0, 0, 400, 400)
-ctx2.Fill() // Only visible through mask
+dc2 := gg.NewContext(400, 400)
+dc2.SetMask(mask)
+dc2.DrawRectangle(0, 0, 400, 400)
+dc2.Fill() // Only visible through mask
 
 // Mask operations
-ctx2.InvertMask()
-ctx2.ClearMask()
+dc2.InvertMask()
+dc2.ClearMask()
 ```
 
 ### Layer Compositing
@@ -221,17 +244,17 @@ ctx2.ClearMask()
 29 blend modes with isolated layers:
 
 ```go
-ctx.PushLayer(gg.BlendOverlay, 0.7)
+dc.PushLayer(gg.BlendOverlay, 0.7)
 
-ctx.SetRGB(1, 0, 0)
-ctx.DrawCircle(150, 200, 100)
-ctx.Fill()
+dc.SetRGB(1, 0, 0)
+dc.DrawCircle(150, 200, 100)
+dc.Fill()
 
-ctx.SetRGB(0, 0, 1)
-ctx.DrawCircle(250, 200, 100)
-ctx.Fill()
+dc.SetRGB(0, 0, 1)
+dc.DrawCircle(250, 200, 100)
+dc.Fill()
 
-ctx.PopLayer() // Composite with overlay blend
+dc.PopLayer() // Composite with overlay blend
 ```
 
 ---

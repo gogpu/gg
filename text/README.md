@@ -67,10 +67,10 @@ defer source.Close()
 // Create face at specific size (lightweight)
 face := source.Face(24)
 
-// Use with gg.Context
-ctx := gg.NewContext(800, 600)
-ctx.SetFont(face)
-ctx.DrawString("Hello, GoGPU!", 100, 100)
+// Use with gg.Context (dc = drawing context)
+dc := gg.NewContext(800, 600)
+dc.SetFont(face)
+dc.DrawString("Hello, GoGPU!", 100, 100)
 ```
 
 ### Text Shaping

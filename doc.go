@@ -10,16 +10,16 @@
 //
 //	import "github.com/gogpu/gg"
 //
-//	// Create a context
-//	ctx := gg.NewContext(512, 512)
+//	// Create a drawing context (dc = drawing context convention)
+//	dc := gg.NewContext(512, 512)
 //
 //	// Draw shapes
-//	ctx.SetRGB(1, 0, 0)
-//	ctx.DrawCircle(256, 256, 100)
-//	ctx.Fill()
+//	dc.SetRGB(1, 0, 0)
+//	dc.DrawCircle(256, 256, 100)
+//	dc.Fill()
 //
 //	// Save to PNG
-//	ctx.SavePNG("output.png")
+//	dc.SavePNG("output.png")
 //
 // # API Compatibility
 //
