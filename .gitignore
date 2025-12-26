@@ -46,4 +46,4 @@ BENCHMARK_RESULTS*.md
 # Private developer docs
 docs/dev/
 
-tmp/.claude/STATUS.md
+tmp/
