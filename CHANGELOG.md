@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.1] - 2025-12-26
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.6.0 → v0.7.1
+  - Includes `ErrZeroArea` validation for zero-dimension surfaces
+  - Fixes macOS timing issue when window initially has zero dimensions
+
 ## [0.15.0] - 2025-12-26
 
 ### Added
