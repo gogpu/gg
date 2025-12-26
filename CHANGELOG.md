@@ -344,6 +344,14 @@ Key design decisions:
 - Bidi segmentation uses Unicode standard via golang.org/x/text
 - Layout engine ready for GPU rendering pipeline
 
+## [0.9.2] - 2025-12-19
+
+### Fixed
+- **Raster winding direction** — Compute edge direction before point swap ([#15](https://github.com/gogpu/gg/pull/15))
+  - Non-zero winding rule was broken because direction was computed AFTER swapping points
+  - Direction must be determined from original point order before normalizing edges
+  - Thanks to @cmaglie for reporting and testing
+
 ## [0.9.1] - 2025-12-19
 
 ### Fixed
@@ -838,7 +846,8 @@ Key benefits:
 [0.12.0]: https://github.com/gogpu/gg/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/gogpu/gg/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/gogpu/gg/compare/v0.10.0...v0.10.1
-[0.10.0]: https://github.com/gogpu/gg/compare/v0.9.1...v0.10.0
+[0.10.0]: https://github.com/gogpu/gg/compare/v0.9.2...v0.10.0
+[0.9.2]: https://github.com/gogpu/gg/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/gogpu/gg/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/gogpu/gg/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gogpu/gg/compare/v0.7.0...v0.8.0

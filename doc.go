@@ -28,15 +28,16 @@
 //
 // # Renderers
 //
-// v0.1.0 includes a software rasterizer for immediate usability.
-// Future versions will add GPU-accelerated rendering via gogpu/wgpu.
+// The library includes both software and GPU-accelerated renderers:
+//   - Software rasterizer for broad compatibility
+//   - GPU renderer via gogpu/wgpu for high performance
 //
 // # Architecture
 //
 // The library is organized into:
 //   - Public API: Context, Path, Paint, Matrix, Point
 //   - Internal: raster (scanline), path (tessellation), blend (compositing)
-//   - Renderers: software (v0.1), gpu (v0.3+)
+//   - Renderers: software, gpu (wgpu)
 //
 // # Coordinate System
 //
@@ -48,24 +49,6 @@
 //
 // # Performance
 //
-// The software renderer is optimized for correctness over speed.
-// For performance-critical applications, use the GPU renderer (v0.3+).
+// The software renderer prioritizes correctness.
+// For performance-critical applications, use the GPU renderer.
 package gg
-
-// Version information
-const (
-	// Version is the current version of the library
-	Version = "0.1.0-alpha.1"
-
-	// VersionMajor is the major version
-	VersionMajor = 0
-
-	// VersionMinor is the minor version
-	VersionMinor = 1
-
-	// VersionPatch is the patch version
-	VersionPatch = 0
-
-	// VersionPrerelease is the prerelease identifier
-	VersionPrerelease = "alpha.1"
-)
