@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.15.0
+## Current State: v0.15.1
 
 | Version | Focus |
 |---------|-------|
@@ -46,7 +46,8 @@
 | v0.12.0 | Brush, Gradients, Stroke |
 | v0.13.0 | Go 1.25+ Modernization |
 | v0.14.0 | Advanced Features |
-| **v0.15.0** | **GPU Compute Shaders** |
+| v0.15.0 | GPU Compute Shaders |
+| **v0.15.1** | **Dependency update (wgpu v0.7.1)** |
 
 ---
 
