@@ -12,6 +12,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.0] - 2025-12-26
+
+### Added
+
+#### GPU Compute Shaders for Sparse Strips (Phase 6)
+
+Implements vello-style GPU compute shader pipeline for high-performance 2D rasterization.
+
+##### Phase 6.1: Fine Shader (GPU coverage)
+- **GPUFineRasterizer** — GPU-accelerated fine rasterization
+  - `gpu_fine.go` (752 LOC) — GPU rasterizer with CPU fallback
+  - `shaders/fine.wgsl` (290 LOC) — WGSL compute shader
+  - Per-pixel coverage calculation with analytic anti-aliasing
+  - NonZero and EvenOdd fill rules support
+
+##### Phase 6.2: Coarse Shader (tile binning)
+- **GPUCoarseRasterizer** — GPU-accelerated tile binning
+  - `gpu_coarse.go` (698 LOC) — GPU rasterizer with CPU fallback
+  - `shaders/coarse.wgsl` (335 LOC) — WGSL compute shader with atomics
+  - Efficient segment-to-tile mapping
+  - Dynamic tile entry allocation
+
+##### Phase 6.3: Flatten Shader (curves)
+- **GPUFlattenRasterizer** — GPU-accelerated curve flattening
+  - `gpu_flatten.go` (809 LOC) — GPU rasterizer with CPU fallback
+  - `shaders/flatten.wgsl` (589 LOC) — Bezier flattening shader
+  - Quadratic and cubic Bezier support
+  - Affine transform integration
+
+##### Phase 6.4: Full GPU/CPU Integration
+- **HybridPipeline** — Unified GPU/CPU pipeline
+  - `sparse_strips_gpu.go` (837 LOC) — Full pipeline integration
+  - Automatic GPU/CPU selection based on workload
+  - Per-stage threshold configuration
+  - Comprehensive statistics tracking
+  - `RasterizePath(path, transform, fillRule)` — Full pipeline execution
+
+### Statistics
+- **+6,470 LOC** across 15 files
+- **3 WGSL compute shaders** (1,214 lines total)
+- **6 new Go files** with comprehensive tests
+- **87.6% coverage** maintained
+
 ## [0.14.0] - 2025-12-24
 
 ### Added
