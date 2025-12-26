@@ -1,7 +1,7 @@
 github.com/gogpu/naga v0.6.0 h1:hGfNo1F9e+r6eqZDuEl6Y9TgB7jvhLz0ii2wML7ERnw=
 github.com/gogpu/naga v0.6.0/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
-github.com/gogpu/wgpu v0.7.1 h1:V9d0H0P3TkK1Wgeanl7Ksca9ePToxno9E7epdUeogJ4=
-github.com/gogpu/wgpu v0.7.1/go.mod h1:MRBA/7wAukW6orOEB/8wPG3T4h7fVywF8TlgoIjKczc=
+github.com/gogpu/wgpu v0.7.2 h1:KZkCiIqcM0mlFHHC4jhVbViQiT1EoSOESoqFHkVfbm0=
+github.com/gogpu/wgpu v0.7.2/go.mod h1:cvliTk43ayrSOB1C40t9C6gY9XoWV0vE/+wcPJEyj6M=
 golang.org/x/image v0.34.0 h1:33gCkyw9hmwbZJeZkct8XyR11yH889EQt/QH4VmXMn8=
 golang.org/x/image v0.34.0/go.mod h1:2RNFBZRB+vnwwFil8GkMdRvrJOFd1AzdZI6vOY+eJVU=
 golang.org/x/text v0.32.0 h1:ZD01bjUt1FQ9WJ0ClOL5vxgxOI/sVCNgX1YtKwcY0mU=
