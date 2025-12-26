@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.2] - 2025-12-26
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.7.1 → v0.7.2
+  - Fixes Metal CommandEncoder state bug (wgpu Issue #24)
+  - Metal backend properly tracks recording state via `cmdBuffer != 0`
+
 ## [0.15.1] - 2025-12-26
 
 ### Changed
@@ -847,7 +854,10 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/gogpu/gg/compare/v0.15.1...v0.15.2
+[0.15.1]: https://github.com/gogpu/gg/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/gogpu/gg/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/gogpu/gg/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/gogpu/gg/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/gogpu/gg/compare/v0.11.0...v0.12.0
