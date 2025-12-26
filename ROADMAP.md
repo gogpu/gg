@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.14.0
+## Current State: v0.15.0
 
 | Version | Focus |
 |---------|-------|
@@ -45,7 +45,8 @@
 | v0.11.0 | MSDF, Emoji |
 | v0.12.0 | Brush, Gradients, Stroke |
 | v0.13.0 | Go 1.25+ Modernization |
-| **v0.14.0** | **Advanced Features** |
+| v0.14.0 | Advanced Features |
+| **v0.15.0** | **GPU Compute Shaders** |
 
 ---
 
@@ -151,18 +152,32 @@ defer file.Close()
 ctx.EncodePNG(file) // Write directly to file
 ```
 
-### v0.15.0 — Documentation & RC
+### v0.15.0 — GPU Compute Shaders
 
-**Status:** Planned | **Target:** Q2 2025
+**Status:** Released | **Date:** 2025-12-26
 
-Comprehensive documentation and release candidate.
+Implements vello-style GPU compute shader pipeline for high-performance 2D rasterization.
 
-| Deliverable | Description |
-|-------------|-------------|
-| **API Documentation** | Every public symbol documented |
-| **Migration Guide** | fogleman/gg → gogpu/gg |
-| **Examples** | 20+ working examples |
-| **Benchmarks** | Performance comparison suite |
+| Feature | Description |
+|---------|-------------|
+| **Fine Shader** | GPU coverage calculation with analytic anti-aliasing |
+| **Coarse Shader** | Tile binning with atomic operations |
+| **Flatten Shader** | Quadratic and cubic Bezier curve flattening |
+| **HybridPipeline** | Unified GPU/CPU pipeline with automatic selection |
+
+```go
+// GPU-accelerated path rasterization
+pipeline := wgpu.NewHybridPipeline(device, queue, wgpu.HybridPipelineConfig{
+    FlattenThreshold: 100,  // Use GPU for 100+ curves
+    CoarseThreshold:  50,   // Use GPU for 50+ segments
+    FineThreshold:    20,   // Use GPU for 20+ tiles
+})
+
+// Rasterize path with optimal GPU/CPU balance
+coverage := pipeline.RasterizePath(path, transform, scene.FillNonZero)
+```
+
+**Statistics:** +6,470 LOC, 3 WGSL shaders, 17 tests, 87.6% coverage
 
 ### v1.0.0 — Production Release
 
