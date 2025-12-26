@@ -9,3 +9,5 @@ require (
 	golang.org/x/image v0.34.0
 	golang.org/x/text v0.32.0
 )
+
+require github.com/gogpu/naga v0.6.0
