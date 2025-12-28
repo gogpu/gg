@@ -273,7 +273,7 @@ check_ecosystem_dep() {
     local DEP_NAME=$1
     local REPO=$2
 
-    LOCAL_VERSION=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module" | awk '{print $2}')
+    LOCAL_VERSION=$(grep "$DEP_NAME" go.mod 2>/dev/null | grep -v "^module" | awk '{print $NF}')
 
     if [ -z "$LOCAL_VERSION" ]; then
         return 0  # Dependency not used, skip
