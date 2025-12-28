@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.4] - 2025-12-29
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.1 → v0.8.3
+  - Metal macOS blank window fix (Issue gogpu/gogpu#24)
+  - Metal present timing: schedule `presentDrawable:` before `commit`
+  - TextureView NSRange parameters fix
+
 ## [0.15.3] - 2025-12-29
 
 ### Changed

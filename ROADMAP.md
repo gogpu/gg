@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.15.1
+## Current State: v0.15.4
 
 | Version | Focus |
 |---------|-------|
@@ -47,7 +47,8 @@
 | v0.13.0 | Go 1.25+ Modernization |
 | v0.14.0 | Advanced Features |
 | v0.15.0 | GPU Compute Shaders |
-| **v0.15.1** | **Dependency update (wgpu v0.7.1)** |
+| v0.15.3 | Dependency update (wgpu v0.8.1, DX12) |
+| **v0.15.4** | **Metal macOS blank window fix** |
 
 ---
 
