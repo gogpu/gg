@@ -28,26 +28,25 @@
 
 ---
 
-## Current State: v0.15.1
+## Current State: v0.15.4
 
-| Version | Focus |
-|---------|-------|
-| v0.1.0 | Canvas API |
-| v0.2.0 | Text Rendering |
-| v0.3.0 | Images, Clipping |
-| v0.4.0 | Colors, Layers |
-| v0.5.0 | SIMD Optimization |
-| v0.6.0 | Parallel Rendering |
-| v0.7.0 | Scene Graph |
-| v0.8.0 | Backend Abstraction |
-| v0.9.0 | GPU Backend |
-| v0.10.0 | Text Pipeline |
-| v0.11.0 | MSDF, Emoji |
-| v0.12.0 | Brush, Gradients, Stroke |
-| v0.13.0 | Go 1.25+ Modernization |
-| v0.14.0 | Advanced Features |
-| v0.15.0 | GPU Compute Shaders |
-| **v0.15.1** | **Dependency update (wgpu v0.7.1)** |
+| Milestone | Focus |
+|-----------|-------|
+| Canvas API | Core drawing operations |
+| Text Rendering | Font loading, layout, rendering |
+| Images, Clipping | Image loading, clip paths |
+| Colors, Layers | Color pipeline, layer compositing |
+| SIMD Optimization | Performance improvements |
+| Parallel Rendering | Multi-threaded rasterization |
+| Scene Graph | Retained mode rendering |
+| Backend Abstraction | GPU/CPU backend interface |
+| GPU Backend | Sparse strips, compute shaders |
+| Text Pipeline | GPU-accelerated text |
+| MSDF, Emoji | Signed distance fonts, emoji support |
+| Brush, Gradients | Gradient fills, stroke system |
+| Go 1.25+ Modernization | Modern Go features |
+| Advanced Features | Masks, PathBuilder, streaming I/O |
+| GPU Compute Shaders | Fine, coarse, flatten shaders |
 
 ---
 
