@@ -886,7 +886,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.5...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.6...HEAD
+[0.15.6]: https://github.com/gogpu/gg/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/gogpu/gg/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/gogpu/gg/compare/v0.15.3...v0.15.4
 [0.15.3]: https://github.com/gogpu/gg/compare/v0.15.2...v0.15.3
