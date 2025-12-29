@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.6] - 2025-12-29
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.5 → v0.8.6
+  - Metal double present fix
+  - goffi v0.3.6 with ARM64 struct return fixes
+  - Resolves macOS ARM64 blank window issue (gogpu/gogpu#24)
+
 ## [0.15.5] - 2025-12-29
 
 ### Changed
