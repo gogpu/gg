@@ -12,18 +12,24 @@ import (
 
 // Draw renders text to a destination image.
 // Position (x, y) is the baseline origin.
-// The face must be a *sourceFace from this package.
+// Supports sourceFace, MultiFace, and FilteredFace.
 func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color) {
 	if text == "" || face == nil {
 		return
 	}
 
-	// Type assert to get source face
-	sf, ok := face.(*sourceFace)
-	if !ok {
-		return
+	switch f := face.(type) {
+	case *sourceFace:
+		drawSourceFace(dst, text, f, x, y, col)
+	case *MultiFace:
+		drawMultiFace(dst, text, f, x, y, col)
+	case *FilteredFace:
+		drawFilteredFace(dst, text, f, x, y, col)
 	}
+}
 
+// drawSourceFace renders text using a sourceFace.
+func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, col color.Color) {
 	// Get the parsed font
 	parsed := sf.source.Parsed()
 	xparsed, ok := parsed.(*ximageParsedFont)
@@ -56,6 +62,83 @@ func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color)
 
 	// Draw the text
 	d.DrawString(text)
+}
+
+// drawMultiFace renders text using a MultiFace, selecting the appropriate font for each rune.
+func drawMultiFace(dst draw.Image, text string, mf *MultiFace, x, y float64, col color.Color) {
+	currentX := x
+
+	for _, r := range text {
+		runeStr := string(r)
+
+		// Find the face that has this glyph
+		var faceToUse Face
+		for _, f := range mf.faces {
+			if f.HasGlyph(r) {
+				faceToUse = f
+				break
+			}
+		}
+
+		// Fallback to first face if no face has the glyph
+		if faceToUse == nil {
+			faceToUse = mf.faces[0]
+		}
+
+		// Get advance for this rune
+		advance := 0.0
+		for glyph := range faceToUse.Glyphs(runeStr) {
+			advance = glyph.Advance
+			break
+		}
+
+		// Render based on face type
+		switch f := faceToUse.(type) {
+		case *sourceFace:
+			drawSourceFace(dst, runeStr, f, currentX, y, col)
+		case *FilteredFace:
+			drawFilteredFace(dst, runeStr, f, currentX, y, col)
+		case *MultiFace:
+			// Nested MultiFace (rare but possible)
+			drawMultiFace(dst, runeStr, f, currentX, y, col)
+		}
+
+		currentX += advance
+	}
+}
+
+// drawFilteredFace renders text using a FilteredFace.
+func drawFilteredFace(dst draw.Image, text string, ff *FilteredFace, x, y float64, col color.Color) {
+	// FilteredFace wraps another face - extract and use it
+	// Only render runes that pass the filter
+	currentX := x
+
+	for _, r := range text {
+		if !ff.inRanges(r) {
+			continue // Skip filtered runes
+		}
+
+		runeStr := string(r)
+
+		// Get advance for this rune
+		advance := 0.0
+		for glyph := range ff.face.Glyphs(runeStr) {
+			advance = glyph.Advance
+			break
+		}
+
+		// Render using the underlying face
+		switch f := ff.face.(type) {
+		case *sourceFace:
+			drawSourceFace(dst, runeStr, f, currentX, y, col)
+		case *FilteredFace:
+			drawFilteredFace(dst, runeStr, f, currentX, y, col)
+		case *MultiFace:
+			drawMultiFace(dst, runeStr, f, currentX, y, col)
+		}
+
+		currentX += advance
+	}
 }
 
 // Measure returns the dimensions of text.

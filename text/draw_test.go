@@ -216,6 +216,202 @@ func TestMeasureConsistency(t *testing.T) {
 	}
 }
 
+func TestDrawMultiFace(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	// Load font
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	// Create faces for MultiFace
+	face1 := source.Face(12.0)
+	face2 := source.Face(14.0)
+
+	// Create MultiFace
+	multiFace, err := NewMultiFace(face1, face2)
+	if err != nil {
+		t.Fatalf("Failed to create MultiFace: %v", err)
+	}
+
+	// Create destination image
+	dst := image.NewRGBA(image.Rect(0, 0, 200, 50))
+
+	// Draw text using MultiFace - this was the bug in Issue #34
+	Draw(dst, "Hello, World!", multiFace, 10, 30, color.Black)
+
+	// Verify that some pixels were modified
+	modified := false
+	for y := 0; y < dst.Bounds().Dy(); y++ {
+		for x := 0; x < dst.Bounds().Dx(); x++ {
+			r, g, b, a := dst.At(x, y).RGBA()
+			if r != 0 || g != 0 || b != 0 || a != 0 {
+				modified = true
+				break
+			}
+		}
+		if modified {
+			break
+		}
+	}
+
+	if !modified {
+		t.Error("Expected Draw with MultiFace to modify the destination image (Issue #34 regression)")
+	}
+}
+
+func TestDrawFilteredFace(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	face := source.Face(12.0)
+
+	// Create FilteredFace with ASCII range
+	filteredFace := NewFilteredFace(face, UnicodeRange{Start: 0x0020, End: 0x007F})
+
+	// Create destination image
+	dst := image.NewRGBA(image.Rect(0, 0, 200, 50))
+
+	// Draw text using FilteredFace
+	Draw(dst, "Hello", filteredFace, 10, 30, color.Black)
+
+	// Verify that some pixels were modified
+	modified := false
+	for y := 0; y < dst.Bounds().Dy(); y++ {
+		for x := 0; x < dst.Bounds().Dx(); x++ {
+			r, g, b, a := dst.At(x, y).RGBA()
+			if r != 0 || g != 0 || b != 0 || a != 0 {
+				modified = true
+				break
+			}
+		}
+		if modified {
+			break
+		}
+	}
+
+	if !modified {
+		t.Error("Expected Draw with FilteredFace to modify the destination image")
+	}
+}
+
+func TestDrawMultiFaceWithFilteredFaces(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	// Create base faces
+	face1 := source.Face(12.0)
+	face2 := source.Face(12.0)
+
+	// Create filtered faces for different ranges
+	latinFace := NewFilteredFace(face1, UnicodeRange{Start: 0x0000, End: 0x024F}) // Latin
+	extendedFace := NewFilteredFace(face2, UnicodeRange{Start: 0x0250, End: 0xFFFF})
+
+	// Create MultiFace from filtered faces
+	multiFace, err := NewMultiFace(latinFace, extendedFace)
+	if err != nil {
+		t.Fatalf("Failed to create MultiFace: %v", err)
+	}
+
+	// Create destination image
+	dst := image.NewRGBA(image.Rect(0, 0, 300, 50))
+
+	// Draw text - this tests the full composite face rendering chain
+	Draw(dst, "Hello World 123", multiFace, 10, 30, color.Black)
+
+	// Verify that some pixels were modified
+	modified := false
+	for y := 0; y < dst.Bounds().Dy(); y++ {
+		for x := 0; x < dst.Bounds().Dx(); x++ {
+			r, g, b, a := dst.At(x, y).RGBA()
+			if r != 0 || g != 0 || b != 0 || a != 0 {
+				modified = true
+				break
+			}
+		}
+		if modified {
+			break
+		}
+	}
+
+	if !modified {
+		t.Error("Expected Draw with MultiFace containing FilteredFaces to modify the destination image")
+	}
+}
+
+func TestMeasureMultiFace(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	face1 := source.Face(12.0)
+	face2 := source.Face(14.0)
+
+	multiFace, err := NewMultiFace(face1, face2)
+	if err != nil {
+		t.Fatalf("Failed to create MultiFace: %v", err)
+	}
+
+	w, h := Measure("Hello", multiFace)
+
+	if w <= 0 {
+		t.Errorf("Expected positive width for MultiFace, got %f", w)
+	}
+
+	if h <= 0 {
+		t.Errorf("Expected positive height for MultiFace, got %f", h)
+	}
+}
+
+func TestMeasureFilteredFace(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	face := source.Face(12.0)
+	filteredFace := NewFilteredFace(face, UnicodeRange{Start: 0x0020, End: 0x007F})
+
+	w, h := Measure("Hello", filteredFace)
+
+	if w <= 0 {
+		t.Errorf("Expected positive width for FilteredFace, got %f", w)
+	}
+
+	if h <= 0 {
+		t.Errorf("Expected positive height for FilteredFace, got %f", h)
+	}
+}
+
 func BenchmarkDraw(b *testing.B) {
 	// Try to get a font, skip if not available
 	candidates := []string{

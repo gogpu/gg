@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.7] - 2025-12-29
+
+### Fixed
+- **MultiFace and FilteredFace rendering** — `text.Draw()` now correctly renders text using composite Face types ([#34](https://github.com/gogpu/gg/issues/34))
+  - Previously, `text.Draw()` silently failed when passed `MultiFace` or `FilteredFace`
+  - Root cause: type assertion to `*sourceFace` returned early for composite faces
+  - Fix: implemented type switch to handle all Face implementations
+
+### Added
+- **Regression tests for composite faces** — comprehensive tests for `MultiFace` and `FilteredFace` rendering
+  - `TestDrawMultiFace` — verifies MultiFace renders correctly
+  - `TestDrawFilteredFace` — verifies FilteredFace renders correctly
+  - `TestDrawMultiFaceWithFilteredFaces` — tests nested composite faces
+  - `TestMeasureMultiFace` and `TestMeasureFilteredFace` — measurement tests
+
 ## [0.15.6] - 2025-12-29
 
 ### Changed
@@ -886,7 +901,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.6...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.7...HEAD
+[0.15.7]: https://github.com/gogpu/gg/compare/v0.15.6...v0.15.7
 [0.15.6]: https://github.com/gogpu/gg/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/gogpu/gg/compare/v0.15.4...v0.15.5
 [0.15.4]: https://github.com/gogpu/gg/compare/v0.15.3...v0.15.4
