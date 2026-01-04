@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.9] - 2026-01-04
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.7 → v0.8.8
+  - Skip Metal tests on CI (Metal unavailable in virtualized macOS)
+  - MSL `[[position]]` attribute fix via naga v0.8.3
+- Updated dependency: `github.com/gogpu/naga` v0.8.2 → v0.8.3
+  - Fixes MSL `[[position]]` attribute placement (now on struct member, not function)
+
 ## [0.15.8] - 2026-01-04
 
 ### Changed
@@ -910,7 +919,9 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.7...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.9...HEAD
+[0.15.9]: https://github.com/gogpu/gg/compare/v0.15.8...v0.15.9
+[0.15.8]: https://github.com/gogpu/gg/compare/v0.15.7...v0.15.8
 [0.15.7]: https://github.com/gogpu/gg/compare/v0.15.6...v0.15.7
 [0.15.6]: https://github.com/gogpu/gg/compare/v0.15.5...v0.15.6
 [0.15.5]: https://github.com/gogpu/gg/compare/v0.15.4...v0.15.5

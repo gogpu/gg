@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.15.4
+## Current State: v0.15.9
 
 | Milestone | Focus |
 |-----------|-------|
