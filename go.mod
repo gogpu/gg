@@ -2,12 +2,10 @@ module github.com/gogpu/gg
 
 go 1.25
 
-// Pure Go 2D graphics library with GPU acceleration (v0.9.0+)
-
 require (
-	github.com/gogpu/wgpu v0.8.7
+	github.com/gogpu/wgpu v0.8.8
 	golang.org/x/image v0.34.0
 	golang.org/x/text v0.32.0
 )
 
-require github.com/gogpu/naga v0.8.2
+require github.com/gogpu/naga v0.8.3
