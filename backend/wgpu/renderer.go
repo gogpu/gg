@@ -50,16 +50,9 @@ type GPUSceneRenderer struct {
 	// Integrates: Flatten → Coarse → Fine stages
 	hybridPipeline *HybridPipeline
 
-	// Deprecated: tessellatorPool is kept for backward compatibility
-	// Will be removed once HybridPipeline is fully integrated
-	tessellatorPool *TessellatorPool
-
 	// Working textures
 	targetTex  *GPUTexture   // Final render target
 	layerStack []*GPUTexture // Layer texture stack
-
-	// Strip buffer for current path
-	stripBuffer *StripBuffer
 
 	// Current transform for rendering
 	currentTransform scene.Affine
@@ -168,10 +161,8 @@ func NewGPUSceneRenderer(backend *WGPUBackend, config GPUSceneRendererConfig) (*
 		pipelines:        pipelines,
 		memory:           memory,
 		hybridPipeline:   hybridPipeline,
-		tessellatorPool:  NewTessellatorPool(), // Deprecated: kept for backward compatibility
 		targetTex:        targetTex,
 		layerStack:       make([]*GPUTexture, 0, config.MaxLayers),
-		stripBuffer:      NewStripBuffer(),
 		currentTransform: scene.IdentityAffine(),
 		clipStack:        make([]clipState, 0, 8),
 	}
@@ -475,57 +466,6 @@ func (r *GPUSceneRenderer) expandStroke(path *scene.Path, style *scene.StrokeSty
 
 	// TODO: Implement proper stroke expansion
 	return path
-}
-
-// rasterizeStrips rasterizes coverage strips to a texture.
-//
-// Deprecated: This method uses the old Tessellator-based path. Use rasterizeFromGrid
-// with HybridPipeline for the new vello-style GPU/CPU rasterization.
-// Kept for reference and potential fallback scenarios.
-//
-//nolint:unused // Deprecated: kept for reference until HybridPipeline is fully validated
-func (r *GPUSceneRenderer) rasterizeStrips(strips *StripBuffer, brush scene.Brush, target *GPUTexture) {
-	if strips.IsEmpty() {
-		return
-	}
-
-	// Pack strips for GPU
-	headers, coverage := strips.PackForGPU()
-	if len(headers) == 0 {
-		return
-	}
-
-	// Extract color from brush
-	color := [4]float32{
-		float32(brush.Color.R),
-		float32(brush.Color.G),
-		float32(brush.Color.B),
-		float32(brush.Color.A),
-	}
-
-	// Create strip params
-	//nolint:gosec // texture dimensions and strip count are bounded by reasonable limits
-	params := StripParams{
-		Color:        color,
-		TargetWidth:  int32(target.Width()),
-		TargetHeight: int32(target.Height()),
-		StripCount:   int32(len(headers)),
-	}
-
-	// TODO: When wgpu is ready:
-	// 1. Upload headers to GPU buffer
-	// 2. Upload coverage to GPU buffer
-	// 3. Create command encoder
-	// 4. Begin compute pass
-	// 5. Set strip pipeline
-	// 6. Set bind group with buffers and target texture
-	// 7. Dispatch workgroups
-	// 8. End pass and submit
-
-	// For now, this is a stub that prepares data but doesn't execute GPU commands
-	_ = headers
-	_ = coverage
-	_ = params
 }
 
 // rasterizeFromGrid renders a TileGrid to the target texture.
