@@ -6,35 +6,37 @@
 //
 // # Architecture Overview
 //
-// The wgpu backend implements a complete GPU rendering pipeline:
+// The wgpu backend implements a vello-style GPU rendering pipeline:
 //
-//	Scene Commands -> Decoder -> Tessellator -> Strip Buffer -> GPU -> Composite
+//	Scene Commands -> Decoder -> HybridPipeline (Flatten → Coarse → Fine) -> GPU -> Composite
 //
 // Key components:
 //
 //   - WGPUBackend: Main entry point implementing backend.RenderBackend
-//   - GPUSceneRenderer: Scene-to-GPU pipeline with tessellation and compositing
+//   - GPUSceneRenderer: Scene-to-GPU pipeline with HybridPipeline rasterization
+//   - HybridPipeline: 3-stage path rasterization (Flatten, Coarse, Fine)
 //   - MemoryManager: GPU texture memory with LRU eviction (configurable budget)
 //   - TextureAtlas: Shelf-packing for efficient GPU memory usage
-//   - Tessellator: Path-to-strips using Active Edge Table algorithm
 //   - PipelineCache: Pre-compiled GPU pipelines for all 29 blend modes
-//   - ShaderModules: WGSL shaders for strip rasterization and blending
+//   - ShaderModules: WGSL compute shaders for tile rasterization and blending
 //
-// # Sparse Strips Algorithm
+// # HybridPipeline (vello-style)
 //
-// Scene rendering uses the Sparse Strips algorithm optimized for GPU execution:
+// Scene rendering uses a 3-stage tile-based pipeline inspired by Linebender's vello:
 //
-//  1. Paths are tessellated into horizontal coverage strips (one per scanline)
-//  2. Each strip stores anti-aliased coverage values (0-255) for a contiguous range
-//  3. Adjacent strips on the same row are merged for efficiency
-//  4. GPU compute shaders rasterize strips to textures in parallel
-//  5. Layer compositing uses fragment shaders with blend modes
+//  1. Flatten: Bezier curves are flattened to line segments using Wang's formula
+//  2. Coarse: Line segments are binned into 4×4 pixel tiles with winding info
+//  3. Fine: Each tile's coverage is computed with anti-aliased edges
 //
-// Example strip data for a circle:
+// The pipeline automatically selects GPU or CPU execution per stage based on
+// workload size. This hybrid approach provides optimal performance across
+// different path complexities.
 //
-//	Y=10, X=45, Width=10, Coverage=[32, 128, 255, 255, 255, 255, 255, 128, 32, 8]
-//	Y=11, X=43, Width=14, Coverage=[64, 192, 255, ... ]
-//	... (one strip per visible scanline)
+// Example tile data for a circle:
+//
+//	Tile(X=10, Y=5): Coverage[16]=[32, 128, 255, 255, ...]  // 4×4 pixel coverage
+//	Tile(X=11, Y=5): Coverage[16]=[255, 255, 255, 192, ...] // Adjacent tile
+//	... (sparse tiles only where path intersects)
 //
 // # Blend Modes
 //
@@ -152,29 +154,28 @@
 //
 // When memory budget is exceeded, least-recently-used textures are evicted.
 //
-// # Current Status (v0.9.0)
+// # Current Status (v0.16.0)
 //
-// The GPU pipeline implementation is complete. The following components are
-// fully implemented and tested:
+// The GPU pipeline uses vello-style HybridPipeline architecture.
+// The following components are fully implemented and tested:
 //
-//   - Path tessellation to sparse strips
-//   - Strip buffer packing for GPU upload
-//   - Active Edge Table scanline conversion
+//   - HybridPipeline: 3-stage path rasterization (Flatten → Coarse → Fine)
+//   - Tile-based sparse coverage (4×4 pixel tiles)
+//   - GPU/CPU automatic selection per stage
 //   - Fill rule support (NonZero, EvenOdd)
 //   - Anti-aliased coverage calculation
 //   - Pipeline cache for all blend modes
-//   - WGSL shader generation
+//   - WGSL compute shaders (flatten.wgsl, coarse.wgsl, fine.wgsl)
 //   - Memory management with LRU eviction
 //   - Layer stack management
 //   - Clip region support
 //
-// GPU operations currently run as stubs that prepare all data but don't
-// execute actual GPU commands. This will be enabled when gogpu/wgpu
-// implements the remaining core functionality:
+// GPU compute shader execution uses CPU fallback until HAL bridge is complete.
+// This will be enabled when core↔HAL device/queue bridge is implemented:
 //
+//   - HAL device/queue wiring to HybridPipeline
 //   - Texture readback (for downloading GPU results to CPU)
 //   - Buffer mapping (for uploading vertex/uniform data)
-//   - Command buffer execution
 //
 // All data flow through the pipeline is correct and tested.
 //
@@ -208,11 +209,11 @@
 //	go test -bench=. ./backend/wgpu/...
 //
 // Key benchmarks:
-//   - BenchmarkTessellation: Path to strips conversion
-//   - BenchmarkStripPacking: GPU data preparation
 //   - BenchmarkClear1080p: Full canvas clear comparison
 //   - BenchmarkRect100: 100 rectangles comparison
+//   - BenchmarkCircle50: Circle rendering comparison
 //   - BenchmarkLayers4: Layer compositing comparison
+//   - BenchmarkPipelineCreation: GPU pipeline cache performance
 //
 // # Related Packages
 //

@@ -372,61 +372,6 @@ func TestGPUSceneRendererInvalidDimensions(t *testing.T) {
 	}
 }
 
-// TestStripBufferIntegration tests StripBuffer with tessellator.
-func TestStripBufferIntegration(t *testing.T) {
-	tess := NewTessellator()
-
-	// Create simple rectangle path
-	path := scene.NewPath().Rectangle(10, 10, 100, 100)
-
-	// Tessellate
-	strips := tess.TessellatePath(path, scene.IdentityAffine())
-
-	if strips.IsEmpty() {
-		t.Error("Tessellation should produce strips")
-	}
-
-	// Verify bounds
-	bounds := strips.Bounds()
-	if bounds.IsEmpty() {
-		t.Error("Strips should have non-empty bounds")
-	}
-
-	// Pack for GPU
-	headers, coverage := strips.PackForGPU()
-	if len(headers) == 0 {
-		t.Error("Should have strip headers")
-	}
-	if len(coverage) == 0 {
-		t.Error("Should have coverage data")
-	}
-}
-
-// TestTessellatorPoolConcurrency tests pool thread safety.
-func TestTessellatorPoolConcurrency(t *testing.T) {
-	pool := NewTessellatorPool()
-
-	done := make(chan bool, 10)
-
-	for i := 0; i < 10; i++ {
-		go func() {
-			tess := pool.Get()
-
-			// Do some work
-			path := scene.NewPath().Circle(50, 50, 25)
-			_ = tess.TessellatePath(path, scene.IdentityAffine())
-
-			pool.Put(tess)
-			done <- true
-		}()
-	}
-
-	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
-		<-done
-	}
-}
-
 // TestBlendModeMapping tests blend mode shader constant mapping.
 func TestBlendModeMapping(t *testing.T) {
 	tests := []struct {
