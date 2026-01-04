@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.15.8] - 2026-01-04
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.6 → v0.8.7
+  - Metal ARM64 ObjC typed arguments
+  - goffi v0.3.7 with improved ARM64 ABI support
+- Updated dependency: `github.com/gogpu/naga` v0.8.1 → v0.8.2
+  - MSL backend improvements for triangle shader compilation
+
 ## [0.15.7] - 2025-12-29
 
 ### Fixed
