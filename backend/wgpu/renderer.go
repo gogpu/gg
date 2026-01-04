@@ -23,8 +23,11 @@ var (
 )
 
 // GPUSceneRenderer renders scenes using GPU acceleration.
-// It implements the full render pipeline: scene decoding, path tessellation,
-// strip rasterization, and layer compositing.
+// It implements the full render pipeline: scene decoding, path rasterization,
+// coverage calculation, and layer compositing.
+//
+// The renderer uses HybridPipeline which automatically selects between
+// GPU and CPU execution for each stage based on workload size.
 //
 // GPUSceneRenderer is safe for concurrent use from multiple goroutines.
 type GPUSceneRenderer struct {
@@ -43,7 +46,12 @@ type GPUSceneRenderer struct {
 	// Memory manager for texture allocation
 	memory *MemoryManager
 
-	// Tessellator pool for path conversion
+	// HybridPipeline for GPU/CPU path rasterization (vello-style)
+	// Integrates: Flatten → Coarse → Fine stages
+	hybridPipeline *HybridPipeline
+
+	// Deprecated: tessellatorPool is kept for backward compatibility
+	// Will be removed once HybridPipeline is fully integrated
 	tessellatorPool *TessellatorPool
 
 	// Working textures
@@ -143,13 +151,24 @@ func NewGPUSceneRenderer(backend *WGPUBackend, config GPUSceneRendererConfig) (*
 		return nil, fmt.Errorf("target texture allocation failed: %w", err)
 	}
 
+	// Create HybridPipeline for GPU/CPU path rasterization
+	// TODO: Wire up HAL device/queue when core↔HAL bridge is implemented
+	// For now, use CPU-only mode which provides correct functionality
+	//nolint:gosec // dimensions are validated above
+	hybridPipeline := NewHybridPipeline(uint16(config.Width), uint16(config.Height), HybridPipelineConfig{
+		Device:   nil, // Will be populated when HAL bridge is ready
+		Queue:    nil,
+		ForceCPU: true, // Use CPU fallback until HAL integration is complete
+	})
+
 	r := &GPUSceneRenderer{
 		backend:          backend,
 		width:            config.Width,
 		height:           config.Height,
 		pipelines:        pipelines,
 		memory:           memory,
-		tessellatorPool:  NewTessellatorPool(),
+		hybridPipeline:   hybridPipeline,
+		tessellatorPool:  NewTessellatorPool(), // Deprecated: kept for backward compatibility
 		targetTex:        targetTex,
 		layerStack:       make([]*GPUTexture, 0, config.MaxLayers),
 		stripBuffer:      NewStripBuffer(),
@@ -397,42 +416,30 @@ func (r *GPUSceneRenderer) processCommandsWithContext(ctx context.Context, dec *
 }
 
 // renderFill fills a path with the given brush and style.
+//
+// Uses HybridPipeline for vello-style GPU/CPU rasterization:
+// 1. Flatten: path → segments (GPU or CPU based on complexity)
+// 2. Coarse: segments → tile bins (GPU or CPU based on segment count)
+// 3. Fine: tile bins → coverage (GPU or CPU based on tile count)
 func (r *GPUSceneRenderer) renderFill(path *scene.Path, brush scene.Brush, style scene.FillStyle) {
-	// Get tessellator from pool
-	tess := r.tessellatorPool.Get()
-	defer r.tessellatorPool.Put(tess)
-
-	// Configure fill rule
-	tess.SetFillRule(style)
-
-	// Tessellate path to strips
-	strips := tess.TessellatePath(path, r.currentTransform)
-	if strips.IsEmpty() {
+	// Use HybridPipeline for path rasterization
+	grid := r.hybridPipeline.RasterizePath(path, r.currentTransform, style)
+	if grid == nil || grid.TileCount() == 0 {
 		return
 	}
-
-	// Merge adjacent strips for efficiency
-	strips.MergeAdjacent()
 
 	// Get current render target
 	target := r.getCurrentTarget()
 
-	// Rasterize strips to target
-	r.rasterizeStrips(strips, brush, target)
+	// Rasterize tile grid to target
+	r.rasterizeFromGrid(grid, brush, target)
 }
 
 // renderStroke strokes a path with the given brush and style.
+//
+// The stroke is first expanded to a filled region, then rasterized
+// using HybridPipeline.
 func (r *GPUSceneRenderer) renderStroke(path *scene.Path, brush scene.Brush, style *scene.StrokeStyle) {
-	// For stroke, we need to expand the path to a filled region
-	// This is typically done by creating an offset path or using
-	// stroke-specific tessellation
-
-	// For now, use a simplified approach: tessellate the path outline
-	// A proper implementation would expand the stroke to a fill region
-
-	tess := r.tessellatorPool.Get()
-	defer r.tessellatorPool.Put(tess)
-
 	// Expand stroke to fill (simplified - proper implementation would
 	// create offset curves based on stroke width)
 	expandedPath := r.expandStroke(path, style)
@@ -440,17 +447,14 @@ func (r *GPUSceneRenderer) renderStroke(path *scene.Path, brush scene.Brush, sty
 		return
 	}
 
-	tess.SetFillRule(scene.FillNonZero)
-
-	strips := tess.TessellatePath(expandedPath, r.currentTransform)
-	if strips.IsEmpty() {
+	// Use HybridPipeline to rasterize the expanded stroke path
+	grid := r.hybridPipeline.RasterizePath(expandedPath, r.currentTransform, scene.FillNonZero)
+	if grid == nil || grid.TileCount() == 0 {
 		return
 	}
 
-	strips.MergeAdjacent()
-
 	target := r.getCurrentTarget()
-	r.rasterizeStrips(strips, brush, target)
+	r.rasterizeFromGrid(grid, brush, target)
 }
 
 // expandStroke creates a filled path representing the stroke.
@@ -474,6 +478,12 @@ func (r *GPUSceneRenderer) expandStroke(path *scene.Path, style *scene.StrokeSty
 }
 
 // rasterizeStrips rasterizes coverage strips to a texture.
+//
+// Deprecated: This method uses the old Tessellator-based path. Use rasterizeFromGrid
+// with HybridPipeline for the new vello-style GPU/CPU rasterization.
+// Kept for reference and potential fallback scenarios.
+//
+//nolint:unused // Deprecated: kept for reference until HybridPipeline is fully validated
 func (r *GPUSceneRenderer) rasterizeStrips(strips *StripBuffer, brush scene.Brush, target *GPUTexture) {
 	if strips.IsEmpty() {
 		return
@@ -516,6 +526,100 @@ func (r *GPUSceneRenderer) rasterizeStrips(strips *StripBuffer, brush scene.Brus
 	_ = headers
 	_ = coverage
 	_ = params
+}
+
+// rasterizeFromGrid renders a TileGrid to the target texture.
+// This is the new vello-style rasterization path using HybridPipeline output.
+//
+// The grid contains pre-computed coverage values from the Flatten→Coarse→Fine
+// pipeline stages. Each tile's coverage is applied to the target with the
+// specified brush color.
+func (r *GPUSceneRenderer) rasterizeFromGrid(grid *TileGrid, brush scene.Brush, target *GPUTexture) {
+	if grid == nil || grid.TileCount() == 0 {
+		return
+	}
+
+	// Extract color from brush
+	color := [4]float32{
+		float32(brush.Color.R),
+		float32(brush.Color.G),
+		float32(brush.Color.B),
+		float32(brush.Color.A),
+	}
+
+	// Create grid params for GPU upload
+	//nolint:gosec // texture dimensions bounded by reasonable limits
+	params := GridRasterParams{
+		Color:        color,
+		TargetWidth:  int32(target.Width()),
+		TargetHeight: int32(target.Height()),
+		TileCount:    int32(grid.TileCount()),
+	}
+
+	// TODO: When wgpu GPU commands are ready:
+	// 1. Pack tiles into GPU buffer (position + coverage)
+	// 2. Upload to GPU
+	// 3. Begin compute pass
+	// 4. Set tile rasterization pipeline
+	// 5. Set bind group with tile buffer and target texture
+	// 6. Dispatch workgroups (one per tile)
+	// 7. End pass and submit
+
+	// For now, log that we're using the new path (will be removed once GPU path works)
+	_ = params
+
+	// CPU fallback: apply coverage directly to target
+	// This demonstrates the correct data flow until GPU rendering is implemented
+	grid.ForEach(func(tile *Tile) {
+		r.applyTileCoverage(tile, color, target)
+	})
+}
+
+// GridRasterParams contains parameters for tile grid rasterization.
+type GridRasterParams struct {
+	Color        [4]float32 // Fill color (RGBA normalized)
+	TargetWidth  int32      // Target texture width
+	TargetHeight int32      // Target texture height
+	TileCount    int32      // Number of tiles in grid
+}
+
+// applyTileCoverage applies a single tile's coverage to the target texture.
+// This is a CPU fallback implementation.
+func (r *GPUSceneRenderer) applyTileCoverage(tile *Tile, color [4]float32, target *GPUTexture) {
+	// Get pixel coordinates of tile
+	px := int(tile.PixelX())
+	py := int(tile.PixelY())
+
+	// Bounds check
+	targetW := target.Width()
+	targetH := target.Height()
+
+	// Apply each pixel's coverage
+	for row := 0; row < TileSize; row++ {
+		for col := 0; col < TileSize; col++ {
+			x := px + col
+			y := py + row
+
+			// Skip pixels outside target
+			if x < 0 || x >= targetW || y < 0 || y >= targetH {
+				continue
+			}
+
+			coverage := tile.GetCoverage(col, row)
+			if coverage == 0 {
+				continue
+			}
+
+			// TODO: When texture pixel access is available:
+			// 1. Read current pixel
+			// 2. Blend with color using coverage as alpha multiplier
+			// 3. Write result back to texture
+
+			// For now, mark that we processed this pixel
+			_ = color
+			_ = coverage
+		}
+	}
 }
 
 // pushLayer pushes a new compositing layer.
@@ -645,18 +749,64 @@ func (r *GPUSceneRenderer) popClip() {
 
 // renderClipMask renders a path to a single-channel mask texture.
 func (r *GPUSceneRenderer) renderClipMask(path *scene.Path, mask *GPUTexture) {
-	// Tessellate path
-	tess := r.tessellatorPool.Get()
-	defer r.tessellatorPool.Put(tess)
-
-	strips := tess.TessellatePath(path, r.currentTransform)
-	if strips.IsEmpty() {
+	// Use HybridPipeline to compute coverage for clip mask
+	grid := r.hybridPipeline.RasterizePath(path, r.currentTransform, scene.FillNonZero)
+	if grid == nil || grid.TileCount() == 0 {
 		return
 	}
 
-	// TODO: Rasterize to single-channel mask texture
-	// This is similar to rasterizeStrips but outputs coverage to a mask
-	_ = mask
+	// Rasterize coverage to single-channel mask texture
+	r.rasterizeClipFromGrid(grid, mask)
+}
+
+// rasterizeClipFromGrid renders a TileGrid to a single-channel mask texture.
+// This is used for clip paths where we only need coverage, not color.
+func (r *GPUSceneRenderer) rasterizeClipFromGrid(grid *TileGrid, mask *GPUTexture) {
+	if grid == nil || grid.TileCount() == 0 {
+		return
+	}
+
+	// TODO: When GPU mask rasterization is ready:
+	// 1. Pack tile coverage into GPU buffer
+	// 2. Upload to GPU
+	// 3. Begin compute pass with mask-specific pipeline
+	// 4. Dispatch workgroups
+	// 5. End pass and submit
+
+	// CPU fallback: apply coverage directly to mask texture
+	grid.ForEach(func(tile *Tile) {
+		r.applyTileToMask(tile, mask)
+	})
+}
+
+// applyTileToMask applies a tile's coverage to a single-channel mask texture.
+// This is a CPU fallback implementation.
+func (r *GPUSceneRenderer) applyTileToMask(tile *Tile, mask *GPUTexture) {
+	px := int(tile.PixelX())
+	py := int(tile.PixelY())
+
+	maskW := mask.Width()
+	maskH := mask.Height()
+
+	for row := 0; row < TileSize; row++ {
+		for col := 0; col < TileSize; col++ {
+			x := px + col
+			y := py + row
+
+			if x < 0 || x >= maskW || y < 0 || y >= maskH {
+				continue
+			}
+
+			coverage := tile.GetCoverage(col, row)
+			if coverage == 0 {
+				continue
+			}
+
+			// TODO: When texture pixel access is available:
+			// Write coverage directly to single-channel mask
+			_ = coverage
+		}
+	}
 }
 
 // renderImage renders an image at the given transform.
@@ -804,6 +954,12 @@ func (r *GPUSceneRenderer) Close() {
 	if r.targetTex != nil {
 		_ = r.memory.FreeTexture(r.targetTex)
 		r.targetTex = nil
+	}
+
+	// Destroy HybridPipeline (releases GPU resources if any)
+	if r.hybridPipeline != nil {
+		r.hybridPipeline.Destroy()
+		r.hybridPipeline = nil
 	}
 
 	// Close pipeline cache
