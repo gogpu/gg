@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.16.0] - 2026-01-05
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.8.8 → v0.9.0
+  - Core-HAL Bridge implementation
+  - Snatchable pattern for safe resource destruction
+  - TrackerIndex Allocator for state tracking
+  - Buffer State Tracker for validation
+  - 58 TODO comments replaced with proper documentation
+
+### Removed
+- **Deprecated tessellation code** — Removed unused `strips.go` and `tessellate.go` from wgpu backend
+  - These were experimental triangle strip optimization code
+  - Cleanup reduces backend/wgpu from ~2.5K to ~500 LOC
+
 ## [0.15.9] - 2026-01-04
 
 ### Changed
