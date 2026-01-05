@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.17.0] - 2026-01-05
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.9.0 → v0.9.2
+  - v0.9.1: Vulkan vkDestroyDevice fix, features and limits mapping
+  - v0.9.2: Metal NSString double-free fix on autorelease pool drain
+
 ## [0.16.0] - 2026-01-05
 
 ### Changed
