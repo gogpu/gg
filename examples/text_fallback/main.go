@@ -26,36 +26,36 @@ func main() {
 	defer func() { _ = mainSource.Close() }()
 
 	// Create context
-	ctx := gg.NewContext(800, 500)
-	ctx.ClearWithColor(gg.White)
+	dc := gg.NewContext(800, 500)
+	dc.ClearWithColor(gg.White)
 
 	// Create main face
 	mainFace := mainSource.Face(32)
 
 	// Title
-	ctx.SetFont(mainFace)
-	ctx.SetRGB(0.1, 0.1, 0.1)
-	ctx.DrawString("Font Fallback Demo", 50, 60)
+	dc.SetFont(mainFace)
+	dc.SetRGB(0.1, 0.1, 0.1)
+	dc.DrawString("Font Fallback Demo", 50, 60)
 
 	// Draw text with main font only
-	ctx.SetFont(mainFace)
-	ctx.SetRGB(0.3, 0.3, 0.3)
-	ctx.DrawString("Single font: Hello World!", 50, 120)
+	dc.SetFont(mainFace)
+	dc.SetRGB(0.3, 0.3, 0.3)
+	dc.DrawString("Single font: Hello World!", 50, 120)
 
 	// Try to create MultiFace with emoji support
-	drawMultiFaceDemo(ctx, mainFace, mainSource, emojiFont)
+	drawMultiFaceDemo(dc, mainFace, mainSource, emojiFont)
 
 	// Filtered Face demo
-	ctx.SetFont(mainFace)
-	ctx.SetRGB(0.1, 0.1, 0.1)
-	ctx.DrawString("FilteredFace Demo", 50, 300)
+	dc.SetFont(mainFace)
+	dc.SetRGB(0.1, 0.1, 0.1)
+	dc.DrawString("FilteredFace Demo", 50, 300)
 
 	// Create ASCII-only filtered face
 	asciiOnlyFace := text.NewFilteredFace(mainFace, text.RangeBasicLatin)
 
-	ctx.SetFont(asciiOnlyFace)
-	ctx.SetRGB(0.4, 0.6, 0.3)
-	ctx.DrawString("ASCII only: Hello (extended chars filtered)", 50, 350)
+	dc.SetFont(asciiOnlyFace)
+	dc.SetRGB(0.4, 0.6, 0.3)
+	dc.DrawString("ASCII only: Hello (extended chars filtered)", 50, 350)
 
 	// Latin Extended demo
 	latinExtFace := text.NewFilteredFace(mainFace,
@@ -64,21 +64,21 @@ func main() {
 		text.RangeLatinExtB,
 	)
 
-	ctx.SetFont(latinExtFace)
-	ctx.SetRGB(0.6, 0.3, 0.5)
-	ctx.DrawString("Latin Extended: cafe, naive, resume", 50, 400)
+	dc.SetFont(latinExtFace)
+	dc.SetRGB(0.6, 0.3, 0.5)
+	dc.DrawString("Latin Extended: cafe, naive, resume", 50, 400)
 
 	// Font info
 	face14 := mainSource.Face(14)
-	ctx.SetFont(face14)
-	ctx.SetRGB(0.6, 0.6, 0.6)
-	ctx.DrawString("Main font: "+mainSource.Name(), 50, 460)
+	dc.SetFont(face14)
+	dc.SetRGB(0.6, 0.6, 0.6)
+	dc.DrawString("Main font: "+mainSource.Name(), 50, 460)
 	if emojiFont != "" {
-		ctx.DrawString("Emoji font: found", 50, 480)
+		dc.DrawString("Emoji font: found", 50, 480)
 	}
 
 	// Save to PNG
-	if err := ctx.SavePNG("text_fallback.png"); err != nil {
+	if err := dc.SavePNG("text_fallback.png"); err != nil {
 		log.Fatalf("Failed to save PNG: %v", err)
 	}
 
@@ -86,16 +86,16 @@ func main() {
 }
 
 // drawMultiFaceDemo demonstrates MultiFace with emoji fallback.
-func drawMultiFaceDemo(ctx *gg.Context, mainFace text.Face, mainSource *text.FontSource, emojiFont string) {
+func drawMultiFaceDemo(dc *gg.Context, mainFace text.Face, mainSource *text.FontSource, emojiFont string) {
 	if emojiFont == "" {
-		drawNoEmojiFallback(ctx, mainSource)
+		drawNoEmojiFallback(dc, mainSource)
 		return
 	}
 
 	emojiSource, err := text.NewFontSourceFromFile(emojiFont)
 	if err != nil {
 		log.Printf("Failed to load emoji font: %v", err)
-		drawNoEmojiFallback(ctx, mainSource)
+		drawNoEmojiFallback(dc, mainSource)
 		return
 	}
 	defer func() { _ = emojiSource.Close() }()
@@ -116,23 +116,23 @@ func drawMultiFaceDemo(ctx *gg.Context, mainFace text.Face, mainSource *text.Fon
 	}
 
 	// Draw with MultiFace (emoji should use fallback font)
-	ctx.SetFont(multiFace)
-	ctx.SetRGB(0.2, 0.4, 0.7)
-	ctx.DrawString("MultiFace: Hello World! [emoji here]", 50, 180)
+	dc.SetFont(multiFace)
+	dc.SetRGB(0.2, 0.4, 0.7)
+	dc.DrawString("MultiFace: Hello World! [emoji here]", 50, 180)
 
 	// Explanation
 	face16 := mainSource.Face(16)
-	ctx.SetFont(face16)
-	ctx.SetRGB(0.5, 0.5, 0.5)
-	ctx.DrawString("Emoji characters use fallback font automatically", 50, 220)
+	dc.SetFont(face16)
+	dc.SetRGB(0.5, 0.5, 0.5)
+	dc.DrawString("Emoji characters use fallback font automatically", 50, 220)
 }
 
 // drawNoEmojiFallback draws fallback message when no emoji font available.
-func drawNoEmojiFallback(ctx *gg.Context, mainSource *text.FontSource) {
+func drawNoEmojiFallback(dc *gg.Context, mainSource *text.FontSource) {
 	face16 := mainSource.Face(16)
-	ctx.SetFont(face16)
-	ctx.SetRGB(0.8, 0.4, 0.1)
-	ctx.DrawString("No emoji font found - fallback not available", 50, 180)
+	dc.SetFont(face16)
+	dc.SetRGB(0.8, 0.4, 0.1)
+	dc.DrawString("No emoji font found - fallback not available", 50, 180)
 }
 
 // findMainFont returns path to a TTF font (TTC collections not supported).
