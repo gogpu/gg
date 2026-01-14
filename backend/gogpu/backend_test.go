@@ -242,37 +242,66 @@ func TestBackendRenderScene(t *testing.T) {
 	}
 }
 
-// TestGPURendererStubs tests that stub methods return expected errors.
-func TestGPURendererStubs(t *testing.T) {
+// TestGPURendererFillStroke tests that Fill and Stroke methods work correctly.
+func TestGPURendererFillStroke(t *testing.T) {
 	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Logf("Init() returned error (expected in test environment): %v", err)
-		return
+		// Continue without GPU - we can still test the software fallback
 	}
 	defer b.Close()
 
-	r := b.NewRenderer(100, 100)
-	if r == nil {
-		t.Fatal("NewRenderer() returned nil")
+	// Create renderer directly for testing (bypasses GPU check)
+	gpuR := newGPURenderer(b, 100, 100)
+	if gpuR == nil {
+		t.Fatal("newGPURenderer() returned nil")
 	}
-
-	gpuR := r.(*GPURenderer)
 
 	// Create test objects
 	pixmap := gg.NewPixmap(100, 100)
 	path := gg.NewPath()
-	path.MoveTo(0, 0)
-	path.LineTo(100, 100)
+	path.MoveTo(10, 10)
+	path.LineTo(90, 10)
+	path.LineTo(90, 90)
+	path.LineTo(10, 90)
+	path.Close()
 	paint := gg.NewPaint()
 
-	// These should return ErrNotImplemented
-	if err := gpuR.Fill(pixmap, path, paint); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("Fill() = %v, want %v", err, ErrNotImplemented)
+	// Fill should now work (Phase 1: software rasterization)
+	if err := gpuR.Fill(pixmap, path, paint); err != nil {
+		t.Errorf("Fill() = %v, want nil", err)
 	}
-	if err := gpuR.Stroke(pixmap, path, paint); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("Stroke() = %v, want %v", err, ErrNotImplemented)
+
+	// Stroke should now work (Phase 1: software rasterization)
+	if err := gpuR.Stroke(pixmap, path, paint); err != nil {
+		t.Errorf("Stroke() = %v, want nil", err)
 	}
+
+	// Test nil pixmap
+	if err := gpuR.Fill(nil, path, paint); !errors.Is(err, ErrNilTarget) {
+		t.Errorf("Fill(nil, ...) = %v, want %v", err, ErrNilTarget)
+	}
+	if err := gpuR.Stroke(nil, path, paint); !errors.Is(err, ErrNilTarget) {
+		t.Errorf("Stroke(nil, ...) = %v, want %v", err, ErrNilTarget)
+	}
+
+	// Test nil path (should be no-op, not error)
+	if err := gpuR.Fill(pixmap, nil, paint); err != nil {
+		t.Errorf("Fill(pixmap, nil, paint) = %v, want nil", err)
+	}
+	if err := gpuR.Stroke(pixmap, nil, paint); err != nil {
+		t.Errorf("Stroke(pixmap, nil, paint) = %v, want nil", err)
+	}
+
+	// Test nil paint (should be no-op, not error)
+	if err := gpuR.Fill(pixmap, path, nil); err != nil {
+		t.Errorf("Fill(pixmap, path, nil) = %v, want nil", err)
+	}
+	if err := gpuR.Stroke(pixmap, path, nil); err != nil {
+		t.Errorf("Stroke(pixmap, path, nil) = %v, want nil", err)
+	}
+
 	gpuR.Close()
 }
 
