@@ -32,6 +32,11 @@ type Backend struct {
 	device     types.Device
 	queue      types.Queue
 
+	// Scene rendering (Phase 1: software fallback)
+	sceneRenderer *scene.Renderer
+	sceneWidth    int
+	sceneHeight   int
+
 	// State
 	initialized bool
 }
@@ -124,6 +129,12 @@ func (b *Backend) Close() {
 		return
 	}
 
+	// Close scene renderer if exists
+	if b.sceneRenderer != nil {
+		b.sceneRenderer.Close()
+		b.sceneRenderer = nil
+	}
+
 	// Resources are released when gogpu backend is destroyed
 	// Individual handles don't need explicit release in most cases
 	// as they are managed by the backend
@@ -160,10 +171,10 @@ func (b *Backend) NewRenderer(width, height int) gg.Renderer {
 }
 
 // RenderScene renders a scene to the target pixmap using retained mode.
-// This method is optimized for complex scenes with many draw operations.
 //
-// Note: This is currently a stub implementation. Full GPU scene rendering
-// will be implemented when the rendering pipeline is complete.
+// Phase 1 Implementation:
+// Uses software scene rendering via scene.Renderer. Future phases will add
+// GPU-accelerated scene rendering with tessellation and compute shaders.
 func (b *Backend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
 	b.mu.RLock()
 	initialized := b.initialized
@@ -181,15 +192,26 @@ func (b *Backend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
 		return ErrNilScene
 	}
 
-	// TODO: Implement GPU scene rendering
-	// This will involve:
-	// 1. Decode scene commands
-	// 2. Tessellate paths to GPU geometry
-	// 3. Execute render passes
-	// 4. Read back result to pixmap
+	width := target.Width()
+	height := target.Height()
 
-	log.Println("gogpu: RenderScene not fully implemented, using stub")
-	return ErrNotImplemented
+	// Phase 1: Use software scene renderer
+	b.mu.Lock()
+	if b.sceneRenderer == nil || b.sceneWidth != width || b.sceneHeight != height {
+		if b.sceneRenderer != nil {
+			b.sceneRenderer.Close()
+		}
+		b.sceneRenderer = scene.NewRenderer(width, height)
+		b.sceneWidth = width
+		b.sceneHeight = height
+	}
+	renderer := b.sceneRenderer
+	b.mu.Unlock()
+
+	// TODO Phase 2: GPU scene tessellation and rendering
+	// TODO Phase 3: Compute shader pipeline integration
+
+	return renderer.Render(target, s)
 }
 
 // IsInitialized returns true if the backend has been initialized.

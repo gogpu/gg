@@ -231,14 +231,13 @@ func TestBackendRenderScene(t *testing.T) {
 		t.Errorf("RenderScene(target, nil) = %v, want %v", err, ErrNilScene)
 	}
 
-	// Test with valid scene
-	// Currently returns ErrNotImplemented as GPU scene rendering is not implemented
+	// Test with valid scene (Phase 1: software fallback)
 	s := scene.NewScene()
 	rect := scene.NewRectShape(10, 10, 80, 80)
 	s.Fill(scene.FillNonZero, scene.IdentityAffine(), scene.SolidBrush(gg.Red), rect)
 	err = b.RenderScene(target, s)
 	if err != nil {
-		t.Logf("RenderScene() = %v (expected until full GPU support)", err)
+		t.Errorf("RenderScene() = %v, want nil", err)
 	}
 }
 
