@@ -254,32 +254,68 @@ func (b *WGPUBackend) Queue() core.QueueID {
 // Note: This is a stub implementation. The actual GPU rendering
 // will be implemented in TASK-110.
 type GPURenderer struct {
-	backend *WGPUBackend
-	width   int
-	height  int
+	backend          *WGPUBackend
+	width            int
+	height           int
+	softwareRenderer *gg.SoftwareRenderer
 }
 
 // newGPURenderer creates a new GPU renderer.
 func newGPURenderer(b *WGPUBackend, width, height int) *GPURenderer {
 	return &GPURenderer{
-		backend: b,
-		width:   width,
-		height:  height,
+		backend:          b,
+		width:            width,
+		height:           height,
+		softwareRenderer: gg.NewSoftwareRenderer(width, height),
 	}
 }
 
 // Fill fills a path with the given paint.
-// Note: This is a stub implementation.
+//
+// Phase 1 Implementation:
+// Uses software rasterization via SoftwareRenderer. Future phases will add
+// GPU texture upload and native GPU path rendering.
 func (r *GPURenderer) Fill(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) error {
-	// TODO: Implement GPU fill in TASK-110
-	return ErrNotImplemented
+	if pixmap == nil {
+		return ErrNilTarget
+	}
+	if path == nil || paint == nil {
+		return nil // No-op for nil path or paint
+	}
+
+	// Phase 1: Delegate to software renderer
+	if err := r.softwareRenderer.Fill(pixmap, path, paint); err != nil {
+		return fmt.Errorf("fill: %w", err)
+	}
+
+	// TODO Phase 2: Upload pixmap to GPU texture for compositing
+	// TODO Phase 3: Native GPU path tessellation
+
+	return nil
 }
 
 // Stroke strokes a path with the given paint.
-// Note: This is a stub implementation.
+//
+// Phase 1 Implementation:
+// Uses software rasterization via SoftwareRenderer. Future phases will add
+// GPU texture upload and native GPU stroke expansion.
 func (r *GPURenderer) Stroke(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) error {
-	// TODO: Implement GPU stroke in TASK-110
-	return ErrNotImplemented
+	if pixmap == nil {
+		return ErrNilTarget
+	}
+	if path == nil || paint == nil {
+		return nil // No-op for nil path or paint
+	}
+
+	// Phase 1: Delegate to software renderer
+	if err := r.softwareRenderer.Stroke(pixmap, path, paint); err != nil {
+		return fmt.Errorf("stroke: %w", err)
+	}
+
+	// TODO Phase 2: Upload pixmap to GPU texture for compositing
+	// TODO Phase 3: Native GPU stroke expansion and tessellation
+
+	return nil
 }
 
 // Width returns the renderer width.
