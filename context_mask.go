@@ -35,7 +35,7 @@ func (c *Context) AsMask() *Mask {
 	temp := NewContext(c.Width(), c.Height())
 	temp.path = c.path.Clone()
 	temp.SetRGBA(1, 1, 1, 1)
-	temp.Fill()
+	_ = temp.Fill() // Software renderer never fails
 
 	// Extract alpha channel from the rendered path
 	img := temp.Image()

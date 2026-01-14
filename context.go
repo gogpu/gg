@@ -327,26 +327,32 @@ func (c *Context) NewSubPath() {
 	// This is a no-op but provided for API compatibility
 }
 
-// Fill fills the current path.
-func (c *Context) Fill() {
-	c.renderer.Fill(c.pixmap, c.path, c.paint)
+// Fill fills the current path and clears it.
+// Returns an error if the rendering operation fails.
+func (c *Context) Fill() error {
+	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
+	c.path.Clear()
+	return err
 }
 
-// Stroke strokes the current path.
-func (c *Context) Stroke() {
-	c.renderer.Stroke(c.pixmap, c.path, c.paint)
+// Stroke strokes the current path and clears it.
+// Returns an error if the rendering operation fails.
+func (c *Context) Stroke() error {
+	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
+	c.path.Clear()
+	return err
 }
 
-// FillPreserve fills the current path and preserves it for additional operations.
-func (c *Context) FillPreserve() {
-	c.renderer.Fill(c.pixmap, c.path, c.paint)
-	// Path is preserved
+// FillPreserve fills the current path without clearing it.
+// Returns an error if the rendering operation fails.
+func (c *Context) FillPreserve() error {
+	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
-// StrokePreserve strokes the current path and preserves it.
-func (c *Context) StrokePreserve() {
-	c.renderer.Stroke(c.pixmap, c.path, c.paint)
-	// Path is preserved
+// StrokePreserve strokes the current path without clearing it.
+// Returns an error if the rendering operation fails.
+func (c *Context) StrokePreserve() error {
+	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
 // Push saves the current state (transform, paint, clip, and mask).

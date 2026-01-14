@@ -43,7 +43,7 @@ func drawGradientBackground(ctx *gg.Context, w, h int) {
 		ctx.SetColor(color.Color())
 		y := float64(h) * t
 		ctx.DrawRectangle(0, y, float64(w), float64(h)/float64(steps)+1)
-		ctx.Fill()
+		_ = ctx.Fill()
 	}
 }
 
@@ -51,26 +51,26 @@ func drawShapesDemo(ctx *gg.Context) {
 	// Circles
 	ctx.SetRGBA(1, 0.3, 0.3, 0.8)
 	ctx.DrawCircle(150, 150, 60)
-	ctx.Fill()
+	_ = ctx.Fill()
 
 	ctx.SetRGBA(0.3, 1, 0.3, 0.8)
 	ctx.DrawCircle(200, 150, 60)
-	ctx.Fill()
+	_ = ctx.Fill()
 
 	ctx.SetRGBA(0.3, 0.3, 1, 0.8)
 	ctx.DrawCircle(175, 200, 60)
-	ctx.Fill()
+	_ = ctx.Fill()
 
 	// Rectangles
 	ctx.SetRGB(1, 0.8, 0)
 	ctx.DrawRoundedRectangle(350, 100, 120, 80, 15)
-	ctx.Fill()
+	_ = ctx.Fill()
 
 	// Stroked shapes
 	ctx.SetRGB(1, 1, 1)
 	ctx.SetLineWidth(4)
 	ctx.DrawRectangle(350, 100, 120, 80)
-	ctx.Stroke()
+	_ = ctx.Stroke()
 }
 
 func drawTransformDemo(ctx *gg.Context) {
@@ -90,7 +90,7 @@ func drawTransformDemo(ctx *gg.Context) {
 		ctx.SetColor(color.Color())
 
 		ctx.DrawRectangle(-30, -30, 60, 60)
-		ctx.Fill()
+		_ = ctx.Fill()
 		ctx.Pop()
 	}
 }
@@ -105,7 +105,7 @@ func drawPathDemo(ctx *gg.Context) {
 	ctx.CubicTo(50, -50, 100, 50, 150, 0)
 	ctx.CubicTo(200, -30, 250, 30, 300, 0)
 	ctx.SetLineWidth(6)
-	ctx.Stroke()
+	_ = ctx.Stroke()
 
 	// Polygon star
 	ctx.Translate(400, 0)
@@ -131,7 +131,7 @@ func drawPathDemo(ctx *gg.Context) {
 		}
 	}
 	ctx.ClosePath()
-	ctx.Fill()
+	_ = ctx.Fill()
 
 	ctx.Pop()
 }

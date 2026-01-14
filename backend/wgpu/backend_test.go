@@ -253,7 +253,7 @@ func TestWGPUBackendRenderScene(t *testing.T) {
 	}
 }
 
-// TestGPURendererStubs tests that stub methods don't panic.
+// TestGPURendererStubs tests that stub methods return expected errors.
 func TestGPURendererStubs(t *testing.T) {
 	b := NewWGPUBackend()
 
@@ -277,9 +277,13 @@ func TestGPURendererStubs(t *testing.T) {
 	path.LineTo(100, 100)
 	paint := gg.NewPaint()
 
-	// These should not panic
-	gpuR.Fill(pixmap, path, paint)
-	gpuR.Stroke(pixmap, path, paint)
+	// These should return ErrNotImplemented
+	if err := gpuR.Fill(pixmap, path, paint); !errors.Is(err, ErrNotImplemented) {
+		t.Errorf("Fill() = %v, want %v", err, ErrNotImplemented)
+	}
+	if err := gpuR.Stroke(pixmap, path, paint); !errors.Is(err, ErrNotImplemented) {
+		t.Errorf("Stroke() = %v, want %v", err, ErrNotImplemented)
+	}
 	gpuR.Close()
 }
 

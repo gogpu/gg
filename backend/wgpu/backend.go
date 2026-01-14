@@ -270,18 +270,16 @@ func newGPURenderer(b *WGPUBackend, width, height int) *GPURenderer {
 
 // Fill fills a path with the given paint.
 // Note: This is a stub implementation.
-func (r *GPURenderer) Fill(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) {
+func (r *GPURenderer) Fill(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) error {
 	// TODO: Implement GPU fill in TASK-110
-	// For now, this is a no-op
-	log.Println("wgpu: GPURenderer.Fill not implemented")
+	return ErrNotImplemented
 }
 
 // Stroke strokes a path with the given paint.
 // Note: This is a stub implementation.
-func (r *GPURenderer) Stroke(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) {
+func (r *GPURenderer) Stroke(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) error {
 	// TODO: Implement GPU stroke in TASK-110
-	// For now, this is a no-op
-	log.Println("wgpu: GPURenderer.Stroke not implemented")
+	return ErrNotImplemented
 }
 
 // Width returns the renderer width.
