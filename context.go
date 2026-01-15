@@ -48,12 +48,37 @@ type Context struct {
 var _ io.Closer = (*Context)(nil)
 
 // NewContext creates a new drawing context with the given dimensions.
-func NewContext(width, height int) *Context {
+// Optional ContextOption arguments can be used for dependency injection:
+//
+//	// Default software rendering
+//	dc := gg.NewContext(800, 600)
+//
+//	// Custom GPU renderer (dependency injection)
+//	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+func NewContext(width, height int, opts ...ContextOption) *Context {
+	// Apply options
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	// Use provided pixmap or create new one
+	pixmap := options.pixmap
+	if pixmap == nil {
+		pixmap = NewPixmap(width, height)
+	}
+
+	// Use provided renderer or create software renderer
+	renderer := options.renderer
+	if renderer == nil {
+		renderer = NewSoftwareRenderer(width, height)
+	}
+
 	return &Context{
 		width:          width,
 		height:         height,
-		pixmap:         NewPixmap(width, height),
-		renderer:       NewSoftwareRenderer(width, height),
+		pixmap:         pixmap,
+		renderer:       renderer,
 		path:           NewPath(),
 		paint:          NewPaint(),
 		matrix:         Identity(),
@@ -63,17 +88,30 @@ func NewContext(width, height int) *Context {
 }
 
 // NewContextForImage creates a context for drawing on an existing image.
-func NewContextForImage(img image.Image) *Context {
+// Optional ContextOption arguments can be used for dependency injection.
+func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
 	pixmap := FromImage(img)
 
+	// Apply options
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	// Use provided renderer or create software renderer
+	renderer := options.renderer
+	if renderer == nil {
+		renderer = NewSoftwareRenderer(width, height)
+	}
+
 	return &Context{
 		width:          width,
 		height:         height,
 		pixmap:         pixmap,
-		renderer:       NewSoftwareRenderer(width, height),
+		renderer:       renderer,
 		path:           NewPath(),
 		paint:          NewPaint(),
 		matrix:         Identity(),
@@ -327,26 +365,32 @@ func (c *Context) NewSubPath() {
 	// This is a no-op but provided for API compatibility
 }
 
-// Fill fills the current path.
-func (c *Context) Fill() {
-	c.renderer.Fill(c.pixmap, c.path, c.paint)
+// Fill fills the current path and clears it.
+// Returns an error if the rendering operation fails.
+func (c *Context) Fill() error {
+	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
+	c.path.Clear()
+	return err
 }
 
-// Stroke strokes the current path.
-func (c *Context) Stroke() {
-	c.renderer.Stroke(c.pixmap, c.path, c.paint)
+// Stroke strokes the current path and clears it.
+// Returns an error if the rendering operation fails.
+func (c *Context) Stroke() error {
+	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
+	c.path.Clear()
+	return err
 }
 
-// FillPreserve fills the current path and preserves it for additional operations.
-func (c *Context) FillPreserve() {
-	c.renderer.Fill(c.pixmap, c.path, c.paint)
-	// Path is preserved
+// FillPreserve fills the current path without clearing it.
+// Returns an error if the rendering operation fails.
+func (c *Context) FillPreserve() error {
+	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
-// StrokePreserve strokes the current path and preserves it.
-func (c *Context) StrokePreserve() {
-	c.renderer.Stroke(c.pixmap, c.path, c.paint)
-	// Path is preserved
+// StrokePreserve strokes the current path without clearing it.
+// Returns an error if the rendering operation fails.
+func (c *Context) StrokePreserve() error {
+	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
 // Push saves the current state (transform, paint, clip, and mask).

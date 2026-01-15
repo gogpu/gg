@@ -71,7 +71,7 @@ func convertPoints(points []path.Point) []raster.Point {
 }
 
 // Fill implements Renderer.Fill.
-func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) {
+func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Convert path to internal format and flatten
 	elements := convertPath(p)
 	flattenedPath := path.Flatten(elements)
@@ -80,7 +80,7 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) {
 	// Get color from paint
 	solidPattern, ok := paint.Pattern.(*SolidPattern)
 	if !ok {
-		return // Only solid patterns supported in v0.1
+		return nil // Only solid patterns supported in v0.1
 	}
 	color := solidPattern.Color
 
@@ -98,10 +98,12 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) {
 		B: color.B,
 		A: color.A,
 	})
+
+	return nil
 }
 
 // Stroke implements Renderer.Stroke.
-func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) {
+func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Convert path to internal format and flatten
 	elements := convertPath(p)
 	flattenedPath := path.Flatten(elements)
@@ -110,7 +112,7 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) {
 	// Get color from paint
 	solidPattern, ok := paint.Pattern.(*SolidPattern)
 	if !ok {
-		return
+		return nil // Only solid patterns supported in v0.1
 	}
 	color := solidPattern.Color
 
@@ -122,4 +124,6 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) {
 		B: color.B,
 		A: color.A,
 	})
+
+	return nil
 }

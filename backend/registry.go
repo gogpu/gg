@@ -12,8 +12,8 @@ var (
 	registryMu sync.RWMutex
 	backends   = make(map[string]BackendFactory)
 	// Priority order for backend selection (first available wins).
-	// Software is the default fallback.
-	backendPriority = []string{BackendWGPU, BackendSoftware}
+	// Rust > Native > Software (Rust is fastest, Software is fallback).
+	backendPriority = []string{BackendRust, BackendNative, BackendSoftware}
 )
 
 // Register registers a backend factory with the given name.

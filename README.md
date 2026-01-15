@@ -1,8 +1,8 @@
 <h1 align="center">gg</h1>
 
 <p align="center">
-  <strong>Enterprise-Grade 2D Graphics Library for Go</strong><br>
-  Pure Go | GPU Accelerated | Rust-Inspired Architecture
+  <strong>2D Graphics Library for Go</strong><br>
+  Pure Go | GPU Accelerated | Production Ready
 </p>
 
 <p align="center">
@@ -12,73 +12,29 @@
   <a href="https://goreportcard.com/report/github.com/gogpu/gg"><img src="https://goreportcard.com/badge/github.com/gogpu/gg" alt="Go Report Card"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"></a>
   <a href="https://github.com/gogpu/gg/releases"><img src="https://img.shields.io/github/v/release/gogpu/gg" alt="Latest Release"></a>
-  <a href="https://github.com/gogpu/gogpu/stargazers"><img src="https://img.shields.io/github/stars/gogpu/gogpu?style=flat&labelColor=555&color=yellow" alt="Stars"></a>
-  <a href="https://github.com/gogpu/gogpu/discussions"><img src="https://img.shields.io/github/discussions/gogpu/gogpu?style=flat&labelColor=555&color=blue" alt="Discussions"></a>
+  <a href="https://github.com/gogpu/gg"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go" alt="Go Version"></a>
 </p>
 
 <p align="center">
-  <strong>Go 1.25+ Required</strong>
+  <sub>Part of the <a href="https://github.com/gogpu">GoGPU</a> ecosystem</sub>
 </p>
 
 ---
 
 ## Overview
 
-**gg** is a professional 2D graphics library for Go, designed to power IDEs, browsers, and graphics-intensive applications. Built with modern Rust-inspired patterns from [vello](https://github.com/linebender/vello) and [tiny-skia](https://github.com/RazrFalcon/tiny-skia), it delivers enterprise-grade rendering with zero CGO dependencies.
+**gg** is a 2D graphics library for Go designed to power IDEs, browsers, and graphics-intensive applications. Built with modern patterns inspired by [vello](https://github.com/linebender/vello) and [tiny-skia](https://github.com/RazrFalcon/tiny-skia), it delivers production-grade rendering with zero CGO dependencies.
 
 ### Key Features
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate & retained mode, GPU acceleration via WebGPU, CPU fallback |
+| **Rendering** | Immediate and retained mode, GPU acceleration, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF rendering, emoji/COLRv1, bidirectional text, CJK |
-| **Compositing** | 29 blend modes (Porter-Duff + Advanced + HSL), layer isolation |
+| **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text |
+| **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG I/O, mipmaps, affine transforms |
-| **Performance** | Sparse strips GPU, tile-based parallel rendering, LRU caching |
-
-### Architecture Highlights
-
-```
-                         gg (Public API)
-                              │
-          ┌───────────────────┼───────────────────┐
-          │                   │                   │
-    Immediate Mode       Retained Mode        Resources
-    (Context API)        (Scene Graph)     (Images, Fonts)
-          │                   │                   │
-          └───────────────────┼───────────────────┘
-                              │
-                     RenderBackend Interface
-                              │
-             ┌────────────────┼────────────────┐
-             │                                 │
-        Software                             GPU
-        (CPU SIMD)                    (gogpu/wgpu WebGPU)
-```
-
----
-
-## Why "Context" Instead of "Canvas"?
-
-The main drawing type is named `Context` following industry standards:
-
-| Library | Drawing Type |
-|---------|-------------|
-| HTML5 Canvas API | `CanvasRenderingContext2D` |
-| Cairo | `cairo_t` (context) |
-| Apple CoreGraphics | `CGContext` |
-| piet (Rust) | `RenderContext` |
-| fogleman/gg | `Context` |
-
-In HTML5, the Canvas is just the HTML element (surface), while the **Context** is what performs all drawing operations (`canvas.getContext("2d")`). This semantic distinction applies here: `Context` contains drawing state (colors, transforms, fonts) and provides the drawing API.
-
-**Variable naming convention:**
-```go
-dc := gg.NewContext(512, 512)  // dc = drawing context
-```
-
-This convention (`dc` for drawing, `ctx` for `context.Context`) avoids confusion with Go's standard library and is used throughout fogleman/gg, Cairo, and CoreGraphics codebases.
+| **Performance** | Tile-based parallel rendering, LRU caching |
 
 ---
 
@@ -87,6 +43,8 @@ This convention (`dc` for drawing, `ctx` for `context.Context`) avoids confusion
 ```bash
 go get github.com/gogpu/gg
 ```
+
+**Requirements:** Go 1.25+
 
 ---
 
@@ -101,18 +59,18 @@ import (
 )
 
 func main() {
-    // Create a 512x512 drawing context
+    // Create drawing context
     dc := gg.NewContext(512, 512)
-    defer dc.Close() // Clean resource release
+    defer dc.Close()
 
     dc.ClearWithColor(gg.White)
 
-    // Draw a gradient circle
+    // Draw shapes
     dc.SetHexColor("#3498db")
     dc.DrawCircle(256, 256, 100)
     dc.Fill()
 
-    // Text rendering with font fallback
+    // Render text
     source, _ := text.NewFontSourceFromFile("arial.ttf")
     defer source.Close()
 
@@ -126,17 +84,92 @@ func main() {
 
 ---
 
+## Renderer Dependency Injection
+
+gg supports pluggable renderers through the `Renderer` interface, enabling GPU acceleration via gogpu integration.
+
+### Software Rendering (Default)
+
+```go
+// Default software renderer
+dc := gg.NewContext(800, 600)
+defer dc.Close()
+```
+
+### GPU Rendering via Native Backend
+
+gg includes a built-in GPU backend using gogpu/wgpu:
+
+```go
+import (
+    "github.com/gogpu/gg"
+    "github.com/gogpu/gg/backend/native"
+)
+
+func main() {
+    // Create GPU-accelerated context using native backend
+    device := native.NewDevice()
+    defer device.Destroy()
+
+    // Draw with GPU acceleration
+    device.DrawCircle(400, 300, 100)
+    device.Fill()
+}
+```
+
+For integration with gogpu windowing, see the `examples/gpu/` directory.
+
+### Custom Pixmap
+
+```go
+// Use existing pixmap
+pm := gg.NewPixmap(800, 600)
+dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
+```
+
+---
+
+## Architecture
+
+```
+                        gg (Public API)
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+   Immediate Mode       Retained Mode        Resources
+   (Context API)        (Scene Graph)     (Images, Fonts)
+         │                   │                   │
+         └───────────────────┼───────────────────┘
+                             │
+                    Renderer Interface
+                             │
+            ┌────────────────┼────────────────┐
+            │                                 │
+       Software                             GPU
+       (Default)                     (backend/native/)
+```
+
+### Backend Structure
+
+| Backend | Package | Description |
+|---------|---------|-------------|
+| **Native** | `backend/native/` | Pure Go WebGPU via gogpu/wgpu |
+| **Rust** | `backend/rust/` | wgpu-native FFI via go-webgpu/webgpu |
+| **Software** | `backend/software/` | CPU-based default renderer |
+
+---
+
 ## Core APIs
 
 ### Immediate Mode (Context)
 
-Classic canvas-style drawing with transformation stack:
+Canvas-style drawing with transformation stack:
 
 ```go
 dc := gg.NewContext(800, 600)
 defer dc.Close()
 
-// Shapes with transforms
+// Transforms
 dc.Push()
 dc.Translate(400, 300)
 dc.Rotate(math.Pi / 4)
@@ -179,23 +212,21 @@ GPU-optimized scene graph for complex applications:
 ```go
 scene := gg.NewScene()
 
-// Build scene with layers
 scene.PushLayer(gg.BlendMultiply, 0.8)
 scene.Fill(style, transform, gg.Solid(gg.Red), gg.Circle(150, 200, 100))
 scene.Fill(style, transform, gg.Solid(gg.Blue), gg.Circle(250, 200, 100))
 scene.PopLayer()
 
-// Render to pixmap
 renderer := scene.NewRenderer()
 renderer.Render(target, scene)
 ```
 
 ### Text Rendering
 
-Full Unicode support with bidirectional text:
+Full Unicode support with font fallback:
 
 ```go
-// Font composition with fallback
+// Font composition
 mainFont, _ := text.NewFontSourceFromFile("Roboto.ttf")
 emojiFont, _ := text.NewFontSourceFromFile("NotoEmoji.ttf")
 defer mainFont.Close()
@@ -209,34 +240,13 @@ multiFace, _ := text.NewMultiFace(
 dc.SetFont(multiFace)
 dc.DrawString("Hello World! Nice day!", 50, 100)
 
-// Layout with wrapping
+// Text layout with wrapping
 opts := text.LayoutOptions{
-    MaxWidth: 400,
-    WrapMode: text.WrapWordChar,
+    MaxWidth:  400,
+    WrapMode:  text.WrapWordChar,
     Alignment: text.AlignCenter,
 }
 layout := text.LayoutText("Long text...", face, 16, opts)
-```
-
-### Alpha Masks
-
-Sophisticated compositing with alpha masks:
-
-```go
-// Create mask from current drawing
-dc.DrawCircle(200, 200, 100)
-dc.Fill()
-mask := dc.AsMask()
-
-// Apply mask to new context
-dc2 := gg.NewContext(400, 400)
-dc2.SetMask(mask)
-dc2.DrawRectangle(0, 0, 400, 400)
-dc2.Fill() // Only visible through mask
-
-// Mask operations
-dc2.InvertMask()
-dc2.ClearMask()
 ```
 
 ### Layer Compositing
@@ -254,24 +264,44 @@ dc.SetRGB(0, 0, 1)
 dc.DrawCircle(250, 200, 100)
 dc.Fill()
 
-dc.PopLayer() // Composite with overlay blend
+dc.PopLayer()
+```
+
+### Alpha Masks
+
+Sophisticated compositing with masks:
+
+```go
+dc.DrawCircle(200, 200, 100)
+dc.Fill()
+mask := dc.AsMask()
+
+dc2 := gg.NewContext(400, 400)
+dc2.SetMask(mask)
+dc2.DrawRectangle(0, 0, 400, 400)
+dc2.Fill() // Only visible through mask
 ```
 
 ---
 
-## Ecosystem
+## Why "Context" Instead of "Canvas"?
 
-**gg** is part of the [GoGPU](https://github.com/gogpu) ecosystem — Pure Go GPU computing libraries.
+The drawing type is named `Context` following industry conventions:
 
-| Project | Description | Purpose |
-|---------|-------------|---------|
-| [gogpu/gogpu](https://github.com/gogpu/gogpu) | Graphics framework | GPU abstraction, windowing, input |
-| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU | Vulkan, Metal, GLES, Software backends |
-| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler | WGSL → SPIR-V, MSL, GLSL |
-| **gogpu/gg** | **2D graphics (this repo)** | Canvas API, scene graph, GPU text |
-| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit | Widgets, layouts, themes (planned) |
+| Library | Drawing Type |
+|---------|-------------|
+| HTML5 Canvas | `CanvasRenderingContext2D` |
+| Cairo | `cairo_t` (context) |
+| Apple CoreGraphics | `CGContext` |
+| piet (Rust) | `RenderContext` |
 
-> **Note:** Always use the latest versions. Check each repository for current releases.
+In HTML5, Canvas is the element while **Context** performs drawing (`canvas.getContext("2d")`). The `Context` contains drawing state and provides the drawing API.
+
+**Convention:** `dc` for drawing context, `ctx` for `context.Context`:
+
+```go
+dc := gg.NewContext(512, 512) // dc = drawing context
+```
 
 ---
 
@@ -279,7 +309,7 @@ dc.PopLayer() // Composite with overlay blend
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| sRGB → Linear | 0.16ns | 260x faster than math.Pow |
+| sRGB to Linear | 0.16ns | 260x faster than math.Pow |
 | LayerCache.Get | 90ns | Thread-safe LRU |
 | DirtyRegion.Mark | 10.9ns | Lock-free atomic |
 | MSDF lookup | <10ns | Zero-allocation |
@@ -287,16 +317,28 @@ dc.PopLayer() // Composite with overlay blend
 
 ---
 
-## Documentation
+## Ecosystem
 
-- **[ROADMAP.md](ROADMAP.md)** — Development roadmap and version history
-- **[CHANGELOG.md](CHANGELOG.md)** — Detailed release notes
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
-- **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/gg)** — API reference
+**gg** is part of the [GoGPU](https://github.com/gogpu) ecosystem.
+
+| Project | Description |
+|---------|-------------|
+| [gogpu/gogpu](https://github.com/gogpu/gogpu) | GPU framework with windowing and input |
+| [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
+| [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
+| **gogpu/gg** | **2D graphics (this repo)** |
+| [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (planned) |
 
 ---
 
-## Articles
+## Documentation
+
+- **[ROADMAP.md](ROADMAP.md)** — Development milestones
+- **[CHANGELOG.md](CHANGELOG.md)** — Release notes
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
+- **[pkg.go.dev](https://pkg.go.dev/github.com/gogpu/gg)** — API reference
+
+### Articles
 
 - [GoGPU: From Idea to 100K Lines in Two Weeks](https://dev.to/kolkov/gogpu-from-idea-to-100k-lines-in-two-weeks-building-gos-gpu-ecosystem-3b2)
 - [Pure Go 2D Graphics Library with GPU Acceleration](https://dev.to/kolkov/pure-go-2d-graphics-library-with-gpu-acceleration-introducing-gogpugg-538h)
@@ -306,9 +348,9 @@ dc.PopLayer() // Composite with overlay blend
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-Priority areas:
+**Priority areas:**
 - API feedback and testing
 - Examples and documentation
 - Performance benchmarks
@@ -319,3 +361,9 @@ Priority areas:
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <strong>gg</strong> — 2D Graphics for Go
+</p>

@@ -12,6 +12,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.18.0] - 2026-01-15
+
+### Added
+
+#### Renderer Dependency Injection
+- **Renderer Interface** — Pluggable renderer abstraction
+  - `Fill(pixmap, path, paint)` — Fill path with paint
+  - `Stroke(pixmap, path, paint)` — Stroke path with paint
+- **SoftwareRenderer** — Default CPU-based implementation
+  - `NewSoftwareRenderer(width, height)` — Create renderer
+- **Functional Options** — Modern Go pattern for NewContext
+  - `WithRenderer(r Renderer)` — Inject custom renderer
+  - `WithPixmap(pm *Pixmap)` — Inject custom pixmap
+
+#### Backend Refactoring
+- **Renamed `backend/wgpu/` → `backend/native/`** — Pure Go WebGPU backend
+- **Removed `backend/gogpu/`** — Unnecessary abstraction layer
+- **Added `backend/rust/`** — wgpu-native FFI backend via go-webgpu/webgpu
+- **Backend Constants** — `BackendNative`, `BackendRust`, `BackendSoftware`
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.9.3 → v0.10.0
+  - HAL Backend Integration layer
+
+### Example
+
+```go
+// Default software renderer
+dc := gg.NewContext(800, 600)
+
+// Custom renderer via dependency injection
+customRenderer := NewCustomRenderer(800, 600)
+dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
+
+// Use gg's native GPU backend directly
+import "github.com/gogpu/gg/backend/native"
+// See backend/native/ for GPU-accelerated rendering
+```
+
 ## [0.17.1] - 2026-01-10
 
 ### Changed
@@ -950,7 +989,11 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.15.9...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/gogpu/gg/compare/v0.17.1...v0.18.0
+[0.17.1]: https://github.com/gogpu/gg/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/gogpu/gg/compare/v0.16.0...v0.17.0
+[0.16.0]: https://github.com/gogpu/gg/compare/v0.15.9...v0.16.0
 [0.15.9]: https://github.com/gogpu/gg/compare/v0.15.8...v0.15.9
 [0.15.8]: https://github.com/gogpu/gg/compare/v0.15.7...v0.15.8
 [0.15.7]: https://github.com/gogpu/gg/compare/v0.15.6...v0.15.7

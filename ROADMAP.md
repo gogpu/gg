@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.17.1
+## Current State: v0.18.0
 
 | Milestone | Focus |
 |-----------|-------|
@@ -47,6 +47,7 @@
 | Go 1.25+ Modernization | Modern Go features |
 | Advanced Features | Masks, PathBuilder, streaming I/O |
 | GPU Compute Shaders | Fine, coarse, flatten shaders |
+| **Renderer DI** | Dependency injection for GPU integration |
 
 ---
 
@@ -238,7 +239,11 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.14.0** | **2025-12-24** | **Masks, PathBuilder, Close, EncodePNG** | **+800** |
+| **v0.18.0** | **2026-01-15** | **Renderer DI, Backend refactoring** | **+400** |
+| v0.17.x | 2026-01 | Dependency updates | — |
+| v0.16.0 | 2026-01 | wgpu v0.9.0, cleanup | — |
+| v0.15.x | 2025-12/2026-01 | GPU compute shaders, dependency updates | +6,470 |
+| v0.14.0 | 2025-12-24 | Masks, PathBuilder, Close, EncodePNG | +800 |
 | v0.13.0 | 2025-12-24 | Go 1.25+: Iterators, Cache, Context, Wrapping | +1,700 |
 | v0.12.0 | 2025-12-24 | Brush, Gradients, Stroke, Dash | +4,337 |
 | v0.11.0 | 2025-12-24 | MSDF, Emoji, Subpixel text | +16,200 |
