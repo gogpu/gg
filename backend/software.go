@@ -9,8 +9,10 @@ import (
 const (
 	// BackendSoftware is the name of the CPU-based software backend.
 	BackendSoftware = "software"
-	// BackendWGPU is the name of the GPU-based wgpu backend.
-	BackendWGPU = "wgpu"
+	// BackendNative is the name of the Pure Go GPU backend (gogpu/wgpu).
+	BackendNative = "native"
+	// BackendRust is the name of the Rust GPU backend (go-webgpu/webgpu FFI).
+	BackendRust = "rust"
 )
 
 // SoftwareBackend is a CPU-based rendering backend.

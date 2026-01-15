@@ -22,7 +22,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/backend"
-	_ "github.com/gogpu/gg/backend/wgpu" // Register GPU backend
+	_ "github.com/gogpu/gg/backend/native" // Register GPU backend
 	"github.com/gogpu/gg/scene"
 )
 
@@ -69,7 +69,7 @@ func main() {
 // selectBackend attempts to initialize the GPU backend, falling back to software.
 func selectBackend() backend.RenderBackend {
 	// First, try GPU backend
-	gpuBackend := backend.Get(backend.BackendWGPU)
+	gpuBackend := backend.Get(backend.BackendNative)
 	if gpuBackend != nil {
 		if err := gpuBackend.Init(); err != nil {
 			fmt.Printf("GPU backend unavailable: %v\n", err)
@@ -220,7 +220,7 @@ func printBackendInfo(be backend.RenderBackend) {
 	fmt.Printf("  Available backends: %v\n", available)
 
 	// If GPU backend, try to get additional info
-	if be.Name() == backend.BackendWGPU {
+	if be.Name() == backend.BackendNative {
 		fmt.Println("  Type: GPU (WebGPU via gogpu/wgpu)")
 		fmt.Println("  Status: Pipeline implemented, GPU ops as stubs")
 	} else {
