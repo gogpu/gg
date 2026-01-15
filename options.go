@@ -31,13 +31,12 @@ func defaultOptions() contextOptions {
 //
 // Example:
 //
-//	// Using a GPU renderer from gogpu
-//	gpuRenderer := ggrender.New(app.DeviceProvider())
-//	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
-//
 //	// Using a custom renderer
 //	customRenderer := mypackage.NewRenderer()
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
+//
+// For GPU-accelerated rendering, see gg's native backend (backend/native/)
+// which uses gogpu/wgpu directly.
 func WithRenderer(r Renderer) ContextOption {
 	return func(o *contextOptions) {
 		o.renderer = r

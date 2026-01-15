@@ -96,38 +96,28 @@ dc := gg.NewContext(800, 600)
 defer dc.Close()
 ```
 
-### GPU Rendering via gogpu
+### GPU Rendering via Native Backend
+
+gg includes a built-in GPU backend using gogpu/wgpu:
 
 ```go
 import (
-    "github.com/gogpu/gogpu"
-    "github.com/gogpu/gogpu/ggrender"
     "github.com/gogpu/gg"
+    "github.com/gogpu/gg/backend/native"
 )
 
 func main() {
-    app := gogpu.NewApp(gogpu.DefaultConfig().
-        WithTitle("GPU Drawing").
-        WithSize(800, 600))
+    // Create GPU-accelerated context using native backend
+    device := native.NewDevice()
+    defer device.Destroy()
 
-    var gpuRenderer *ggrender.Renderer
-    var dc *gg.Context
-
-    app.OnDraw(func(ctx *gogpu.Context) {
-        if gpuRenderer == nil {
-            gpuRenderer = ggrender.New(app.DeviceProvider())
-            dc = gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
-        }
-
-        dc.Clear()
-        dc.SetHexColor("#e74c3c")
-        dc.DrawCircle(400, 300, 100)
-        dc.Fill()
-    })
-
-    app.Run()
+    // Draw with GPU acceleration
+    device.DrawCircle(400, 300, 100)
+    device.Fill()
 }
 ```
+
+For integration with gogpu windowing, see the `examples/gpu/` directory.
 
 ### Custom Pixmap
 
@@ -156,7 +146,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
             ┌────────────────┼────────────────┐
             │                                 │
        Software                             GPU
-       (Default)                     (via ggrender)
+       (Default)                     (backend/native/)
 ```
 
 ### Backend Structure

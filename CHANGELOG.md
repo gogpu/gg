@@ -39,12 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Example
 
 ```go
-// Default software renderer (existing behavior)
+// Default software renderer
 dc := gg.NewContext(800, 600)
 
-// Custom GPU renderer via gogpu integration
-gpuRenderer := ggrender.New(app.DeviceProvider())
-dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+// Custom renderer via dependency injection
+customRenderer := NewCustomRenderer(800, 600)
+dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
+
+// Use gg's native GPU backend directly
+import "github.com/gogpu/gg/backend/native"
+// See backend/native/ for GPU-accelerated rendering
 ```
 
 ## [0.17.1] - 2026-01-10
