@@ -278,6 +278,11 @@ func (a *HALAdapter) CreateTexture(width, height int, format gpucore.TextureForm
 	if width <= 0 || height <= 0 {
 		return gpucore.InvalidID, fmt.Errorf("texture dimensions must be positive")
 	}
+	// Bounds check for uint32 conversion (gosec G115)
+	const maxDim = 1 << 24 // 16M pixels max per dimension (realistic GPU limit)
+	if width > maxDim || height > maxDim {
+		return gpucore.InvalidID, fmt.Errorf("texture dimensions exceed maximum (%d)", maxDim)
+	}
 
 	desc := &hal.TextureDescriptor{
 		Label: "",

@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg/scene"
-	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
 )
@@ -140,33 +139,17 @@ func (r *GPUFineRasterizer) init() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Compile WGSL to SPIR-V
-	spirvBytes, err := naga.Compile(fineShaderWGSL)
+	// Compile WGSL to SPIR-V using shared helper
+	spirvCode, err := CompileShaderToSPIRV(fineShaderWGSL)
 	if err != nil {
-		return fmt.Errorf("gpu_fine: failed to compile shader: %w", err)
+		return fmt.Errorf("gpu_fine: %w", err)
 	}
-
-	// Convert bytes to uint32 slice for SPIR-V
-	r.spirvCode = make([]uint32, len(spirvBytes)/4)
-	for i := range r.spirvCode {
-		r.spirvCode[i] = uint32(spirvBytes[i*4]) |
-			uint32(spirvBytes[i*4+1])<<8 |
-			uint32(spirvBytes[i*4+2])<<16 |
-			uint32(spirvBytes[i*4+3])<<24
-	}
-
+	r.spirvCode = spirvCode
 	r.shaderReady = true
 
-	// Create shader module
-	shaderModule, err := r.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label: "fine_shader",
-		Source: hal.ShaderSource{
-			SPIRV: r.spirvCode,
-		},
-	})
+	// Create shader module using shared helper
+	shaderModule, err := CreateShaderModule(r.device, "fine_shader", r.spirvCode)
 	if err != nil {
-		// Shader module creation may fail if compute shaders are not supported
-		// Log but don't fail - allow CPU fallback
 		return fmt.Errorf("gpu_fine: failed to create shader module: %w", err)
 	}
 	r.shaderModule = shaderModule

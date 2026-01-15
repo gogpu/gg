@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/types"
 )
@@ -94,30 +93,16 @@ func (r *GPUCoarseRasterizer) init() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Compile WGSL to SPIR-V
-	spirvBytes, err := naga.Compile(coarseShaderWGSL)
+	// Compile WGSL to SPIR-V using shared helper
+	spirvCode, err := CompileShaderToSPIRV(coarseShaderWGSL)
 	if err != nil {
-		return fmt.Errorf("gpu_coarse: failed to compile shader: %w", err)
+		return fmt.Errorf("gpu_coarse: %w", err)
 	}
-
-	// Convert bytes to uint32 slice for SPIR-V
-	r.spirvCode = make([]uint32, len(spirvBytes)/4)
-	for i := range r.spirvCode {
-		r.spirvCode[i] = uint32(spirvBytes[i*4]) |
-			uint32(spirvBytes[i*4+1])<<8 |
-			uint32(spirvBytes[i*4+2])<<16 |
-			uint32(spirvBytes[i*4+3])<<24
-	}
-
+	r.spirvCode = spirvCode
 	r.shaderReady = true
 
-	// Create shader module
-	shaderModule, err := r.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label: "coarse_shader",
-		Source: hal.ShaderSource{
-			SPIRV: r.spirvCode,
-		},
-	})
+	// Create shader module using shared helper
+	shaderModule, err := CreateShaderModule(r.device, "coarse_shader", r.spirvCode)
 	if err != nil {
 		return fmt.Errorf("gpu_coarse: failed to create shader module: %w", err)
 	}

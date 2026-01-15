@@ -208,7 +208,8 @@ linters:
           - funlen       # Conversion functions map all 28+ modes
 
       # GPU compute shaders - similar initialization patterns (Phase 6)
-      - path: backend/wgpu/gpu_.*.go
+      # Each rasterizer has structurally similar but functionally different code
+      - path: backend/native/gpu_.*.go
         linters:
           - dupl          # Fine, coarse, flatten have similar WebGPU init patterns
 
