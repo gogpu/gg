@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.18.1] - 2026-01-16
+
+### Changed
+- Updated dependency: `github.com/gogpu/wgpu` v0.10.0 → v0.10.1
+  - Non-blocking swapchain acquire (16ms timeout)
+  - Window responsiveness fix during resize/drag
+  - ErrNotReady for skip-frame handling
+
 ## [0.18.0] - 2026-01-15
 
 ### Added
@@ -989,7 +997,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/gogpu/gg/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/gogpu/gg/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/gogpu/gg/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/gogpu/gg/compare/v0.16.0...v0.17.0
