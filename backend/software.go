@@ -13,6 +13,8 @@ const (
 	BackendNative = "native"
 	// BackendRust is the name of the Rust GPU backend (go-webgpu/webgpu FFI).
 	BackendRust = "rust"
+	// BackendGo is an alias for BackendNative (user convenience).
+	BackendGo = BackendNative
 )
 
 // SoftwareBackend is a CPU-based rendering backend.

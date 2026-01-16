@@ -333,6 +333,7 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 
 ## Documentation
 
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture
 - **[ROADMAP.md](ROADMAP.md)** — Development milestones
 - **[CHANGELOG.md](CHANGELOG.md)** — Release notes
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines
