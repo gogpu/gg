@@ -8,41 +8,41 @@ import (
 )
 
 // =============================================================================
-// HALRenderPassEncoder Tests
+// RenderPassEncoder Tests
 // =============================================================================
 
-func TestHALRenderPassEncoder_State(t *testing.T) {
+func TestRenderPassEncoder_State(t *testing.T) {
 	tests := []struct {
 		name     string
-		setup    func() *HALRenderPassEncoder
-		expected HALRenderPassState
+		setup    func() *RenderPassEncoder
+		expected RenderPassState
 	}{
 		{
 			name: "recording state on creation",
-			setup: func() *HALRenderPassEncoder {
-				return &HALRenderPassEncoder{
-					state: HALRenderPassStateRecording,
+			setup: func() *RenderPassEncoder {
+				return &RenderPassEncoder{
+					state: RenderPassStateRecording,
 				}
 			},
-			expected: HALRenderPassStateRecording,
+			expected: RenderPassStateRecording,
 		},
 		{
 			name: "ended state after End",
-			setup: func() *HALRenderPassEncoder {
-				p := &HALRenderPassEncoder{
-					state: HALRenderPassStateRecording,
+			setup: func() *RenderPassEncoder {
+				p := &RenderPassEncoder{
+					state: RenderPassStateRecording,
 				}
 				_ = p.End()
 				return p
 			},
-			expected: HALRenderPassStateEnded,
+			expected: RenderPassStateEnded,
 		},
 		{
 			name: "nil pass returns ended",
-			setup: func() *HALRenderPassEncoder {
+			setup: func() *RenderPassEncoder {
 				return nil
 			},
-			expected: HALRenderPassStateEnded,
+			expected: RenderPassStateEnded,
 		},
 	}
 
@@ -57,19 +57,19 @@ func TestHALRenderPassEncoder_State(t *testing.T) {
 	}
 }
 
-func TestHALRenderPassEncoder_IsEnded(t *testing.T) {
+func TestRenderPassEncoder_IsEnded(t *testing.T) {
 	tests := []struct {
 		name     string
-		state    HALRenderPassState
+		state    RenderPassState
 		expected bool
 	}{
-		{"recording", HALRenderPassStateRecording, false},
-		{"ended", HALRenderPassStateEnded, true},
+		{"recording", RenderPassStateRecording, false},
+		{"ended", RenderPassStateEnded, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &HALRenderPassEncoder{state: tt.state}
+			p := &RenderPassEncoder{state: tt.state}
 			if got := p.IsEnded(); got != tt.expected {
 				t.Errorf("IsEnded() = %v, want %v", got, tt.expected)
 			}
@@ -77,10 +77,10 @@ func TestHALRenderPassEncoder_IsEnded(t *testing.T) {
 	}
 }
 
-func TestHALRenderPassEncoder_SetPipeline(t *testing.T) {
+func TestRenderPassEncoder_SetPipeline(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		pipeline := &HALRenderPipeline{id: 1}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		pipeline := &RenderPipeline{id: 1}
 		err := p.SetPipeline(pipeline)
 		if err != nil {
 			t.Errorf("SetPipeline() error = %v, want nil", err)
@@ -91,7 +91,7 @@ func TestHALRenderPassEncoder_SetPipeline(t *testing.T) {
 	})
 
 	t.Run("nil pipeline error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetPipeline(nil)
 		if err == nil {
 			t.Error("SetPipeline(nil) should return error")
@@ -99,8 +99,8 @@ func TestHALRenderPassEncoder_SetPipeline(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		pipeline := &HALRenderPipeline{id: 1}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		pipeline := &RenderPipeline{id: 1}
 		err := p.SetPipeline(pipeline)
 		if err == nil {
 			t.Error("SetPipeline() on ended pass should return error")
@@ -108,32 +108,32 @@ func TestHALRenderPassEncoder_SetPipeline(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_SetBindGroup(t *testing.T) {
+func TestRenderPassEncoder_SetBindGroup(t *testing.T) {
 	tests := []struct {
 		name      string
 		index     uint32
-		bindGroup *HALBindGroup
+		bindGroup *BindGroup
 		offsets   []uint32
 		wantErr   bool
 	}{
 		{
 			name:      "valid bind group index 0",
 			index:     0,
-			bindGroup: &HALBindGroup{id: 1},
+			bindGroup: &BindGroup{id: 1},
 			offsets:   nil,
 			wantErr:   false,
 		},
 		{
 			name:      "valid bind group index 3",
 			index:     3,
-			bindGroup: &HALBindGroup{id: 2},
+			bindGroup: &BindGroup{id: 2},
 			offsets:   []uint32{256, 512},
 			wantErr:   false,
 		},
 		{
 			name:      "index out of range",
 			index:     4,
-			bindGroup: &HALBindGroup{id: 1},
+			bindGroup: &BindGroup{id: 1},
 			offsets:   nil,
 			wantErr:   true,
 		},
@@ -148,7 +148,7 @@ func TestHALRenderPassEncoder_SetBindGroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+			p := &RenderPassEncoder{state: RenderPassStateRecording}
 			err := p.SetBindGroup(tt.index, tt.bindGroup, tt.offsets)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SetBindGroup() error = %v, wantErr %v", err, tt.wantErr)
@@ -157,18 +157,18 @@ func TestHALRenderPassEncoder_SetBindGroup(t *testing.T) {
 	}
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		err := p.SetBindGroup(0, &HALBindGroup{id: 1}, nil)
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		err := p.SetBindGroup(0, &BindGroup{id: 1}, nil)
 		if err == nil {
 			t.Error("SetBindGroup() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALRenderPassEncoder_SetVertexBuffer(t *testing.T) {
+func TestRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.SetVertexBuffer(0, buffer, 0, 0)
 		if err != nil {
 			t.Errorf("SetVertexBuffer() error = %v, want nil", err)
@@ -179,7 +179,7 @@ func TestHALRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	})
 
 	t.Run("nil buffer error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetVertexBuffer(0, nil, 0, 0)
 		if err == nil {
 			t.Error("SetVertexBuffer(nil) should return error")
@@ -187,8 +187,8 @@ func TestHALRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	})
 
 	t.Run("multiple slots", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 
 		_ = p.SetVertexBuffer(0, buffer, 0, 0)
 		_ = p.SetVertexBuffer(5, buffer, 0, 0)
@@ -199,18 +199,18 @@ func TestHALRenderPassEncoder_SetVertexBuffer(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		err := p.SetVertexBuffer(0, &HALBuffer{}, 0, 0)
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		err := p.SetVertexBuffer(0, &Buffer{}, 0, 0)
 		if err == nil {
 			t.Error("SetVertexBuffer() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALRenderPassEncoder_SetIndexBuffer(t *testing.T) {
+func TestRenderPassEncoder_SetIndexBuffer(t *testing.T) {
 	t.Run("success uint16", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.SetIndexBuffer(buffer, IndexFormatUint16, 0, 0)
 		if err != nil {
 			t.Errorf("SetIndexBuffer() error = %v, want nil", err)
@@ -221,8 +221,8 @@ func TestHALRenderPassEncoder_SetIndexBuffer(t *testing.T) {
 	})
 
 	t.Run("success uint32", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.SetIndexBuffer(buffer, IndexFormatUint32, 0, 0)
 		if err != nil {
 			t.Errorf("SetIndexBuffer() error = %v, want nil", err)
@@ -230,7 +230,7 @@ func TestHALRenderPassEncoder_SetIndexBuffer(t *testing.T) {
 	})
 
 	t.Run("nil buffer error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetIndexBuffer(nil, IndexFormatUint16, 0, 0)
 		if err == nil {
 			t.Error("SetIndexBuffer(nil) should return error")
@@ -238,17 +238,17 @@ func TestHALRenderPassEncoder_SetIndexBuffer(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		err := p.SetIndexBuffer(&HALBuffer{}, IndexFormatUint16, 0, 0)
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		err := p.SetIndexBuffer(&Buffer{}, IndexFormatUint16, 0, 0)
 		if err == nil {
 			t.Error("SetIndexBuffer() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALRenderPassEncoder_SetViewport(t *testing.T) {
+func TestRenderPassEncoder_SetViewport(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetViewport(0, 0, 1920, 1080, 0, 1)
 		if err != nil {
 			t.Errorf("SetViewport() error = %v, want nil", err)
@@ -256,7 +256,7 @@ func TestHALRenderPassEncoder_SetViewport(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.SetViewport(0, 0, 100, 100, 0, 1)
 		if err == nil {
 			t.Error("SetViewport() on ended pass should return error")
@@ -264,9 +264,9 @@ func TestHALRenderPassEncoder_SetViewport(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_SetScissorRect(t *testing.T) {
+func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetScissorRect(0, 0, 1920, 1080)
 		if err != nil {
 			t.Errorf("SetScissorRect() error = %v, want nil", err)
@@ -274,7 +274,7 @@ func TestHALRenderPassEncoder_SetScissorRect(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.SetScissorRect(0, 0, 100, 100)
 		if err == nil {
 			t.Error("SetScissorRect() on ended pass should return error")
@@ -282,9 +282,9 @@ func TestHALRenderPassEncoder_SetScissorRect(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_SetBlendConstant(t *testing.T) {
+func TestRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		color := types.Color{R: 1, G: 0, B: 0, A: 1}
 		err := p.SetBlendConstant(color)
 		if err != nil {
@@ -293,7 +293,7 @@ func TestHALRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.SetBlendConstant(types.Color{})
 		if err == nil {
 			t.Error("SetBlendConstant() on ended pass should return error")
@@ -301,9 +301,9 @@ func TestHALRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_SetStencilReference(t *testing.T) {
+func TestRenderPassEncoder_SetStencilReference(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.SetStencilReference(128)
 		if err != nil {
 			t.Errorf("SetStencilReference() error = %v, want nil", err)
@@ -311,7 +311,7 @@ func TestHALRenderPassEncoder_SetStencilReference(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.SetStencilReference(0)
 		if err == nil {
 			t.Error("SetStencilReference() on ended pass should return error")
@@ -319,9 +319,9 @@ func TestHALRenderPassEncoder_SetStencilReference(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_Draw(t *testing.T) {
+func TestRenderPassEncoder_Draw(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.Draw(6, 1, 0, 0)
 		if err != nil {
 			t.Errorf("Draw() error = %v, want nil", err)
@@ -329,7 +329,7 @@ func TestHALRenderPassEncoder_Draw(t *testing.T) {
 	})
 
 	t.Run("instanced", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.Draw(36, 100, 0, 0)
 		if err != nil {
 			t.Errorf("Draw() error = %v, want nil", err)
@@ -337,7 +337,7 @@ func TestHALRenderPassEncoder_Draw(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.Draw(3, 1, 0, 0)
 		if err == nil {
 			t.Error("Draw() on ended pass should return error")
@@ -345,9 +345,9 @@ func TestHALRenderPassEncoder_Draw(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_DrawIndexed(t *testing.T) {
+func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.DrawIndexed(36, 1, 0, 0, 0)
 		if err != nil {
 			t.Errorf("DrawIndexed() error = %v, want nil", err)
@@ -355,7 +355,7 @@ func TestHALRenderPassEncoder_DrawIndexed(t *testing.T) {
 	})
 
 	t.Run("with base vertex", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.DrawIndexed(36, 1, 0, -10, 0)
 		if err != nil {
 			t.Errorf("DrawIndexed() error = %v, want nil", err)
@@ -363,7 +363,7 @@ func TestHALRenderPassEncoder_DrawIndexed(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
 		err := p.DrawIndexed(6, 1, 0, 0, 0)
 		if err == nil {
 			t.Error("DrawIndexed() on ended pass should return error")
@@ -371,10 +371,10 @@ func TestHALRenderPassEncoder_DrawIndexed(t *testing.T) {
 	})
 }
 
-func TestHALRenderPassEncoder_DrawIndirect(t *testing.T) {
+func TestRenderPassEncoder_DrawIndirect(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.DrawIndirect(buffer, 0)
 		if err != nil {
 			t.Errorf("DrawIndirect() error = %v, want nil", err)
@@ -382,7 +382,7 @@ func TestHALRenderPassEncoder_DrawIndirect(t *testing.T) {
 	})
 
 	t.Run("nil buffer error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.DrawIndirect(nil, 0)
 		if err == nil {
 			t.Error("DrawIndirect(nil) should return error")
@@ -390,8 +390,8 @@ func TestHALRenderPassEncoder_DrawIndirect(t *testing.T) {
 	})
 
 	t.Run("unaligned offset error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.DrawIndirect(buffer, 3)
 		if err == nil {
 			t.Error("DrawIndirect() with unaligned offset should return error")
@@ -399,18 +399,18 @@ func TestHALRenderPassEncoder_DrawIndirect(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		err := p.DrawIndirect(&HALBuffer{}, 0)
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		err := p.DrawIndirect(&Buffer{}, 0)
 		if err == nil {
 			t.Error("DrawIndirect() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALRenderPassEncoder_DrawIndexedIndirect(t *testing.T) {
+func TestRenderPassEncoder_DrawIndexedIndirect(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.DrawIndexedIndirect(buffer, 0)
 		if err != nil {
 			t.Errorf("DrawIndexedIndirect() error = %v, want nil", err)
@@ -418,7 +418,7 @@ func TestHALRenderPassEncoder_DrawIndexedIndirect(t *testing.T) {
 	})
 
 	t.Run("nil buffer error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.DrawIndexedIndirect(nil, 0)
 		if err == nil {
 			t.Error("DrawIndexedIndirect(nil) should return error")
@@ -426,8 +426,8 @@ func TestHALRenderPassEncoder_DrawIndexedIndirect(t *testing.T) {
 	})
 
 	t.Run("unaligned offset error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
-		buffer := &HALBuffer{}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
+		buffer := &Buffer{}
 		err := p.DrawIndexedIndirect(buffer, 5)
 		if err == nil {
 			t.Error("DrawIndexedIndirect() with unaligned offset should return error")
@@ -435,28 +435,28 @@ func TestHALRenderPassEncoder_DrawIndexedIndirect(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateEnded}
-		err := p.DrawIndexedIndirect(&HALBuffer{}, 0)
+		p := &RenderPassEncoder{state: RenderPassStateEnded}
+		err := p.DrawIndexedIndirect(&Buffer{}, 0)
 		if err == nil {
 			t.Error("DrawIndexedIndirect() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALRenderPassEncoder_End(t *testing.T) {
+func TestRenderPassEncoder_End(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		err := p.End()
 		if err != nil {
 			t.Errorf("End() error = %v, want nil", err)
 		}
-		if p.state != HALRenderPassStateEnded {
-			t.Errorf("state = %v, want %v", p.state, HALRenderPassStateEnded)
+		if p.state != RenderPassStateEnded {
+			t.Errorf("state = %v, want %v", p.state, RenderPassStateEnded)
 		}
 	})
 
 	t.Run("idempotent", func(t *testing.T) {
-		p := &HALRenderPassEncoder{state: HALRenderPassStateRecording}
+		p := &RenderPassEncoder{state: RenderPassStateRecording}
 		_ = p.End()
 		err := p.End()
 		if err != nil {
@@ -466,17 +466,17 @@ func TestHALRenderPassEncoder_End(t *testing.T) {
 }
 
 // =============================================================================
-// HALRenderPassState Tests
+// RenderPassState Tests
 // =============================================================================
 
-func TestHALRenderPassState_String(t *testing.T) {
+func TestRenderPassState_String(t *testing.T) {
 	tests := []struct {
-		state    HALRenderPassState
+		state    RenderPassState
 		expected string
 	}{
-		{HALRenderPassStateRecording, "Recording"},
-		{HALRenderPassStateEnded, "Ended"},
-		{HALRenderPassState(99), "Unknown(99)"},
+		{RenderPassStateRecording, "Recording"},
+		{RenderPassStateEnded, "Ended"},
+		{RenderPassState(99), "Unknown(99)"},
 	}
 
 	for _, tt := range tests {
@@ -489,11 +489,11 @@ func TestHALRenderPassState_String(t *testing.T) {
 }
 
 // =============================================================================
-// HALRenderPipeline Tests
+// RenderPipeline Tests
 // =============================================================================
 
-func TestHALRenderPipeline_Methods(t *testing.T) {
-	p := &HALRenderPipeline{
+func TestRenderPipeline_Methods(t *testing.T) {
+	p := &RenderPipeline{
 		id:    123,
 		label: "test-pipeline",
 	}
@@ -525,11 +525,11 @@ func TestHALRenderPipeline_Methods(t *testing.T) {
 }
 
 // =============================================================================
-// HALBindGroup Tests
+// BindGroup Tests
 // =============================================================================
 
-func TestHALBindGroup_Methods(t *testing.T) {
-	bg := &HALBindGroup{
+func TestBindGroup_Methods(t *testing.T) {
+	bg := &BindGroup{
 		id:    456,
 		label: "test-bindgroup",
 	}

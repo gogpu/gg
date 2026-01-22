@@ -6,41 +6,41 @@ import (
 )
 
 // =============================================================================
-// HALComputePassEncoder Tests
+// ComputePassEncoder Tests
 // =============================================================================
 
-func TestHALComputePassEncoder_State(t *testing.T) {
+func TestComputePassEncoder_State(t *testing.T) {
 	tests := []struct {
 		name     string
-		setup    func() *HALComputePassEncoder
-		expected HALComputePassState
+		setup    func() *ComputePassEncoder
+		expected ComputePassState
 	}{
 		{
 			name: "recording state on creation",
-			setup: func() *HALComputePassEncoder {
-				return &HALComputePassEncoder{
-					state: HALComputePassStateRecording,
+			setup: func() *ComputePassEncoder {
+				return &ComputePassEncoder{
+					state: ComputePassStateRecording,
 				}
 			},
-			expected: HALComputePassStateRecording,
+			expected: ComputePassStateRecording,
 		},
 		{
 			name: "ended state after End",
-			setup: func() *HALComputePassEncoder {
-				p := &HALComputePassEncoder{
-					state: HALComputePassStateRecording,
+			setup: func() *ComputePassEncoder {
+				p := &ComputePassEncoder{
+					state: ComputePassStateRecording,
 				}
 				_ = p.End()
 				return p
 			},
-			expected: HALComputePassStateEnded,
+			expected: ComputePassStateEnded,
 		},
 		{
 			name: "nil pass returns ended",
-			setup: func() *HALComputePassEncoder {
+			setup: func() *ComputePassEncoder {
 				return nil
 			},
-			expected: HALComputePassStateEnded,
+			expected: ComputePassStateEnded,
 		},
 	}
 
@@ -55,19 +55,19 @@ func TestHALComputePassEncoder_State(t *testing.T) {
 	}
 }
 
-func TestHALComputePassEncoder_IsEnded(t *testing.T) {
+func TestComputePassEncoder_IsEnded(t *testing.T) {
 	tests := []struct {
 		name     string
-		state    HALComputePassState
+		state    ComputePassState
 		expected bool
 	}{
-		{"recording", HALComputePassStateRecording, false},
-		{"ended", HALComputePassStateEnded, true},
+		{"recording", ComputePassStateRecording, false},
+		{"ended", ComputePassStateEnded, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &HALComputePassEncoder{state: tt.state}
+			p := &ComputePassEncoder{state: tt.state}
 			if got := p.IsEnded(); got != tt.expected {
 				t.Errorf("IsEnded() = %v, want %v", got, tt.expected)
 			}
@@ -75,10 +75,10 @@ func TestHALComputePassEncoder_IsEnded(t *testing.T) {
 	}
 }
 
-func TestHALComputePassEncoder_SetPipeline(t *testing.T) {
+func TestComputePassEncoder_SetPipeline(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
-		pipeline := &HALComputePipeline{id: 1}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
+		pipeline := &ComputePipeline{id: 1}
 		err := p.SetPipeline(pipeline)
 		if err != nil {
 			t.Errorf("SetPipeline() error = %v, want nil", err)
@@ -89,7 +89,7 @@ func TestHALComputePassEncoder_SetPipeline(t *testing.T) {
 	})
 
 	t.Run("nil pipeline error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		err := p.SetPipeline(nil)
 		if err == nil {
 			t.Error("SetPipeline(nil) should return error")
@@ -97,8 +97,8 @@ func TestHALComputePassEncoder_SetPipeline(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateEnded}
-		pipeline := &HALComputePipeline{id: 1}
+		p := &ComputePassEncoder{state: ComputePassStateEnded}
+		pipeline := &ComputePipeline{id: 1}
 		err := p.SetPipeline(pipeline)
 		if err == nil {
 			t.Error("SetPipeline() on ended pass should return error")
@@ -106,32 +106,32 @@ func TestHALComputePassEncoder_SetPipeline(t *testing.T) {
 	})
 }
 
-func TestHALComputePassEncoder_SetBindGroup(t *testing.T) {
+func TestComputePassEncoder_SetBindGroup(t *testing.T) {
 	tests := []struct {
 		name      string
 		index     uint32
-		bindGroup *HALBindGroup
+		bindGroup *BindGroup
 		offsets   []uint32
 		wantErr   bool
 	}{
 		{
 			name:      "valid bind group index 0",
 			index:     0,
-			bindGroup: &HALBindGroup{id: 1},
+			bindGroup: &BindGroup{id: 1},
 			offsets:   nil,
 			wantErr:   false,
 		},
 		{
 			name:      "valid bind group index 3",
 			index:     3,
-			bindGroup: &HALBindGroup{id: 2},
+			bindGroup: &BindGroup{id: 2},
 			offsets:   []uint32{256, 512},
 			wantErr:   false,
 		},
 		{
 			name:      "index out of range",
 			index:     4,
-			bindGroup: &HALBindGroup{id: 1},
+			bindGroup: &BindGroup{id: 1},
 			offsets:   nil,
 			wantErr:   true,
 		},
@@ -146,7 +146,7 @@ func TestHALComputePassEncoder_SetBindGroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+			p := &ComputePassEncoder{state: ComputePassStateRecording}
 			err := p.SetBindGroup(tt.index, tt.bindGroup, tt.offsets)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SetBindGroup() error = %v, wantErr %v", err, tt.wantErr)
@@ -155,17 +155,17 @@ func TestHALComputePassEncoder_SetBindGroup(t *testing.T) {
 	}
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateEnded}
-		err := p.SetBindGroup(0, &HALBindGroup{id: 1}, nil)
+		p := &ComputePassEncoder{state: ComputePassStateEnded}
+		err := p.SetBindGroup(0, &BindGroup{id: 1}, nil)
 		if err == nil {
 			t.Error("SetBindGroup() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALComputePassEncoder_DispatchWorkgroups(t *testing.T) {
+func TestComputePassEncoder_DispatchWorkgroups(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		err := p.DispatchWorkgroups(64, 64, 1)
 		if err != nil {
 			t.Errorf("DispatchWorkgroups() error = %v, want nil", err)
@@ -176,7 +176,7 @@ func TestHALComputePassEncoder_DispatchWorkgroups(t *testing.T) {
 	})
 
 	t.Run("multiple dispatches", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		_ = p.DispatchWorkgroups(32, 32, 1)
 		_ = p.DispatchWorkgroups(16, 16, 1)
 		_ = p.DispatchWorkgroups(8, 8, 8)
@@ -187,7 +187,7 @@ func TestHALComputePassEncoder_DispatchWorkgroups(t *testing.T) {
 	})
 
 	t.Run("zero workgroups allowed", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		err := p.DispatchWorkgroups(0, 0, 0)
 		if err != nil {
 			t.Errorf("DispatchWorkgroups(0,0,0) error = %v, want nil (spec allows zero)", err)
@@ -195,7 +195,7 @@ func TestHALComputePassEncoder_DispatchWorkgroups(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateEnded}
+		p := &ComputePassEncoder{state: ComputePassStateEnded}
 		err := p.DispatchWorkgroups(1, 1, 1)
 		if err == nil {
 			t.Error("DispatchWorkgroups() on ended pass should return error")
@@ -203,10 +203,10 @@ func TestHALComputePassEncoder_DispatchWorkgroups(t *testing.T) {
 	})
 }
 
-func TestHALComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
+func TestComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
-		buffer := &HALBuffer{}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
+		buffer := &Buffer{}
 		err := p.DispatchWorkgroupsIndirect(buffer, 0)
 		if err != nil {
 			t.Errorf("DispatchWorkgroupsIndirect() error = %v, want nil", err)
@@ -217,8 +217,8 @@ func TestHALComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
 	})
 
 	t.Run("aligned offset", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
-		buffer := &HALBuffer{}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
+		buffer := &Buffer{}
 		err := p.DispatchWorkgroupsIndirect(buffer, 256)
 		if err != nil {
 			t.Errorf("DispatchWorkgroupsIndirect() error = %v, want nil", err)
@@ -226,7 +226,7 @@ func TestHALComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
 	})
 
 	t.Run("nil buffer error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		err := p.DispatchWorkgroupsIndirect(nil, 0)
 		if err == nil {
 			t.Error("DispatchWorkgroupsIndirect(nil) should return error")
@@ -234,8 +234,8 @@ func TestHALComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
 	})
 
 	t.Run("unaligned offset error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
-		buffer := &HALBuffer{}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
+		buffer := &Buffer{}
 		err := p.DispatchWorkgroupsIndirect(buffer, 3)
 		if err == nil {
 			t.Error("DispatchWorkgroupsIndirect() with unaligned offset should return error")
@@ -243,28 +243,28 @@ func TestHALComputePassEncoder_DispatchWorkgroupsIndirect(t *testing.T) {
 	})
 
 	t.Run("ended pass error", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateEnded}
-		err := p.DispatchWorkgroupsIndirect(&HALBuffer{}, 0)
+		p := &ComputePassEncoder{state: ComputePassStateEnded}
+		err := p.DispatchWorkgroupsIndirect(&Buffer{}, 0)
 		if err == nil {
 			t.Error("DispatchWorkgroupsIndirect() on ended pass should return error")
 		}
 	})
 }
 
-func TestHALComputePassEncoder_End(t *testing.T) {
+func TestComputePassEncoder_End(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		err := p.End()
 		if err != nil {
 			t.Errorf("End() error = %v, want nil", err)
 		}
-		if p.state != HALComputePassStateEnded {
-			t.Errorf("state = %v, want %v", p.state, HALComputePassStateEnded)
+		if p.state != ComputePassStateEnded {
+			t.Errorf("state = %v, want %v", p.state, ComputePassStateEnded)
 		}
 	})
 
 	t.Run("idempotent", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		_ = p.End()
 		err := p.End()
 		if err != nil {
@@ -273,18 +273,18 @@ func TestHALComputePassEncoder_End(t *testing.T) {
 	})
 }
 
-func TestHALComputePassEncoder_DispatchCount(t *testing.T) {
+func TestComputePassEncoder_DispatchCount(t *testing.T) {
 	t.Run("zero initially", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		if got := p.DispatchCount(); got != 0 {
 			t.Errorf("DispatchCount() = %d, want 0", got)
 		}
 	})
 
 	t.Run("tracks dispatches", func(t *testing.T) {
-		p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+		p := &ComputePassEncoder{state: ComputePassStateRecording}
 		_ = p.DispatchWorkgroups(1, 1, 1)
-		_ = p.DispatchWorkgroupsIndirect(&HALBuffer{}, 0)
+		_ = p.DispatchWorkgroupsIndirect(&Buffer{}, 0)
 
 		if got := p.DispatchCount(); got != 2 {
 			t.Errorf("DispatchCount() = %d, want 2", got)
@@ -293,17 +293,17 @@ func TestHALComputePassEncoder_DispatchCount(t *testing.T) {
 }
 
 // =============================================================================
-// HALComputePassState Tests
+// ComputePassState Tests
 // =============================================================================
 
-func TestHALComputePassState_String(t *testing.T) {
+func TestComputePassState_String(t *testing.T) {
 	tests := []struct {
-		state    HALComputePassState
+		state    ComputePassState
 		expected string
 	}{
-		{HALComputePassStateRecording, "Recording"},
-		{HALComputePassStateEnded, "Ended"},
-		{HALComputePassState(99), "Unknown(99)"},
+		{ComputePassStateRecording, "Recording"},
+		{ComputePassStateEnded, "Ended"},
+		{ComputePassState(99), "Unknown(99)"},
 	}
 
 	for _, tt := range tests {
@@ -316,11 +316,11 @@ func TestHALComputePassState_String(t *testing.T) {
 }
 
 // =============================================================================
-// HALComputePipeline Tests
+// ComputePipeline Tests
 // =============================================================================
 
-func TestHALComputePipeline_Methods(t *testing.T) {
-	p := &HALComputePipeline{
+func TestComputePipeline_Methods(t *testing.T) {
+	p := &ComputePipeline{
 		id:            123,
 		label:         "test-compute-pipeline",
 		workgroupSize: [3]uint32{64, 1, 1},
@@ -393,10 +393,10 @@ func TestDrawIndexedIndirectArgs_Size(t *testing.T) {
 
 func TestComputePass_TypicalWorkflow(t *testing.T) {
 	// Simulate a typical compute pass workflow
-	p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+	p := &ComputePassEncoder{state: ComputePassStateRecording}
 
 	// Set pipeline
-	pipeline := &HALComputePipeline{
+	pipeline := &ComputePipeline{
 		id:            1,
 		workgroupSize: [3]uint32{256, 1, 1},
 	}
@@ -405,7 +405,7 @@ func TestComputePass_TypicalWorkflow(t *testing.T) {
 	}
 
 	// Set bind groups
-	bindGroup := &HALBindGroup{id: 1}
+	bindGroup := &BindGroup{id: 1}
 	if err := p.SetBindGroup(0, bindGroup, nil); err != nil {
 		t.Fatalf("SetBindGroup failed: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestComputePass_TypicalWorkflow(t *testing.T) {
 }
 
 func TestComputePass_MultipleDispatches(t *testing.T) {
-	p := &HALComputePassEncoder{state: HALComputePassStateRecording}
+	p := &ComputePassEncoder{state: ComputePassStateRecording}
 
 	// Multiple passes for different data
 	for i := 0; i < 10; i++ {

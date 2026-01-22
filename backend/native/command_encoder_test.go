@@ -9,10 +9,10 @@ import (
 )
 
 // =============================================================================
-// HALCommandEncoder Tests
+// CoreCommandEncoder Tests
 // =============================================================================
 
-func TestHALCommandEncoder_CreateFromBackend(t *testing.T) {
+func TestCoreCommandEncoder_CreateFromBackend(t *testing.T) {
 	tests := []struct {
 		name          string
 		backend       *NativeBackend
@@ -50,7 +50,7 @@ func TestHALCommandEncoder_CreateFromBackend(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			enc, err := NewHALCommandEncoder(tt.backend, tt.label)
+			enc, err := NewCoreCommandEncoder(tt.backend, tt.label)
 
 			if tt.wantErr {
 				if err == nil {
@@ -77,10 +77,10 @@ func TestHALCommandEncoder_CreateFromBackend(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_Label(t *testing.T) {
+func TestCoreCommandEncoder_Label(t *testing.T) {
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
+		encoder *CoreCommandEncoder
 		want    string
 	}{
 		{
@@ -90,12 +90,12 @@ func TestHALCommandEncoder_Label(t *testing.T) {
 		},
 		{
 			name:    "encoder with label",
-			encoder: &HALCommandEncoder{label: "my-encoder"},
+			encoder: &CoreCommandEncoder{label: "my-encoder"},
 			want:    "my-encoder",
 		},
 		{
 			name:    "encoder without label",
-			encoder: &HALCommandEncoder{label: ""},
+			encoder: &CoreCommandEncoder{label: ""},
 			want:    "",
 		},
 	}
@@ -110,10 +110,10 @@ func TestHALCommandEncoder_Label(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_Status(t *testing.T) {
+func TestCoreCommandEncoder_Status(t *testing.T) {
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
+		encoder *CoreCommandEncoder
 		want    core.CommandEncoderStatus
 	}{
 		{
@@ -123,20 +123,20 @@ func TestHALCommandEncoder_Status(t *testing.T) {
 		},
 		{
 			name:    "recording state",
-			encoder: &HALCommandEncoder{},
+			encoder: &CoreCommandEncoder{},
 			want:    core.CommandEncoderStatusRecording,
 		},
 		{
 			name: "locked state (render pass)",
-			encoder: &HALCommandEncoder{
-				activeRenderPass: &HALRenderPassEncoder{},
+			encoder: &CoreCommandEncoder{
+				activeRenderPass: &RenderPassEncoder{},
 			},
 			want: core.CommandEncoderStatusLocked,
 		},
 		{
 			name: "locked state (compute pass)",
-			encoder: &HALCommandEncoder{
-				activeComputePass: &HALComputePassEncoder{},
+			encoder: &CoreCommandEncoder{
+				activeComputePass: &ComputePassEncoder{},
 			},
 			want: core.CommandEncoderStatusLocked,
 		},
@@ -152,21 +152,21 @@ func TestHALCommandEncoder_Status(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_BeginRenderPass(t *testing.T) {
+func TestCoreCommandEncoder_BeginRenderPass(t *testing.T) {
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
-		desc    *HALRenderPassDescriptor
+		encoder *CoreCommandEncoder
+		desc    *RenderPassDescriptor
 		wantErr bool
 	}{
 		{
 			name: "success with descriptor",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label: "test",
 			},
-			desc: &HALRenderPassDescriptor{
+			desc: &RenderPassDescriptor{
 				Label: "render-pass",
-				ColorAttachments: []HALRenderPassColorAttachment{
+				ColorAttachments: []RenderPassColorAttachment{
 					{
 						LoadOp:     types.LoadOpClear,
 						StoreOp:    types.StoreOpStore,
@@ -178,7 +178,7 @@ func TestHALCommandEncoder_BeginRenderPass(t *testing.T) {
 		},
 		{
 			name: "nil descriptor",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label: "test",
 			},
 			desc:    nil,
@@ -186,11 +186,11 @@ func TestHALCommandEncoder_BeginRenderPass(t *testing.T) {
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label:            "test",
-				activeRenderPass: &HALRenderPassEncoder{},
+				activeRenderPass: &RenderPassEncoder{},
 			},
-			desc: &HALRenderPassDescriptor{
+			desc: &RenderPassDescriptor{
 				Label: "render-pass",
 			},
 			wantErr: true,
@@ -233,26 +233,26 @@ func TestHALCommandEncoder_BeginRenderPass(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_BeginComputePass(t *testing.T) {
+func TestCoreCommandEncoder_BeginComputePass(t *testing.T) {
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
-		desc    *HALComputePassDescriptor
+		encoder *CoreCommandEncoder
+		desc    *ComputePassDescriptor
 		wantErr bool
 	}{
 		{
 			name: "success with descriptor",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label: "test",
 			},
-			desc: &HALComputePassDescriptor{
+			desc: &ComputePassDescriptor{
 				Label: "compute-pass",
 			},
 			wantErr: false,
 		},
 		{
 			name: "success with nil descriptor",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label: "test",
 			},
 			desc:    nil,
@@ -260,11 +260,11 @@ func TestHALCommandEncoder_BeginComputePass(t *testing.T) {
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label:             "test",
-				activeComputePass: &HALComputePassEncoder{},
+				activeComputePass: &ComputePassEncoder{},
 			},
-			desc: &HALComputePassDescriptor{
+			desc: &ComputePassDescriptor{
 				Label: "compute-pass",
 			},
 			wantErr: true,
@@ -307,14 +307,14 @@ func TestHALCommandEncoder_BeginComputePass(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
+func TestCoreCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 	// Create mock buffers for testing
 	srcBuffer := &core.Buffer{}
 	dstBuffer := &core.Buffer{}
 
 	tests := []struct {
 		name          string
-		encoder       *HALCommandEncoder
+		encoder       *CoreCommandEncoder
 		src           *core.Buffer
 		dst           *core.Buffer
 		srcOffset     uint64
@@ -325,7 +325,7 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 	}{
 		{
 			name:      "nil source buffer",
-			encoder:   &HALCommandEncoder{},
+			encoder:   &CoreCommandEncoder{},
 			src:       nil,
 			dst:       dstBuffer,
 			srcOffset: 0,
@@ -335,7 +335,7 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 		},
 		{
 			name:      "nil destination buffer",
-			encoder:   &HALCommandEncoder{},
+			encoder:   &CoreCommandEncoder{},
 			src:       srcBuffer,
 			dst:       nil,
 			srcOffset: 0,
@@ -345,7 +345,7 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 		},
 		{
 			name:          "unaligned source offset",
-			encoder:       &HALCommandEncoder{},
+			encoder:       &CoreCommandEncoder{},
 			src:           srcBuffer,
 			dst:           dstBuffer,
 			srcOffset:     3,
@@ -356,7 +356,7 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 		},
 		{
 			name:          "unaligned destination offset",
-			encoder:       &HALCommandEncoder{},
+			encoder:       &CoreCommandEncoder{},
 			src:           srcBuffer,
 			dst:           dstBuffer,
 			srcOffset:     0,
@@ -367,7 +367,7 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 		},
 		{
 			name:          "unaligned size",
-			encoder:       &HALCommandEncoder{},
+			encoder:       &CoreCommandEncoder{},
 			src:           srcBuffer,
 			dst:           dstBuffer,
 			srcOffset:     0,
@@ -378,8 +378,8 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
-				activeRenderPass: &HALRenderPassEncoder{},
+			encoder: &CoreCommandEncoder{
+				activeRenderPass: &RenderPassEncoder{},
 			},
 			src:       srcBuffer,
 			dst:       dstBuffer,
@@ -411,23 +411,23 @@ func TestHALCommandEncoder_CopyBufferToBuffer(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_CopyBufferToTexture(t *testing.T) {
+func TestCoreCommandEncoder_CopyBufferToTexture(t *testing.T) {
 	texture := &GPUTexture{}
 	buffer := &core.Buffer{}
 
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
-		source  *HALImageCopyBuffer
-		dest    *HALImageCopyTexture
+		encoder *CoreCommandEncoder
+		source  *ImageCopyBuffer
+		dest    *ImageCopyTexture
 		size    types.Extent3D
 		wantErr bool
 	}{
 		{
 			name:    "nil source",
-			encoder: &HALCommandEncoder{},
+			encoder: &CoreCommandEncoder{},
 			source:  nil,
-			dest: &HALImageCopyTexture{
+			dest: &ImageCopyTexture{
 				Texture: texture,
 			},
 			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
@@ -435,8 +435,8 @@ func TestHALCommandEncoder_CopyBufferToTexture(t *testing.T) {
 		},
 		{
 			name:    "nil destination",
-			encoder: &HALCommandEncoder{},
-			source: &HALImageCopyBuffer{
+			encoder: &CoreCommandEncoder{},
+			source: &ImageCopyBuffer{
 				Buffer: buffer,
 			},
 			dest:    nil,
@@ -445,13 +445,13 @@ func TestHALCommandEncoder_CopyBufferToTexture(t *testing.T) {
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
-				activeRenderPass: &HALRenderPassEncoder{},
+			encoder: &CoreCommandEncoder{
+				activeRenderPass: &RenderPassEncoder{},
 			},
-			source: &HALImageCopyBuffer{
+			source: &ImageCopyBuffer{
 				Buffer: buffer,
 			},
-			dest: &HALImageCopyTexture{
+			dest: &ImageCopyTexture{
 				Texture: texture,
 			},
 			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
@@ -477,23 +477,23 @@ func TestHALCommandEncoder_CopyBufferToTexture(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_CopyTextureToBuffer(t *testing.T) {
+func TestCoreCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 	texture := &GPUTexture{}
 	buffer := &core.Buffer{}
 
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
-		source  *HALImageCopyTexture
-		dest    *HALImageCopyBuffer
+		encoder *CoreCommandEncoder
+		source  *ImageCopyTexture
+		dest    *ImageCopyBuffer
 		size    types.Extent3D
 		wantErr bool
 	}{
 		{
 			name:    "nil source",
-			encoder: &HALCommandEncoder{},
+			encoder: &CoreCommandEncoder{},
 			source:  nil,
-			dest: &HALImageCopyBuffer{
+			dest: &ImageCopyBuffer{
 				Buffer: buffer,
 			},
 			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
@@ -501,8 +501,8 @@ func TestHALCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 		},
 		{
 			name:    "nil destination",
-			encoder: &HALCommandEncoder{},
-			source: &HALImageCopyTexture{
+			encoder: &CoreCommandEncoder{},
+			source: &ImageCopyTexture{
 				Texture: texture,
 			},
 			dest:    nil,
@@ -529,23 +529,23 @@ func TestHALCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_CopyTextureToTexture(t *testing.T) {
+func TestCoreCommandEncoder_CopyTextureToTexture(t *testing.T) {
 	texture1 := &GPUTexture{}
 	texture2 := &GPUTexture{}
 
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
-		source  *HALImageCopyTexture
-		dest    *HALImageCopyTexture
+		encoder *CoreCommandEncoder
+		source  *ImageCopyTexture
+		dest    *ImageCopyTexture
 		size    types.Extent3D
 		wantErr bool
 	}{
 		{
 			name:    "nil source",
-			encoder: &HALCommandEncoder{},
+			encoder: &CoreCommandEncoder{},
 			source:  nil,
-			dest: &HALImageCopyTexture{
+			dest: &ImageCopyTexture{
 				Texture: texture2,
 			},
 			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
@@ -553,8 +553,8 @@ func TestHALCommandEncoder_CopyTextureToTexture(t *testing.T) {
 		},
 		{
 			name:    "nil destination",
-			encoder: &HALCommandEncoder{},
-			source: &HALImageCopyTexture{
+			encoder: &CoreCommandEncoder{},
+			source: &ImageCopyTexture{
 				Texture: texture1,
 			},
 			dest:    nil,
@@ -581,12 +581,12 @@ func TestHALCommandEncoder_CopyTextureToTexture(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_ClearBuffer(t *testing.T) {
+func TestCoreCommandEncoder_ClearBuffer(t *testing.T) {
 	buffer := &core.Buffer{}
 
 	tests := []struct {
 		name          string
-		encoder       *HALCommandEncoder
+		encoder       *CoreCommandEncoder
 		buffer        *core.Buffer
 		offset        uint64
 		size          uint64
@@ -595,7 +595,7 @@ func TestHALCommandEncoder_ClearBuffer(t *testing.T) {
 	}{
 		{
 			name:    "nil buffer",
-			encoder: &HALCommandEncoder{},
+			encoder: &CoreCommandEncoder{},
 			buffer:  nil,
 			offset:  0,
 			size:    64,
@@ -603,7 +603,7 @@ func TestHALCommandEncoder_ClearBuffer(t *testing.T) {
 		},
 		{
 			name:          "unaligned offset",
-			encoder:       &HALCommandEncoder{},
+			encoder:       &CoreCommandEncoder{},
 			buffer:        buffer,
 			offset:        3,
 			size:          64,
@@ -612,8 +612,8 @@ func TestHALCommandEncoder_ClearBuffer(t *testing.T) {
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
-				activeComputePass: &HALComputePassEncoder{},
+			encoder: &CoreCommandEncoder{
+				activeComputePass: &ComputePassEncoder{},
 			},
 			buffer:  buffer,
 			offset:  0,
@@ -643,22 +643,22 @@ func TestHALCommandEncoder_ClearBuffer(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_Finish(t *testing.T) {
+func TestCoreCommandEncoder_Finish(t *testing.T) {
 	tests := []struct {
 		name    string
-		encoder *HALCommandEncoder
+		encoder *CoreCommandEncoder
 		wantErr bool
 	}{
 		{
 			name:    "success",
-			encoder: &HALCommandEncoder{label: "test"},
+			encoder: &CoreCommandEncoder{label: "test"},
 			wantErr: false,
 		},
 		{
 			name: "encoder locked",
-			encoder: &HALCommandEncoder{
+			encoder: &CoreCommandEncoder{
 				label:            "test",
-				activeRenderPass: &HALRenderPassEncoder{},
+				activeRenderPass: &RenderPassEncoder{},
 			},
 			wantErr: true,
 		},
@@ -691,14 +691,14 @@ func TestHALCommandEncoder_Finish(t *testing.T) {
 }
 
 // =============================================================================
-// HALRenderPassEncoder Basic Tests
+// RenderPassEncoder Basic Tests
 // Note: Comprehensive tests are in hal_render_pass_test.go
 // =============================================================================
 
-func TestHALRenderPassEncoder_IntegrationWithEncoder(t *testing.T) {
+func TestRenderPassEncoder_IntegrationWithEncoder(t *testing.T) {
 	t.Run("normal end clears active pass", func(t *testing.T) {
-		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALRenderPassEncoder{encoder: encoder, state: HALRenderPassStateRecording}
+		encoder := &CoreCommandEncoder{label: "test"}
+		pass := &RenderPassEncoder{encoder: encoder, state: RenderPassStateRecording}
 		encoder.activeRenderPass = pass
 
 		err := pass.End()
@@ -706,7 +706,7 @@ func TestHALRenderPassEncoder_IntegrationWithEncoder(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if pass.state != HALRenderPassStateEnded {
+		if pass.state != RenderPassStateEnded {
 			t.Error("pass.state should be Ended")
 		}
 
@@ -717,14 +717,14 @@ func TestHALRenderPassEncoder_IntegrationWithEncoder(t *testing.T) {
 }
 
 // =============================================================================
-// HALComputePassEncoder Basic Tests
+// ComputePassEncoder Basic Tests
 // Note: Comprehensive tests are in hal_compute_pass_test.go
 // =============================================================================
 
-func TestHALComputePassEncoder_IntegrationWithEncoder(t *testing.T) {
+func TestComputePassEncoder_IntegrationWithEncoder(t *testing.T) {
 	t.Run("normal end clears active pass", func(t *testing.T) {
-		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALComputePassEncoder{encoder: encoder, state: HALComputePassStateRecording}
+		encoder := &CoreCommandEncoder{label: "test"}
+		pass := &ComputePassEncoder{encoder: encoder, state: ComputePassStateRecording}
 		encoder.activeComputePass = pass
 
 		err := pass.End()
@@ -732,7 +732,7 @@ func TestHALComputePassEncoder_IntegrationWithEncoder(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if pass.state != HALComputePassStateEnded {
+		if pass.state != ComputePassStateEnded {
 			t.Error("pass.state should be Ended")
 		}
 
@@ -743,13 +743,13 @@ func TestHALComputePassEncoder_IntegrationWithEncoder(t *testing.T) {
 }
 
 // =============================================================================
-// HALCommandBuffer Tests
+// CoreCommandBuffer Tests
 // =============================================================================
 
-func TestHALCommandBuffer_Label(t *testing.T) {
+func TestCoreCommandBuffer_Label(t *testing.T) {
 	tests := []struct {
 		name string
-		cb   *HALCommandBuffer
+		cb   *CoreCommandBuffer
 		want string
 	}{
 		{
@@ -759,12 +759,12 @@ func TestHALCommandBuffer_Label(t *testing.T) {
 		},
 		{
 			name: "buffer with label",
-			cb:   &HALCommandBuffer{label: "test-buffer"},
+			cb:   &CoreCommandBuffer{label: "test-buffer"},
 			want: "test-buffer",
 		},
 		{
 			name: "buffer without label",
-			cb:   &HALCommandBuffer{label: ""},
+			cb:   &CoreCommandBuffer{label: ""},
 			want: "",
 		},
 	}
@@ -779,16 +779,16 @@ func TestHALCommandBuffer_Label(t *testing.T) {
 	}
 }
 
-func TestHALCommandBuffer_CoreBuffer(t *testing.T) {
+func TestCoreCommandBuffer_CoreBuffer(t *testing.T) {
 	t.Run("nil command buffer", func(t *testing.T) {
-		var cb *HALCommandBuffer
+		var cb *CoreCommandBuffer
 		if cb.CoreBuffer() != nil {
 			t.Error("CoreBuffer() should return nil for nil buffer")
 		}
 	})
 
 	t.Run("buffer without core buffer", func(t *testing.T) {
-		cb := &HALCommandBuffer{label: "test"}
+		cb := &CoreCommandBuffer{label: "test"}
 		if cb.CoreBuffer() != nil {
 			t.Error("CoreBuffer() should return nil when coreBuffer is nil")
 		}
@@ -796,12 +796,12 @@ func TestHALCommandBuffer_CoreBuffer(t *testing.T) {
 }
 
 // =============================================================================
-// HALRenderPassDescriptor Tests
+// RenderPassDescriptor Tests
 // =============================================================================
 
-func TestHALRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
+func TestRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 	t.Run("nil descriptor", func(t *testing.T) {
-		var desc *HALRenderPassDescriptor
+		var desc *RenderPassDescriptor
 		coreDesc := desc.toCoreDescriptor()
 		if coreDesc != nil {
 			t.Error("expected nil for nil descriptor")
@@ -809,9 +809,9 @@ func TestHALRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 	})
 
 	t.Run("descriptor with color attachment", func(t *testing.T) {
-		desc := &HALRenderPassDescriptor{
+		desc := &RenderPassDescriptor{
 			Label: "test-pass",
-			ColorAttachments: []HALRenderPassColorAttachment{
+			ColorAttachments: []RenderPassColorAttachment{
 				{
 					LoadOp:     types.LoadOpClear,
 					StoreOp:    types.StoreOpStore,
@@ -839,9 +839,9 @@ func TestHALRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 	})
 
 	t.Run("descriptor with depth stencil", func(t *testing.T) {
-		desc := &HALRenderPassDescriptor{
+		desc := &RenderPassDescriptor{
 			Label: "test-pass",
-			DepthStencilAttachment: &HALRenderPassDepthStencilAttachment{
+			DepthStencilAttachment: &RenderPassDepthStencilAttachment{
 				DepthLoadOp:       types.LoadOpClear,
 				DepthStoreOp:      types.StoreOpStore,
 				DepthClearValue:   1.0,
@@ -907,13 +907,13 @@ func TestCommandEncoderErrors(t *testing.T) {
 // Integration Tests (Workflow)
 // =============================================================================
 
-func TestHALCommandEncoder_RenderWorkflow(t *testing.T) {
+func TestCoreCommandEncoder_RenderWorkflow(t *testing.T) {
 	backend := &NativeBackend{initialized: true}
 
 	// Create encoder
-	encoder, err := NewHALCommandEncoder(backend, "render-workflow")
+	encoder, err := NewCoreCommandEncoder(backend, "render-workflow")
 	if err != nil {
-		t.Fatalf("NewHALCommandEncoder failed: %v", err)
+		t.Fatalf("NewCoreCommandEncoder failed: %v", err)
 	}
 
 	// Verify initial state
@@ -922,9 +922,9 @@ func TestHALCommandEncoder_RenderWorkflow(t *testing.T) {
 	}
 
 	// Begin render pass
-	pass, err := encoder.BeginRenderPass(&HALRenderPassDescriptor{
+	pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{
 		Label: "main-pass",
-		ColorAttachments: []HALRenderPassColorAttachment{
+		ColorAttachments: []RenderPassColorAttachment{
 			{
 				LoadOp:     types.LoadOpClear,
 				StoreOp:    types.StoreOpStore,
@@ -971,17 +971,17 @@ func TestHALCommandEncoder_RenderWorkflow(t *testing.T) {
 	}
 }
 
-func TestHALCommandEncoder_ComputeWorkflow(t *testing.T) {
+func TestCoreCommandEncoder_ComputeWorkflow(t *testing.T) {
 	backend := &NativeBackend{initialized: true}
 
 	// Create encoder
-	encoder, err := NewHALCommandEncoder(backend, "compute-workflow")
+	encoder, err := NewCoreCommandEncoder(backend, "compute-workflow")
 	if err != nil {
-		t.Fatalf("NewHALCommandEncoder failed: %v", err)
+		t.Fatalf("NewCoreCommandEncoder failed: %v", err)
 	}
 
 	// Begin compute pass
-	pass, err := encoder.BeginComputePass(&HALComputePassDescriptor{
+	pass, err := encoder.BeginComputePass(&ComputePassDescriptor{
 		Label: "compute-pass",
 	})
 	if err != nil {

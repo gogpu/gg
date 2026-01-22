@@ -10,13 +10,13 @@ import (
 	"github.com/gogpu/wgpu/types"
 )
 
-// HAL buffer errors.
+// Buffer errors.
 var (
 	// ErrBufferDestroyed is returned when operating on a destroyed buffer.
 	ErrBufferDestroyed = errors.New("native: buffer has been destroyed")
 
-	// ErrNilHALBuffer is returned when creating operations without a buffer.
-	ErrNilHALBuffer = errors.New("native: HAL buffer is nil")
+	// ErrNilBuffer is returned when creating operations without a buffer.
+	ErrNilBuffer = errors.New("native: buffer is nil")
 
 	// ErrInvalidBufferSize is returned when buffer size is invalid.
 	ErrInvalidBufferSize = errors.New("native: invalid buffer size")
@@ -122,36 +122,36 @@ func (s BufferMapAsyncStatus) String() string {
 	}
 }
 
-// HALBuffer represents a GPU buffer resource with HAL integration.
+// Buffer represents a GPU buffer resource.
 //
-// HALBuffer wraps a hal.Buffer and provides Go-idiomatic access with
+// Buffer wraps a hal.Buffer and provides Go-idiomatic access with
 // async buffer mapping support. This follows the wgpu pattern where
 // buffer mapping is asynchronous and requires device polling.
 //
 // Thread Safety:
-// HALBuffer is safe for concurrent access. All state mutations are
+// Buffer is safe for concurrent access. All state mutations are
 // protected by a mutex. The mapping callback is invoked from the
 // polling goroutine.
 //
 // Lifecycle:
-//  1. Create via CreateHALBuffer()
+//  1. Create via CreateBuffer()
 //  2. Use MapAsync() to initiate mapping
 //  3. Poll with PollMapAsync() until complete
 //  4. Access data with GetMappedRange()
 //  5. Call Unmap() when done
 //  6. Call Destroy() when the buffer is no longer needed
-type HALBuffer struct {
+type Buffer struct {
 	// mu protects mutable state.
 	mu sync.RWMutex
 
-	// halBuffer is the underlying HAL buffer handle.
+	// halBuffer is the underlying buffer handle.
 	halBuffer hal.Buffer
 
-	// device is the parent HAL device.
+	// device is the parent device.
 	device hal.Device
 
 	// descriptor holds the buffer configuration (immutable after creation).
-	descriptor HALBufferDescriptor
+	descriptor BufferDescriptor
 
 	// mapState is the current mapping state.
 	mapState BufferMapState
@@ -175,8 +175,8 @@ type HALBuffer struct {
 	destroyed bool
 }
 
-// HALBufferDescriptor describes a buffer to create.
-type HALBufferDescriptor struct {
+// BufferDescriptor describes a buffer to create.
+type BufferDescriptor struct {
 	// Label is an optional debug name.
 	Label string
 
@@ -190,19 +190,19 @@ type HALBufferDescriptor struct {
 	MappedAtCreation bool
 }
 
-// NewHALBuffer creates a new HALBuffer from a HAL buffer handle.
+// NewBuffer creates a new Buffer from a buffer handle.
 //
-// This is typically called by CreateHALBuffer() after successfully
-// creating the underlying HAL buffer.
+// This is typically called by CreateBuffer() after successfully
+// creating the underlying buffer.
 //
 // Parameters:
-//   - halBuffer: The underlying HAL buffer (ownership transferred)
-//   - device: The parent HAL device (retained for operations)
+//   - halBuffer: The underlying buffer (ownership transferred)
+//   - device: The parent device (retained for operations)
 //   - desc: The buffer descriptor (copied)
 //
-// Returns the new HALBuffer.
-func NewHALBuffer(halBuffer hal.Buffer, device hal.Device, desc *HALBufferDescriptor) *HALBuffer {
-	buf := &HALBuffer{
+// Returns the new Buffer.
+func NewBuffer(halBuffer hal.Buffer, device hal.Device, desc *BufferDescriptor) *Buffer {
+	buf := &Buffer{
 		halBuffer:  halBuffer,
 		device:     device,
 		descriptor: *desc,
@@ -221,45 +221,45 @@ func NewHALBuffer(halBuffer hal.Buffer, device hal.Device, desc *HALBufferDescri
 }
 
 // Label returns the buffer's debug label.
-func (b *HALBuffer) Label() string {
+func (b *Buffer) Label() string {
 	return b.descriptor.Label
 }
 
 // Size returns the buffer size in bytes.
-func (b *HALBuffer) Size() uint64 {
+func (b *Buffer) Size() uint64 {
 	return b.descriptor.Size
 }
 
 // Usage returns the buffer usage flags.
-func (b *HALBuffer) Usage() types.BufferUsage {
+func (b *Buffer) Usage() types.BufferUsage {
 	return b.descriptor.Usage
 }
 
 // Descriptor returns a copy of the buffer descriptor.
-func (b *HALBuffer) Descriptor() HALBufferDescriptor {
+func (b *Buffer) Descriptor() BufferDescriptor {
 	return b.descriptor
 }
 
 // MapState returns the current mapping state.
-func (b *HALBuffer) MapState() BufferMapState {
+func (b *Buffer) MapState() BufferMapState {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.mapState
 }
 
 // IsDestroyed returns true if the buffer has been destroyed.
-func (b *HALBuffer) IsDestroyed() bool {
+func (b *Buffer) IsDestroyed() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.destroyed
 }
 
-// Raw returns the underlying HAL buffer handle.
+// Raw returns the underlying buffer handle.
 //
 // Returns nil if the buffer has been destroyed.
 // Use with caution - the caller should ensure the buffer is not destroyed
 // while the handle is in use.
-func (b *HALBuffer) Raw() hal.Buffer {
+func (b *Buffer) Raw() hal.Buffer {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.destroyed {
@@ -290,7 +290,7 @@ func (b *HALBuffer) Raw() hal.Buffer {
 //   - The mode doesn't match buffer usage flags
 //   - The range is out of bounds
 //   - The callback is nil
-func (b *HALBuffer) MapAsync(mode types.MapMode, offset, size uint64, callback func(BufferMapAsyncStatus)) error {
+func (b *Buffer) MapAsync(mode types.MapMode, offset, size uint64, callback func(BufferMapAsyncStatus)) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -357,7 +357,7 @@ func (b *HALBuffer) MapAsync(mode types.MapMode, offset, size uint64, callback f
 	b.mapSize = size
 	b.mapCallback = callback
 
-	// Note: In a real implementation, this would initiate the HAL buffer map
+	// Note: In a real implementation, this would initiate the buffer map
 	// operation. For now, we simulate immediate completion in PollMapAsync.
 
 	return nil
@@ -371,7 +371,7 @@ func (b *HALBuffer) MapAsync(mode types.MapMode, offset, size uint64, callback f
 //
 // Returns true if mapping is complete (success or failure).
 // Returns false if mapping is still pending.
-func (b *HALBuffer) PollMapAsync() bool {
+func (b *Buffer) PollMapAsync() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -395,11 +395,11 @@ func (b *HALBuffer) PollMapAsync() bool {
 	}
 
 	// Simulate mapping completion.
-	// In a real implementation, this would check the HAL buffer state
+	// In a real implementation, this would check the buffer state
 	// via device polling (e.g., device.Poll()).
 
 	// For now, simulate successful mapping by creating a slice.
-	// In production, this would get the actual mapped pointer from HAL.
+	// In production, this would get the actual mapped pointer.
 	b.mappedData = make([]byte, b.mapSize)
 	b.mapState = BufferMapStateMapped
 
@@ -430,7 +430,7 @@ func (b *HALBuffer) PollMapAsync() bool {
 //   - The buffer has been destroyed
 //   - The buffer is not mapped
 //   - The range is outside the mapped region
-func (b *HALBuffer) GetMappedRange(offset, size uint64) ([]byte, error) {
+func (b *Buffer) GetMappedRange(offset, size uint64) ([]byte, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -471,7 +471,7 @@ func (b *HALBuffer) GetMappedRange(offset, size uint64) ([]byte, error) {
 // Returns nil on success.
 // Returns an error if the buffer has been destroyed.
 // If the buffer is already unmapped, this is a no-op.
-func (b *HALBuffer) Unmap() error {
+func (b *Buffer) Unmap() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -500,7 +500,7 @@ func (b *HALBuffer) Unmap() error {
 		return nil
 	}
 
-	// Note: In a real implementation, this would call HAL buffer unmap
+	// Note: In a real implementation, this would call buffer unmap
 	// to flush changes to GPU memory.
 
 	// Clear state
@@ -517,7 +517,7 @@ func (b *HALBuffer) Unmap() error {
 // If the buffer is mapped, it will be unmapped first.
 //
 // This method is idempotent - calling it multiple times is safe.
-func (b *HALBuffer) Destroy() {
+func (b *Buffer) Destroy() {
 	b.mu.Lock()
 	if b.destroyed {
 		b.mu.Unlock()
@@ -539,32 +539,32 @@ func (b *HALBuffer) Destroy() {
 		callback(BufferMapAsyncStatusDestroyedBeforeCallback)
 	}
 
-	// Destroy the HAL buffer
+	// Destroy the buffer
 	if device != nil && halBuf != nil {
 		device.DestroyBuffer(halBuf)
 	}
 }
 
 // =============================================================================
-// HAL Device Buffer Creation
+// Device Buffer Creation
 // =============================================================================
 
-// CreateHALBuffer creates a new HAL buffer from a HAL device.
+// CreateBuffer creates a new buffer from a device.
 //
 // This is a helper function for creating buffers using the HAL API directly.
-// It handles validation and wraps the HAL buffer in an HALBuffer.
+// It handles validation and wraps the buffer in a Buffer.
 //
 // Parameters:
-//   - device: The HAL device to create the buffer on.
+//   - device: The device to create the buffer on.
 //   - desc: The buffer descriptor.
 //
-// Returns the new HALBuffer and nil on success.
+// Returns the new Buffer and nil on success.
 // Returns nil and an error if:
 //   - The device is nil
 //   - The descriptor is nil
 //   - Buffer size is invalid
-//   - HAL buffer creation fails
-func CreateHALBuffer(device hal.Device, desc *HALBufferDescriptor) (*HALBuffer, error) {
+//   - Buffer creation fails
+func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
 	if device == nil {
 		return nil, ErrNilHALDevice
 	}
@@ -595,7 +595,7 @@ func CreateHALBuffer(device hal.Device, desc *HALBufferDescriptor) (*HALBuffer, 
 	const copyBufferAlignment uint64 = 4
 	alignedSize := (desc.Size + copyBufferAlignment - 1) &^ (copyBufferAlignment - 1)
 
-	// Convert to HAL descriptor
+	// Convert to descriptor
 	halDesc := &hal.BufferDescriptor{
 		Label:            desc.Label,
 		Size:             alignedSize,
@@ -603,44 +603,44 @@ func CreateHALBuffer(device hal.Device, desc *HALBufferDescriptor) (*HALBuffer, 
 		MappedAtCreation: desc.MappedAtCreation,
 	}
 
-	// Create HAL buffer
+	// Create buffer
 	halBuffer, err := device.CreateBuffer(halDesc)
 	if err != nil {
-		return nil, fmt.Errorf("HAL buffer creation failed: %w", err)
+		return nil, fmt.Errorf("buffer creation failed: %w", err)
 	}
 
 	// Update descriptor with aligned size
 	resolvedDesc := *desc
 	resolvedDesc.Size = alignedSize
 
-	return NewHALBuffer(halBuffer, device, &resolvedDesc), nil
+	return NewBuffer(halBuffer, device, &resolvedDesc), nil
 }
 
-// CreateHALBufferSimple creates a buffer with common defaults.
+// CreateBufferSimple creates a buffer with common defaults.
 //
 // This is a convenience function for creating simple buffers.
 //
 // Parameters:
-//   - device: The HAL device to create the buffer on.
+//   - device: The device to create the buffer on.
 //   - size: Buffer size in bytes.
 //   - usage: Buffer usage flags.
 //   - label: Optional debug label.
 //
-// Returns the new HALBuffer and nil on success.
+// Returns the new Buffer and nil on success.
 // Returns nil and an error if creation fails.
-func CreateHALBufferSimple(
+func CreateBufferSimple(
 	device hal.Device,
 	size uint64,
 	usage types.BufferUsage,
 	label string,
-) (*HALBuffer, error) {
-	desc := &HALBufferDescriptor{
+) (*Buffer, error) {
+	desc := &BufferDescriptor{
 		Label: label,
 		Size:  size,
 		Usage: usage,
 	}
 
-	return CreateHALBuffer(device, desc)
+	return CreateBuffer(device, desc)
 }
 
 // CreateStagingBuffer creates a staging buffer for CPU-GPU data transfer.
@@ -650,20 +650,20 @@ func CreateHALBufferSimple(
 //   - For readback: Create with MapRead | CopyDst, copy from GPU, map, read
 //
 // Parameters:
-//   - device: The HAL device to create the buffer on.
+//   - device: The device to create the buffer on.
 //   - size: Buffer size in bytes.
 //   - forUpload: If true, creates upload staging buffer (MapWrite | CopySrc).
 //     If false, creates readback staging buffer (MapRead | CopyDst).
 //   - label: Optional debug label.
 //
-// Returns the new HALBuffer and nil on success.
+// Returns the new Buffer and nil on success.
 // Returns nil and an error if creation fails.
 func CreateStagingBuffer(
 	device hal.Device,
 	size uint64,
 	forUpload bool,
 	label string,
-) (*HALBuffer, error) {
+) (*Buffer, error) {
 	var usage types.BufferUsage
 	if forUpload {
 		usage = types.BufferUsageMapWrite | types.BufferUsageCopySrc
@@ -671,12 +671,12 @@ func CreateStagingBuffer(
 		usage = types.BufferUsageMapRead | types.BufferUsageCopyDst
 	}
 
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label:            label,
 		Size:             size,
 		Usage:            usage,
 		MappedAtCreation: forUpload, // Pre-map upload buffers for convenience
 	}
 
-	return CreateHALBuffer(device, desc)
+	return CreateBuffer(device, desc)
 }

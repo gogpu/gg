@@ -10,7 +10,7 @@ import (
 	"github.com/gogpu/wgpu/types"
 )
 
-// HAL-integrated command encoder errors.
+// Command encoder errors.
 var (
 	// ErrEncoderNotRecording is returned when recording operations are called
 	// on an encoder that is not in the Recording state.
@@ -51,19 +51,19 @@ var (
 )
 
 // =============================================================================
-// HAL-Integrated Command Encoder
+// Command Encoder
 // =============================================================================
 
-// HALCommandEncoder records GPU commands for later submission to a queue.
+// CoreCommandEncoder records GPU commands for later submission to a queue.
 //
-// This is the HAL-integrated command encoder that wraps core.CoreCommandEncoder.
+// This is the core command encoder that wraps core.CoreCommandEncoder.
 // It provides a higher-level API with Go-style immediate error handling.
 //
-// HALCommandEncoder follows the WebGPU command encoding pattern:
-//  1. Create encoder via NewHALCommandEncoder()
+// CoreCommandEncoder follows the WebGPU command encoding pattern:
+//  1. Create encoder via NewCoreCommandEncoder()
 //  2. Record commands (copy operations, begin/end passes)
-//  3. Call Finish() to get a HALCommandBuffer
-//  4. Submit HALCommandBuffer to a Queue
+//  3. Call Finish() to get a CoreCommandBuffer
+//  4. Submit CoreCommandBuffer to a Queue
 //
 // State machine:
 //
@@ -72,13 +72,12 @@ var (
 //	Recording -> Finish()                           -> Finished
 //	Finished  -> (submitted to queue)               -> Consumed
 //
-// HALCommandEncoder is NOT safe for concurrent use. Each encoder should
+// CoreCommandEncoder is NOT safe for concurrent use. Each encoder should
 // be used from a single goroutine.
-type HALCommandEncoder struct {
+type CoreCommandEncoder struct {
 	mu sync.Mutex
 
 	// coreEncoder is the underlying wgpu core command encoder.
-	// This provides the actual HAL integration.
 	coreEncoder *core.CoreCommandEncoder
 
 	// device is the parent native backend device reference.
@@ -88,13 +87,13 @@ type HALCommandEncoder struct {
 	label string
 
 	// activeRenderPass tracks the currently active render pass (if any).
-	activeRenderPass *HALRenderPassEncoder
+	activeRenderPass *RenderPassEncoder
 
 	// activeComputePass tracks the currently active compute pass (if any).
-	activeComputePass *HALComputePassEncoder
+	activeComputePass *ComputePassEncoder
 }
 
-// NewHALCommandEncoder creates a new HAL-integrated command encoder from a backend.
+// NewCoreCommandEncoder creates a new command encoder from a backend.
 //
 // The encoder is created in the Recording state, ready to record commands.
 //
@@ -104,7 +103,7 @@ type HALCommandEncoder struct {
 //
 // Returns the encoder and nil on success.
 // Returns nil and an error if the backend is not initialized.
-func NewHALCommandEncoder(backend *NativeBackend, label string) (*HALCommandEncoder, error) {
+func NewCoreCommandEncoder(backend *NativeBackend, label string) (*CoreCommandEncoder, error) {
 	if backend == nil {
 		return nil, ErrNilDevice
 	}
@@ -116,7 +115,7 @@ func NewHALCommandEncoder(backend *NativeBackend, label string) (*HALCommandEnco
 		return nil, ErrNotInitialized
 	}
 
-	enc := &HALCommandEncoder{
+	enc := &CoreCommandEncoder{
 		device: backend,
 		label:  label,
 	}
@@ -124,17 +123,17 @@ func NewHALCommandEncoder(backend *NativeBackend, label string) (*HALCommandEnco
 	return enc, nil
 }
 
-// NewHALCommandEncoderWithDevice creates a command encoder using a core.Device.
+// NewCoreCommandEncoderWithDevice creates a command encoder using a core.Device.
 //
-// This is the full HAL-integrated version that creates a real wgpu command encoder.
+// This version creates a real wgpu command encoder.
 //
 // Parameters:
 //   - device: The core.Device to create the encoder on.
 //   - label: Debug label for the encoder (optional).
 //
 // Returns the encoder and nil on success.
-// Returns nil and an error if the device is invalid or HAL creation fails.
-func NewHALCommandEncoderWithDevice(device *core.Device, label string) (*HALCommandEncoder, error) {
+// Returns nil and an error if the device is invalid or creation fails.
+func NewCoreCommandEncoderWithDevice(device *core.Device, label string) (*CoreCommandEncoder, error) {
 	if device == nil {
 		return nil, ErrNilDevice
 	}
@@ -144,7 +143,7 @@ func NewHALCommandEncoderWithDevice(device *core.Device, label string) (*HALComm
 		return nil, fmt.Errorf("create command encoder: %w", err)
 	}
 
-	enc := &HALCommandEncoder{
+	enc := &CoreCommandEncoder{
 		coreEncoder: coreEncoder,
 		label:       label,
 	}
@@ -153,7 +152,7 @@ func NewHALCommandEncoderWithDevice(device *core.Device, label string) (*HALComm
 }
 
 // Label returns the encoder's debug label.
-func (e *HALCommandEncoder) Label() string {
+func (e *CoreCommandEncoder) Label() string {
 	if e == nil {
 		return ""
 	}
@@ -161,7 +160,7 @@ func (e *HALCommandEncoder) Label() string {
 }
 
 // Status returns the current encoder status.
-func (e *HALCommandEncoder) Status() core.CommandEncoderStatus {
+func (e *CoreCommandEncoder) Status() core.CommandEncoderStatus {
 	if e == nil {
 		return core.CommandEncoderStatusError
 	}
@@ -176,7 +175,7 @@ func (e *HALCommandEncoder) Status() core.CommandEncoderStatus {
 // This method acquires the mutex; use checkRecordingLocked if mutex is already held.
 //
 //nolint:unused // Public API for external use, internal code uses checkRecordingLocked
-func (e *HALCommandEncoder) checkRecording() error {
+func (e *CoreCommandEncoder) checkRecording() error {
 	if e == nil {
 		return ErrNilEncoder
 	}
@@ -189,7 +188,7 @@ func (e *HALCommandEncoder) checkRecording() error {
 
 // checkRecordingLocked returns an error if the encoder is not in Recording state.
 // The caller must hold e.mu.
-func (e *HALCommandEncoder) checkRecordingLocked() error {
+func (e *CoreCommandEncoder) checkRecordingLocked() error {
 	status := e.statusLocked()
 	switch status {
 	case core.CommandEncoderStatusRecording:
@@ -206,12 +205,12 @@ func (e *HALCommandEncoder) checkRecordingLocked() error {
 }
 
 // statusLocked returns the encoder status. The caller must hold e.mu.
-func (e *HALCommandEncoder) statusLocked() core.CommandEncoderStatus {
+func (e *CoreCommandEncoder) statusLocked() core.CommandEncoderStatus {
 	if e.coreEncoder != nil {
 		return e.coreEncoder.Status()
 	}
 
-	// Fallback for non-HAL mode
+	// Fallback for mock mode (no core encoder)
 	if e.activeRenderPass != nil || e.activeComputePass != nil {
 		return core.CommandEncoderStatusLocked
 	}
@@ -231,8 +230,8 @@ func (e *HALCommandEncoder) statusLocked() core.CommandEncoderStatus {
 // Returns nil and an error if:
 //   - The encoder is not in Recording state
 //   - The descriptor is nil
-//   - HAL render pass creation fails
-func (e *HALCommandEncoder) BeginRenderPass(desc *HALRenderPassDescriptor) (*HALRenderPassEncoder, error) {
+//   - Render pass creation fails
+func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -252,19 +251,19 @@ func (e *HALCommandEncoder) BeginRenderPass(desc *HALRenderPassDescriptor) (*HAL
 			return nil, fmt.Errorf("begin render pass: %w", err)
 		}
 
-		pass := &HALRenderPassEncoder{
+		pass := &RenderPassEncoder{
 			corePass: corePass,
 			encoder:  e,
-			state:    HALRenderPassStateRecording,
+			state:    RenderPassStateRecording,
 		}
 		e.activeRenderPass = pass
 		return pass, nil
 	}
 
-	// Fallback for non-HAL mode
-	pass := &HALRenderPassEncoder{
+	// Fallback for mock mode (no core encoder)
+	pass := &RenderPassEncoder{
 		encoder: e,
-		state:   HALRenderPassStateRecording,
+		state:   RenderPassStateRecording,
 	}
 	e.activeRenderPass = pass
 	return pass, nil
@@ -272,9 +271,9 @@ func (e *HALCommandEncoder) BeginRenderPass(desc *HALRenderPassDescriptor) (*HAL
 
 // endRenderPass ends the current render pass.
 //
-// This is called internally by HALRenderPassEncoder.End().
+// This is called internally by RenderPassEncoder.End().
 // The encoder transitions from Locked back to Recording state.
-func (e *HALCommandEncoder) endRenderPass(pass *HALRenderPassEncoder) error {
+func (e *CoreCommandEncoder) endRenderPass(pass *RenderPassEncoder) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -298,8 +297,8 @@ func (e *HALCommandEncoder) endRenderPass(pass *HALRenderPassEncoder) error {
 // Returns the compute pass encoder and nil on success.
 // Returns nil and an error if:
 //   - The encoder is not in Recording state
-//   - HAL compute pass creation fails
-func (e *HALCommandEncoder) BeginComputePass(desc *HALComputePassDescriptor) (*HALComputePassEncoder, error) {
+//   - Compute pass creation fails
+func (e *CoreCommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -319,19 +318,19 @@ func (e *HALCommandEncoder) BeginComputePass(desc *HALComputePassDescriptor) (*H
 			return nil, fmt.Errorf("begin compute pass: %w", err)
 		}
 
-		pass := &HALComputePassEncoder{
+		pass := &ComputePassEncoder{
 			corePass: corePass,
 			encoder:  e,
-			state:    HALComputePassStateRecording,
+			state:    ComputePassStateRecording,
 		}
 		e.activeComputePass = pass
 		return pass, nil
 	}
 
-	// Fallback for non-HAL mode
-	pass := &HALComputePassEncoder{
+	// Fallback for mock mode (no core encoder)
+	pass := &ComputePassEncoder{
 		encoder: e,
-		state:   HALComputePassStateRecording,
+		state:   ComputePassStateRecording,
 	}
 	e.activeComputePass = pass
 	return pass, nil
@@ -339,9 +338,9 @@ func (e *HALCommandEncoder) BeginComputePass(desc *HALComputePassDescriptor) (*H
 
 // endComputePass ends the current compute pass.
 //
-// This is called internally by HALComputePassEncoder.End().
+// This is called internally by ComputePassEncoder.End().
 // The encoder transitions from Locked back to Recording state.
-func (e *HALCommandEncoder) endComputePass(pass *HALComputePassEncoder) error {
+func (e *CoreCommandEncoder) endComputePass(pass *ComputePassEncoder) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -371,7 +370,7 @@ func (e *HALCommandEncoder) endComputePass(pass *HALComputePassEncoder) error {
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *HALCommandEncoder) CopyBufferToBuffer(src, dst *core.Buffer, srcOffset, dstOffset, size uint64) error {
+func (e *CoreCommandEncoder) CopyBufferToBuffer(src, dst *core.Buffer, srcOffset, dstOffset, size uint64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -423,7 +422,7 @@ func (e *HALCommandEncoder) CopyBufferToBuffer(src, dst *core.Buffer, srcOffset,
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *HALCommandEncoder) CopyBufferToTexture(source *HALImageCopyBuffer, destination *HALImageCopyTexture, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyBufferToTexture(source *ImageCopyBuffer, destination *ImageCopyTexture, copySize types.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -454,7 +453,7 @@ func (e *HALCommandEncoder) CopyBufferToTexture(source *HALImageCopyBuffer, dest
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *HALCommandEncoder) CopyTextureToBuffer(source *HALImageCopyTexture, destination *HALImageCopyBuffer, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyTextureToBuffer(source *ImageCopyTexture, destination *ImageCopyBuffer, copySize types.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -485,7 +484,7 @@ func (e *HALCommandEncoder) CopyTextureToBuffer(source *HALImageCopyTexture, des
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *HALCommandEncoder) CopyTextureToTexture(source, destination *HALImageCopyTexture, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyTextureToTexture(source, destination *ImageCopyTexture, copySize types.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -516,7 +515,7 @@ func (e *HALCommandEncoder) CopyTextureToTexture(source, destination *HALImageCo
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *HALCommandEncoder) ClearBuffer(buffer *core.Buffer, offset, size uint64) error {
+func (e *CoreCommandEncoder) ClearBuffer(buffer *core.Buffer, offset, size uint64) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -563,7 +562,7 @@ func (e *HALCommandEncoder) ClearBuffer(buffer *core.Buffer, offset, size uint64
 //
 // Returns the command buffer and nil on success.
 // Returns nil and an error if the encoder is not in Recording state.
-func (e *HALCommandEncoder) Finish() (*HALCommandBuffer, error) {
+func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -578,14 +577,14 @@ func (e *HALCommandEncoder) Finish() (*HALCommandBuffer, error) {
 			return nil, fmt.Errorf("finish: %w", err)
 		}
 
-		return &HALCommandBuffer{
+		return &CoreCommandBuffer{
 			coreBuffer: coreBuffer,
 			label:      e.label,
 		}, nil
 	}
 
-	// Fallback for non-HAL mode
-	return &HALCommandBuffer{
+	// Fallback for mock mode (no core encoder)
+	return &CoreCommandBuffer{
 		label: e.label,
 	}, nil
 }
@@ -594,20 +593,20 @@ func (e *HALCommandEncoder) Finish() (*HALCommandBuffer, error) {
 // Supporting Types
 // =============================================================================
 
-// HALRenderPassDescriptor describes a render pass.
-type HALRenderPassDescriptor struct {
+// RenderPassDescriptor describes a render pass.
+type RenderPassDescriptor struct {
 	// Label is an optional debug name.
 	Label string
 
 	// ColorAttachments are the color render targets.
-	ColorAttachments []HALRenderPassColorAttachment
+	ColorAttachments []RenderPassColorAttachment
 
 	// DepthStencilAttachment is the depth/stencil target (optional).
-	DepthStencilAttachment *HALRenderPassDepthStencilAttachment
+	DepthStencilAttachment *RenderPassDepthStencilAttachment
 }
 
 // toCoreDescriptor converts to a core.RenderPassDescriptor.
-func (d *HALRenderPassDescriptor) toCoreDescriptor() *core.RenderPassDescriptor {
+func (d *RenderPassDescriptor) toCoreDescriptor() *core.RenderPassDescriptor {
 	if d == nil {
 		return nil
 	}
@@ -642,13 +641,13 @@ func (d *HALRenderPassDescriptor) toCoreDescriptor() *core.RenderPassDescriptor 
 	return coreDesc
 }
 
-// HALRenderPassColorAttachment describes a color attachment.
-type HALRenderPassColorAttachment struct {
+// RenderPassColorAttachment describes a color attachment.
+type RenderPassColorAttachment struct {
 	// View is the texture view to render to.
-	View *HALTextureView
+	View *TextureView
 
 	// ResolveTarget is the MSAA resolve target (optional).
-	ResolveTarget *HALTextureView
+	ResolveTarget *TextureView
 
 	// LoadOp specifies what to do at pass start.
 	LoadOp types.LoadOp
@@ -660,10 +659,10 @@ type HALRenderPassColorAttachment struct {
 	ClearValue types.Color
 }
 
-// HALRenderPassDepthStencilAttachment describes a depth/stencil attachment.
-type HALRenderPassDepthStencilAttachment struct {
+// RenderPassDepthStencilAttachment describes a depth/stencil attachment.
+type RenderPassDepthStencilAttachment struct {
 	// View is the texture view to use.
-	View *HALTextureView
+	View *TextureView
 
 	// DepthLoadOp specifies what to do with depth at pass start.
 	DepthLoadOp types.LoadOp
@@ -690,17 +689,17 @@ type HALRenderPassDepthStencilAttachment struct {
 	StencilReadOnly bool
 }
 
-// HALComputePassDescriptor describes a compute pass.
-type HALComputePassDescriptor struct {
+// ComputePassDescriptor describes a compute pass.
+type ComputePassDescriptor struct {
 	// Label is an optional debug name for the compute pass.
 	Label string
 
 	// TimestampWrites are timestamp queries to write at pass boundaries (optional).
-	TimestampWrites *HALComputePassTimestampWrites
+	TimestampWrites *ComputePassTimestampWrites
 }
 
-// HALComputePassTimestampWrites describes timestamp query writes for a compute pass.
-type HALComputePassTimestampWrites struct {
+// ComputePassTimestampWrites describes timestamp query writes for a compute pass.
+type ComputePassTimestampWrites struct {
 	// QuerySet is the query set to write timestamps to.
 	QuerySet core.QuerySetID
 
@@ -711,8 +710,8 @@ type HALComputePassTimestampWrites struct {
 	EndOfPassWriteIndex *uint32
 }
 
-// HALImageCopyBuffer describes a buffer for texture copy operations.
-type HALImageCopyBuffer struct {
+// ImageCopyBuffer describes a buffer for texture copy operations.
+type ImageCopyBuffer struct {
 	// Buffer is the buffer to copy to/from.
 	Buffer *core.Buffer
 
@@ -720,8 +719,8 @@ type HALImageCopyBuffer struct {
 	Layout types.TextureDataLayout
 }
 
-// HALImageCopyTexture describes a texture for copy operations.
-type HALImageCopyTexture struct {
+// ImageCopyTexture describes a texture for copy operations.
+type ImageCopyTexture struct {
 	// Texture is the texture to copy to/from.
 	Texture *GPUTexture
 
@@ -735,19 +734,19 @@ type HALImageCopyTexture struct {
 	Aspect types.TextureAspect
 }
 
-// Note: HALTextureView is defined in hal_texture.go with full implementation.
-// Note: HALRenderPassEncoder is defined in hal_render_pass.go with full implementation.
-// Note: HALComputePassEncoder is defined in hal_compute_pass.go with full implementation.
+// Note: TextureView is defined in hal_texture.go with full implementation.
+// Note: RenderPassEncoder is defined in hal_render_pass.go with full implementation.
+// Note: ComputePassEncoder is defined in hal_compute_pass.go with full implementation.
 
 // =============================================================================
-// HALCommandBuffer
+// CoreCommandBuffer
 // =============================================================================
 
-// HALCommandBuffer is a finished command recording ready for submission.
+// CoreCommandBuffer is a finished command recording ready for submission.
 //
-// Command buffers are created by HALCommandEncoder.Finish() and submitted
+// Command buffers are created by CoreCommandEncoder.Finish() and submitted
 // to a Queue for execution.
-type HALCommandBuffer struct {
+type CoreCommandBuffer struct {
 	// coreBuffer is the underlying core command buffer.
 	coreBuffer *core.CoreCommandBuffer
 
@@ -756,7 +755,7 @@ type HALCommandBuffer struct {
 }
 
 // Label returns the command buffer's debug label.
-func (cb *HALCommandBuffer) Label() string {
+func (cb *CoreCommandBuffer) Label() string {
 	if cb == nil {
 		return ""
 	}
@@ -764,8 +763,8 @@ func (cb *HALCommandBuffer) Label() string {
 }
 
 // CoreBuffer returns the underlying core command buffer.
-// Returns nil if the buffer was created without HAL integration.
-func (cb *HALCommandBuffer) CoreBuffer() *core.CoreCommandBuffer {
+// Returns nil if the buffer was created without a core encoder.
+func (cb *CoreCommandBuffer) CoreBuffer() *core.CoreCommandBuffer {
 	if cb == nil {
 		return nil
 	}

@@ -13,10 +13,10 @@ import (
 	"github.com/gogpu/wgpu/types"
 )
 
-// HAL pipeline cache errors.
+// Pipeline cache errors.
 var (
 	// ErrPipelineCacheNilDevice is returned when creating a cache without a device.
-	ErrPipelineCacheNilDevice = errors.New("native: HAL device is nil")
+	ErrPipelineCacheNilDevice = errors.New("native: device is nil")
 
 	// ErrPipelineCacheNilDescriptor is returned when creating a pipeline with nil descriptor.
 	ErrPipelineCacheNilDescriptor = errors.New("native: pipeline descriptor is nil")
@@ -25,19 +25,19 @@ var (
 	ErrPipelineCacheNilShader = errors.New("native: shader module is nil")
 )
 
-// HALPipelineCache caches compiled render and compute pipelines.
+// PipelineCacheCore caches compiled render and compute pipelines.
 //
 // Pipeline creation is expensive because it involves shader compilation and
 // validation. This cache stores pipelines indexed by descriptor hash to avoid
 // redundant creation.
 //
 // Thread Safety:
-// HALPipelineCache is safe for concurrent use. It uses RWMutex with
+// PipelineCacheCore is safe for concurrent use. It uses RWMutex with
 // double-check locking for efficient reads and safe writes.
 //
 // Usage:
 //
-//	cache := NewHALPipelineCache()
+//	cache := NewPipelineCacheCore()
 //	pipeline, err := cache.GetOrCreateRenderPipeline(device, desc)
 //	if err != nil {
 //	    // handle error
@@ -45,15 +45,15 @@ var (
 //	// Use pipeline for rendering
 //
 // The cache tracks hit/miss statistics for performance monitoring.
-type HALPipelineCache struct {
+type PipelineCacheCore struct {
 	// mu protects mutable state.
 	mu sync.RWMutex
 
 	// renderCache stores render pipelines indexed by descriptor hash.
-	renderCache map[uint64]*HALRenderPipeline
+	renderCache map[uint64]*RenderPipeline
 
 	// computeCache stores compute pipelines indexed by descriptor hash.
-	computeCache map[uint64]*HALComputePipeline
+	computeCache map[uint64]*ComputePipeline
 
 	// hits counts cache hits (atomic for lock-free reads).
 	hits uint64
@@ -62,13 +62,13 @@ type HALPipelineCache struct {
 	misses uint64
 }
 
-// NewHALPipelineCache creates a new pipeline cache.
+// NewPipelineCacheCore creates a new pipeline cache.
 //
 // The cache starts empty and pipelines are created on demand.
-func NewHALPipelineCache() *HALPipelineCache {
-	return &HALPipelineCache{
-		renderCache:  make(map[uint64]*HALRenderPipeline),
-		computeCache: make(map[uint64]*HALComputePipeline),
+func NewPipelineCacheCore() *PipelineCacheCore {
+	return &PipelineCacheCore{
+		renderCache:  make(map[uint64]*RenderPipeline),
+		computeCache: make(map[uint64]*ComputePipeline),
 	}
 }
 
@@ -79,7 +79,7 @@ func NewHALPipelineCache() *HALPipelineCache {
 //  2. Slow path: Lock, double-check, create if needed
 //
 // Parameters:
-//   - device: The HAL device to create the pipeline on (used for creation only).
+//   - device: The device to create the pipeline on (used for creation only).
 //   - desc: The render pipeline descriptor.
 //
 // Returns the pipeline and nil on success.
@@ -89,10 +89,10 @@ func NewHALPipelineCache() *HALPipelineCache {
 //   - Pipeline creation fails
 //
 //nolint:dupl // Intentional pattern: same double-check locking for both render and compute pipelines
-func (c *HALPipelineCache) GetOrCreateRenderPipeline(
+func (c *PipelineCacheCore) GetOrCreateRenderPipeline(
 	device hal.Device,
-	desc *HALRenderPipelineDescriptor,
-) (*HALRenderPipeline, error) {
+	desc *RenderPipelineDescriptor,
+) (*RenderPipeline, error) {
 	if desc == nil {
 		return nil, ErrPipelineCacheNilDescriptor
 	}
@@ -120,8 +120,8 @@ func (c *HALPipelineCache) GetOrCreateRenderPipeline(
 
 	// Create new pipeline
 	// Note: device may be nil during testing when creating placeholder pipelines.
-	// When HAL integration is complete, this will validate device != nil.
-	pipeline, err := createHALRenderPipeline(device, desc)
+	// When integration is complete, this will validate device != nil.
+	pipeline, err := createRenderPipeline(device, desc)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (c *HALPipelineCache) GetOrCreateRenderPipeline(
 // This method implements the "get or create" pattern with double-check locking.
 //
 // Parameters:
-//   - device: The HAL device to create the pipeline on (used for creation only).
+//   - device: The device to create the pipeline on (used for creation only).
 //   - desc: The compute pipeline descriptor.
 //
 // Returns the pipeline and nil on success.
@@ -147,10 +147,10 @@ func (c *HALPipelineCache) GetOrCreateRenderPipeline(
 //   - Pipeline creation fails
 //
 //nolint:dupl // Intentional pattern: same double-check locking for both render and compute pipelines
-func (c *HALPipelineCache) GetOrCreateComputePipeline(
+func (c *PipelineCacheCore) GetOrCreateComputePipeline(
 	device hal.Device,
-	desc *HALComputePipelineDescriptor,
-) (*HALComputePipeline, error) {
+	desc *ComputePipelineDescriptor,
+) (*ComputePipeline, error) {
 	if desc == nil {
 		return nil, ErrPipelineCacheNilDescriptor
 	}
@@ -178,8 +178,8 @@ func (c *HALPipelineCache) GetOrCreateComputePipeline(
 
 	// Create new pipeline
 	// Note: device may be nil during testing when creating placeholder pipelines.
-	// When HAL integration is complete, this will validate device != nil.
-	pipeline, err := createHALComputePipeline(device, desc)
+	// When integration is complete, this will validate device != nil.
+	pipeline, err := createComputePipeline(device, desc)
 	if err != nil {
 		return nil, err
 	}
@@ -194,14 +194,14 @@ func (c *HALPipelineCache) GetOrCreateComputePipeline(
 //
 // Returns the number of cache hits and misses.
 // These values are read atomically and may not be perfectly synchronized.
-func (c *HALPipelineCache) Stats() (hits, misses uint64) {
+func (c *PipelineCacheCore) Stats() (hits, misses uint64) {
 	return atomic.LoadUint64(&c.hits), atomic.LoadUint64(&c.misses)
 }
 
 // HitRate returns the cache hit rate as a percentage (0.0 to 1.0).
 //
 // Returns 0.0 if no requests have been made.
-func (c *HALPipelineCache) HitRate() float64 {
+func (c *PipelineCacheCore) HitRate() float64 {
 	hits := atomic.LoadUint64(&c.hits)
 	misses := atomic.LoadUint64(&c.misses)
 	total := hits + misses
@@ -212,21 +212,21 @@ func (c *HALPipelineCache) HitRate() float64 {
 }
 
 // Size returns the total number of cached pipelines.
-func (c *HALPipelineCache) Size() int {
+func (c *PipelineCacheCore) Size() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.renderCache) + len(c.computeCache)
 }
 
 // RenderPipelineCount returns the number of cached render pipelines.
-func (c *HALPipelineCache) RenderPipelineCount() int {
+func (c *PipelineCacheCore) RenderPipelineCount() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.renderCache)
 }
 
 // ComputePipelineCount returns the number of cached compute pipelines.
-func (c *HALPipelineCache) ComputePipelineCount() int {
+func (c *PipelineCacheCore) ComputePipelineCount() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.computeCache)
@@ -234,23 +234,23 @@ func (c *HALPipelineCache) ComputePipelineCount() int {
 
 // Clear removes all cached pipelines and resets statistics.
 //
-// This does NOT destroy the underlying HAL resources. Call Destroy()
+// This does NOT destroy the underlying resources. Call Destroy()
 // on individual pipelines if resource cleanup is needed.
-func (c *HALPipelineCache) Clear() {
+func (c *PipelineCacheCore) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.renderCache = make(map[uint64]*HALRenderPipeline)
-	c.computeCache = make(map[uint64]*HALComputePipeline)
+	c.renderCache = make(map[uint64]*RenderPipeline)
+	c.computeCache = make(map[uint64]*ComputePipeline)
 	atomic.StoreUint64(&c.hits, 0)
 	atomic.StoreUint64(&c.misses, 0)
 }
 
 // DestroyAll destroys all cached pipelines and clears the cache.
 //
-// This releases underlying HAL resources. After calling DestroyAll(),
+// This releases underlying resources. After calling DestroyAll(),
 // the cache is empty and ready for reuse.
-func (c *HALPipelineCache) DestroyAll() {
+func (c *PipelineCacheCore) DestroyAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -265,8 +265,8 @@ func (c *HALPipelineCache) DestroyAll() {
 		}
 	}
 
-	c.renderCache = make(map[uint64]*HALRenderPipeline)
-	c.computeCache = make(map[uint64]*HALComputePipeline)
+	c.renderCache = make(map[uint64]*RenderPipeline)
+	c.computeCache = make(map[uint64]*ComputePipeline)
 	atomic.StoreUint64(&c.hits, 0)
 	atomic.StoreUint64(&c.misses, 0)
 }
@@ -275,30 +275,30 @@ func (c *HALPipelineCache) DestroyAll() {
 // Pipeline Descriptors
 // =============================================================================
 
-// HALRenderPipelineDescriptor describes a render pipeline to create.
+// RenderPipelineDescriptor describes a render pipeline to create.
 //
 // This is a minimal descriptor focused on the fields needed for hashing.
 // It captures the essential pipeline state that affects rendering behavior.
-type HALRenderPipelineDescriptor struct {
+type RenderPipelineDescriptor struct {
 	// Label is an optional debug name.
 	Label string
 
 	// VertexShader is the vertex shader module.
-	VertexShader *HALShaderModule
+	VertexShader *ShaderModule
 
 	// VertexEntryPoint is the vertex shader entry point function name.
 	// Defaults to "vs_main" if empty.
 	VertexEntryPoint string
 
 	// FragmentShader is the fragment shader module.
-	FragmentShader *HALShaderModule
+	FragmentShader *ShaderModule
 
 	// FragmentEntryPoint is the fragment shader entry point function name.
 	// Defaults to "fs_main" if empty.
 	FragmentEntryPoint string
 
 	// VertexBufferLayouts describes the vertex buffer layouts.
-	VertexBufferLayouts []HALVertexBufferLayout
+	VertexBufferLayouts []VertexBufferLayout
 
 	// PrimitiveTopology is the primitive type (triangles, lines, points).
 	PrimitiveTopology types.PrimitiveTopology
@@ -324,14 +324,14 @@ type HALRenderPipelineDescriptor struct {
 
 	// BlendState is the color blending configuration (optional).
 	// Nil means no blending (source replaces destination).
-	BlendState *HALBlendState
+	BlendState *BlendState
 
 	// SampleCount is the number of samples per pixel (1 for non-MSAA).
 	SampleCount uint32
 }
 
-// HALVertexBufferLayout describes a vertex buffer layout.
-type HALVertexBufferLayout struct {
+// VertexBufferLayout describes a vertex buffer layout.
+type VertexBufferLayout struct {
 	// ArrayStride is the byte stride between consecutive vertices.
 	ArrayStride uint64
 
@@ -339,11 +339,11 @@ type HALVertexBufferLayout struct {
 	StepMode types.VertexStepMode
 
 	// Attributes describes the vertex attributes in this buffer.
-	Attributes []HALVertexAttribute
+	Attributes []VertexAttribute
 }
 
-// HALVertexAttribute describes a vertex attribute.
-type HALVertexAttribute struct {
+// VertexAttribute describes a vertex attribute.
+type VertexAttribute struct {
 	// ShaderLocation is the attribute location in the shader.
 	ShaderLocation uint32
 
@@ -354,17 +354,17 @@ type HALVertexAttribute struct {
 	Offset uint64
 }
 
-// HALBlendState describes the color blending configuration.
-type HALBlendState struct {
+// BlendState describes the color blending configuration.
+type BlendState struct {
 	// Color is the color blending configuration.
-	Color HALBlendComponent
+	Color BlendComponent
 
 	// Alpha is the alpha blending configuration.
-	Alpha HALBlendComponent
+	Alpha BlendComponent
 }
 
-// HALBlendComponent describes a blend component (color or alpha).
-type HALBlendComponent struct {
+// BlendComponent describes a blend component (color or alpha).
+type BlendComponent struct {
 	// SrcFactor is the source blend factor.
 	SrcFactor types.BlendFactor
 
@@ -375,24 +375,24 @@ type HALBlendComponent struct {
 	Operation types.BlendOperation
 }
 
-// HALComputePipelineDescriptor describes a compute pipeline to create.
-type HALComputePipelineDescriptor struct {
+// ComputePipelineDescriptor describes a compute pipeline to create.
+type ComputePipelineDescriptor struct {
 	// Label is an optional debug name.
 	Label string
 
 	// ComputeShader is the compute shader module.
-	ComputeShader *HALShaderModule
+	ComputeShader *ShaderModule
 
 	// EntryPoint is the compute shader entry point function name.
 	// Defaults to "main" if empty.
 	EntryPoint string
 }
 
-// HALShaderModule represents a compiled shader module.
+// ShaderModule represents a compiled shader module.
 //
 // Shader modules contain SPIR-V bytecode and are used to create pipelines.
 // The hash is computed from the SPIR-V code for cache lookup.
-type HALShaderModule struct {
+type ShaderModule struct {
 	// id is a unique identifier for the shader module.
 	id uint64
 
@@ -403,7 +403,7 @@ type HALShaderModule struct {
 	// Used for pipeline descriptor hashing.
 	codeHash uint64
 
-	// halModule is the underlying HAL shader module (when available).
+	// halModule is the underlying shader module (when available).
 	halModule hal.ShaderModule
 
 	// destroyed indicates whether the module has been destroyed.
@@ -413,15 +413,15 @@ type HALShaderModule struct {
 	mu sync.RWMutex
 }
 
-// NewHALShaderModule creates a new shader module wrapper.
+// NewShaderModule creates a new shader module wrapper.
 //
 // Parameters:
 //   - id: Unique identifier for this module.
 //   - label: Debug label.
 //   - code: SPIR-V bytecode.
-//   - halModule: The underlying HAL module (may be nil for testing).
-func NewHALShaderModule(id uint64, label string, code []byte, halModule hal.ShaderModule) *HALShaderModule {
-	return &HALShaderModule{
+//   - halModule: The underlying module (may be nil for testing).
+func NewShaderModule(id uint64, label string, code []byte, halModule hal.ShaderModule) *ShaderModule {
+	return &ShaderModule{
 		id:        id,
 		label:     label,
 		codeHash:  hashBytes(code),
@@ -430,22 +430,22 @@ func NewHALShaderModule(id uint64, label string, code []byte, halModule hal.Shad
 }
 
 // ID returns the shader module's unique identifier.
-func (m *HALShaderModule) ID() uint64 {
+func (m *ShaderModule) ID() uint64 {
 	return m.id
 }
 
 // Label returns the shader module's debug label.
-func (m *HALShaderModule) Label() string {
+func (m *ShaderModule) Label() string {
 	return m.label
 }
 
 // CodeHash returns the hash of the shader bytecode.
-func (m *HALShaderModule) CodeHash() uint64 {
+func (m *ShaderModule) CodeHash() uint64 {
 	return m.codeHash
 }
 
-// Raw returns the underlying HAL shader module.
-func (m *HALShaderModule) Raw() hal.ShaderModule {
+// Raw returns the underlying shader module.
+func (m *ShaderModule) Raw() hal.ShaderModule {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.destroyed {
@@ -455,14 +455,14 @@ func (m *HALShaderModule) Raw() hal.ShaderModule {
 }
 
 // IsDestroyed returns true if the module has been destroyed.
-func (m *HALShaderModule) IsDestroyed() bool {
+func (m *ShaderModule) IsDestroyed() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.destroyed
 }
 
 // Destroy marks the shader module as destroyed.
-func (m *HALShaderModule) Destroy() {
+func (m *ShaderModule) Destroy() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.destroyed = true
@@ -482,7 +482,7 @@ func (m *HALShaderModule) Destroy() {
 //   - Color and depth formats
 //   - Blend state
 //   - Sample count
-func HashRenderPipelineDescriptor(desc *HALRenderPipelineDescriptor) uint64 {
+func HashRenderPipelineDescriptor(desc *RenderPipelineDescriptor) uint64 {
 	h := fnv.New64a()
 
 	// Hash shader modules
@@ -552,7 +552,7 @@ func HashRenderPipelineDescriptor(desc *HALRenderPipelineDescriptor) uint64 {
 }
 
 // HashComputePipelineDescriptor computes an FNV-1a hash for a compute pipeline descriptor.
-func HashComputePipelineDescriptor(desc *HALComputePipelineDescriptor) uint64 {
+func HashComputePipelineDescriptor(desc *ComputePipelineDescriptor) uint64 {
 	h := fnv.New64a()
 
 	if desc.ComputeShader != nil {
@@ -619,10 +619,10 @@ func nextPipelineID() uint64 {
 	return atomic.AddUint64(&pipelineIDCounter, 1)
 }
 
-// createHALRenderPipeline creates a new render pipeline from a descriptor.
+// createRenderPipeline creates a new render pipeline from a descriptor.
 //
 // This is called by GetOrCreateRenderPipeline when a cache miss occurs.
-func createHALRenderPipeline(device hal.Device, desc *HALRenderPipelineDescriptor) (*HALRenderPipeline, error) {
+func createRenderPipeline(device hal.Device, desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
 	if desc.VertexShader == nil {
 		return nil, ErrPipelineCacheNilShader
 	}
@@ -644,7 +644,7 @@ func createHALRenderPipeline(device hal.Device, desc *HALRenderPipelineDescripto
 		sampleCount = 1
 	}
 
-	// TODO: When HAL pipeline creation is implemented, create actual pipeline:
+	// TODO: When pipeline creation is implemented, create actual pipeline:
 	// halDesc := &hal.RenderPipelineDescriptor{
 	//     Label: desc.Label,
 	//     Vertex: hal.VertexState{
@@ -682,7 +682,7 @@ func createHALRenderPipeline(device hal.Device, desc *HALRenderPipelineDescripto
 	_ = fragmentEntry
 	_ = sampleCount
 
-	pipeline := &HALRenderPipeline{
+	pipeline := &RenderPipeline{
 		id:    nextPipelineID(),
 		label: desc.Label,
 	}
@@ -690,10 +690,10 @@ func createHALRenderPipeline(device hal.Device, desc *HALRenderPipelineDescripto
 	return pipeline, nil
 }
 
-// createHALComputePipeline creates a new compute pipeline from a descriptor.
+// createComputePipeline creates a new compute pipeline from a descriptor.
 //
 // This is called by GetOrCreateComputePipeline when a cache miss occurs.
-func createHALComputePipeline(device hal.Device, desc *HALComputePipelineDescriptor) (*HALComputePipeline, error) {
+func createComputePipeline(device hal.Device, desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
 	if desc.ComputeShader == nil {
 		return nil, ErrPipelineCacheNilShader
 	}
@@ -704,7 +704,7 @@ func createHALComputePipeline(device hal.Device, desc *HALComputePipelineDescrip
 		entryPoint = "main"
 	}
 
-	// TODO: When HAL pipeline creation is implemented, create actual pipeline:
+	// TODO: When pipeline creation is implemented, create actual pipeline:
 	// halDesc := &hal.ComputePipelineDescriptor{
 	//     Label: desc.Label,
 	//     Compute: hal.ProgrammableStageDescriptor{
@@ -721,7 +721,7 @@ func createHALComputePipeline(device hal.Device, desc *HALComputePipelineDescrip
 	_ = device // Will be used for actual creation
 	_ = entryPoint
 
-	pipeline := &HALComputePipeline{
+	pipeline := &ComputePipeline{
 		id:            nextPipelineID(),
 		label:         desc.Label,
 		workgroupSize: [3]uint32{64, 1, 1}, // Default workgroup size

@@ -12,7 +12,7 @@ import (
 )
 
 // =============================================================================
-// Mock HAL Types for Testing
+// Mock Types for Testing
 // =============================================================================
 
 // mockHALDevice is a test double for hal.Device.
@@ -151,13 +151,13 @@ type mockHALTextureView struct {
 func (v *mockHALTextureView) Destroy() {}
 
 // =============================================================================
-// HALTexture Tests
+// Texture Tests
 // =============================================================================
 
-func TestNewHALTexture(t *testing.T) {
+func TestNewTexture(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256, format: types.TextureFormatRGBA8Unorm}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -171,10 +171,10 @@ func TestNewHALTexture(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	if tex == nil {
-		t.Fatal("NewHALTexture returned nil")
+		t.Fatal("NewTexture returned nil")
 	}
 	if tex.Label() != "test-texture" {
 		t.Errorf("Label = %q, want %q", tex.Label(), "test-texture")
@@ -193,10 +193,10 @@ func TestNewHALTexture(t *testing.T) {
 	}
 }
 
-func TestHALTexture_GetDefaultView(t *testing.T) {
+func TestTexture_GetDefaultView(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 512, height: 512}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              512,
@@ -210,7 +210,7 @@ func TestHALTexture_GetDefaultView(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Get default view
 	view1, err := tex.GetDefaultView()
@@ -240,10 +240,10 @@ func TestHALTexture_GetDefaultView(t *testing.T) {
 	}
 }
 
-func TestHALTexture_GetDefaultView_Concurrent(t *testing.T) {
+func TestTexture_GetDefaultView_Concurrent(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "concurrent-test",
 		Size: types.Extent3D{
 			Width:              256,
@@ -257,11 +257,11 @@ func TestHALTexture_GetDefaultView_Concurrent(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	const numGoroutines = 10
 	var wg sync.WaitGroup
-	views := make([]*HALTextureView, numGoroutines)
+	views := make([]*TextureView, numGoroutines)
 	errs := make([]error, numGoroutines)
 
 	// Launch multiple goroutines to call GetDefaultView concurrently
@@ -291,10 +291,10 @@ func TestHALTexture_GetDefaultView_Concurrent(t *testing.T) {
 	}
 }
 
-func TestHALTexture_CreateView(t *testing.T) {
+func TestTexture_CreateView(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 512, height: 512}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              512,
@@ -308,10 +308,10 @@ func TestHALTexture_CreateView(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Create custom view
-	viewDesc := &HALTextureViewDescriptor{
+	viewDesc := &TextureViewDescriptor{
 		Label:           "custom-view",
 		Format:          types.TextureFormatRGBA8Unorm,
 		Dimension:       types.TextureViewDimension2D,
@@ -346,10 +346,10 @@ func TestHALTexture_CreateView(t *testing.T) {
 	}
 }
 
-func TestHALTexture_CreateView_NilDescriptor(t *testing.T) {
+func TestTexture_CreateView_NilDescriptor(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -363,7 +363,7 @@ func TestHALTexture_CreateView_NilDescriptor(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// CreateView with nil descriptor should return default view
 	view, err := tex.CreateView(nil)
@@ -378,10 +378,10 @@ func TestHALTexture_CreateView_NilDescriptor(t *testing.T) {
 	}
 }
 
-func TestHALTexture_Destroy(t *testing.T) {
+func TestTexture_Destroy(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -395,7 +395,7 @@ func TestHALTexture_Destroy(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Get default view first
 	_, _ = tex.GetDefaultView()
@@ -417,10 +417,10 @@ func TestHALTexture_Destroy(t *testing.T) {
 	}
 }
 
-func TestHALTexture_Destroy_Idempotent(t *testing.T) {
+func TestTexture_Destroy_Idempotent(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -434,7 +434,7 @@ func TestHALTexture_Destroy_Idempotent(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Destroy multiple times
 	tex.Destroy()
@@ -447,10 +447,10 @@ func TestHALTexture_Destroy_Idempotent(t *testing.T) {
 	}
 }
 
-func TestHALTexture_GetDefaultView_AfterDestroy(t *testing.T) {
+func TestTexture_GetDefaultView_AfterDestroy(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -464,7 +464,7 @@ func TestHALTexture_GetDefaultView_AfterDestroy(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 	tex.Destroy()
 
 	// GetDefaultView after destroy should fail
@@ -475,13 +475,13 @@ func TestHALTexture_GetDefaultView_AfterDestroy(t *testing.T) {
 }
 
 // =============================================================================
-// HALTextureView Tests
+// TextureView Tests
 // =============================================================================
 
-func TestHALTextureView_Destroy_NonDefault(t *testing.T) {
+func TestTextureView_Destroy_NonDefault(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -495,10 +495,10 @@ func TestHALTextureView_Destroy_NonDefault(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Create a custom view
-	view, _ := tex.CreateView(&HALTextureViewDescriptor{
+	view, _ := tex.CreateView(&TextureViewDescriptor{
 		Label: "custom-view",
 	})
 
@@ -513,10 +513,10 @@ func TestHALTextureView_Destroy_NonDefault(t *testing.T) {
 	}
 }
 
-func TestHALTextureView_Destroy_Default_NoOp(t *testing.T) {
+func TestTextureView_Destroy_Default_NoOp(t *testing.T) {
 	device := &mockHALDevice{}
 	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: types.Extent3D{
 			Width:              256,
@@ -530,7 +530,7 @@ func TestHALTextureView_Destroy_Default_NoOp(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding,
 	}
 
-	tex := NewHALTexture(halTex, device, desc)
+	tex := NewTexture(halTex, device, desc)
 
 	// Get default view
 	defaultView, _ := tex.GetDefaultView()
@@ -547,12 +547,12 @@ func TestHALTextureView_Destroy_Default_NoOp(t *testing.T) {
 }
 
 // =============================================================================
-// CreateHALTexture Tests
+// CreateCoreTexture Tests
 // =============================================================================
 
-func TestCreateHALTexture(t *testing.T) {
+func TestCreateCoreTexture(t *testing.T) {
 	device := &mockHALDevice{}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "created-texture",
 		Size: types.Extent3D{
 			Width:              512,
@@ -566,12 +566,12 @@ func TestCreateHALTexture(t *testing.T) {
 		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
 	}
 
-	tex, err := CreateHALTexture(device, desc)
+	tex, err := CreateCoreTexture(device, desc)
 	if err != nil {
-		t.Fatalf("CreateHALTexture failed: %v", err)
+		t.Fatalf("CreateCoreTexture failed: %v", err)
 	}
 	if tex == nil {
-		t.Fatal("CreateHALTexture returned nil")
+		t.Fatal("CreateCoreTexture returned nil")
 	}
 	if tex.Width() != 512 {
 		t.Errorf("Width = %d, want 512", tex.Width())
@@ -584,8 +584,8 @@ func TestCreateHALTexture(t *testing.T) {
 	}
 }
 
-func TestCreateHALTexture_NilDevice(t *testing.T) {
-	desc := &HALTextureDescriptor{
+func TestCreateCoreTexture_NilDevice(t *testing.T) {
+	desc := &TextureDescriptor{
 		Label: "test",
 		Size: types.Extent3D{
 			Width:              256,
@@ -594,22 +594,22 @@ func TestCreateHALTexture_NilDevice(t *testing.T) {
 		},
 	}
 
-	_, err := CreateHALTexture(nil, desc)
+	_, err := CreateCoreTexture(nil, desc)
 	if !errors.Is(err, ErrNilHALDevice) {
-		t.Errorf("CreateHALTexture(nil device): got %v, want ErrNilHALDevice", err)
+		t.Errorf("CreateCoreTexture(nil device): got %v, want ErrNilHALDevice", err)
 	}
 }
 
-func TestCreateHALTexture_NilDescriptor(t *testing.T) {
+func TestCreateCoreTexture_NilDescriptor(t *testing.T) {
 	device := &mockHALDevice{}
 
-	_, err := CreateHALTexture(device, nil)
+	_, err := CreateCoreTexture(device, nil)
 	if err == nil {
-		t.Error("CreateHALTexture(nil desc) should fail")
+		t.Error("CreateCoreTexture(nil desc) should fail")
 	}
 }
 
-func TestCreateHALTexture_InvalidSize(t *testing.T) {
+func TestCreateCoreTexture_InvalidSize(t *testing.T) {
 	device := &mockHALDevice{}
 
 	tests := []struct {
@@ -624,7 +624,7 @@ func TestCreateHALTexture_InvalidSize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			desc := &HALTextureDescriptor{
+			desc := &TextureDescriptor{
 				Label: "test",
 				Size: types.Extent3D{
 					Width:              tt.width,
@@ -633,17 +633,17 @@ func TestCreateHALTexture_InvalidSize(t *testing.T) {
 				},
 			}
 
-			_, err := CreateHALTexture(device, desc)
+			_, err := CreateCoreTexture(device, desc)
 			if err == nil {
-				t.Error("CreateHALTexture with invalid size should fail")
+				t.Error("CreateCoreTexture with invalid size should fail")
 			}
 		})
 	}
 }
 
-func TestCreateHALTexture_DefaultValues(t *testing.T) {
+func TestCreateCoreTexture_DefaultValues(t *testing.T) {
 	device := &mockHALDevice{}
-	desc := &HALTextureDescriptor{
+	desc := &TextureDescriptor{
 		Label: "defaults-test",
 		Size: types.Extent3D{
 			Width:  256,
@@ -657,9 +657,9 @@ func TestCreateHALTexture_DefaultValues(t *testing.T) {
 		Usage:     types.TextureUsageTextureBinding,
 	}
 
-	tex, err := CreateHALTexture(device, desc)
+	tex, err := CreateCoreTexture(device, desc)
 	if err != nil {
-		t.Fatalf("CreateHALTexture failed: %v", err)
+		t.Fatalf("CreateCoreTexture failed: %v", err)
 	}
 
 	if tex.MipLevelCount() != 1 {
@@ -673,10 +673,10 @@ func TestCreateHALTexture_DefaultValues(t *testing.T) {
 	}
 }
 
-func TestCreateHALTextureSimple(t *testing.T) {
+func TestCreateCoreTextureSimple(t *testing.T) {
 	device := &mockHALDevice{}
 
-	tex, err := CreateHALTextureSimple(
+	tex, err := CreateCoreTextureSimple(
 		device,
 		1024, 768,
 		types.TextureFormatBGRA8Unorm,
@@ -684,7 +684,7 @@ func TestCreateHALTextureSimple(t *testing.T) {
 		"simple-texture",
 	)
 	if err != nil {
-		t.Fatalf("CreateHALTextureSimple failed: %v", err)
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
 	}
 	if tex.Width() != 1024 {
 		t.Errorf("Width = %d, want 1024", tex.Width())

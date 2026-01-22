@@ -10,7 +10,7 @@ import (
 	"github.com/gogpu/wgpu/types"
 )
 
-// HAL render pass errors.
+// Render pass errors.
 var (
 	// ErrPassEnded is returned when operations are called on an ended pass.
 	ErrPassEnded = errors.New("native: render pass has already ended")
@@ -40,32 +40,32 @@ var (
 	ErrIndirectOffsetNotAligned = errors.New("native: indirect offset must be 4-byte aligned")
 )
 
-// HALRenderPassState represents the state of a render pass encoder.
-type HALRenderPassState int
+// RenderPassState represents the state of a render pass encoder.
+type RenderPassState int
 
 const (
-	// HALRenderPassStateRecording means the pass is actively recording commands.
-	HALRenderPassStateRecording HALRenderPassState = iota
+	// RenderPassStateRecording means the pass is actively recording commands.
+	RenderPassStateRecording RenderPassState = iota
 
-	// HALRenderPassStateEnded means the pass has been ended.
-	HALRenderPassStateEnded
+	// RenderPassStateEnded means the pass has been ended.
+	RenderPassStateEnded
 )
 
-// String returns the string representation of HALRenderPassState.
-func (s HALRenderPassState) String() string {
+// String returns the string representation of RenderPassState.
+func (s RenderPassState) String() string {
 	switch s {
-	case HALRenderPassStateRecording:
+	case RenderPassStateRecording:
 		return "Recording"
-	case HALRenderPassStateEnded:
+	case RenderPassStateEnded:
 		return "Ended"
 	default:
 		return fmt.Sprintf("Unknown(%d)", int(s))
 	}
 }
 
-// HALRenderPassEncoder records render commands within a render pass.
+// RenderPassEncoder records render commands within a render pass.
 //
-// HALRenderPassEncoder wraps core.CoreRenderPassEncoder and provides
+// RenderPassEncoder wraps core.CoreRenderPassEncoder and provides
 // Go-idiomatic access with immediate error returns. Commands recorded include:
 //   - SetPipeline: Set the render pipeline for subsequent draw calls
 //   - SetBindGroup: Bind resource groups (textures, buffers, samplers)
@@ -81,34 +81,33 @@ func (s HALRenderPassState) String() string {
 //   - DrawIndexedIndirect: Draw indexed with GPU-generated parameters
 //
 // Thread Safety:
-// HALRenderPassEncoder is NOT safe for concurrent use. All commands must be
+// RenderPassEncoder is NOT safe for concurrent use. All commands must be
 // recorded from a single goroutine. The pass must be ended with End() before
 // the parent command encoder can continue recording.
 //
 // Lifecycle:
-//  1. Created by HALCommandEncoder.BeginRenderPass()
+//  1. Created by CoreCommandEncoder.BeginRenderPass()
 //  2. Record commands (SetPipeline, SetVertexBuffer, Draw, etc.)
 //  3. Call End() to complete the pass
 //
 // State Machine:
 //
 //	Recording -> End() -> Ended
-type HALRenderPassEncoder struct {
+type RenderPassEncoder struct {
 	// mu protects mutable state.
 	mu sync.Mutex
 
 	// corePass is the underlying core render pass encoder.
-	// This provides the actual HAL integration.
 	corePass *core.CoreRenderPassEncoder
 
 	// encoder is the parent command encoder.
-	encoder *HALCommandEncoder
+	encoder *CoreCommandEncoder
 
 	// state is the current pass state.
-	state HALRenderPassState
+	state RenderPassState
 
 	// currentPipeline tracks the currently bound pipeline (if any).
-	currentPipeline *HALRenderPipeline
+	currentPipeline *RenderPipeline
 
 	// vertexBufferCount tracks the number of vertex buffer slots used.
 	vertexBufferCount uint32
@@ -118,9 +117,9 @@ type HALRenderPassEncoder struct {
 }
 
 // State returns the current pass state.
-func (p *HALRenderPassEncoder) State() HALRenderPassState {
+func (p *RenderPassEncoder) State() RenderPassState {
 	if p == nil {
-		return HALRenderPassStateEnded
+		return RenderPassStateEnded
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -128,14 +127,14 @@ func (p *HALRenderPassEncoder) State() HALRenderPassState {
 }
 
 // IsEnded returns true if the pass has been ended.
-func (p *HALRenderPassEncoder) IsEnded() bool {
-	return p.State() == HALRenderPassStateEnded
+func (p *RenderPassEncoder) IsEnded() bool {
+	return p.State() == RenderPassStateEnded
 }
 
 // checkRecording returns an error if the pass is not in Recording state.
 // The caller must hold p.mu.
-func (p *HALRenderPassEncoder) checkRecording() error {
-	if p.state != HALRenderPassStateRecording {
+func (p *RenderPassEncoder) checkRecording() error {
+	if p.state != RenderPassStateRecording {
 		return ErrPassEnded
 	}
 	return nil
@@ -157,7 +156,7 @@ func (p *HALRenderPassEncoder) checkRecording() error {
 // Returns an error if:
 //   - The pass has ended
 //   - The pipeline is nil
-func (p *HALRenderPassEncoder) SetPipeline(pipeline *HALRenderPipeline) error {
+func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -173,9 +172,9 @@ func (p *HALRenderPassEncoder) SetPipeline(pipeline *HALRenderPipeline) error {
 
 	// Forward to core pass if available
 	// Note: core.CoreRenderPassEncoder.SetPipeline takes *core.RenderPipeline
-	// HAL integration pending for core.RenderPipeline
+	// Integration pending for core.RenderPipeline
 	// For now, we record the state locally
-	_ = p.corePass // Silence linter until HAL integration
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -195,7 +194,7 @@ func (p *HALRenderPassEncoder) SetPipeline(pipeline *HALRenderPipeline) error {
 //   - The pass has ended
 //   - The index exceeds maximum (3)
 //   - The bind group is nil
-func (p *HALRenderPassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGroup, dynamicOffsets []uint32) error {
+func (p *RenderPassEncoder) SetBindGroup(index uint32, bindGroup *BindGroup, dynamicOffsets []uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -214,8 +213,8 @@ func (p *HALRenderPassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGrou
 
 	// Forward to core pass if available
 	// Note: core.CoreRenderPassEncoder does not have SetBindGroup yet
-	// HAL integration pending
-	_ = p.corePass // Silence linter until HAL integration
+	// Integration pending
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -236,7 +235,7 @@ func (p *HALRenderPassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGrou
 // Returns an error if:
 //   - The pass has ended
 //   - The buffer is nil
-func (p *HALRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *HALBuffer, offset, size uint64) error {
+func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset, size uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -255,9 +254,9 @@ func (p *HALRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *HALBuffer, o
 
 	// Forward to core pass if available
 	// core.CoreRenderPassEncoder.SetVertexBuffer takes *core.Buffer
-	// We need to convert HALBuffer to core.Buffer
-	// For now, this is a no-op until HAL buffer integration is complete
-	_ = p.corePass // Silence linter until HAL integration
+	// We need to convert Buffer to core.Buffer
+	// For now, this is a no-op until buffer integration is complete
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -277,7 +276,7 @@ func (p *HALRenderPassEncoder) SetVertexBuffer(slot uint32, buffer *HALBuffer, o
 // Returns an error if:
 //   - The pass has ended
 //   - The buffer is nil
-func (p *HALRenderPassEncoder) SetIndexBuffer(buffer *HALBuffer, format IndexFormat, offset, size uint64) error {
+func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format IndexFormat, offset, size uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -294,8 +293,8 @@ func (p *HALRenderPassEncoder) SetIndexBuffer(buffer *HALBuffer, format IndexFor
 	// Forward to core pass if available
 	// core.CoreRenderPassEncoder.SetIndexBuffer takes *core.Buffer
 	// Convert format and forward
-	// For now, this is a no-op until HAL buffer integration is complete
-	_ = p.corePass // Silence linter until HAL integration
+	// For now, this is a no-op until buffer integration is complete
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -312,7 +311,7 @@ func (p *HALRenderPassEncoder) SetIndexBuffer(buffer *HALBuffer, format IndexFor
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) error {
+func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -339,7 +338,7 @@ func (p *HALRenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDep
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) SetScissorRect(x, y, width, height uint32) error {
+func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -365,7 +364,7 @@ func (p *HALRenderPassEncoder) SetScissorRect(x, y, width, height uint32) error 
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) SetBlendConstant(color types.Color) error {
+func (p *RenderPassEncoder) SetBlendConstant(color types.Color) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -390,7 +389,7 @@ func (p *HALRenderPassEncoder) SetBlendConstant(color types.Color) error {
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) SetStencilReference(reference uint32) error {
+func (p *RenderPassEncoder) SetStencilReference(reference uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -419,7 +418,7 @@ func (p *HALRenderPassEncoder) SetStencilReference(reference uint32) error {
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) error {
+func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -449,7 +448,7 @@ func (p *HALRenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, fir
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *HALRenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) error {
+func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -486,7 +485,7 @@ func (p *HALRenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex
 //   - The pass has ended
 //   - The buffer is nil
 //   - The offset is not 4-byte aligned
-func (p *HALRenderPassEncoder) DrawIndirect(indirectBuffer *HALBuffer, indirectOffset uint64) error {
+func (p *RenderPassEncoder) DrawIndirect(indirectBuffer *Buffer, indirectOffset uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -504,8 +503,8 @@ func (p *HALRenderPassEncoder) DrawIndirect(indirectBuffer *HALBuffer, indirectO
 
 	// Forward to core pass if available
 	// core.CoreRenderPassEncoder.DrawIndirect takes *core.Buffer
-	// For now, this is a no-op until HAL buffer integration is complete
-	_ = p.corePass // Silence linter until HAL integration
+	// For now, this is a no-op until buffer integration is complete
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -532,7 +531,7 @@ func (p *HALRenderPassEncoder) DrawIndirect(indirectBuffer *HALBuffer, indirectO
 //   - The pass has ended
 //   - The buffer is nil
 //   - The offset is not 4-byte aligned
-func (p *HALRenderPassEncoder) DrawIndexedIndirect(indirectBuffer *HALBuffer, indirectOffset uint64) error {
+func (p *RenderPassEncoder) DrawIndexedIndirect(indirectBuffer *Buffer, indirectOffset uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -550,8 +549,8 @@ func (p *HALRenderPassEncoder) DrawIndexedIndirect(indirectBuffer *HALBuffer, in
 
 	// Forward to core pass if available
 	// core.CoreRenderPassEncoder.DrawIndexedIndirect takes *core.Buffer
-	// For now, this is a no-op until HAL buffer integration is complete
-	_ = p.corePass // Silence linter until HAL integration
+	// For now, this is a no-op until buffer integration is complete
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -563,14 +562,14 @@ func (p *HALRenderPassEncoder) DrawIndexedIndirect(indirectBuffer *HALBuffer, in
 //
 // Returns nil on success.
 // Returns an error if the pass has already ended.
-func (p *HALRenderPassEncoder) End() error {
+func (p *RenderPassEncoder) End() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state == HALRenderPassStateEnded {
+	if p.state == RenderPassStateEnded {
 		return nil // Idempotent
 	}
-	p.state = HALRenderPassStateEnded
+	p.state = RenderPassStateEnded
 
 	// End the core pass if available
 	if p.corePass != nil {
@@ -591,7 +590,7 @@ func (p *HALRenderPassEncoder) End() error {
 // Supporting Types for Render Pass
 // =============================================================================
 
-// HALRenderPipeline represents a GPU render pipeline.
+// RenderPipeline represents a GPU render pipeline.
 //
 // Render pipelines define the complete rendering state including:
 //   - Vertex and fragment shaders
@@ -600,9 +599,9 @@ func (p *HALRenderPassEncoder) End() error {
 //   - Depth/stencil state
 //   - Blend state
 //
-// HALRenderPipeline is a placeholder type that will be expanded when
+// RenderPipeline is a placeholder type that will be expanded when
 // pipeline creation is implemented.
-type HALRenderPipeline struct {
+type RenderPipeline struct {
 	// id is a unique identifier for the pipeline.
 	id uint64
 
@@ -617,30 +616,30 @@ type HALRenderPipeline struct {
 }
 
 // ID returns the pipeline's unique identifier.
-func (p *HALRenderPipeline) ID() uint64 {
+func (p *RenderPipeline) ID() uint64 {
 	return p.id
 }
 
 // Label returns the pipeline's debug label.
-func (p *HALRenderPipeline) Label() string {
+func (p *RenderPipeline) Label() string {
 	return p.label
 }
 
 // IsDestroyed returns true if the pipeline has been destroyed.
-func (p *HALRenderPipeline) IsDestroyed() bool {
+func (p *RenderPipeline) IsDestroyed() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.destroyed
 }
 
 // Destroy releases the pipeline resources.
-func (p *HALRenderPipeline) Destroy() {
+func (p *RenderPipeline) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.destroyed = true
 }
 
-// HALBindGroup represents a collection of resources bound together.
+// BindGroup represents a collection of resources bound together.
 //
 // Bind groups contain:
 //   - Uniform buffers
@@ -648,9 +647,9 @@ func (p *HALRenderPipeline) Destroy() {
 //   - Texture bindings
 //   - Sampler bindings
 //
-// HALBindGroup is a placeholder type that will be expanded when
+// BindGroup is a placeholder type that will be expanded when
 // bind group creation is implemented.
-type HALBindGroup struct {
+type BindGroup struct {
 	// id is a unique identifier for the bind group.
 	id uint64
 
@@ -665,24 +664,24 @@ type HALBindGroup struct {
 }
 
 // ID returns the bind group's unique identifier.
-func (bg *HALBindGroup) ID() uint64 {
+func (bg *BindGroup) ID() uint64 {
 	return bg.id
 }
 
 // Label returns the bind group's debug label.
-func (bg *HALBindGroup) Label() string {
+func (bg *BindGroup) Label() string {
 	return bg.label
 }
 
 // IsDestroyed returns true if the bind group has been destroyed.
-func (bg *HALBindGroup) IsDestroyed() bool {
+func (bg *BindGroup) IsDestroyed() bool {
 	bg.mu.RLock()
 	defer bg.mu.RUnlock()
 	return bg.destroyed
 }
 
 // Destroy releases the bind group resources.
-func (bg *HALBindGroup) Destroy() {
+func (bg *BindGroup) Destroy() {
 	bg.mu.Lock()
 	defer bg.mu.Unlock()
 	bg.destroyed = true

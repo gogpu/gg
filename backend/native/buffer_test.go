@@ -11,7 +11,7 @@ import (
 )
 
 // =============================================================================
-// Mock HAL Buffer for Testing
+// Mock Buffer for Testing
 // =============================================================================
 
 // mockHALBuffer is a test double for hal.Buffer.
@@ -61,22 +61,22 @@ func (d *bufferMockHALDevice) DestroyBuffer(buffer hal.Buffer) {
 }
 
 // =============================================================================
-// HALBuffer Construction Tests
+// Buffer Construction Tests
 // =============================================================================
 
-func TestNewHALBuffer(t *testing.T) {
+func TestNewBuffer(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "test-buffer",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	if buf == nil {
-		t.Fatal("NewHALBuffer returned nil")
+		t.Fatal("NewBuffer returned nil")
 	}
 	if buf.Label() != "test-buffer" {
 		t.Errorf("Label = %q, want %q", buf.Label(), "test-buffer")
@@ -95,17 +95,17 @@ func TestNewHALBuffer(t *testing.T) {
 	}
 }
 
-func TestNewHALBuffer_MappedAtCreation(t *testing.T) {
+func TestNewBuffer_MappedAtCreation(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 512, usage: types.BufferUsageMapWrite, mapped: true}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label:            "mapped-buffer",
 		Size:             512,
 		Usage:            types.BufferUsageMapWrite,
 		MappedAtCreation: true,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	if buf.MapState() != BufferMapStateMapped {
 		t.Errorf("MapState = %v, want Mapped (MappedAtCreation)", buf.MapState())
@@ -116,16 +116,16 @@ func TestNewHALBuffer_MappedAtCreation(t *testing.T) {
 // MapAsync Tests
 // =============================================================================
 
-func TestHALBuffer_MapAsync_Success(t *testing.T) {
+func TestBuffer_MapAsync_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "map-test",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackInvoked bool
 	var callbackStatus BufferMapAsyncStatus
@@ -158,16 +158,16 @@ func TestHALBuffer_MapAsync_Success(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_WriteMode(t *testing.T) {
+func TestBuffer_MapAsync_WriteMode(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 512, usage: types.BufferUsageMapWrite}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "write-map-test",
 		Size:  512,
 		Usage: types.BufferUsageMapWrite,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
 	err := buf.MapAsync(types.MapModeWrite, 0, 512, func(s BufferMapAsyncStatus) {
@@ -185,17 +185,17 @@ func TestHALBuffer_MapAsync_WriteMode(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_AlreadyMapped(t *testing.T) {
+func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label:            "already-mapped",
 		Size:             1024,
 		Usage:            types.BufferUsageMapRead | types.BufferUsageMapWrite,
 		MappedAtCreation: true,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
 	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
@@ -210,16 +210,16 @@ func TestHALBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_UsageMismatch(t *testing.T) {
+func TestBuffer_MapAsync_UsageMismatch(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "usage-mismatch",
 		Size:  1024,
 		Usage: types.BufferUsageVertex, // No MapRead or MapWrite
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
 	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
@@ -234,16 +234,16 @@ func TestHALBuffer_MapAsync_UsageMismatch(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_RangeValidation(t *testing.T) {
+func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	tests := []struct {
 		name           string
@@ -288,16 +288,16 @@ func TestHALBuffer_MapAsync_RangeValidation(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_NilCallback(t *testing.T) {
+func TestBuffer_MapAsync_NilCallback(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "nil-callback",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	err := buf.MapAsync(types.MapModeRead, 0, 1024, nil)
 
@@ -306,16 +306,16 @@ func TestHALBuffer_MapAsync_NilCallback(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_AfterDestroy(t *testing.T) {
+func TestBuffer_MapAsync_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "destroyed",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 	buf.Destroy()
 
 	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -329,16 +329,16 @@ func TestHALBuffer_MapAsync_AfterDestroy(t *testing.T) {
 // GetMappedRange Tests
 // =============================================================================
 
-func TestHALBuffer_GetMappedRange_Success(t *testing.T) {
+func TestBuffer_GetMappedRange_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Map the buffer
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -354,16 +354,16 @@ func TestHALBuffer_GetMappedRange_Success(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_GetMappedRange_PartialMap(t *testing.T) {
+func TestBuffer_GetMappedRange_PartialMap(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "partial-map",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Map partial range (256 to 768)
 	_ = buf.MapAsync(types.MapModeRead, 256, 512, func(_ BufferMapAsyncStatus) {})
@@ -385,16 +385,16 @@ func TestHALBuffer_GetMappedRange_PartialMap(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_GetMappedRange_NotMapped(t *testing.T) {
+func TestBuffer_GetMappedRange_NotMapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "not-mapped",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	_, err := buf.GetMappedRange(0, 512)
 
@@ -403,16 +403,16 @@ func TestHALBuffer_GetMappedRange_NotMapped(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_GetMappedRange_Pending(t *testing.T) {
+func TestBuffer_GetMappedRange_Pending(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "pending",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Start mapping but don't poll
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -428,16 +428,16 @@ func TestHALBuffer_GetMappedRange_Pending(t *testing.T) {
 // Unmap Tests
 // =============================================================================
 
-func TestHALBuffer_Unmap_Success(t *testing.T) {
+func TestBuffer_Unmap_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "unmap-test",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Map and poll
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -453,16 +453,16 @@ func TestHALBuffer_Unmap_Success(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Unmap_Pending(t *testing.T) {
+func TestBuffer_Unmap_Pending(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "unmap-pending",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackStatus BufferMapAsyncStatus
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
@@ -482,16 +482,16 @@ func TestHALBuffer_Unmap_Pending(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
+func TestBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "already-unmapped",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Unmap when already unmapped should be a no-op
 	err := buf.Unmap()
@@ -500,16 +500,16 @@ func TestHALBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Unmap_AfterDestroy(t *testing.T) {
+func TestBuffer_Unmap_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "unmap-destroyed",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 	buf.Destroy()
 
 	err := buf.Unmap()
@@ -523,16 +523,16 @@ func TestHALBuffer_Unmap_AfterDestroy(t *testing.T) {
 // Destroy Tests
 // =============================================================================
 
-func TestHALBuffer_Destroy(t *testing.T) {
+func TestBuffer_Destroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "destroy-test",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 	buf.Destroy()
 
 	if !buf.IsDestroyed() {
@@ -546,16 +546,16 @@ func TestHALBuffer_Destroy(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Destroy_Idempotent(t *testing.T) {
+func TestBuffer_Destroy_Idempotent(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "idempotent-destroy",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Destroy multiple times
 	buf.Destroy()
@@ -568,16 +568,16 @@ func TestHALBuffer_Destroy_Idempotent(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Destroy_WhilePending(t *testing.T) {
+func TestBuffer_Destroy_WhilePending(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "destroy-pending",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackStatus BufferMapAsyncStatus
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
@@ -599,16 +599,16 @@ func TestHALBuffer_Destroy_WhilePending(t *testing.T) {
 // Concurrent Access Tests
 // =============================================================================
 
-func TestHALBuffer_ConcurrentMapUnmap(t *testing.T) {
+func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead | types.BufferUsageMapWrite}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "concurrent",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead | types.BufferUsageMapWrite,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	const numOps = 100
 	var wg sync.WaitGroup
@@ -633,16 +633,16 @@ func TestHALBuffer_ConcurrentMapUnmap(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_ConcurrentGetMappedRange(t *testing.T) {
+func TestBuffer_ConcurrentGetMappedRange(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "concurrent-read",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Map the buffer
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -671,23 +671,23 @@ func TestHALBuffer_ConcurrentGetMappedRange(t *testing.T) {
 }
 
 // =============================================================================
-// CreateHALBuffer Tests
+// CreateBuffer Tests
 // =============================================================================
 
-func TestCreateHALBuffer(t *testing.T) {
+func TestCreateBuffer(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "created-buffer",
 		Size:  1024,
 		Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
 	}
 
-	buf, err := CreateHALBuffer(device, desc)
+	buf, err := CreateBuffer(device, desc)
 	if err != nil {
-		t.Fatalf("CreateHALBuffer failed: %v", err)
+		t.Fatalf("CreateBuffer failed: %v", err)
 	}
 	if buf == nil {
-		t.Fatal("CreateHALBuffer returned nil")
+		t.Fatal("CreateBuffer returned nil")
 	}
 	if buf.Label() != "created-buffer" {
 		t.Errorf("Label = %q, want %q", buf.Label(), "created-buffer")
@@ -697,67 +697,67 @@ func TestCreateHALBuffer(t *testing.T) {
 	}
 }
 
-func TestCreateHALBuffer_NilDevice(t *testing.T) {
-	desc := &HALBufferDescriptor{
+func TestCreateBuffer_NilDevice(t *testing.T) {
+	desc := &BufferDescriptor{
 		Label: "test",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	_, err := CreateHALBuffer(nil, desc)
+	_, err := CreateBuffer(nil, desc)
 	if !errors.Is(err, ErrNilHALDevice) {
-		t.Errorf("CreateHALBuffer(nil device): got %v, want ErrNilHALDevice", err)
+		t.Errorf("CreateBuffer(nil device): got %v, want ErrNilHALDevice", err)
 	}
 }
 
-func TestCreateHALBuffer_NilDescriptor(t *testing.T) {
+func TestCreateBuffer_NilDescriptor(t *testing.T) {
 	device := &bufferMockHALDevice{}
 
-	_, err := CreateHALBuffer(device, nil)
+	_, err := CreateBuffer(device, nil)
 	if err == nil {
-		t.Error("CreateHALBuffer(nil desc) should fail")
+		t.Error("CreateBuffer(nil desc) should fail")
 	}
 }
 
-func TestCreateHALBuffer_ZeroSize(t *testing.T) {
+func TestCreateBuffer_ZeroSize(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "zero-size",
 		Size:  0,
 		Usage: types.BufferUsageVertex,
 	}
 
-	_, err := CreateHALBuffer(device, desc)
+	_, err := CreateBuffer(device, desc)
 	if err == nil {
-		t.Error("CreateHALBuffer with zero size should fail")
+		t.Error("CreateBuffer with zero size should fail")
 	}
 }
 
-func TestCreateHALBuffer_ZeroUsage(t *testing.T) {
+func TestCreateBuffer_ZeroUsage(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "zero-usage",
 		Size:  1024,
 		Usage: 0,
 	}
 
-	_, err := CreateHALBuffer(device, desc)
+	_, err := CreateBuffer(device, desc)
 	if err == nil {
-		t.Error("CreateHALBuffer with zero usage should fail")
+		t.Error("CreateBuffer with zero usage should fail")
 	}
 }
 
-func TestCreateHALBuffer_SizeAlignment(t *testing.T) {
+func TestCreateBuffer_SizeAlignment(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "alignment-test",
 		Size:  1001, // Not aligned to 4 bytes
 		Usage: types.BufferUsageVertex,
 	}
 
-	buf, err := CreateHALBuffer(device, desc)
+	buf, err := CreateBuffer(device, desc)
 	if err != nil {
-		t.Fatalf("CreateHALBuffer failed: %v", err)
+		t.Fatalf("CreateBuffer failed: %v", err)
 	}
 
 	// Size should be aligned up to 4 bytes
@@ -766,12 +766,12 @@ func TestCreateHALBuffer_SizeAlignment(t *testing.T) {
 	}
 }
 
-func TestCreateHALBufferSimple(t *testing.T) {
+func TestCreateBufferSimple(t *testing.T) {
 	device := &bufferMockHALDevice{}
 
-	buf, err := CreateHALBufferSimple(device, 2048, types.BufferUsageStorage, "simple-buffer")
+	buf, err := CreateBufferSimple(device, 2048, types.BufferUsageStorage, "simple-buffer")
 	if err != nil {
-		t.Fatalf("CreateHALBufferSimple failed: %v", err)
+		t.Fatalf("CreateBufferSimple failed: %v", err)
 	}
 	if buf.Size() != 2048 {
 		t.Errorf("Size = %d, want 2048", buf.Size())
@@ -872,16 +872,16 @@ func TestBufferMapAsyncStatus_String(t *testing.T) {
 // Additional Coverage Tests
 // =============================================================================
 
-func TestHALBuffer_Descriptor(t *testing.T) {
+func TestBuffer_Descriptor(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 2048, usage: types.BufferUsageUniform}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "descriptor-test",
 		Size:  2048,
 		Usage: types.BufferUsageUniform,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	got := buf.Descriptor()
 	if got.Label != desc.Label {
@@ -895,16 +895,16 @@ func TestHALBuffer_Descriptor(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_Raw_AfterDestroy(t *testing.T) {
+func TestBuffer_Raw_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "raw-destroy-test",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Raw should return the buffer
 	if buf.Raw() == nil {
@@ -919,16 +919,16 @@ func TestHALBuffer_Raw_AfterDestroy(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_MapAsync_InvalidMode(t *testing.T) {
+func TestBuffer_MapAsync_InvalidMode(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "invalid-mode",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
 	err := buf.MapAsync(0, 0, 1024, func(s BufferMapAsyncStatus) {
@@ -943,16 +943,16 @@ func TestHALBuffer_MapAsync_InvalidMode(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_PollMapAsync_NotPending(t *testing.T) {
+func TestBuffer_PollMapAsync_NotPending(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "poll-not-pending",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Poll when not pending should return true (nothing to wait for)
 	if !buf.PollMapAsync() {
@@ -960,16 +960,16 @@ func TestHALBuffer_PollMapAsync_NotPending(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
+func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "poll-destroyed",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackStatus BufferMapAsyncStatus
 	var callbackCalled bool
@@ -998,16 +998,16 @@ func TestHALBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 	}
 }
 
-func TestHALBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
+func TestBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
 	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "range-destroy",
 		Size:  1024,
 		Usage: types.BufferUsageMapRead,
 	}
 
-	buf := NewHALBuffer(halBuf, device, desc)
+	buf := NewBuffer(halBuf, device, desc)
 
 	// Map and poll
 	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
@@ -1023,35 +1023,35 @@ func TestHALBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
 	}
 }
 
-func TestCreateHALBuffer_MappedAtCreationValidation(t *testing.T) {
+func TestCreateBuffer_MappedAtCreationValidation(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label:            "mapped-validation",
 		Size:             1024,
 		Usage:            types.BufferUsageVertex, // No MapWrite or CopyDst
 		MappedAtCreation: true,
 	}
 
-	_, err := CreateHALBuffer(device, desc)
+	_, err := CreateBuffer(device, desc)
 	if err == nil {
-		t.Error("CreateHALBuffer with MappedAtCreation but no MapWrite/CopyDst should fail")
+		t.Error("CreateBuffer with MappedAtCreation but no MapWrite/CopyDst should fail")
 	}
 }
 
-func TestCreateHALBuffer_HALError(t *testing.T) {
+func TestCreateBuffer_HALError(t *testing.T) {
 	device := &bufferMockHALDevice{
 		createBufferFunc: func(_ *hal.BufferDescriptor) (hal.Buffer, error) {
 			return nil, errors.New("HAL creation failed")
 		},
 	}
-	desc := &HALBufferDescriptor{
+	desc := &BufferDescriptor{
 		Label: "hal-error",
 		Size:  1024,
 		Usage: types.BufferUsageVertex,
 	}
 
-	_, err := CreateHALBuffer(device, desc)
+	_, err := CreateBuffer(device, desc)
 	if err == nil {
-		t.Error("CreateHALBuffer should fail when HAL creation fails")
+		t.Error("CreateBuffer should fail when HAL creation fails")
 	}
 }

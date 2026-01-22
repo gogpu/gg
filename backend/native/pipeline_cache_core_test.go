@@ -13,8 +13,8 @@ import (
 // =============================================================================
 
 // mockShaderModule creates a test shader module with the given code hash.
-func mockShaderModule(id uint64, label string, codeHash uint64) *HALShaderModule {
-	return &HALShaderModule{
+func mockShaderModule(id uint64, label string, codeHash uint64) *ShaderModule {
+	return &ShaderModule{
 		id:       id,
 		label:    label,
 		codeHash: codeHash,
@@ -22,18 +22,18 @@ func mockShaderModule(id uint64, label string, codeHash uint64) *HALShaderModule
 }
 
 // mockRenderPipelineDescriptor creates a test render pipeline descriptor.
-func mockRenderPipelineDescriptor(vertexHash, fragmentHash uint64) *HALRenderPipelineDescriptor {
-	return &HALRenderPipelineDescriptor{
+func mockRenderPipelineDescriptor(vertexHash, fragmentHash uint64) *RenderPipelineDescriptor {
+	return &RenderPipelineDescriptor{
 		Label:              "test-pipeline",
 		VertexShader:       mockShaderModule(1, "vertex", vertexHash),
 		VertexEntryPoint:   "vs_main",
 		FragmentShader:     mockShaderModule(2, "fragment", fragmentHash),
 		FragmentEntryPoint: "fs_main",
-		VertexBufferLayouts: []HALVertexBufferLayout{
+		VertexBufferLayouts: []VertexBufferLayout{
 			{
 				ArrayStride: 32,
 				StepMode:    types.VertexStepModeVertex,
-				Attributes: []HALVertexAttribute{
+				Attributes: []VertexAttribute{
 					{ShaderLocation: 0, Format: types.VertexFormatFloat32x3, Offset: 0},
 					{ShaderLocation: 1, Format: types.VertexFormatFloat32x2, Offset: 12},
 				},
@@ -51,8 +51,8 @@ func mockRenderPipelineDescriptor(vertexHash, fragmentHash uint64) *HALRenderPip
 }
 
 // mockComputePipelineDescriptor creates a test compute pipeline descriptor.
-func mockComputePipelineDescriptor(codeHash uint64) *HALComputePipelineDescriptor {
-	return &HALComputePipelineDescriptor{
+func mockComputePipelineDescriptor(codeHash uint64) *ComputePipelineDescriptor {
+	return &ComputePipelineDescriptor{
 		Label:         "test-compute",
 		ComputeShader: mockShaderModule(3, "compute", codeHash),
 		EntryPoint:    "main",
@@ -60,11 +60,11 @@ func mockComputePipelineDescriptor(codeHash uint64) *HALComputePipelineDescripto
 }
 
 // =============================================================================
-// HALPipelineCache Tests
+// PipelineCacheCore Tests
 // =============================================================================
 
-func TestNewHALPipelineCache(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestNewPipelineCacheCore(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	if cache == nil {
 		t.Fatal("expected non-nil cache")
@@ -80,8 +80,8 @@ func TestNewHALPipelineCache(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_GetOrCreateRenderPipeline(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_GetOrCreateRenderPipeline(t *testing.T) {
+	cache := NewPipelineCacheCore()
 	desc := mockRenderPipelineDescriptor(100, 200)
 
 	// First call - cache miss, creates pipeline
@@ -137,8 +137,8 @@ func TestHALPipelineCache_GetOrCreateRenderPipeline(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_GetOrCreateComputePipeline(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_GetOrCreateComputePipeline(t *testing.T) {
+	cache := NewPipelineCacheCore()
 	desc := mockComputePipelineDescriptor(500)
 
 	// First call - cache miss
@@ -168,8 +168,8 @@ func TestHALPipelineCache_GetOrCreateComputePipeline(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_NilDescriptor(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_NilDescriptor(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	// Nil render descriptor
 	_, err := cache.GetOrCreateRenderPipeline(nil, nil)
@@ -184,11 +184,11 @@ func TestHALPipelineCache_NilDescriptor(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_NilShader(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_NilShader(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	// Nil vertex shader
-	desc := &HALRenderPipelineDescriptor{
+	desc := &RenderPipelineDescriptor{
 		VertexShader:   nil,
 		FragmentShader: mockShaderModule(1, "fragment", 100),
 	}
@@ -198,7 +198,7 @@ func TestHALPipelineCache_NilShader(t *testing.T) {
 	}
 
 	// Nil compute shader
-	computeDesc := &HALComputePipelineDescriptor{
+	computeDesc := &ComputePipelineDescriptor{
 		ComputeShader: nil,
 	}
 	_, err = cache.GetOrCreateComputePipeline(nil, computeDesc)
@@ -207,8 +207,8 @@ func TestHALPipelineCache_NilShader(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_Size(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_Size(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	if cache.Size() != 0 {
 		t.Errorf("expected size 0, got %d", cache.Size())
@@ -246,8 +246,8 @@ func TestHALPipelineCache_Size(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_Clear(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_Clear(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	// Add some pipelines
 	desc1 := mockRenderPipelineDescriptor(100, 200)
@@ -273,8 +273,8 @@ func TestHALPipelineCache_Clear(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_DestroyAll(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_DestroyAll(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	// Add some pipelines
 	desc1 := mockRenderPipelineDescriptor(100, 200)
@@ -299,8 +299,8 @@ func TestHALPipelineCache_DestroyAll(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_HitRate(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_HitRate(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	// No requests - hit rate should be 0
 	if rate := cache.HitRate(); rate != 0.0 {
@@ -391,13 +391,13 @@ func TestHashRenderPipelineDescriptor_DifferentBlendState(t *testing.T) {
 	desc1.BlendState = nil
 
 	desc2 := mockRenderPipelineDescriptor(100, 200)
-	desc2.BlendState = &HALBlendState{
-		Color: HALBlendComponent{
+	desc2.BlendState = &BlendState{
+		Color: BlendComponent{
 			SrcFactor: types.BlendFactorSrcAlpha,
 			DstFactor: types.BlendFactorOneMinusSrcAlpha,
 			Operation: types.BlendOperationAdd,
 		},
-		Alpha: HALBlendComponent{
+		Alpha: BlendComponent{
 			SrcFactor: types.BlendFactorOne,
 			DstFactor: types.BlendFactorZero,
 			Operation: types.BlendOperationAdd,
@@ -439,11 +439,11 @@ func TestHashRenderPipelineDescriptor_DifferentEntryPoint(t *testing.T) {
 }
 
 func TestHashRenderPipelineDescriptor_NilShaders(t *testing.T) {
-	desc1 := &HALRenderPipelineDescriptor{
+	desc1 := &RenderPipelineDescriptor{
 		VertexShader:   nil,
 		FragmentShader: nil,
 	}
-	desc2 := &HALRenderPipelineDescriptor{
+	desc2 := &RenderPipelineDescriptor{
 		VertexShader:   nil,
 		FragmentShader: nil,
 	}
@@ -493,12 +493,12 @@ func TestHashComputePipelineDescriptor_DifferentEntryPoint(t *testing.T) {
 }
 
 // =============================================================================
-// HALShaderModule Tests
+// ShaderModule Tests
 // =============================================================================
 
-func TestNewHALShaderModule(t *testing.T) {
+func TestNewShaderModule(t *testing.T) {
 	code := []byte{0x03, 0x02, 0x23, 0x07} // SPIR-V magic number
-	module := NewHALShaderModule(1, "test", code, nil)
+	module := NewShaderModule(1, "test", code, nil)
 
 	if module.ID() != 1 {
 		t.Errorf("expected ID 1, got %d", module.ID())
@@ -514,8 +514,8 @@ func TestNewHALShaderModule(t *testing.T) {
 	}
 }
 
-func TestHALShaderModule_Destroy(t *testing.T) {
-	module := NewHALShaderModule(1, "test", []byte{1, 2, 3}, nil)
+func TestShaderModule_Destroy(t *testing.T) {
+	module := NewShaderModule(1, "test", []byte{1, 2, 3}, nil)
 
 	if module.IsDestroyed() {
 		t.Error("expected module not to be destroyed initially")
@@ -531,19 +531,19 @@ func TestHALShaderModule_Destroy(t *testing.T) {
 	}
 }
 
-func TestHALShaderModule_CodeHashDeterministic(t *testing.T) {
+func TestShaderModule_CodeHashDeterministic(t *testing.T) {
 	code := []byte{1, 2, 3, 4, 5}
-	module1 := NewHALShaderModule(1, "test1", code, nil)
-	module2 := NewHALShaderModule(2, "test2", code, nil)
+	module1 := NewShaderModule(1, "test1", code, nil)
+	module2 := NewShaderModule(2, "test2", code, nil)
 
 	if module1.CodeHash() != module2.CodeHash() {
 		t.Error("same code should produce same hash")
 	}
 }
 
-func TestHALShaderModule_CodeHashDifferent(t *testing.T) {
-	module1 := NewHALShaderModule(1, "test1", []byte{1, 2, 3}, nil)
-	module2 := NewHALShaderModule(2, "test2", []byte{4, 5, 6}, nil)
+func TestShaderModule_CodeHashDifferent(t *testing.T) {
+	module1 := NewShaderModule(1, "test1", []byte{1, 2, 3}, nil)
+	module2 := NewShaderModule(2, "test2", []byte{4, 5, 6}, nil)
 
 	if module1.CodeHash() == module2.CodeHash() {
 		t.Error("different code should produce different hash")
@@ -554,8 +554,8 @@ func TestHALShaderModule_CodeHashDifferent(t *testing.T) {
 // Concurrent Access Tests
 // =============================================================================
 
-func TestHALPipelineCache_ConcurrentAccess(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_ConcurrentAccess(t *testing.T) {
+	cache := NewPipelineCacheCore()
 	desc := mockRenderPipelineDescriptor(100, 200)
 
 	const goroutines = 100
@@ -600,8 +600,8 @@ func TestHALPipelineCache_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_ConcurrentDifferentDescriptors(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_ConcurrentDifferentDescriptors(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	const goroutines = 50
 
@@ -643,8 +643,8 @@ func TestHALPipelineCache_ConcurrentDifferentDescriptors(t *testing.T) {
 	}
 }
 
-func TestHALPipelineCache_ConcurrentMixedOperations(t *testing.T) {
-	cache := NewHALPipelineCache()
+func TestPipelineCacheCore_ConcurrentMixedOperations(t *testing.T) {
+	cache := NewPipelineCacheCore()
 
 	const goroutines = 100
 	const iterations = 50
@@ -742,7 +742,7 @@ func BenchmarkHashComputePipelineDescriptor(b *testing.B) {
 }
 
 func BenchmarkPipelineCache_Hit(b *testing.B) {
-	cache := NewHALPipelineCache()
+	cache := NewPipelineCacheCore()
 	desc := mockRenderPipelineDescriptor(100, 200)
 
 	// Prime the cache
@@ -755,7 +755,7 @@ func BenchmarkPipelineCache_Hit(b *testing.B) {
 }
 
 func BenchmarkPipelineCache_Miss(b *testing.B) {
-	cache := NewHALPipelineCache()
+	cache := NewPipelineCacheCore()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -765,7 +765,7 @@ func BenchmarkPipelineCache_Miss(b *testing.B) {
 }
 
 func BenchmarkPipelineCache_ConcurrentHit(b *testing.B) {
-	cache := NewHALPipelineCache()
+	cache := NewPipelineCacheCore()
 	desc := mockRenderPipelineDescriptor(100, 200)
 
 	// Prime the cache

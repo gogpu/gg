@@ -9,7 +9,7 @@ import (
 	"github.com/gogpu/wgpu/core"
 )
 
-// HAL compute pass errors.
+// Compute pass errors.
 var (
 	// ErrComputePassEnded is returned when operations are called on an ended compute pass.
 	ErrComputePassEnded = errors.New("native: compute pass has already ended")
@@ -39,32 +39,32 @@ var (
 	ErrWorkgroupCountExceedsLimit = errors.New("native: workgroup count exceeds device limit")
 )
 
-// HALComputePassState represents the state of a compute pass encoder.
-type HALComputePassState int
+// ComputePassState represents the state of a compute pass encoder.
+type ComputePassState int
 
 const (
-	// HALComputePassStateRecording means the pass is actively recording commands.
-	HALComputePassStateRecording HALComputePassState = iota
+	// ComputePassStateRecording means the pass is actively recording commands.
+	ComputePassStateRecording ComputePassState = iota
 
-	// HALComputePassStateEnded means the pass has been ended.
-	HALComputePassStateEnded
+	// ComputePassStateEnded means the pass has been ended.
+	ComputePassStateEnded
 )
 
-// String returns the string representation of HALComputePassState.
-func (s HALComputePassState) String() string {
+// String returns the string representation of ComputePassState.
+func (s ComputePassState) String() string {
 	switch s {
-	case HALComputePassStateRecording:
+	case ComputePassStateRecording:
 		return "Recording"
-	case HALComputePassStateEnded:
+	case ComputePassStateEnded:
 		return "Ended"
 	default:
 		return fmt.Sprintf("Unknown(%d)", int(s))
 	}
 }
 
-// HALComputePassEncoder records compute commands within a compute pass.
+// ComputePassEncoder records compute commands within a compute pass.
 //
-// HALComputePassEncoder wraps core.CoreComputePassEncoder and provides
+// ComputePassEncoder wraps core.CoreComputePassEncoder and provides
 // Go-idiomatic access with immediate error returns. Commands recorded include:
 //   - SetPipeline: Set the compute pipeline for subsequent dispatch calls
 //   - SetBindGroup: Bind resource groups (buffers, textures) to shaders
@@ -72,43 +72,42 @@ func (s HALComputePassState) String() string {
 //   - DispatchWorkgroupsIndirect: Execute with GPU-generated parameters
 //
 // Thread Safety:
-// HALComputePassEncoder is NOT safe for concurrent use. All commands must be
+// ComputePassEncoder is NOT safe for concurrent use. All commands must be
 // recorded from a single goroutine. The pass must be ended with End() before
 // the parent command encoder can continue recording.
 //
 // Lifecycle:
-//  1. Created by HALCommandEncoder.BeginComputePass()
+//  1. Created by CoreCommandEncoder.BeginComputePass()
 //  2. Record commands (SetPipeline, SetBindGroup, DispatchWorkgroups, etc.)
 //  3. Call End() to complete the pass
 //
 // State Machine:
 //
 //	Recording -> End() -> Ended
-type HALComputePassEncoder struct {
+type ComputePassEncoder struct {
 	// mu protects mutable state.
 	mu sync.Mutex
 
 	// corePass is the underlying core compute pass encoder.
-	// This provides the actual HAL integration.
-	corePass *core.CoreComputePassEncoder
+		corePass *core.CoreComputePassEncoder
 
 	// encoder is the parent command encoder.
-	encoder *HALCommandEncoder
+	encoder *CoreCommandEncoder
 
 	// state is the current pass state.
-	state HALComputePassState
+	state ComputePassState
 
 	// currentPipeline tracks the currently bound pipeline (if any).
-	currentPipeline *HALComputePipeline
+	currentPipeline *ComputePipeline
 
 	// dispatchCount tracks the number of dispatch calls made.
 	dispatchCount uint32
 }
 
 // State returns the current pass state.
-func (p *HALComputePassEncoder) State() HALComputePassState {
+func (p *ComputePassEncoder) State() ComputePassState {
 	if p == nil {
-		return HALComputePassStateEnded
+		return ComputePassStateEnded
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -116,14 +115,14 @@ func (p *HALComputePassEncoder) State() HALComputePassState {
 }
 
 // IsEnded returns true if the pass has been ended.
-func (p *HALComputePassEncoder) IsEnded() bool {
-	return p.State() == HALComputePassStateEnded
+func (p *ComputePassEncoder) IsEnded() bool {
+	return p.State() == ComputePassStateEnded
 }
 
 // checkRecording returns an error if the pass is not in Recording state.
 // The caller must hold p.mu.
-func (p *HALComputePassEncoder) checkRecording() error {
-	if p.state != HALComputePassStateRecording {
+func (p *ComputePassEncoder) checkRecording() error {
+	if p.state != ComputePassStateRecording {
 		return ErrComputePassEnded
 	}
 	return nil
@@ -141,7 +140,7 @@ func (p *HALComputePassEncoder) checkRecording() error {
 // Returns an error if:
 //   - The pass has ended
 //   - The pipeline is nil
-func (p *HALComputePassEncoder) SetPipeline(pipeline *HALComputePipeline) error {
+func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -157,9 +156,9 @@ func (p *HALComputePassEncoder) SetPipeline(pipeline *HALComputePipeline) error 
 
 	// Forward to core pass if available
 	// Note: core.CoreComputePassEncoder.SetPipeline takes *core.ComputePipeline
-	// HAL integration pending for core.ComputePipeline
+	// Integration pending for core.ComputePipeline
 	// For now, we record the state locally
-	_ = p.corePass // Silence linter until HAL integration
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -179,7 +178,7 @@ func (p *HALComputePassEncoder) SetPipeline(pipeline *HALComputePipeline) error 
 //   - The pass has ended
 //   - The index exceeds maximum (3)
 //   - The bind group is nil
-func (p *HALComputePassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGroup, dynamicOffsets []uint32) error {
+func (p *ComputePassEncoder) SetBindGroup(index uint32, bindGroup *BindGroup, dynamicOffsets []uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -198,8 +197,8 @@ func (p *HALComputePassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGro
 
 	// Forward to core pass if available
 	// Note: core.CoreComputePassEncoder does not have SetBindGroup yet
-	// HAL integration pending
-	_ = p.corePass // Silence linter until HAL integration
+	// Integration pending
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -220,7 +219,7 @@ func (p *HALComputePassEncoder) SetBindGroup(index uint32, bindGroup *HALBindGro
 // Returns an error if:
 //   - The pass has ended
 //   - Any dimension is zero (optional validation)
-func (p *HALComputePassEncoder) DispatchWorkgroups(x, y, z uint32) error {
+func (p *ComputePassEncoder) DispatchWorkgroups(x, y, z uint32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -261,7 +260,7 @@ func (p *HALComputePassEncoder) DispatchWorkgroups(x, y, z uint32) error {
 //   - The pass has ended
 //   - The buffer is nil
 //   - The offset is not 4-byte aligned
-func (p *HALComputePassEncoder) DispatchWorkgroupsIndirect(indirectBuffer *HALBuffer, indirectOffset uint64) error {
+func (p *ComputePassEncoder) DispatchWorkgroupsIndirect(indirectBuffer *Buffer, indirectOffset uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -282,8 +281,8 @@ func (p *HALComputePassEncoder) DispatchWorkgroupsIndirect(indirectBuffer *HALBu
 
 	// Forward to core pass if available
 	// core.CoreComputePassEncoder.DispatchIndirect takes *core.Buffer
-	// For now, this is a no-op until HAL buffer integration is complete
-	_ = p.corePass // Silence linter until HAL integration
+	// For now, this is a no-op until buffer integration is complete
+	_ = p.corePass // Silence linter until integration complete
 
 	return nil
 }
@@ -295,14 +294,14 @@ func (p *HALComputePassEncoder) DispatchWorkgroupsIndirect(indirectBuffer *HALBu
 //
 // Returns nil on success.
 // Returns an error if the pass has already ended.
-func (p *HALComputePassEncoder) End() error {
+func (p *ComputePassEncoder) End() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.state == HALComputePassStateEnded {
+	if p.state == ComputePassStateEnded {
 		return nil // Idempotent
 	}
-	p.state = HALComputePassStateEnded
+	p.state = ComputePassStateEnded
 
 	// End the core pass if available
 	if p.corePass != nil {
@@ -320,7 +319,7 @@ func (p *HALComputePassEncoder) End() error {
 }
 
 // DispatchCount returns the number of dispatch calls made during this pass.
-func (p *HALComputePassEncoder) DispatchCount() uint32 {
+func (p *ComputePassEncoder) DispatchCount() uint32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.dispatchCount
@@ -330,16 +329,16 @@ func (p *HALComputePassEncoder) DispatchCount() uint32 {
 // Supporting Types for Compute Pass
 // =============================================================================
 
-// HALComputePipeline represents a GPU compute pipeline.
+// ComputePipeline represents a GPU compute pipeline.
 //
 // Compute pipelines define:
 //   - The compute shader to execute
 //   - Bind group layouts for resource bindings
 //   - Pipeline layout
 //
-// HALComputePipeline is a placeholder type that will be expanded when
+// ComputePipeline is a placeholder type that will be expanded when
 // pipeline creation is implemented.
-type HALComputePipeline struct {
+type ComputePipeline struct {
 	// id is a unique identifier for the pipeline.
 	id uint64
 
@@ -357,30 +356,30 @@ type HALComputePipeline struct {
 }
 
 // ID returns the pipeline's unique identifier.
-func (p *HALComputePipeline) ID() uint64 {
+func (p *ComputePipeline) ID() uint64 {
 	return p.id
 }
 
 // Label returns the pipeline's debug label.
-func (p *HALComputePipeline) Label() string {
+func (p *ComputePipeline) Label() string {
 	return p.label
 }
 
 // WorkgroupSize returns the compute shader's workgroup size.
 // Returns [x, y, z] dimensions.
-func (p *HALComputePipeline) WorkgroupSize() [3]uint32 {
+func (p *ComputePipeline) WorkgroupSize() [3]uint32 {
 	return p.workgroupSize
 }
 
 // IsDestroyed returns true if the pipeline has been destroyed.
-func (p *HALComputePipeline) IsDestroyed() bool {
+func (p *ComputePipeline) IsDestroyed() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.destroyed
 }
 
 // Destroy releases the pipeline resources.
-func (p *HALComputePipeline) Destroy() {
+func (p *ComputePipeline) Destroy() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.destroyed = true
