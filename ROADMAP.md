@@ -28,27 +28,28 @@
 
 ---
 
-## Current State: v0.19.0
+## Current State: v0.20.0 (In Progress)
 
-| Milestone | Focus |
-|-----------|-------|
-| Anti-Aliased Rendering | Smooth edges for all shapes |
-| Canvas API | Core drawing operations |
-| Text Rendering | Font loading, layout, rendering |
-| Images, Clipping | Image loading, clip paths |
-| Colors, Layers | Color pipeline, layer compositing |
-| SIMD Optimization | Performance improvements |
-| Parallel Rendering | Multi-threaded rasterization |
-| Scene Graph | Retained mode rendering |
-| Backend Abstraction | GPU/CPU backend interface |
-| GPU Backend | Sparse strips, compute shaders |
-| Text Pipeline | GPU-accelerated text |
-| MSDF, Emoji | Signed distance fonts, emoji support |
-| Brush, Gradients | Gradient fills, stroke system |
-| Go 1.25+ Modernization | Modern Go features |
-| Advanced Features | Masks, PathBuilder, streaming I/O |
-| GPU Compute Shaders | Fine, coarse, flatten shaders |
-| **Renderer DI** | Dependency injection for GPU integration |
+| Milestone | Focus | Status |
+|-----------|-------|--------|
+| Anti-Aliased Rendering | Smooth edges for all shapes | ✅ v0.19.0 |
+| **GPU Backend Completion** | Enterprise-grade GPU types | ✅ v0.20.0 |
+| Canvas API | Core drawing operations | ✅ |
+| Text Rendering | Font loading, layout, rendering | ✅ |
+| Images, Clipping | Image loading, clip paths | ✅ |
+| Colors, Layers | Color pipeline, layer compositing | ✅ |
+| SIMD Optimization | Performance improvements | ✅ |
+| Parallel Rendering | Multi-threaded rasterization | ✅ |
+| Scene Graph | Retained mode rendering | ✅ |
+| Backend Abstraction | GPU/CPU backend interface | ✅ |
+| GPU Backend | Sparse strips, compute shaders | ✅ |
+| Text Pipeline | GPU-accelerated text | ✅ |
+| MSDF, Emoji | Signed distance fonts, emoji support | ✅ |
+| Brush, Gradients | Gradient fills, stroke system | ✅ |
+| Go 1.25+ Modernization | Modern Go features | ✅ |
+| Advanced Features | Masks, PathBuilder, streaming I/O | ✅ |
+| GPU Compute Shaders | Fine, coarse, flatten shaders | ✅ |
+| Renderer DI | Dependency injection for GPU integration | ✅ |
 
 ---
 
@@ -194,19 +195,46 @@ Professional-grade anti-aliasing using the tiny-skia algorithm.
 | **SuperBlitter** | tiny-skia | Coverage accumulation coordinator |
 | **SIMD Optimization** | internal/wide | Batch processing for 16 pixels |
 
-```go
-// Before (v0.18.x) — Pixelated edges
-dc := gg.NewContext(400, 400)
-dc.DrawCircle(200, 200, 100)
-dc.Fill() // Jagged edges
+**Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
 
-// After (v0.19.0) — Smooth edges
-dc := gg.NewContext(400, 400)
-dc.DrawCircle(200, 200, 100)
-dc.Fill() // Smooth anti-aliased edges
+### v0.20.0 — GPU Backend Completion
+
+**Status:** In Progress | **Date:** 2026-01-22
+
+Enterprise-grade GPU backend implementation following wgpu-rs and vello patterns.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **Command Encoder** | wgpu | State machine with deferred errors |
+| **Texture Management** | wgpu-rs | Lazy default view via `sync.Once` |
+| **Buffer Mapping** | wgpu | Async mapping with state machine |
+| **Render/Compute Pass** | wgpu | Full pass encoder implementation |
+| **Pipeline Cache** | wgpu-core | FNV-1a hashing, double-check locking |
+| **Stroke Expansion** | kurbo/tiny-skia | Forward/backward offset paths |
+| **Glyph Run Builder** | vello | Efficient glyph batching |
+| **Color Emoji** | skrifa/swash | CBDT/CBLC, COLR format support |
+
+```go
+// Command Encoder with state machine
+encoder := native.NewCommandEncoder(device, nil)
+pass := encoder.BeginRenderPass(&RenderPassDescriptor{...})
+pass.SetPipeline(pipeline)
+pass.Draw(3, 1, 0, 0)
+pass.End()
+cmdBuffer := encoder.Finish(nil)
+
+// Texture with lazy view
+texture := native.CreateCoreTexture(device, descriptor)
+view := texture.GetDefaultView() // Thread-safe, created once
+
+// Pipeline caching
+cache := native.NewPipelineCacheCore(device)
+pipeline := cache.GetOrCreateRenderPipeline(descriptor)
 ```
 
-**Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
+**Statistics:** +8,700 LOC, 9 tasks completed, enterprise-grade patterns
+
+**Fixes:** [#45](https://github.com/gogpu/gg/issues/45) — Color emoji rendering
 
 ### v1.0.0 — Production Release
 
@@ -267,7 +295,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.19.0** | **2026-01-22** | **Anti-Aliased Rendering (tiny-skia)** | **+700** |
+| **v0.20.0** | **2026-01-22** | **GPU Backend Completion (enterprise-grade)** | **+8,700** |
+| v0.19.0 | 2026-01-22 | Anti-Aliased Rendering (tiny-skia) | +700 |
 | v0.18.x | 2026-01 | Renderer DI, Backend refactoring | +400 |
 | v0.17.x | 2026-01 | Dependency updates | — |
 | v0.16.0 | 2026-01 | wgpu v0.9.0, cleanup | — |
