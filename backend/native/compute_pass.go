@@ -89,7 +89,7 @@ type ComputePassEncoder struct {
 	mu sync.Mutex
 
 	// corePass is the underlying core compute pass encoder.
-		corePass *core.CoreComputePassEncoder
+	corePass *core.CoreComputePassEncoder
 
 	// encoder is the parent command encoder.
 	encoder *CoreCommandEncoder
