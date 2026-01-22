@@ -249,6 +249,32 @@ opts := text.LayoutOptions{
 layout := text.LayoutText("Long text...", face, 16, opts)
 ```
 
+### Color Emoji
+
+Full color emoji support with CBDT/CBLC (bitmap) and COLR/CPAL (vector) formats:
+
+<p align="center">
+  <img src="docs/images/colr_palette.png" alt="COLR Color Palette" width="512">
+  <br>
+  <sub>175 colors from Segoe UI Emoji COLR/CPAL palette</sub>
+</p>
+
+```go
+// Extract color emoji from font
+extractor, _ := emoji.NewCBDTExtractor(cbdtData, cblcData)
+glyph, _ := extractor.GetGlyph(glyphID, ppem)
+img, _ := png.Decode(bytes.NewReader(glyph.Data))
+
+// Parse COLR/CPAL vector layers
+parser, _ := emoji.NewCOLRParser(colrData, cpalData)
+glyph, _ := parser.GetGlyph(glyphID, paletteIndex)
+for _, layer := range glyph.Layers {
+    // Render each layer with layer.Color
+}
+```
+
+See [`examples/color_emoji/`](examples/color_emoji/) for a complete example.
+
 ### Layer Compositing
 
 29 blend modes with isolated layers:
