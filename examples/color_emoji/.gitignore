@@ -1,0 +1,7 @@
+# Downloaded fonts (large files)
+*.ttf
+*.ttc
+*.otf
+
+# Generated output
+*.png
