@@ -731,13 +731,7 @@ type HALImageCopyTexture struct {
 	Aspect types.TextureAspect
 }
 
-// HALTextureView represents a view into a GPU texture.
-// This is a placeholder - full implementation in GPU-TEX-001.
-type HALTextureView struct {
-	// coreView is the underlying core texture view.
-	//nolint:unused // Placeholder for GPU-TEX-001 implementation
-	coreView *core.TextureView
-}
+// Note: HALTextureView is defined in hal_texture.go with full implementation.
 
 // =============================================================================
 // HALRenderPassEncoder
