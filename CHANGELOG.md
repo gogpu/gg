@@ -12,6 +12,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.20.0] - 2026-01-22
+
+### Added
+
+#### GPU Backend Completion (Enterprise-Grade)
+
+Complete GPU backend implementation following wgpu-rs, vello, and tiny-skia patterns.
+
+##### Command Encoder (GPU-CMD-001)
+- **CoreCommandEncoder** — State machine with deferred error handling
+  - States: Recording → Locked → Finished → Consumed
+  - Thread-safe with mutex protection
+  - WebGPU-compliant 4-byte alignment validation
+- **RenderPassEncoder** / **ComputePassEncoder** — Full pass recording
+- **CommandBuffer** — Finished buffer for queue submission
+
+##### Texture Management (GPU-TEX-001)
+- **Texture** — Wraps hal.Texture with lazy default view
+  - `GetDefaultView()` uses `sync.Once` for thread-safe creation
+  - Automatic view dimension inference
+- **TextureView** — Non-owning view with destroy tracking
+- **CreateCoreTexture** / **CreateCoreTextureSimple** — Factory functions
+
+##### Buffer Mapping (GPU-BUF-001)
+- **Buffer** — Async mapping with state machine
+  - States: Unmapped → Pending → Mapped
+  - `MapAsync(mode, offset, size, callback)` — Non-blocking map request
+  - `GetMappedRange(offset, size)` — Access mapped data
+  - `Unmap()` — Release mapped memory
+- **BufferMapAsyncStatus** — Success, ValidationError, etc.
+
+##### Render/Compute Pass (GPU-PASS-001)
+- **RenderPassEncoder** — Full WebGPU render pass API
+  - SetPipeline, SetBindGroup, SetVertexBuffer, SetIndexBuffer
+  - Draw, DrawIndexed, DrawIndirect
+  - SetViewport, SetScissorRect, SetBlendConstant
+  - PushDebugGroup, PopDebugGroup, InsertDebugMarker
+- **ComputePassEncoder** — Compute dispatch
+  - SetPipeline, SetBindGroup, DispatchWorkgroups
+
+##### Pipeline Caching (GPU-PIP-001)
+- **PipelineCacheCore** — FNV-1a descriptor hashing
+  - Double-check locking pattern for thread safety
+  - Atomic hit/miss statistics
+  - `GetOrCreateRenderPipeline` / `GetOrCreateComputePipeline`
+- Zero-allocation hash computation for descriptors
+
+##### Stroke Expansion (GPU-STK-001)
+- **internal/stroke** package — kurbo/tiny-skia algorithm
+  - `StrokeExpander` — Converts stroked paths to filled outlines
+  - Line caps: Butt, Round, Square (cubic Bezier arcs)
+  - Line joins: Miter (with limit), Round, Bevel
+  - Quadratic and cubic Bezier curve flattening
+  - Adaptive tolerance-based subdivision
+
+##### Glyph Run Builder (GPU-TXT-001)
+- **GlyphRunBuilder** — Efficient glyph batching for GPU rendering
+  - `AddGlyph`, `AddShapedGlyph`, `AddShapedRun`, `AddShapedGlyphs`
+  - `Build(createGlyph)` — Generate draw commands
+  - `BuildTransformed(createGlyph, transform)` — With user transform
+- **GlyphRunBuilderPool** — sync.Pool for high-concurrency
+- Float32 size bits conversion for exact key matching
+
+##### Color Emoji Rendering (GG-EMOJI-001)
+- **text/emoji** package enhancements
+  - CBDT/CBLC bitmap extraction (Noto Color Emoji support)
+  - COLR/CPAL color glyph support
+- **CBDTExtractor** — Extract PNG bitmaps from CBDT tables
+- Fixes [#45](https://github.com/gogpu/gg/issues/45) — Blank color emoji
+
+### Changed
+
+#### Type Consolidation (GPU-REF-001)
+- **Removed HAL prefix** from all types for cleaner API
+  - `HALCommandEncoder` → `CoreCommandEncoder`
+  - `HALTexture` → `Texture`
+  - `HALBuffer` → `Buffer`
+  - `HALRenderPassEncoder` → `RenderPassEncoder`
+  - `HALComputePassEncoder` → `ComputePassEncoder`
+  - `HALPipelineCache` → `PipelineCacheCore`
+- **File renames** (preserves git history)
+  - `hal_texture.go` → `texture.go`
+  - `hal_buffer.go` → `buffer.go`
+  - `hal_render_pass.go` → `render_pass.go`
+  - `hal_compute_pass.go` → `compute_pass.go`
+  - `hal_pipeline_cache.go` → `pipeline_cache_core.go`
+
+### Statistics
+- **+8,700 LOC** across 20+ files
+- **9 tasks completed** (8 features + 1 refactoring)
+- **All tests pass** with comprehensive coverage
+- **0 linter issues**
+
 ## [0.19.0] - 2026-01-22
 
 ### Added
@@ -1029,7 +1122,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/gogpu/gg/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/gogpu/gg/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/gogpu/gg/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/gogpu/gg/compare/v0.17.1...v0.18.0
