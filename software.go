@@ -34,6 +34,40 @@ func (p *pixmapAdapter) SetPixel(x, y int, c raster.RGBA) {
 	p.pixmap.SetPixel(x, y, RGBA{R: c.R, G: c.G, B: c.B, A: c.A})
 }
 
+// BlendPixelAlpha blends a color with the existing pixel using given alpha.
+// This implements the raster.AAPixmap interface for anti-aliased rendering.
+func (p *pixmapAdapter) BlendPixelAlpha(x, y int, c raster.RGBA, alpha uint8) {
+	if alpha == 0 {
+		return
+	}
+
+	// Bounds check
+	if x < 0 || x >= p.pixmap.Width() || y < 0 || y >= p.pixmap.Height() {
+		return
+	}
+
+	if alpha == 255 {
+		p.pixmap.SetPixel(x, y, RGBA{R: c.R, G: c.G, B: c.B, A: c.A})
+		return
+	}
+
+	// Get existing pixel
+	existing := p.pixmap.GetPixel(x, y)
+
+	// Calculate blend factor
+	srcAlpha := c.A * float64(alpha) / 255.0
+	invSrcAlpha := 1.0 - srcAlpha
+
+	// Source-over compositing
+	outA := srcAlpha + existing.A*invSrcAlpha
+	if outA > 0 {
+		outR := (c.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
+		outG := (c.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
+		outB := (c.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
+		p.pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
+	}
+}
+
 // convertPath converts gg.Path elements to path.PathElement for flattening.
 func convertPath(p *Path) []path.PathElement {
 	var elements []path.PathElement
@@ -70,7 +104,7 @@ func convertPoints(points []path.Point) []raster.Point {
 	return result
 }
 
-// Fill implements Renderer.Fill.
+// Fill implements Renderer.Fill with anti-aliasing enabled by default.
 func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Convert path to internal format and flatten
 	elements := convertPath(p)
@@ -90,7 +124,39 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 		fillRule = raster.FillRuleEvenOdd
 	}
 
-	// Rasterize
+	// Rasterize with anti-aliasing
+	adapter := &pixmapAdapter{pixmap: pixmap}
+	r.rasterizer.FillAA(adapter, rasterPoints, fillRule, raster.RGBA{
+		R: color.R,
+		G: color.G,
+		B: color.B,
+		A: color.A,
+	})
+
+	return nil
+}
+
+// FillNoAA fills without anti-aliasing (faster but aliased).
+func (r *SoftwareRenderer) FillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// Convert path to internal format and flatten
+	elements := convertPath(p)
+	flattenedPath := path.Flatten(elements)
+	rasterPoints := convertPoints(flattenedPath)
+
+	// Get color from paint
+	solidPattern, ok := paint.Pattern.(*SolidPattern)
+	if !ok {
+		return nil // Only solid patterns supported in v0.1
+	}
+	color := solidPattern.Color
+
+	// Convert fill rule
+	fillRule := raster.FillRuleNonZero
+	if paint.FillRule == FillRuleEvenOdd {
+		fillRule = raster.FillRuleEvenOdd
+	}
+
+	// Rasterize without AA
 	adapter := &pixmapAdapter{pixmap: pixmap}
 	r.rasterizer.Fill(adapter, rasterPoints, fillRule, raster.RGBA{
 		R: color.R,

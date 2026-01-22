@@ -12,6 +12,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.19.0] - 2026-01-22
+
+### Added
+
+#### Anti-Aliased Rendering (tiny-skia algorithm)
+
+Professional-grade anti-aliasing using the tiny-skia algorithm (same as Chrome, Android, Flutter).
+
+**4x Supersampling System**
+- **SuperBlitter** — Coordinates 4x supersampling for sub-pixel accuracy
+  - SUPERSAMPLE_SHIFT=2 (4x resolution)
+  - Coverage accumulation across 4 scanlines
+  - NonZero and EvenOdd fill rule support
+- **AlphaRuns** — RLE-encoded alpha buffer for memory efficiency
+  - O(spans) memory instead of O(width×height)
+  - Efficient merge and accumulation
+  - Zero-allocation hot path
+
+**Rasterizer Integration**
+- **FillAA** — Anti-aliased path filling in software renderer
+- **FillPathAA** — Context-level AA fill method
+- **Automatic fallback** — Graceful degradation when AA unavailable
+
+### Fixed
+- **Pixelated circles and curves** — Shapes now render with smooth edges ([#43](https://github.com/gogpu/gg/issues/43))
+  - Root cause: `antiAlias` parameter was ignored in rasterizer
+  - Fix: Implemented full AA pipeline with supersampling
+
+### Statistics
+- **~700 LOC added** across 5 files
+- **100% backward compatible** — No breaking changes
+
 ## [0.18.1] - 2026-01-16
 
 ### Changed
@@ -997,7 +1029,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/gogpu/gg/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/gogpu/gg/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/gogpu/gg/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/gogpu/gg/compare/v0.17.0...v0.17.1

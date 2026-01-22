@@ -28,10 +28,11 @@
 
 ---
 
-## Current State: v0.18.0
+## Current State: v0.19.0
 
 | Milestone | Focus |
 |-----------|-------|
+| Anti-Aliased Rendering | Smooth edges for all shapes |
 | Canvas API | Core drawing operations |
 | Text Rendering | Font loading, layout, rendering |
 | Images, Clipping | Image loading, clip paths |
@@ -180,6 +181,33 @@ coverage := pipeline.RasterizePath(path, transform, scene.FillNonZero)
 
 **Statistics:** +6,470 LOC, 3 WGSL shaders, 17 tests, 87.6% coverage
 
+### v0.19.0 — Anti-Aliased Rendering
+
+**Status:** Released | **Date:** 2026-01-22
+
+Professional-grade anti-aliasing using the tiny-skia algorithm.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **4x Supersampling** | tiny-skia | Sub-pixel accuracy with SUPERSAMPLE_SHIFT=2 |
+| **AlphaRuns RLE** | tiny-skia | Memory-efficient sparse alpha buffer |
+| **SuperBlitter** | tiny-skia | Coverage accumulation coordinator |
+| **SIMD Optimization** | internal/wide | Batch processing for 16 pixels |
+
+```go
+// Before (v0.18.x) — Pixelated edges
+dc := gg.NewContext(400, 400)
+dc.DrawCircle(200, 200, 100)
+dc.Fill() // Jagged edges
+
+// After (v0.19.0) — Smooth edges
+dc := gg.NewContext(400, 400)
+dc.DrawCircle(200, 200, 100)
+dc.Fill() // Smooth anti-aliased edges
+```
+
+**Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
+
 ### v1.0.0 — Production Release
 
 **Status:** Target | **ETA:** After community validation
@@ -239,7 +267,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.18.0** | **2026-01-15** | **Renderer DI, Backend refactoring** | **+400** |
+| **v0.19.0** | **2026-01-22** | **Anti-Aliased Rendering (tiny-skia)** | **+700** |
+| v0.18.x | 2026-01 | Renderer DI, Backend refactoring | +400 |
 | v0.17.x | 2026-01 | Dependency updates | — |
 | v0.16.0 | 2026-01 | wgpu v0.9.0, cleanup | — |
 | v0.15.x | 2025-12/2026-01 | GPU compute shaders, dependency updates | +6,470 |

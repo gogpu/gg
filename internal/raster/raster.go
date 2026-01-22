@@ -15,6 +15,48 @@ type Pixmap interface {
 	SetPixel(x, y int, c RGBA)
 }
 
+// AAPixmapAdapter wraps a basic Pixmap to provide BlendPixelAlpha for AA rendering.
+// This allows non-AA pixmaps to work with the AA rasterizer.
+type AAPixmapAdapter struct {
+	Pixmap Pixmap
+}
+
+// Width returns the width of the pixmap.
+func (a *AAPixmapAdapter) Width() int {
+	return a.Pixmap.Width()
+}
+
+// Height returns the height of the pixmap.
+func (a *AAPixmapAdapter) Height() int {
+	return a.Pixmap.Height()
+}
+
+// SetPixel sets a pixel color.
+func (a *AAPixmapAdapter) SetPixel(x, y int, c RGBA) {
+	a.Pixmap.SetPixel(x, y, c)
+}
+
+// BlendPixelAlpha blends a color with the existing pixel using given alpha.
+// This is a simple implementation that uses alpha to modulate the color.
+func (a *AAPixmapAdapter) BlendPixelAlpha(x, y int, c RGBA, alpha uint8) {
+	if alpha == 0 {
+		return
+	}
+	if alpha == 255 {
+		a.Pixmap.SetPixel(x, y, c)
+		return
+	}
+	// Scale color alpha by the coverage alpha
+	alphaFloat := float64(alpha) / 255.0
+	blendedColor := RGBA{
+		R: c.R,
+		G: c.G,
+		B: c.B,
+		A: c.A * alphaFloat,
+	}
+	a.Pixmap.SetPixel(x, y, blendedColor)
+}
+
 // FillRule specifies how to determine which areas are inside a path.
 type FillRule int
 
