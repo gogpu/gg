@@ -21,16 +21,16 @@ func TestHALCommandEncoder_CreateFromBackend(t *testing.T) {
 		wantErrTarget error
 	}{
 		{
-			name:        "success with label",
-			backend:     &NativeBackend{initialized: true},
-			label:       "test-encoder",
-			wantErr:     false,
+			name:    "success with label",
+			backend: &NativeBackend{initialized: true},
+			label:   "test-encoder",
+			wantErr: false,
 		},
 		{
-			name:        "success without label",
-			backend:     &NativeBackend{initialized: true},
-			label:       "",
-			wantErr:     false,
+			name:    "success without label",
+			backend: &NativeBackend{initialized: true},
+			label:   "",
+			wantErr: false,
 		},
 		{
 			name:          "fail when not initialized",

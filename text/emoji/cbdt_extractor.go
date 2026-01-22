@@ -136,12 +136,12 @@ type indexSubtable struct {
 	imageDataOffset uint32
 
 	// Format-specific data.
-	offsets32    []uint32        // Format 1
-	offsets16    []uint16        // Format 3
-	imageSize    uint32          // Format 2, 5
-	bigMetrics   *bigGlyphMetrics // Format 2, 5
-	glyphPairs   []glyphIDOffsetPair // Format 4
-	glyphIDs     []uint16        // Format 5
+	offsets32  []uint32            // Format 1
+	offsets16  []uint16            // Format 3
+	imageSize  uint32              // Format 2, 5
+	bigMetrics *bigGlyphMetrics    // Format 2, 5
+	glyphPairs []glyphIDOffsetPair // Format 4
+	glyphIDs   []uint16            // Format 5
 }
 
 // glyphIDOffsetPair for format 4.

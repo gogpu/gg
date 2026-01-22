@@ -677,7 +677,7 @@ func createHALRenderPipeline(device hal.Device, desc *HALRenderPipelineDescripto
 	// }
 
 	// For now, create a placeholder pipeline
-	_ = device     // Will be used for actual creation
+	_ = device // Will be used for actual creation
 	_ = vertexEntry
 	_ = fragmentEntry
 	_ = sampleCount

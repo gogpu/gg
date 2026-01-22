@@ -144,9 +144,9 @@ func TestCBDTExtractor_SelectStrike(t *testing.T) {
 	}{
 		// BestFit: smallest >= requested, or largest if none
 		{"BestFit exact match", 32, StrikeBestFit, 1},
-		{"BestFit round up", 20, StrikeBestFit, 1},      // 32 >= 20
-		{"BestFit largest", 200, StrikeBestFit, 3},     // 128 is largest
-		{"BestFit smallest", 8, StrikeBestFit, 0},      // 16 >= 8
+		{"BestFit round up", 20, StrikeBestFit, 1}, // 32 >= 20
+		{"BestFit largest", 200, StrikeBestFit, 3}, // 128 is largest
+		{"BestFit smallest", 8, StrikeBestFit, 0},  // 16 >= 8
 
 		// Exact: only exact matches
 		{"Exact match", 32, StrikeExact, 1},
