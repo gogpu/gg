@@ -691,13 +691,14 @@ func TestHALCommandEncoder_Finish(t *testing.T) {
 }
 
 // =============================================================================
-// HALRenderPassEncoder Tests
+// HALRenderPassEncoder Basic Tests
+// Note: Comprehensive tests are in hal_render_pass_test.go
 // =============================================================================
 
-func TestHALRenderPassEncoder_End(t *testing.T) {
-	t.Run("normal end", func(t *testing.T) {
+func TestHALRenderPassEncoder_IntegrationWithEncoder(t *testing.T) {
+	t.Run("normal end clears active pass", func(t *testing.T) {
 		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALRenderPassEncoder{encoder: encoder}
+		pass := &HALRenderPassEncoder{encoder: encoder, state: HALRenderPassStateRecording}
 		encoder.activeRenderPass = pass
 
 		err := pass.End()
@@ -705,77 +706,25 @@ func TestHALRenderPassEncoder_End(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !pass.ended {
-			t.Error("pass.ended should be true")
+		if pass.state != HALRenderPassStateEnded {
+			t.Error("pass.state should be Ended")
 		}
 
 		if encoder.activeRenderPass != nil {
 			t.Error("encoder.activeRenderPass should be nil")
 		}
 	})
-
-	t.Run("double end is no-op", func(t *testing.T) {
-		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALRenderPassEncoder{encoder: encoder, ended: true}
-
-		err := pass.End()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func TestHALRenderPassEncoder_Draw(t *testing.T) {
-	t.Run("draw with ended pass", func(t *testing.T) {
-		pass := &HALRenderPassEncoder{ended: true}
-
-		// Should not panic, just silently return
-		pass.Draw(3, 1, 0, 0)
-	})
-
-	t.Run("draw without core pass", func(t *testing.T) {
-		pass := &HALRenderPassEncoder{ended: false}
-
-		// Should not panic, just silently return
-		pass.Draw(3, 1, 0, 0)
-	})
-}
-
-func TestHALRenderPassEncoder_DrawIndexed(t *testing.T) {
-	t.Run("draw indexed with ended pass", func(t *testing.T) {
-		pass := &HALRenderPassEncoder{ended: true}
-
-		// Should not panic
-		pass.DrawIndexed(6, 1, 0, 0, 0)
-	})
-}
-
-func TestHALRenderPassEncoder_SetViewport(t *testing.T) {
-	t.Run("set viewport with ended pass", func(t *testing.T) {
-		pass := &HALRenderPassEncoder{ended: true}
-
-		// Should not panic
-		pass.SetViewport(0, 0, 800, 600, 0, 1)
-	})
-}
-
-func TestHALRenderPassEncoder_SetScissorRect(t *testing.T) {
-	t.Run("set scissor with ended pass", func(t *testing.T) {
-		pass := &HALRenderPassEncoder{ended: true}
-
-		// Should not panic
-		pass.SetScissorRect(0, 0, 800, 600)
-	})
 }
 
 // =============================================================================
-// HALComputePassEncoder Tests
+// HALComputePassEncoder Basic Tests
+// Note: Comprehensive tests are in hal_compute_pass_test.go
 // =============================================================================
 
-func TestHALComputePassEncoder_End(t *testing.T) {
-	t.Run("normal end", func(t *testing.T) {
+func TestHALComputePassEncoder_IntegrationWithEncoder(t *testing.T) {
+	t.Run("normal end clears active pass", func(t *testing.T) {
 		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALComputePassEncoder{encoder: encoder}
+		pass := &HALComputePassEncoder{encoder: encoder, state: HALComputePassStateRecording}
 		encoder.activeComputePass = pass
 
 		err := pass.End()
@@ -783,39 +732,13 @@ func TestHALComputePassEncoder_End(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !pass.ended {
-			t.Error("pass.ended should be true")
+		if pass.state != HALComputePassStateEnded {
+			t.Error("pass.state should be Ended")
 		}
 
 		if encoder.activeComputePass != nil {
 			t.Error("encoder.activeComputePass should be nil")
 		}
-	})
-
-	t.Run("double end is no-op", func(t *testing.T) {
-		encoder := &HALCommandEncoder{label: "test"}
-		pass := &HALComputePassEncoder{encoder: encoder, ended: true}
-
-		err := pass.End()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
-func TestHALComputePassEncoder_Dispatch(t *testing.T) {
-	t.Run("dispatch with ended pass", func(t *testing.T) {
-		pass := &HALComputePassEncoder{ended: true}
-
-		// Should not panic
-		pass.Dispatch(8, 8, 1)
-	})
-
-	t.Run("dispatch without core pass", func(t *testing.T) {
-		pass := &HALComputePassEncoder{ended: false}
-
-		// Should not panic
-		pass.Dispatch(8, 8, 1)
 	})
 }
 
@@ -1070,8 +993,10 @@ func TestHALCommandEncoder_ComputeWorkflow(t *testing.T) {
 		t.Errorf("status after begin pass = %v, want Locked", encoder.Status())
 	}
 
-	// Dispatch
-	pass.Dispatch(8, 8, 1)
+	// Dispatch workgroups
+	if err := pass.DispatchWorkgroups(8, 8, 1); err != nil {
+		t.Fatalf("DispatchWorkgroups failed: %v", err)
+	}
 
 	// End compute pass
 	if err := pass.End(); err != nil {

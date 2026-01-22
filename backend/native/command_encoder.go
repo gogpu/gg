@@ -255,6 +255,7 @@ func (e *HALCommandEncoder) BeginRenderPass(desc *HALRenderPassDescriptor) (*HAL
 		pass := &HALRenderPassEncoder{
 			corePass: corePass,
 			encoder:  e,
+			state:    HALRenderPassStateRecording,
 		}
 		e.activeRenderPass = pass
 		return pass, nil
@@ -263,6 +264,7 @@ func (e *HALCommandEncoder) BeginRenderPass(desc *HALRenderPassDescriptor) (*HAL
 	// Fallback for non-HAL mode
 	pass := &HALRenderPassEncoder{
 		encoder: e,
+		state:   HALRenderPassStateRecording,
 	}
 	e.activeRenderPass = pass
 	return pass, nil
@@ -320,6 +322,7 @@ func (e *HALCommandEncoder) BeginComputePass(desc *HALComputePassDescriptor) (*H
 		pass := &HALComputePassEncoder{
 			corePass: corePass,
 			encoder:  e,
+			state:    HALComputePassStateRecording,
 		}
 		e.activeComputePass = pass
 		return pass, nil
@@ -328,6 +331,7 @@ func (e *HALCommandEncoder) BeginComputePass(desc *HALComputePassDescriptor) (*H
 	// Fallback for non-HAL mode
 	pass := &HALComputePassEncoder{
 		encoder: e,
+		state:   HALComputePassStateRecording,
 	}
 	e.activeComputePass = pass
 	return pass, nil
@@ -732,158 +736,8 @@ type HALImageCopyTexture struct {
 }
 
 // Note: HALTextureView is defined in hal_texture.go with full implementation.
-
-// =============================================================================
-// HALRenderPassEncoder
-// =============================================================================
-
-// HALRenderPassEncoder records render commands within a render pass.
-//
-// Commands recorded include:
-//   - SetPipeline: Set the render pipeline
-//   - SetVertexBuffer: Bind a vertex buffer
-//   - SetIndexBuffer: Bind an index buffer
-//   - SetBindGroup: Bind a bind group
-//   - Draw: Draw primitives
-//   - DrawIndexed: Draw indexed primitives
-//
-// The pass must be ended with End() before finishing the command encoder.
-type HALRenderPassEncoder struct {
-	// corePass is the underlying core render pass encoder.
-	corePass *core.CoreRenderPassEncoder
-
-	// encoder is the parent command encoder.
-	encoder *HALCommandEncoder
-
-	// ended indicates whether End() has been called.
-	ended bool
-}
-
-// SetViewport sets the viewport.
-func (p *HALRenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.SetViewport(x, y, width, height, minDepth, maxDepth)
-	}
-}
-
-// SetScissorRect sets the scissor rectangle.
-func (p *HALRenderPassEncoder) SetScissorRect(x, y, width, height uint32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.SetScissorRect(x, y, width, height)
-	}
-}
-
-// SetBlendConstant sets the blend constant color.
-func (p *HALRenderPassEncoder) SetBlendConstant(color *types.Color) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.SetBlendConstant(color)
-	}
-}
-
-// SetStencilReference sets the stencil reference value.
-func (p *HALRenderPassEncoder) SetStencilReference(reference uint32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.SetStencilReference(reference)
-	}
-}
-
-// Draw draws primitives.
-func (p *HALRenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
-	}
-}
-
-// DrawIndexed draws indexed primitives.
-func (p *HALRenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex uint32, baseVertex int32, firstInstance uint32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
-	}
-}
-
-// End ends the render pass.
-func (p *HALRenderPassEncoder) End() error {
-	if p.ended {
-		return nil
-	}
-	p.ended = true
-
-	if p.corePass != nil {
-		if err := p.corePass.End(); err != nil {
-			return err
-		}
-	}
-
-	return p.encoder.endRenderPass(p)
-}
-
-// =============================================================================
-// HALComputePassEncoder
-// =============================================================================
-
-// HALComputePassEncoder records compute commands within a compute pass.
-//
-// Commands recorded include:
-//   - SetPipeline: Set the compute pipeline
-//   - SetBindGroup: Bind a bind group
-//   - Dispatch: Dispatch compute work
-//   - DispatchIndirect: Dispatch compute work with GPU parameters
-//
-// The pass must be ended with End() before finishing the command encoder.
-type HALComputePassEncoder struct {
-	// corePass is the underlying core compute pass encoder.
-	corePass *core.CoreComputePassEncoder
-
-	// encoder is the parent command encoder.
-	encoder *HALCommandEncoder
-
-	// ended indicates whether End() has been called.
-	ended bool
-}
-
-// Dispatch dispatches compute work.
-func (p *HALComputePassEncoder) Dispatch(x, y, z uint32) {
-	if p.ended {
-		return
-	}
-	if p.corePass != nil {
-		p.corePass.Dispatch(x, y, z)
-	}
-}
-
-// End ends the compute pass.
-func (p *HALComputePassEncoder) End() error {
-	if p.ended {
-		return nil
-	}
-	p.ended = true
-
-	if p.corePass != nil {
-		if err := p.corePass.End(); err != nil {
-			return err
-		}
-	}
-
-	return p.encoder.endComputePass(p)
-}
+// Note: HALRenderPassEncoder is defined in hal_render_pass.go with full implementation.
+// Note: HALComputePassEncoder is defined in hal_compute_pass.go with full implementation.
 
 // =============================================================================
 // HALCommandBuffer
