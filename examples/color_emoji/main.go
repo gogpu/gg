@@ -6,8 +6,9 @@
 // Run: go run main.go
 //
 // Outputs:
-//   - color_emoji_composite.png (bitmap emoji grid)
-//   - colr_palette.png (COLR color palette visualization)
+//   - color_emoji_bitmap.png   (36 color emoji from CBDT/CBLC font)
+//   - color_emoji_palette.png  (COLR/CPAL color palette visualization)
+//   - color_emoji_sample.png   (single emoji at high resolution)
 package main
 
 import (
@@ -26,118 +27,105 @@ import (
 )
 
 func main() {
-	// Try to find a color emoji font
-	fontPaths := []string{
-		"./NotoColorEmoji-Regular.ttf", // Noto Color Emoji (CBDT/CBLC bitmap)
-		"C:/Windows/Fonts/seguiemj.ttf", // Windows Segoe UI Emoji (COLR/CPAL)
-		"/System/Library/Fonts/Apple Color Emoji.ttc", // macOS
-		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", // Linux
-	}
+	fmt.Println("Color Emoji Extraction Example")
+	fmt.Println("===============================")
 
-	var fontData []byte
-	var usedPath string
-	var err error
+	// Find fonts
+	bitmapFont := findFont([]string{
+		"./NotoColorEmoji-Regular.ttf",
+		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+	})
 
-	for _, path := range fontPaths {
-		fontData, err = os.ReadFile(path)
-		if err == nil {
-			usedPath = path
-			break
-		}
-	}
+	vectorFont := findFont([]string{
+		"C:/Windows/Fonts/seguiemj.ttf",
+		"/System/Library/Fonts/Apple Color Emoji.ttc",
+	})
 
-	if fontData == nil {
-		log.Fatal("No color emoji font found. Download NotoColorEmoji-Regular.ttf from:\n" +
+	if bitmapFont == nil && vectorFont == nil {
+		log.Fatal("No color emoji font found.\n" +
+			"Download NotoColorEmoji-Regular.ttf from:\n" +
 			"https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf")
 	}
 
-	fmt.Printf("Using font: %s (%d bytes)\n", usedPath, len(fontData))
+	generated := 0
 
-	// Analyze font tables
-	tables := analyzeFontTables(fontData)
-	fmt.Printf("\nFont tables:\n")
-	for _, t := range tables {
-		fmt.Printf("  %s: %d bytes\n", t.tag, t.length)
+	// 1. Generate bitmap emoji grid (CBDT/CBLC)
+	if bitmapFont != nil {
+		if generateBitmapGrid(bitmapFont) {
+			generated++
+		}
+		if generateSampleEmoji(bitmapFont) {
+			generated++
+		}
 	}
 
-	// Try CBDT/CBLC (bitmap emoji like Noto Color Emoji)
-	cbdtData := getTable(fontData, "CBDT")
-	cblcData := getTable(fontData, "CBLC")
-
-	if cbdtData != nil && cblcData != nil {
-		fmt.Printf("\n=== CBDT/CBLC Bitmap Emoji ===\n")
-		extractBitmapEmoji(cbdtData, cblcData)
-		return
+	// 2. Generate color palette (COLR/CPAL)
+	if vectorFont != nil {
+		if generateColorPalette(vectorFont) {
+			generated++
+		}
 	}
 
-	// Try COLR/CPAL (vector color layers like Segoe UI Emoji)
-	colrData := getTable(fontData, "COLR")
-	cpalData := getTable(fontData, "CPAL")
-
-	if colrData != nil && cpalData != nil {
-		fmt.Printf("\n=== COLR/CPAL Vector Emoji ===\n")
-		visualizeCOLREmoji(colrData, cpalData)
-		return
+	// Fallback: if no vector font, try bitmap font for palette-like output
+	if vectorFont == nil && bitmapFont != nil && generated < 3 {
+		fmt.Println("\nNo COLR/CPAL font found, using bitmap font info instead")
 	}
 
-	fmt.Println("\nNo color emoji tables found (need CBDT/CBLC or COLR/CPAL)")
+	fmt.Printf("\n=== Generated %d files ===\n", generated)
 }
 
-type tableInfo struct {
-	tag    string
-	offset uint32
-	length uint32
-}
-
-func analyzeFontTables(data []byte) []tableInfo {
-	if len(data) < 12 {
-		return nil
-	}
-
-	numTables := int(binary.BigEndian.Uint16(data[4:6]))
-	var tables []tableInfo
-	offset := 12
-
-	for i := 0; i < numTables && offset+16 <= len(data); i++ {
-		tag := string(data[offset : offset+4])
-		tableOffset := binary.BigEndian.Uint32(data[offset+8 : offset+12])
-		tableLength := binary.BigEndian.Uint32(data[offset+12 : offset+16])
-		tables = append(tables, tableInfo{tag, tableOffset, tableLength})
-		offset += 16
-	}
-
-	return tables
-}
-
-func getTable(data []byte, tag string) []byte {
-	tables := analyzeFontTables(data)
-	for _, t := range tables {
-		if t.tag == tag && t.offset+t.length <= uint32(len(data)) {
-			return data[t.offset : t.offset+t.length]
+func findFont(paths []string) []byte {
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			fmt.Printf("Found font: %s (%d bytes)\n", path, len(data))
+			return data
 		}
 	}
 	return nil
 }
 
-func extractBitmapEmoji(cbdtData, cblcData []byte) {
-	extractor, err := emoji.NewCBDTExtractor(cbdtData, cblcData)
+func getTable(data []byte, tag string) []byte {
+	if len(data) < 12 {
+		return nil
+	}
+	numTables := int(binary.BigEndian.Uint16(data[4:6]))
+	offset := 12
+	for i := 0; i < numTables && offset+16 <= len(data); i++ {
+		t := string(data[offset : offset+4])
+		tableOffset := binary.BigEndian.Uint32(data[offset+8 : offset+12])
+		tableLength := binary.BigEndian.Uint32(data[offset+12 : offset+16])
+		if t == tag && tableOffset+tableLength <= uint32(len(data)) {
+			return data[tableOffset : tableOffset+tableLength]
+		}
+		offset += 16
+	}
+	return nil
+}
+
+// generateBitmapGrid creates a 6x6 grid of color emoji
+func generateBitmapGrid(fontData []byte) bool {
+	cbdt := getTable(fontData, "CBDT")
+	cblc := getTable(fontData, "CBLC")
+	if cbdt == nil || cblc == nil {
+		return false
+	}
+
+	extractor, err := emoji.NewCBDTExtractor(cbdt, cblc)
 	if err != nil {
 		log.Printf("CBDTExtractor error: %v\n", err)
-		return
+		return false
 	}
 
 	ppems := extractor.AvailablePPEMs()
-	fmt.Printf("Available sizes (PPEM): %v\n", ppems)
-
 	if len(ppems) == 0 {
-		fmt.Println("No bitmap strikes available")
-		return
+		return false
 	}
 
 	targetPPEM := ppems[len(ppems)-1]
-	fmt.Printf("Using PPEM: %d\n", targetPPEM)
+	fmt.Printf("\nExtracting bitmap emoji (PPEM=%d)...\n", targetPPEM)
 
-	// Create 6x6 grid of emoji
+	// Create 6x6 grid
 	gridSize := 6
 	cellSize := 136
 	padding := 4
@@ -169,40 +157,98 @@ func extractBitmapEmoji(cbdtData, cblcData []byte) {
 		found++
 	}
 
-	fmt.Printf("Extracted %d color emoji\n", found)
-
-	outPath := "color_emoji_composite.png"
+	outPath := "color_emoji_bitmap.png"
 	f, err := os.Create(outPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Failed to create %s: %v\n", outPath, err)
+		return false
 	}
 	defer f.Close()
 	png.Encode(f, canvas)
 
 	absPath, _ := filepath.Abs(outPath)
-	fmt.Printf("Saved: %s\n", absPath)
+	fmt.Printf("  [1] %s (%d emoji in 6x6 grid)\n", absPath, found)
+	return true
 }
 
-func visualizeCOLREmoji(colrData, cpalData []byte) {
-	parser, err := emoji.NewCOLRParser(colrData, cpalData)
-	if err != nil {
-		log.Printf("COLRParser error: %v\n", err)
-		return
+// generateSampleEmoji extracts a single emoji at full resolution
+func generateSampleEmoji(fontData []byte) bool {
+	cbdt := getTable(fontData, "CBDT")
+	cblc := getTable(fontData, "CBLC")
+	if cbdt == nil || cblc == nil {
+		return false
 	}
 
-	fmt.Printf("Palettes: %d\n", parser.NumPalettes())
+	extractor, err := emoji.NewCBDTExtractor(cbdt, cblc)
+	if err != nil {
+		return false
+	}
+
+	ppems := extractor.AvailablePPEMs()
+	if len(ppems) == 0 {
+		return false
+	}
+
+	targetPPEM := ppems[len(ppems)-1]
+
+	// Find first valid glyph
+	for gid := uint16(1); gid < 1000; gid++ {
+		glyph, err := extractor.GetGlyph(gid, targetPPEM)
+		if err != nil || glyph.Data == nil {
+			continue
+		}
+
+		img, err := png.Decode(bytes.NewReader(glyph.Data))
+		if err != nil {
+			continue
+		}
+
+		outPath := "color_emoji_sample.png"
+		f, err := os.Create(outPath)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		png.Encode(f, img)
+
+		absPath, _ := filepath.Abs(outPath)
+		bounds := img.Bounds()
+		fmt.Printf("  [2] %s (glyph %d, %dx%d)\n", absPath, gid, bounds.Dx(), bounds.Dy())
+		return true
+	}
+
+	return false
+}
+
+// generateColorPalette creates a visualization of COLR/CPAL colors
+func generateColorPalette(fontData []byte) bool {
+	colr := getTable(fontData, "COLR")
+	cpal := getTable(fontData, "CPAL")
+	if colr == nil || cpal == nil {
+		return false
+	}
+
+	parser, err := emoji.NewCOLRParser(colr, cpal)
+	if err != nil {
+		log.Printf("COLRParser error: %v\n", err)
+		return false
+	}
 
 	if parser.NumPalettes() == 0 {
-		return
+		return false
 	}
 
 	colors := parser.PaletteColors(0)
-	fmt.Printf("Colors in palette 0: %d\n", len(colors))
+	fmt.Printf("\nExtracting COLR palette (%d colors)...\n", len(colors))
 
-	// Create color palette visualization
+	// Create palette grid
 	cellSize := 32
 	cols := 16
 	rows := (len(colors) + cols - 1) / cols
+	if rows < 1 {
+		rows = 1
+	}
+
 	canvas := image.NewRGBA(image.Rect(0, 0, cols*cellSize, rows*cellSize))
 	draw.Draw(canvas, canvas.Bounds(), image.White, image.Point{}, draw.Src)
 
@@ -214,27 +260,16 @@ func visualizeCOLREmoji(colrData, cpalData []byte) {
 		draw.Draw(canvas, rect, uniform, image.Point{}, draw.Src)
 	}
 
-	outPath := "colr_palette.png"
+	outPath := "color_emoji_palette.png"
 	f, err := os.Create(outPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Failed to create %s: %v\n", outPath, err)
+		return false
 	}
 	defer f.Close()
 	png.Encode(f, canvas)
 
 	absPath, _ := filepath.Abs(outPath)
-	fmt.Printf("Saved palette: %s\n", absPath)
-
-	// Show some color glyph info
-	fmt.Printf("\nSample color glyphs:\n")
-	found := 0
-	for gid := uint16(1); gid < 5000 && found < 5; gid++ {
-		if parser.HasGlyph(gid) {
-			glyph, err := parser.GetGlyph(gid, 0)
-			if err == nil && len(glyph.Layers) > 0 {
-				fmt.Printf("  Glyph %d: %d color layers\n", gid, len(glyph.Layers))
-				found++
-			}
-		}
-	}
+	fmt.Printf("  [3] %s (%d colors)\n", absPath, len(colors))
+	return true
 }
