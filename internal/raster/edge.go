@@ -79,6 +79,19 @@ func (aet *ActiveEdgeTable) Add(edge Edge) {
 	})
 }
 
+// AddAtY adds an edge to the active edge table with x computed for the given y.
+func (aet *ActiveEdgeTable) AddAtY(edge Edge, y float64) {
+	// Calculate x position at this y coordinate
+	x := edge.XAtY(y)
+	aet.edges = append(aet.edges, ActiveEdge{
+		x:      x,
+		dx:     edge.dx,
+		yMax:   edge.y1,
+		dir:    edge.dir,
+		active: true,
+	})
+}
+
 // Remove removes inactive edges for the given scanline.
 func (aet *ActiveEdgeTable) Remove(y float64) {
 	// Mark inactive edges
