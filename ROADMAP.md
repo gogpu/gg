@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.20.0 (In Progress)
+## Current State: v0.20.1
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
@@ -197,9 +197,15 @@ Professional-grade anti-aliasing using the tiny-skia algorithm.
 
 **Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
 
+### v0.20.1 — Dependency Update (Current)
+
+**Status:** Released | **Date:** 2026-01-24
+
+- **wgpu v0.10.2** — FFI build tag fix for CGO compatibility
+
 ### v0.20.0 — GPU Backend Completion
 
-**Status:** In Progress | **Date:** 2026-01-22
+**Status:** Released | **Date:** 2026-01-22
 
 Enterprise-grade GPU backend implementation following wgpu-rs and vello patterns.
 
@@ -295,7 +301,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.20.0** | **2026-01-22** | **GPU Backend Completion (enterprise-grade)** | **+8,700** |
+| **v0.20.1** | **2026-01-24** | **wgpu v0.10.2 (CGO fix)** | **—** |
+| v0.20.0 | 2026-01-22 | GPU Backend Completion (enterprise-grade) | +8,700 |
 | v0.19.0 | 2026-01-22 | Anti-Aliased Rendering (tiny-skia) | +700 |
 | v0.18.x | 2026-01 | Renderer DI, Backend refactoring | +400 |
 | v0.17.x | 2026-01 | Dependency updates | — |
