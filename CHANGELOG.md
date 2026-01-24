@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.20.1] - 2026-01-24
+
+### Changed
+
+- **wgpu v0.10.2** — FFI build tag fix
+  - Clear error message when CGO enabled: `undefined: GOFFI_REQUIRES_CGO_ENABLED_0`
+  - See [wgpu v0.10.2 release](https://github.com/gogpu/wgpu/releases/tag/v0.10.2)
+
 ## [0.20.0] - 2026-01-22
 
 ### Added
