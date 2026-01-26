@@ -28,11 +28,11 @@
 
 ---
 
-## Current State: v0.21.0
+## Current State: v0.20.2
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
-| **Analytic Anti-Aliasing** | Smooth bezier curves | ✅ v0.21.0 |
+| **Analytic Anti-Aliasing** | Smooth bezier curves | ✅ v0.20.2 |
 | Anti-Aliased Rendering | Smooth edges for all shapes | ✅ v0.19.0 |
 | GPU Backend Completion | Enterprise-grade GPU types | ✅ v0.20.0 |
 | Canvas API | Core drawing operations | ✅ |

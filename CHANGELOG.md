@@ -12,88 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
-## [0.21.0] - 2026-01-26
+## [0.20.2] - 2026-01-26
 
-### Added
+### Fixed
 
-#### Enterprise-Grade Analytic Anti-Aliasing (GG-AA System)
-
-Complete analytic AA implementation following vello and tiny-skia patterns for smooth bezier curves.
-
-##### Forward Differencing Edges (GG-AA-002)
-- **QuadraticEdge** — O(1) per-step quadratic curve evaluation
-  - `NewQuadraticEdge(p0, p1, p2, clipTop, clipBottom)`
-  - `Step()` — Single addition per step (7ns/op)
-  - Auto-subdivision based on curvature via `diffToShift()`
-- **CubicEdge** — O(1) per-step cubic curve evaluation
-  - `NewCubicEdge(p0, p1, p2, p3, clipTop, clipBottom)`
-  - `Step()` — Two additions per step (9ns/op)
-  - Automatic subdivision for stability
-- **LineEdge** — Simple vertical span edge
-- **Fixed-Point Arithmetic** — FDot6 (26.6), FDot16 (16.16), FDot8 (24.8)
-  - Sub-pixel precision for exact coverage calculation
-  - Fast integer math avoiding float operations
-
-##### Edge Builder (GG-AA-003)
-- **EdgeBuilder** — Converts Path to typed edges
-  - `NewEdgeBuilder(clipBounds)` — Create builder with clip region
-  - `BuildFromScenePath(path)` — Parse scene.Path to edges
-  - `AllEdges() iter.Seq[CurveEdgeVariant]` — Go 1.25+ iterator
-- **Path Geometry Functions**
-  - `ChopQuadAtYExtrema(p0, p1, p2)` — Split at Y extrema
-  - `ChopCubicAtYExtrema(p0, p1, p2, p3)` — Split cubics
-  - Y-monotonic segments for proper scanline traversal
-
-##### Analytic Filler (GG-AA-004)
-- **CurveAwareAET** — Active Edge Table supporting all edge types
-  - `Insert(edge)` — Add edge with proper Y-sorting
-  - `RemoveExpired(y)` — Remove edges that end at Y
-  - `StepCurves()` — Advance all curve edges one scanline
-  - `SortByX()` — Sort by current X for scanline processing
-- **AlphaRuns** — RLE-encoded coverage buffer
-  - `Add(x, alpha)` — Add coverage at position
-  - `AddRun(x, count, alpha)` — Add run of coverage
-  - `Iter() iter.Seq2[int, uint8]` — Pixel-by-pixel iteration
-  - `IterRuns() iter.Seq[AlphaRun]` — Run-based iteration
-- **AnalyticFiller** — Core analytic AA rasterizer
-  - `Fill(path, bounds, fillRule, callback)` — Fill with callback
-  - Trapezoidal integration for exact per-pixel coverage
-  - NonZero and EvenOdd fill rule support
-  - Zero-allocation hot path
-
-##### SoftwareRenderer Integration (GG-AA-005)
-- **RenderMode** — Analytic vs Supersampled selection
-  - `RenderModeAnalytic` — Use analytic AA for smooth curves
-  - `RenderModeSupersampled` — Use 4x supersampling (legacy)
-- **AnalyticFillerInterface** — Dependency injection for filler
-  - `Fill(path, bounds, fillRule, callback) error`
-  - Allows custom filler implementations
-- **NativeAnalyticAdapter** — Bridges gg.Path to native AnalyticFiller
-  - Converts Path operations to EdgeBuilder calls
-  - Implements AnalyticFillerInterface
-
-##### Enhanced FineRasterizer (GG-AA-006)
-- **RasterizeCurves** — Curve-aware tile rasterization
-  - Processes curve edges directly without pre-flattening
-  - Maintains curve continuity for smooth results
-- **BinCurveEdges** — Curve edge binning to tiles
-  - `CurveTileBin` — Per-tile curve edge storage
-  - Efficient spatial partitioning
-
-### Performance
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| QuadraticEdge.Step | 7ns | O(1) forward differencing |
-| CubicEdge.Step | 9ns | O(1) forward differencing |
-| AnalyticFiller (complex path) | ~1ms | 10K curves handled |
-| Memory vs Supersampling | -75% | No 4x buffer |
-
-### Statistics
-- **+8,163 LOC** across 18 files (15 new, 3 modified)
-- **7 comprehensive test files** with stress tests
-- **All tests pass** including 10K curves stress test
-- **Fixes [#48](https://github.com/gogpu/gg/issues/48)** — Bezier curves not smooth
+- **Bezier curve smoothness** — Analytic anti-aliasing for smooth bezier rendering
+  - Forward differencing edges for quadratic/cubic curves
+  - Proper curve flattening with tight bounds computation
+  - Anti-aliased strokes via stroke expansion
+  - Fixes [#48](https://github.com/gogpu/gg/issues/48)
 
 ## [0.20.1] - 2026-01-24
 
