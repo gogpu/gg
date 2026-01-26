@@ -81,7 +81,8 @@ linters:
 
     goconst:
       min-occurrences: 4  # "Unknown" appears 3 times in enum String() methods
-      ignore-string-values: "Unknown"
+      ignore-string-values:
+        - "Unknown"
 
     revive:
       rules:
