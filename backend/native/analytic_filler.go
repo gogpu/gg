@@ -290,9 +290,9 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 // This implements the analytic AA algorithm from fine.go, adapted for scanline processing.
 // The key insight is that coverage accumulates LEFT-TO-RIGHT within each pixel row:
 //
-//   1. For each pixel, compute the trapezoidal area (partial coverage)
-//   2. Add the accumulated coverage from all pixels to the LEFT (backdrop)
-//   3. Update the accumulator for the NEXT pixel
+//  1. For each pixel, compute the trapezoidal area (partial coverage)
+//  2. Add the accumulated coverage from all pixels to the LEFT (backdrop)
+//  3. Update the accumulator for the NEXT pixel
 //
 // CRITICAL: We must process ALL pixels from 0 to width, not just starting from
 // where the line enters. This ensures correct backdrop accumulation - pixels
