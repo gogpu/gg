@@ -135,6 +135,8 @@ func (p *pixmapAdapter) BlendPixelAlpha(x, y int, c raster.RGBA, alpha uint8) {
 }
 
 // convertPath converts gg.Path elements to path.PathElement for flattening.
+//
+//nolint:dupl // Similar to convertPathToStrokeElements but different types
 func convertPath(p *Path) []path.PathElement {
 	var elements []path.PathElement
 	for _, elem := range p.Elements() {
@@ -350,6 +352,8 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 }
 
 // convertPathToStrokeElements converts gg.Path elements to stroke.PathElement.
+//
+//nolint:dupl // Similar to convertPath but different types
 func convertPathToStrokeElements(p *Path) []stroke.PathElement {
 	var elements []stroke.PathElement
 	for _, elem := range p.Elements() {
@@ -397,8 +401,8 @@ func convertStrokeElementsToPath(elements []stroke.PathElement) *Path {
 }
 
 // convertLineCap converts gg.LineCap to stroke.LineCap.
-func convertLineCap(cap LineCap) stroke.LineCap {
-	switch cap {
+func convertLineCap(c LineCap) stroke.LineCap {
+	switch c {
 	case LineCapButt:
 		return stroke.LineCapButt
 	case LineCapRound:

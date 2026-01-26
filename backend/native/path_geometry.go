@@ -54,7 +54,7 @@ func ChopQuadAtYExtrema(src [3]GeomPoint, dst *[5]GeomPoint) int {
 	b := src[1].Y
 	c := src[2].Y
 
-	if isNotMonotonic(a, b, c) {
+	if isNotMonotonic(a, b, c) { //nolint:nestif // Logic is interconnected, splitting would reduce clarity
 		// Find t where derivative is zero: dy/dt = 0
 		// For quadratic: dy/dt = 2(1-t)(b-a) + 2t(c-b)
 		// Setting to 0: (a-b) = t(a - 2b + c)
