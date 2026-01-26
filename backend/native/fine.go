@@ -288,6 +288,266 @@ func (fr *FineRasterizer) Grid() *TileGrid {
 	return fr.grid
 }
 
+// RasterizeCurves processes curve edges directly without pre-flattening.
+// This is the retained mode rendering path for scene graph rendering.
+//
+// Unlike Rasterize() which works with pre-flattened LineSegments,
+// this method accepts curve edges from EdgeBuilder and steps through
+// their segments during tile processing using forward differencing.
+//
+// Parameters:
+//   - curveBins: Map of tile coordinates (as uint64 key) to curve edge bins (from BinCurveEdges)
+//
+// The output is stored in the FineRasterizer's TileGrid.
+func (fr *FineRasterizer) RasterizeCurves(curveBins map[uint64]*CurveTileBin) {
+	fr.grid.Reset()
+
+	if len(curveBins) == 0 {
+		return
+	}
+
+	// Process each tile with curve edges
+	for key, bin := range curveBins {
+		// Decode tile coordinates from key
+		// Key format: Y in upper 32 bits, X in lower 32 bits
+		tileX := int32(key & 0xFFFFFFFF) //nolint:gosec // Safe: extracting lower 32 bits
+		tileY := int32(key >> 32)        //nolint:gosec // Safe: extracting upper 32 bits
+
+		// Skip tiles outside viewport
+		if tileX < 0 || tileX >= int32(fr.tileColumns) ||
+			tileY < 0 || tileY >= int32(fr.tileRows) {
+			continue
+		}
+
+		//nolint:gosec // tileX, tileY validated above
+		fr.processTileWithCurves(uint16(tileX), uint16(tileY), bin.Edges, bin.Backdrop)
+	}
+}
+
+// processTileWithCurves computes coverage for a single tile using curve edges.
+// This is the core of curve-aware fine rasterization.
+func (fr *FineRasterizer) processTileWithCurves(
+	tileX, tileY uint16,
+	edges []CurveEdgeVariant,
+	backdrop int32,
+) {
+	if len(edges) == 0 {
+		// No edges - fill with backdrop if non-zero
+		if backdrop != 0 {
+			tile := fr.grid.GetOrCreate(int32(tileX), int32(tileY))
+			fr.fillTileWithBackdrop(tile, backdrop)
+		}
+		return
+	}
+
+	// Initialize winding arrays
+	var tileWinding [TileSize][TileSize]float32
+	var accumulatedWinding [TileSize]float32
+
+	backdropF := float32(backdrop)
+	for y := 0; y < TileSize; y++ {
+		accumulatedWinding[y] = backdropF
+		for x := 0; x < TileSize; x++ {
+			tileWinding[y][x] = backdropF
+		}
+	}
+
+	// Process each edge
+	for i := range edges {
+		edge := &edges[i]
+		fr.processEdgeForTile(edge, tileX, tileY, &tileWinding, &accumulatedWinding)
+	}
+
+	// Convert winding to coverage and store in grid
+	fr.finalizeTileFromCurves(tileX, tileY, &tileWinding)
+}
+
+// processEdgeForTile processes a single edge (line or curve) for a tile.
+func (fr *FineRasterizer) processEdgeForTile(
+	edge *CurveEdgeVariant,
+	tileX, tileY uint16,
+	tileWinding *[TileSize][TileSize]float32,
+	accumulatedWinding *[TileSize]float32,
+) {
+	switch edge.Type {
+	case EdgeTypeLine:
+		if edge.Line != nil {
+			fr.processLineEdgeForTile(edge.Line, tileX, tileY, tileWinding, accumulatedWinding)
+		}
+
+	case EdgeTypeQuadratic:
+		if edge.Quadratic != nil {
+			fr.processQuadraticEdgeForTile(edge.Quadratic, tileX, tileY, tileWinding, accumulatedWinding)
+		}
+
+	case EdgeTypeCubic:
+		if edge.Cubic != nil {
+			fr.processCubicEdgeForTile(edge.Cubic, tileX, tileY, tileWinding, accumulatedWinding)
+		}
+	}
+}
+
+// processLineEdgeForTile processes a simple line edge for a tile.
+func (fr *FineRasterizer) processLineEdgeForTile(
+	line *LineEdge,
+	tileX, tileY uint16,
+	tileWinding *[TileSize][TileSize]float32,
+	accumulatedWinding *[TileSize]float32,
+) {
+	// Convert LineEdge to LineSegment for existing processSegment logic
+	segment := fr.lineEdgeToSegment(line, tileX, tileY)
+	if segment.Y0 != segment.Y1 { // Skip horizontal segments
+		fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
+	}
+}
+
+// processQuadraticEdgeForTile processes a quadratic curve edge for a tile.
+// It steps through the curve segments using forward differencing.
+func (fr *FineRasterizer) processQuadraticEdgeForTile(
+	quad *QuadraticEdge,
+	tileX, tileY uint16,
+	tileWinding *[TileSize][TileSize]float32,
+	accumulatedWinding *[TileSize]float32,
+) {
+	// Process all segments from this quadratic curve
+	for quad.CurveCount() > 0 {
+		// Current line segment from the curve
+		line := quad.Line()
+		segment := fr.lineEdgeToSegment(line, tileX, tileY)
+		if segment.Y0 != segment.Y1 {
+			fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
+		}
+
+		// Advance to next segment using forward differencing
+		if !quad.Update() {
+			break
+		}
+	}
+
+	// Process the final segment
+	line := quad.Line()
+	segment := fr.lineEdgeToSegment(line, tileX, tileY)
+	if segment.Y0 != segment.Y1 {
+		fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
+	}
+}
+
+// processCubicEdgeForTile processes a cubic curve edge for a tile.
+// It steps through the curve segments using forward differencing.
+func (fr *FineRasterizer) processCubicEdgeForTile(
+	cubic *CubicEdge,
+	tileX, tileY uint16,
+	tileWinding *[TileSize][TileSize]float32,
+	accumulatedWinding *[TileSize]float32,
+) {
+	// Cubic uses negative count, active while < 0
+	for cubic.CurveCount() < 0 {
+		// Current line segment from the curve
+		line := cubic.Line()
+		segment := fr.lineEdgeToSegment(line, tileX, tileY)
+		if segment.Y0 != segment.Y1 {
+			fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
+		}
+
+		// Advance to next segment using forward differencing
+		if !cubic.Update() {
+			break
+		}
+	}
+
+	// Process the final segment
+	line := cubic.Line()
+	segment := fr.lineEdgeToSegment(line, tileX, tileY)
+	if segment.Y0 != segment.Y1 {
+		fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
+	}
+}
+
+// lineEdgeToSegment converts a LineEdge to a LineSegment for processSegment.
+func (fr *FineRasterizer) lineEdgeToSegment(line *LineEdge, _, _ uint16) LineSegment {
+	// Convert FDot16 coordinates to float32 pixel coordinates
+	x0 := FDot16ToFloat32(line.X)
+	y0 := float32(line.FirstY)
+	y1 := float32(line.LastY + 1)
+
+	// Calculate X at the end using slope
+	dy := y1 - y0
+	dx := FDot16ToFloat32(line.DX)
+	x1 := x0 + dx*dy
+
+	return LineSegment{
+		X0:      x0,
+		Y0:      y0,
+		X1:      x1,
+		Y1:      y1,
+		Winding: line.Winding,
+	}
+}
+
+// fillTileWithBackdrop fills a tile with solid coverage based on backdrop winding.
+func (fr *FineRasterizer) fillTileWithBackdrop(tile *Tile, backdrop int32) {
+	var coverage float32
+
+	switch fr.fillRule {
+	case scene.FillNonZero:
+		coverage = absf32(float32(backdrop))
+		if coverage > 1.0 {
+			coverage = 1.0
+		}
+	case scene.FillEvenOdd:
+		absBackdrop := backdrop
+		if absBackdrop < 0 {
+			absBackdrop = -absBackdrop
+		}
+		if absBackdrop%2 != 0 {
+			coverage = 1.0
+		}
+	}
+
+	if coverage > 0 {
+		alpha := uint8(coverage*255.0 + 0.5)
+		tile.FillSolid(alpha)
+	}
+}
+
+// finalizeTileFromCurves converts winding values to coverage and stores in grid.
+func (fr *FineRasterizer) finalizeTileFromCurves(
+	tileX, tileY uint16,
+	tileWinding *[TileSize][TileSize]float32,
+) {
+	tile := fr.grid.GetOrCreate(int32(tileX), int32(tileY))
+
+	// Convert winding to coverage based on fill rule
+	for y := 0; y < TileSize; y++ {
+		for x := 0; x < TileSize; x++ {
+			winding := tileWinding[y][x]
+			var coverage float32
+
+			switch fr.fillRule {
+			case scene.FillNonZero:
+				// Non-zero: coverage = |winding|, clamped to [0, 1]
+				coverage = absf32(winding)
+				if coverage > 1.0 {
+					coverage = 1.0
+				}
+
+			case scene.FillEvenOdd:
+				// Even-odd: coverage based on fractional part of winding/2
+				absWinding := absf32(winding)
+				im1 := float32(int32(absWinding*0.5 + 0.5))
+				coverage = absf32(absWinding - 2.0*im1)
+				if coverage > 1.0 {
+					coverage = 1.0
+				}
+			}
+
+			// Convert to 8-bit coverage
+			alpha := uint8(coverage*255.0 + 0.5)
+			tile.SetCoverage(x, y, alpha)
+		}
+	}
+}
+
 // clampf32 clamps value to [minVal, maxVal] range.
 func clampf32(val, minVal, maxVal float32) float32 {
 	if val < minVal {

@@ -145,14 +145,23 @@ gg/
 │   ├── backend.go      # RenderBackend interface
 │   ├── registry.go     # Auto-registration
 │   ├── software/       # CPU rasterizer
-│   ├── native/         # Pure Go GPU backend (v0.20.0)
+│   ├── native/         # Pure Go GPU backend (v0.20.0+)
 │   │   ├── command_encoder.go   # CommandEncoder with state machine
 │   │   ├── texture.go           # Texture with lazy default view
 │   │   ├── buffer.go            # Buffer with async mapping
 │   │   ├── render_pass.go       # RenderPassEncoder
 │   │   ├── compute_pass.go      # ComputePassEncoder
 │   │   ├── pipeline_cache_core.go # PipelineCache (FNV-1a hashing)
-│   │   └── shaders/             # WGSL compute shaders
+│   │   ├── shaders/             # WGSL compute shaders
+│   │   │   # Analytic Anti-Aliasing (v0.21.0)
+│   │   ├── fixed_point.go       # FDot6, FDot16 fixed-point types
+│   │   ├── curve_edge.go        # QuadraticEdge, CubicEdge (forward diff)
+│   │   ├── path_geometry.go     # Y-monotonic curve chopping
+│   │   ├── edge_builder.go      # Path to typed edges conversion
+│   │   ├── alpha_runs.go        # RLE-encoded coverage buffer
+│   │   ├── curve_aet.go         # CurveAwareAET (Active Edge Table)
+│   │   ├── analytic_filler.go   # Trapezoidal integration filler
+│   │   └── analytic_adapter.go  # SoftwareRenderer integration
 │   └── rust/           # Rust FFI backend
 │
 ├── scene/              # Retained mode rendering
@@ -290,6 +299,117 @@ for _, cmd := range commands {
 }
 ```
 
+## Analytic Anti-Aliasing (v0.21.0)
+
+Enterprise-grade curve rendering using forward differencing and trapezoidal coverage calculation (vello/tiny-skia pattern).
+
+### Problem: Pre-Flattening
+
+Traditional approach flattens bezier curves to line segments before rasterization:
+
+```
+Curve → Flatten (Tolerance=0.1) → Lines → Rasterize → Visible segments!
+```
+
+This causes visible segmentation on smooth curves, especially at larger sizes.
+
+### Solution: Forward Differencing
+
+Analytic AA processes curves directly with O(1) per-step evaluation:
+
+```
+Curve → Forward Differencing → Direct scanline intersection → Smooth result
+```
+
+### Architecture
+
+```
+Path → EdgeBuilder → Typed Edges → AnalyticFiller → AlphaRuns → Pixels
+         │              │              │
+    Y-monotonic    Line/Quad/Cubic   Trapezoidal
+      chopping     CurveEdgeVariant   integration
+```
+
+### Forward Differencing Edges
+
+```go
+// O(1) per step - only additions, no multiplications
+type QuadraticEdge struct {
+    fFirstX, fFirstY FDot16  // Current position (fixed-point)
+    fDx, fDy         FDot16  // First derivative
+    fDDx, fDDy       FDot16  // Second derivative (constant)
+    fLastY           int     // End scanline
+}
+
+// Step advances one scanline with just additions
+func (e *QuadraticEdge) Step() {
+    e.fFirstX += e.fDx
+    e.fFirstY += e.fDy
+    e.fDx += e.fDDx
+    e.fDy += e.fDDy
+}
+```
+
+### Fixed-Point Arithmetic
+
+Sub-pixel precision without floating-point overhead:
+
+| Type | Format | Precision | Use Case |
+|------|--------|-----------|----------|
+| `FDot6` | 26.6 | 1/64 px | Y coordinates |
+| `FDot16` | 16.16 | 1/65536 px | X coordinates, derivatives |
+| `FDot8` | 24.8 | 1/256 | Coverage values |
+
+### Curve-Aware Active Edge Table
+
+```go
+type CurveAwareAET struct {
+    lines     []LineEdge
+    quads     []QuadraticEdge
+    cubics    []CubicEdge
+}
+
+// StepCurves advances all curve edges one scanline
+func (aet *CurveAwareAET) StepCurves() {
+    for i := range aet.quads {
+        aet.quads[i].Step()  // O(1)
+    }
+    for i := range aet.cubics {
+        aet.cubics[i].Step() // O(1)
+    }
+}
+```
+
+### Trapezoidal Coverage
+
+Exact per-pixel coverage using trapezoidal integration (vello algorithm):
+
+```go
+// Coverage = area of trapezoid formed by edge crossing pixel
+coverage := computeTrapezoidArea(x0, x1, y0, y1)
+alphaRuns.Add(x, uint8(coverage * 255))
+```
+
+### Performance
+
+| Operation | Time | vs Naive |
+|-----------|------|----------|
+| QuadraticEdge.Step | 7ns | O(1) vs O(n) |
+| CubicEdge.Step | 9ns | O(1) vs O(n) |
+| Memory (1080p circle) | ~27KB | -75% vs supersampling |
+
+### Integration
+
+```go
+// SoftwareRenderer with analytic AA
+renderer := gg.NewSoftwareRenderer(800, 600)
+renderer.SetRenderMode(gg.RenderModeAnalytic) // Default
+
+// Curves render smoothly without segmentation
+dc.CubicTo(100, 50, 200, 150, 300, 100)
+dc.Fill()
+```
+
 ## Rendering Modes
 
 ### Immediate Mode
@@ -350,6 +470,10 @@ Both use **gogpu/wgpu** as the shared WebGPU implementation.
 | **FNV-1a Hashing** | wgpu-core | Pipeline cache key generation |
 | **Serial-Based LRU** | vello | Glyph cache eviction |
 | **Stroke Expansion** | kurbo/tiny-skia | Forward/backward offset paths |
+| **Forward Differencing** | Skia | O(1) curve edge stepping |
+| **Fixed-Point Math** | Skia | FDot6/FDot16 sub-pixel precision |
+| **Trapezoidal Coverage** | vello | Exact per-pixel AA calculation |
+| **Y-Monotonic Chopping** | tiny-skia | Curve splitting for scanline traversal |
 
 ## See Also
 

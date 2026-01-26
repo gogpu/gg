@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.20.2] - 2026-01-26
+
+### Fixed
+
+- **Bezier curve smoothness** — Analytic anti-aliasing for smooth bezier rendering
+  - Forward differencing edges for quadratic/cubic curves
+  - Proper curve flattening with tight bounds computation
+  - Anti-aliased strokes via stroke expansion
+  - Fixes [#48](https://github.com/gogpu/gg/issues/48)
+
 ## [0.20.1] - 2026-01-24
 
 ### Changed
@@ -1130,7 +1140,9 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/gogpu/gg/compare/v0.20.1...v0.21.0
+[0.20.1]: https://github.com/gogpu/gg/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/gogpu/gg/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/gogpu/gg/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/gogpu/gg/compare/v0.18.0...v0.18.1

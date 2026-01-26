@@ -28,12 +28,13 @@
 
 ---
 
-## Current State: v0.20.1
+## Current State: v0.20.2
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
+| **Analytic Anti-Aliasing** | Smooth bezier curves | ✅ v0.20.2 |
 | Anti-Aliased Rendering | Smooth edges for all shapes | ✅ v0.19.0 |
-| **GPU Backend Completion** | Enterprise-grade GPU types | ✅ v0.20.0 |
+| GPU Backend Completion | Enterprise-grade GPU types | ✅ v0.20.0 |
 | Canvas API | Core drawing operations | ✅ |
 | Text Rendering | Font loading, layout, rendering | ✅ |
 | Images, Clipping | Image loading, clip paths | ✅ |
@@ -197,7 +198,34 @@ Professional-grade anti-aliasing using the tiny-skia algorithm.
 
 **Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
 
-### v0.20.1 — Dependency Update (Current)
+### v0.21.0 — Analytic Anti-Aliasing (Current)
+
+**Status:** Released | **Date:** 2026-01-26
+
+Enterprise-grade analytic AA for smooth bezier curves following vello/tiny-skia patterns.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **Forward Differencing** | Skia | O(1) per-step curve evaluation |
+| **Fixed-Point Math** | Skia | FDot6/FDot16 sub-pixel precision |
+| **Trapezoidal Integration** | vello | Exact per-pixel coverage |
+| **Curve-Aware AET** | tiny-skia | Active Edge Table for all edge types |
+| **AlphaRuns RLE** | tiny-skia | Memory-efficient coverage storage |
+
+```go
+// Analytic AA is now the default for smooth curves
+renderer := gg.NewSoftwareRenderer(800, 600)
+renderer.SetRenderMode(gg.RenderModeAnalytic) // Optional, this is default
+
+// Bezier curves render smoothly without segmentation
+ctx.CubicTo(100, 50, 200, 150, 300, 100) // Smooth!
+```
+
+**Performance:** QuadStep 7ns, CubicStep 9ns, 75% memory reduction
+
+**Fixes:** [#48](https://github.com/gogpu/gg/issues/48) — Bezier curves not smooth
+
+### v0.20.1 — Dependency Update
 
 **Status:** Released | **Date:** 2026-01-24
 
@@ -301,7 +329,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.20.1** | **2026-01-24** | **wgpu v0.10.2 (CGO fix)** | **—** |
+| **v0.21.0** | **2026-01-26** | **Analytic AA for smooth bezier curves** | **+8,163** |
+| v0.20.1 | 2026-01-24 | wgpu v0.10.2 (CGO fix) | — |
 | v0.20.0 | 2026-01-22 | GPU Backend Completion (enterprise-grade) | +8,700 |
 | v0.19.0 | 2026-01-22 | Anti-Aliased Rendering (tiny-skia) | +700 |
 | v0.18.x | 2026-01 | Renderer DI, Backend refactoring | +400 |

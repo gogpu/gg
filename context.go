@@ -55,6 +55,10 @@ var _ io.Closer = (*Context)(nil)
 //
 //	// Custom GPU renderer (dependency injection)
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+//
+//	// Analytic anti-aliasing (higher quality)
+//	adapter := native.NewAnalyticFillerAdapter(800, 600)
+//	dc := gg.NewContext(800, 600, gg.WithAnalyticAA(adapter))
 func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Apply options
 	options := defaultOptions()
@@ -71,7 +75,12 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Use provided renderer or create software renderer
 	renderer := options.renderer
 	if renderer == nil {
-		renderer = NewSoftwareRenderer(width, height)
+		sr := NewSoftwareRenderer(width, height)
+		// Apply analytic AA if configured
+		if options.analyticFiller != nil {
+			sr.SetAnalyticFiller(options.analyticFiller)
+		}
+		renderer = sr
 	}
 
 	return &Context{
@@ -104,7 +113,12 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 	// Use provided renderer or create software renderer
 	renderer := options.renderer
 	if renderer == nil {
-		renderer = NewSoftwareRenderer(width, height)
+		sr := NewSoftwareRenderer(width, height)
+		// Apply analytic AA if configured
+		if options.analyticFiller != nil {
+			sr.SetAnalyticFiller(options.analyticFiller)
+		}
+		renderer = sr
 	}
 
 	return &Context{
