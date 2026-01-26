@@ -233,11 +233,6 @@ func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
 
 // addQuad adds quadratic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
-	// Update bounds (conservative - includes control point)
-	eb.bounds.unionPoint(x0, y0)
-	eb.bounds.unionPoint(cx, cy)
-	eb.bounds.unionPoint(x1, y1)
-
 	// Check if curve needs to be chopped at Y extrema
 	src := [3]GeomPoint{
 		{X: x0, Y: y0},
@@ -247,6 +242,15 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 
 	var dst [5]GeomPoint
 	numChops := ChopQuadAtYExtrema(src, &dst)
+
+	// Update bounds with endpoints (which lie on the curve).
+	// After chopping, dst[0], dst[2], dst[4] are points ON the curve.
+	// Control points (dst[1], dst[3]) do NOT lie on the curve.
+	eb.bounds.unionPoint(dst[0].X, dst[0].Y)
+	eb.bounds.unionPoint(dst[2].X, dst[2].Y) // Shared point (or endpoint if no chop)
+	if numChops > 0 {
+		eb.bounds.unionPoint(dst[4].X, dst[4].Y)
+	}
 
 	// Add each monotonic segment
 	for i := 0; i <= numChops; i++ {
@@ -263,12 +267,6 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 
 // addCubic adds cubic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
-	// Update bounds (conservative - includes control points)
-	eb.bounds.unionPoint(x0, y0)
-	eb.bounds.unionPoint(c1x, c1y)
-	eb.bounds.unionPoint(c2x, c2y)
-	eb.bounds.unionPoint(x1, y1)
-
 	// Check if curve needs to be chopped at Y extrema
 	src := [4]GeomPoint{
 		{X: x0, Y: y0},
@@ -279,6 +277,18 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 
 	var dst [10]GeomPoint
 	numChops := ChopCubicAtYExtrema(src, &dst)
+
+	// Update bounds with endpoints (which lie on the curve).
+	// After chopping, dst[0], dst[3], dst[6], dst[9] are points ON the curve.
+	// Control points do NOT lie on the curve.
+	eb.bounds.unionPoint(dst[0].X, dst[0].Y)
+	eb.bounds.unionPoint(dst[3].X, dst[3].Y) // First shared point (or endpoint if no chop)
+	if numChops >= 1 {
+		eb.bounds.unionPoint(dst[6].X, dst[6].Y) // Second shared point
+	}
+	if numChops >= 2 {
+		eb.bounds.unionPoint(dst[9].X, dst[9].Y) // Final endpoint
+	}
 
 	// Add each monotonic segment
 	for i := 0; i <= numChops; i++ {
