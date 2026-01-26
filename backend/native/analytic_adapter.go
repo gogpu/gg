@@ -29,8 +29,13 @@ type AnalyticFillerAdapter struct {
 //
 // The adapter is reusable for multiple Fill calls.
 func NewAnalyticFillerAdapter(width, height int) *AnalyticFillerAdapter {
+	eb := NewEdgeBuilder(2) // 4x AA quality
+	// Enable curve flattening for reliable analytic AA rendering.
+	// Curves are converted to line segments at build time, which the
+	// AnalyticFiller handles correctly.
+	eb.SetFlattenCurves(true)
 	return &AnalyticFillerAdapter{
-		edgeBuilder:    NewEdgeBuilder(2), // 4x AA quality
+		edgeBuilder:    eb,
 		analyticFiller: NewAnalyticFiller(width, height),
 		width:          width,
 		height:         height,

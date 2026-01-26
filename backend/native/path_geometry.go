@@ -63,10 +63,28 @@ func ChopQuadAtYExtrema(src [3]GeomPoint, dst *[5]GeomPoint) int {
 		if t > 0 && t < 1 {
 			chopQuadAt(src, t, dst)
 
-			// Flatten the extremum point to ensure exact monotonicity
-			// Both quads share the Y value at the split
-			dst[1].Y = dst[2].Y
-			dst[3].Y = dst[2].Y
+			// Ensure monotonicity by clamping control points to their segment's Y range.
+			// This handles numerical precision issues without distorting the curve shape.
+			//
+			// First segment: dst[0] -> dst[1] -> dst[2]
+			// Control point dst[1].Y should be between dst[0].Y and dst[2].Y
+			minY1 := minF32(dst[0].Y, dst[2].Y)
+			maxY1 := maxF32(dst[0].Y, dst[2].Y)
+			if dst[1].Y < minY1 {
+				dst[1].Y = minY1
+			} else if dst[1].Y > maxY1 {
+				dst[1].Y = maxY1
+			}
+
+			// Second segment: dst[2] -> dst[3] -> dst[4]
+			// Control point dst[3].Y should be between dst[2].Y and dst[4].Y
+			minY2 := minF32(dst[2].Y, dst[4].Y)
+			maxY2 := maxF32(dst[2].Y, dst[4].Y)
+			if dst[3].Y < minY2 {
+				dst[3].Y = minY2
+			} else if dst[3].Y > maxY2 {
+				dst[3].Y = maxY2
+			}
 
 			return 1
 		}
@@ -123,14 +141,44 @@ func ChopCubicAtYExtrema(src [4]GeomPoint, dst *[10]GeomPoint) int {
 
 	chopCubicAt(src, tValues, dst)
 
-	// Flatten extremum points to ensure exact monotonicity
+	// Ensure monotonicity by clamping control points to their segment's Y range.
+	// This handles numerical precision issues without distorting the curve shape.
+	//
+	// For cubic, each segment has 4 points: p0, p1, p2, p3
+	// Control points p1 and p2 should be clamped to [min(p0.Y, p3.Y), max(p0.Y, p3.Y)]
+
+	// Helper to clamp cubic control points
+	clampCubicControlPoints := func(startIdx int) {
+		p0Y := dst[startIdx].Y
+		p3Y := dst[startIdx+3].Y
+		minY := minF32(p0Y, p3Y)
+		maxY := maxF32(p0Y, p3Y)
+
+		// Clamp p1 (startIdx+1)
+		if dst[startIdx+1].Y < minY {
+			dst[startIdx+1].Y = minY
+		} else if dst[startIdx+1].Y > maxY {
+			dst[startIdx+1].Y = maxY
+		}
+
+		// Clamp p2 (startIdx+2)
+		if dst[startIdx+2].Y < minY {
+			dst[startIdx+2].Y = minY
+		} else if dst[startIdx+2].Y > maxY {
+			dst[startIdx+2].Y = maxY
+		}
+	}
+
+	// Always clamp first segment (dst[0..4])
+	clampCubicControlPoints(0)
+
 	if numChops >= 1 {
-		dst[2].Y = dst[3].Y
-		dst[4].Y = dst[3].Y
+		// Clamp second segment (dst[3..7])
+		clampCubicControlPoints(3)
 	}
 	if numChops >= 2 {
-		dst[5].Y = dst[6].Y
-		dst[7].Y = dst[6].Y
+		// Clamp third segment (dst[6..10])
+		clampCubicControlPoints(6)
 	}
 
 	return numChops

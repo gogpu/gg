@@ -286,6 +286,20 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 }
 
 // computeSegmentCoverage computes coverage for a single line segment.
+//
+// This implements the analytic AA algorithm from fine.go, adapted for scanline processing.
+// The key insight is that coverage accumulates LEFT-TO-RIGHT within each pixel row:
+//
+//   1. For each pixel, compute the trapezoidal area (partial coverage)
+//   2. Add the accumulated coverage from all pixels to the LEFT (backdrop)
+//   3. Update the accumulator for the NEXT pixel
+//
+// CRITICAL: We must process ALL pixels from 0 to width, not just starting from
+// where the line enters. This ensures correct backdrop accumulation - pixels
+// to the LEFT of the line get acc=0, pixels to the RIGHT get the accumulated
+// winding from the line crossing.
+//
+// This matches the algorithm in fine.go which processes all pixels in each tile row.
 func (af *AnalyticFiller) computeSegmentCoverage(
 	line *LineEdge,
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
@@ -311,150 +325,84 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 		yBot = lastY
 	}
 
-	// Skip if segment doesn't intersect this scanline (shouldn't happen here)
-	dy := yBot - yTop
-	if dy <= 0 {
+	// Skip if segment doesn't intersect this scanline
+	lineDY := yBot - yTop
+	if lineDY <= 0 {
 		return
 	}
 
 	// Winding direction
 	sign := float32(line.Winding)
 
-	// Compute X coordinates at yTop and yBot
-	// In sub-pixel space: x_sub = x0_sub + DX * (y_sub - y0_sub)
-	// In pixel space: x_pix = x_sub/scale = x0_pix + DX * (y_pix - y0_pix)
-	// So DX remains unchanged when converting to pixel coordinates
-	tTop := yTop - firstY // Pixel delta
-	tBot := yBot - firstY
-	xTop := x + dx*tTop
-	xBot := x + dx*tBot
+	// Compute line parameters relative to this scanline
+	// Line equation: lineX(y) = x + dx * (y - firstY)
+	lineTopY := yTop
+	lineBottomY := yBot
+	lineTopX := x + dx*(lineTopY-firstY)
+	lineBottomX := x + dx*(lineBottomY-firstY)
 
-	// Ensure xMin <= xMax for the algorithm
-	xMin := xTop
-	xMax := xBot
-	if xMin > xMax {
-		xMin, xMax = xMax, xMin
-	}
+	// Calculate slopes for pixel-row intersection
+	lineDX := lineBottomX - lineTopX
 
-	// Process each pixel that this edge crosses
-	pixelMin := int(math.Floor(float64(xMin)))
-	pixelMax := int(math.Ceil(float64(xMax)))
-
-	// Clamp to valid range
-	if pixelMin < 0 {
-		pixelMin = 0
-	}
-	if pixelMax > af.width {
-		pixelMax = af.width
-	}
-
-	// For each pixel, compute trapezoidal coverage
-	for px := pixelMin; px < pixelMax; px++ {
-		coverage := af.computeTrapezoidalCoverage(
-			xTop, yTop,
-			xBot, yBot,
-			float32(px), yPixel,
-		)
-
-		// Accumulate coverage with winding direction
-		if px < len(af.winding) {
-			af.winding[px] += sign * coverage * dy
+	var ySlope float32
+	if lineDX == 0 {
+		// Vertical line
+		if lineDY > 0 {
+			ySlope = 1e10
+		} else {
+			ySlope = -1e10
 		}
+	} else {
+		ySlope = lineDY / lineDX // dy/dx
 	}
+	xSlope := 1.0 / ySlope // dx/dy
 
-	// Handle backdrop contribution (y_edge in vello)
-	// This accounts for edges that pass through pixels to the left
-	xInt := int(math.Floor(float64(xMin)))
-	if xInt >= 0 && xInt < af.width {
-		// Backdrop: add sign * dy for all pixels to the right
-		for px := xInt; px < af.width; px++ {
-			af.winding[px] += sign * dy
+	// Accumulate winding contribution from left edge
+	// CRITICAL: Start from 0, not from the line's X position!
+	// This ensures correct backdrop accumulation across the entire scanline.
+	acc := float32(0)
+
+	// Process each pixel column from left to right (0 to width)
+	// This matches fine.go which processes all pixels in the tile row
+	for xIdx := 0; xIdx < af.width; xIdx++ {
+		pxLeftX := float32(xIdx)
+		pxRightX := pxLeftX + 1.0
+
+		// Calculate Y coordinates where line intersects pixel left and right edges
+		// Using: y = lineTopY + (x - lineTopX) * ySlope
+		linePxLeftY := lineTopY + (pxLeftX-lineTopX)*ySlope
+		linePxRightY := lineTopY + (pxRightX-lineTopX)*ySlope
+
+		// Clamp to scanline Y bounds and line Y bounds
+		linePxLeftY = clamp32(linePxLeftY, yTop, yBot)
+		linePxRightY = clamp32(linePxRightY, yTop, yBot)
+
+		// Calculate X coordinates at the clamped Y values
+		// Using: x = lineTopX + (y - lineTopY) * xSlope
+		linePxLeftYX := lineTopX + (linePxLeftY-lineTopY)*xSlope
+		linePxRightYX := lineTopX + (linePxRightY-lineTopY)*xSlope
+
+		// Height of line segment within this pixel's row
+		pixelH := linePxRightY - linePxLeftY
+		if pixelH < 0 {
+			pixelH = -pixelH
 		}
+
+		// Trapezoidal area: the area enclosed between the line and pixel's right edge
+		// This is 0.5 * height * (width1 + width2) where widths are distances from
+		// line to right edge at top and bottom of segment within pixel
+		//
+		// IMPORTANT: Do NOT clamp area! The algorithm relies on area values outside [0,1]
+		// for correct anti-aliasing. The final winding->coverage conversion handles clamping.
+		area := 0.5 * pixelH * (2*pxRightX - linePxRightYX - linePxLeftYX)
+
+		// Add area contribution plus accumulated winding from left
+		// This is the core of the analytic AA algorithm from fine.go
+		af.winding[xIdx] += (area*sign + acc)
+
+		// Update accumulator for NEXT pixel
+		acc += pixelH * sign
 	}
-}
-
-// computeTrapezoidalCoverage computes the exact coverage of an edge segment
-// within a single pixel using trapezoidal integration.
-//
-// This implements the core algorithm from vello's fine.rs:
-//
-//	a = (b + 0.5 * (d*d - c*c) - xmin) / (xmax - xmin)
-//
-// Where:
-//   - xmin, xmax are the X extents of the edge within the pixel's Y range
-//   - b, c, d are derived from clamping to pixel X bounds
-func (af *AnalyticFiller) computeTrapezoidalCoverage(
-	x0, y0, x1, y1 float32, // Edge segment endpoints
-	pixelX, pixelY float32, // Pixel coordinates
-) float32 {
-	// Pixel bounds
-	pxMin := pixelX
-	pxMax := pixelX + 1.0
-	pyMin := pixelY
-	pyMax := pixelY + 1.0
-
-	// Clip edge to pixel Y bounds
-	if y0 > y1 {
-		x0, x1 = x1, x0
-		y0, y1 = y1, y0
-	}
-
-	// Y clipping
-	if y1 <= pyMin || y0 >= pyMax {
-		return 0 // Edge doesn't intersect pixel Y range
-	}
-
-	// Compute t values for intersection with pixel Y bounds
-	dy := y1 - y0
-	if dy == 0 {
-		return 0 // Horizontal edge
-	}
-
-	dyRecip := 1.0 / dy
-	t0 := clamp32((pyMin-y0)*dyRecip, 0, 1)
-	t1 := clamp32((pyMax-y0)*dyRecip, 0, 1)
-
-	// Compute X coordinates at clipped Y bounds
-	dx := x1 - x0
-	xTop := x0 + t0*dx
-	xBot := x0 + t1*dx
-
-	// Ensure xTop <= xBot
-	xmin := xTop
-	xmax := xBot
-	if xmin > xmax {
-		xmin, xmax = xmax, xmin
-	}
-
-	// Skip if edge is entirely outside pixel X range
-	if xmax <= pxMin || xmin >= pxMax {
-		return 0
-	}
-
-	// Trapezoidal area calculation (from vello)
-	// This computes the area of the trapezoid formed by the edge
-	// within the pixel bounds.
-	b := min32f(xmax, pxMax)
-	c := max32f(min32f(xTop, xBot), pxMin)
-	c = min32f(c, pxMax)
-	d := max32f(min32f(xTop, xBot), pxMin)
-
-	// Guard against division by zero
-	xRange := xmax - xmin
-	if xRange < 1e-6 {
-		// Nearly vertical edge - use simple area
-		return (t1 - t0) * clamp32(1.0-(xmin-pxMin), 0, 1)
-	}
-
-	// Vello's trapezoidal formula
-	// a = (b + 0.5 * (d*d - c*c) - xmin) / (xmax - xmin)
-	cNorm := (c - pxMin) // Normalize to [0, 1]
-	dNorm := (d - pxMin)
-	bNorm := (b - pxMin)
-	area := (bNorm + 0.5*(dNorm*dNorm-cNorm*cNorm)/1.0 - (xmin - pxMin)) / xRange
-
-	// Scale by Y coverage
-	return clamp32(area*(t1-t0), 0, 1)
 }
 
 // applyFillRule converts accumulated winding values to coverage.

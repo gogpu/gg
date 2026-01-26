@@ -13,9 +13,11 @@ import (
 
 // EdgeBuilder converts paths to typed edges for analytic anti-aliasing.
 //
-// Unlike the flatten.go approach that converts all curves to line segments,
-// EdgeBuilder preserves curve information (QuadraticEdge, CubicEdge) which
-// enables higher quality anti-aliasing by evaluating curve coverage analytically.
+// By default, EdgeBuilder preserves curve information (QuadraticEdge, CubicEdge)
+// which enables higher quality anti-aliasing by evaluating curve coverage analytically.
+//
+// Alternatively, with flattenCurves=true, all curves are converted to line segments
+// at build time. This is simpler and more reliable for the AnalyticFiller.
 //
 // The builder ensures all edges are Y-monotonic by chopping curves at their
 // Y extrema before creating edge objects.
@@ -23,6 +25,7 @@ import (
 // Usage:
 //
 //	eb := NewEdgeBuilder(2) // 4x AA quality
+//	eb.SetFlattenCurves(true) // Flatten curves to lines
 //	eb.BuildFromScenePath(path, scene.IdentityAffine())
 //
 //	for edge := range eb.AllEdges() {
@@ -38,6 +41,9 @@ type EdgeBuilder struct {
 
 	// aaShift controls AA quality (0=none, 2=4x equivalent)
 	aaShift int
+
+	// flattenCurves when true converts all curves to line segments
+	flattenCurves bool
 
 	// bounds accumulates the bounding box of all edges
 	bounds edgeBounds
@@ -231,8 +237,26 @@ func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
 	eb.lineEdges = append(eb.lineEdges, *edge)
 }
 
+// SetFlattenCurves enables or disables curve flattening mode.
+// When enabled, all curves are converted to line segments at build time.
+// This is simpler and more reliable for AnalyticFiller.
+func (eb *EdgeBuilder) SetFlattenCurves(flatten bool) {
+	eb.flattenCurves = flatten
+}
+
+// FlattenCurves returns whether curve flattening is enabled.
+func (eb *EdgeBuilder) FlattenCurves() bool {
+	return eb.flattenCurves
+}
+
 // addQuad adds quadratic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
+	// If flattenCurves is enabled, convert curve to line segments
+	if eb.flattenCurves {
+		eb.flattenQuadToLines(x0, y0, cx, cy, x1, y1)
+		return
+	}
+
 	// Check if curve needs to be chopped at Y extrema
 	src := [3]GeomPoint{
 		{X: x0, Y: y0},
@@ -265,8 +289,67 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 	}
 }
 
+// flattenQuadToLines converts a quadratic bezier to line segments.
+// Uses adaptive subdivision based on flatness tolerance.
+func (eb *EdgeBuilder) flattenQuadToLines(x0, y0, cx, cy, x1, y1 float32) {
+	// Flatness tolerance: max deviation from straight line
+	const tolerance = 0.25
+
+	eb.flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance, 0)
+}
+
+// flattenQuadRecursive recursively subdivides a quadratic curve until flat enough.
+func (eb *EdgeBuilder) flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance float32, depth int) {
+	// Max recursion depth to prevent stack overflow
+	if depth > 10 {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
+
+	// Compute flatness: distance from control point to line (x0,y0)-(x1,y1)
+	// Using the formula: d = |cross(P1-P0, P2-P0)| / |P2-P0|
+	dx := x1 - x0
+	dy := y1 - y0
+	dcx := cx - x0
+	dcy := cy - y0
+
+	// Cross product magnitude (2D)
+	cross := dcx*dy - dcy*dx
+
+	// Length of baseline squared
+	lenSq := dx*dx + dy*dy
+
+	// Flatness metric: cross^2 / lenSq (avoids sqrt)
+	// If flat enough, emit line segment
+	if lenSq < 1e-6 || cross*cross/lenSq < tolerance*tolerance {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
+
+	// Subdivide at t=0.5 using de Casteljau
+	// Q0 = (P0 + P1) / 2
+	// Q1 = (P1 + P2) / 2
+	// R0 = (Q0 + Q1) / 2
+	q0x := (x0 + cx) * 0.5
+	q0y := (y0 + cy) * 0.5
+	q1x := (cx + x1) * 0.5
+	q1y := (cy + y1) * 0.5
+	r0x := (q0x + q1x) * 0.5
+	r0y := (q0y + q1y) * 0.5
+
+	// Recurse on both halves
+	eb.flattenQuadRecursive(x0, y0, q0x, q0y, r0x, r0y, tolerance, depth+1)
+	eb.flattenQuadRecursive(r0x, r0y, q1x, q1y, x1, y1, tolerance, depth+1)
+}
+
 // addCubic adds cubic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
+	// If flattenCurves is enabled, convert curve to line segments
+	if eb.flattenCurves {
+		eb.flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
+		return
+	}
+
 	// Check if curve needs to be chopped at Y extrema
 	src := [4]GeomPoint{
 		{X: x0, Y: y0},
@@ -302,6 +385,83 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 			eb.cubicEdges = append(eb.cubicEdges, edge)
 		}
 	}
+}
+
+// flattenCubicToLines converts a cubic bezier to line segments.
+// Uses adaptive subdivision based on flatness tolerance.
+func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
+	// Flatness tolerance: max deviation from straight line
+	const tolerance = 0.25
+
+	eb.flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
+}
+
+// flattenCubicRecursive recursively subdivides a cubic curve until flat enough.
+func (eb *EdgeBuilder) flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float32, depth int) {
+	// Max recursion depth to prevent stack overflow
+	if depth > 10 {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
+
+	// Compute flatness: max distance from control points to line (x0,y0)-(x1,y1)
+	dx := x1 - x0
+	dy := y1 - y0
+	lenSq := dx*dx + dy*dy
+
+	if lenSq < 1e-6 {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
+
+	// Distance from c1 to line
+	dc1x := c1x - x0
+	dc1y := c1y - y0
+	cross1 := dc1x*dy - dc1y*dx
+
+	// Distance from c2 to line
+	dc2x := c2x - x0
+	dc2y := c2y - y0
+	cross2 := dc2x*dy - dc2y*dx
+
+	// Use max flatness
+	maxCross := cross1
+	if cross1 < 0 {
+		maxCross = -cross1
+	}
+	if cross2 > maxCross {
+		maxCross = cross2
+	}
+	if cross2 < -maxCross {
+		maxCross = -cross2
+	}
+
+	// If flat enough, emit line segment
+	if maxCross*maxCross/lenSq < tolerance*tolerance {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
+
+	// Subdivide at t=0.5 using de Casteljau
+	// Level 1
+	m01x := (x0 + c1x) * 0.5
+	m01y := (y0 + c1y) * 0.5
+	m12x := (c1x + c2x) * 0.5
+	m12y := (c1y + c2y) * 0.5
+	m23x := (c2x + x1) * 0.5
+	m23y := (c2y + y1) * 0.5
+	// Level 2
+	m012x := (m01x + m12x) * 0.5
+	m012y := (m01y + m12y) * 0.5
+	m123x := (m12x + m23x) * 0.5
+	m123y := (m12y + m23y) * 0.5
+	// Level 3 - midpoint
+	mx := (m012x + m123x) * 0.5
+	my := (m012y + m123y) * 0.5
+
+	// Recurse on both halves
+	eb.flattenCubicRecursive(x0, y0, m01x, m01y, m012x, m012y, mx, my, tolerance, depth+1)
+	eb.flattenCubicRecursive(mx, my, m123x, m123y, m23x, m23y, x1, y1, tolerance, depth+1)
 }
 
 // combineResult represents the result of trying to combine vertical edges.
