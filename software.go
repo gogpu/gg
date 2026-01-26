@@ -3,6 +3,7 @@ package gg
 import (
 	"github.com/gogpu/gg/internal/path"
 	"github.com/gogpu/gg/internal/raster"
+	"github.com/gogpu/gg/internal/stroke"
 )
 
 // RenderMode specifies which anti-aliasing algorithm to use.
@@ -316,28 +317,109 @@ func (r *SoftwareRenderer) FillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 	return nil
 }
 
-// Stroke implements Renderer.Stroke.
+// Stroke implements Renderer.Stroke with anti-aliasing support.
+// Strokes are expanded to fill paths and rendered with the Fill method
+// to get smooth anti-aliased edges.
 func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Convert path to internal format and flatten
-	elements := convertPath(p)
-	flattenedPath := path.Flatten(elements)
-	rasterPoints := convertPoints(flattenedPath)
+	// Convert gg.Path to stroke.PathElement
+	strokeElements := convertPathToStrokeElements(p)
 
-	// Get color from paint
-	solidPattern, ok := paint.Pattern.(*SolidPattern)
-	if !ok {
-		return nil // Only solid patterns supported in v0.1
+	// Create stroke style from paint
+	strokeStyle := stroke.Stroke{
+		Width:      paint.LineWidth,
+		Cap:        convertLineCap(paint.LineCap),
+		Join:       convertLineJoin(paint.LineJoin),
+		MiterLimit: paint.MiterLimit,
 	}
-	color := solidPattern.Color
+	if strokeStyle.MiterLimit <= 0 {
+		strokeStyle.MiterLimit = 4.0 // Default
+	}
 
-	// Rasterize stroke
-	adapter := &pixmapAdapter{pixmap: pixmap}
-	r.rasterizer.Stroke(adapter, rasterPoints, paint.LineWidth, raster.RGBA{
-		R: color.R,
-		G: color.G,
-		B: color.B,
-		A: color.A,
-	})
+	// Create stroke expander with sub-pixel tolerance for smooth curves
+	expander := stroke.NewStrokeExpander(strokeStyle)
+	expander.SetTolerance(0.1) // Balance between smoothness and performance
 
-	return nil
+	// Expand stroke to fill path
+	expandedElements := expander.Expand(strokeElements)
+
+	// Convert back to gg.Path
+	strokePath := convertStrokeElementsToPath(expandedElements)
+
+	// Fill the stroke path - this gives us anti-aliased strokes
+	return r.Fill(pixmap, strokePath, paint)
+}
+
+// convertPathToStrokeElements converts gg.Path elements to stroke.PathElement.
+func convertPathToStrokeElements(p *Path) []stroke.PathElement {
+	var elements []stroke.PathElement
+	for _, elem := range p.Elements() {
+		switch e := elem.(type) {
+		case MoveTo:
+			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
+		case LineTo:
+			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
+		case QuadTo:
+			elements = append(elements, stroke.QuadTo{
+				Control: stroke.Point{X: e.Control.X, Y: e.Control.Y},
+				Point:   stroke.Point{X: e.Point.X, Y: e.Point.Y},
+			})
+		case CubicTo:
+			elements = append(elements, stroke.CubicTo{
+				Control1: stroke.Point{X: e.Control1.X, Y: e.Control1.Y},
+				Control2: stroke.Point{X: e.Control2.X, Y: e.Control2.Y},
+				Point:    stroke.Point{X: e.Point.X, Y: e.Point.Y},
+			})
+		case Close:
+			elements = append(elements, stroke.Close{})
+		}
+	}
+	return elements
+}
+
+// convertStrokeElementsToPath converts stroke.PathElement back to gg.Path.
+func convertStrokeElementsToPath(elements []stroke.PathElement) *Path {
+	p := NewPath()
+	for _, elem := range elements {
+		switch e := elem.(type) {
+		case stroke.MoveTo:
+			p.MoveTo(e.Point.X, e.Point.Y)
+		case stroke.LineTo:
+			p.LineTo(e.Point.X, e.Point.Y)
+		case stroke.QuadTo:
+			p.QuadraticTo(e.Control.X, e.Control.Y, e.Point.X, e.Point.Y)
+		case stroke.CubicTo:
+			p.CubicTo(e.Control1.X, e.Control1.Y, e.Control2.X, e.Control2.Y, e.Point.X, e.Point.Y)
+		case stroke.Close:
+			p.Close()
+		}
+	}
+	return p
+}
+
+// convertLineCap converts gg.LineCap to stroke.LineCap.
+func convertLineCap(cap LineCap) stroke.LineCap {
+	switch cap {
+	case LineCapButt:
+		return stroke.LineCapButt
+	case LineCapRound:
+		return stroke.LineCapRound
+	case LineCapSquare:
+		return stroke.LineCapSquare
+	default:
+		return stroke.LineCapButt
+	}
+}
+
+// convertLineJoin converts gg.LineJoin to stroke.LineJoin.
+func convertLineJoin(join LineJoin) stroke.LineJoin {
+	switch join {
+	case LineJoinMiter:
+		return stroke.LineJoinMiter
+	case LineJoinRound:
+		return stroke.LineJoinRound
+	case LineJoinBevel:
+		return stroke.LineJoinBevel
+	default:
+		return stroke.LineJoinMiter
+	}
 }

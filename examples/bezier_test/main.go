@@ -7,20 +7,13 @@ import (
 	"math"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend/native"
 )
 
 func main() {
 	const W, H = 800, 600
 
-	// Create software renderer with analytic AA
-	renderer := gg.NewSoftwareRenderer(W, H)
-	filler := native.NewAnalyticFillerAdapter(W, H)
-	renderer.SetAnalyticFiller(filler)
-	log.Println("Analytic AA enabled!")
-
-	// Create context with the analytic AA renderer
-	dc := gg.NewContext(W, H, gg.WithRenderer(renderer))
+	// Create context with default supersampled AA renderer
+	dc := gg.NewContext(W, H)
 
 	dc.ClearWithColor(gg.White)
 
