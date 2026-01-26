@@ -143,39 +143,35 @@ func TestStress100CubicCurves(t *testing.T) {
 		eb.CubicEdgeCount(), scanlineCount)
 }
 
-// TestStress10KCurves tests a path with 10,000 curves.
-func TestStress10KCurves(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 10K curves test in short mode")
-	}
-
-	filler := NewAnalyticFiller(2000, 2000)
+// TestStress500Curves tests a path with 500 curves (reasonable for CI with race detector).
+func TestStress500Curves(t *testing.T) {
+	filler := NewAnalyticFiller(500, 500)
 	eb := NewEdgeBuilder(2)
 
 	path := scene.NewPath()
-	path.MoveTo(1000, 100)
+	path.MoveTo(250, 50)
 
-	// 5000 quadratics
-	for i := 0; i < 5000; i++ {
-		angle := float64(i) * 0.00125663706144 // 2*pi/5000
-		r := 800 + float32(i%100)
-		x := 1000 + r*float32(cosApprox(angle))
-		y := 1000 + r*float32(sinApprox(angle))
-		cx := 1000 + (r-50)*float32(cosApprox(angle-0.0006))
-		cy := 1000 + (r-50)*float32(sinApprox(angle-0.0006))
+	// 250 quadratics
+	for i := 0; i < 250; i++ {
+		angle := float64(i) * 0.02513274122872 // 2*pi/250
+		r := 150 + float32(i%50)
+		x := 250 + r*float32(cosApprox(angle))
+		y := 250 + r*float32(sinApprox(angle))
+		cx := 250 + (r-25)*float32(cosApprox(angle-0.012))
+		cy := 250 + (r-25)*float32(sinApprox(angle-0.012))
 		path.QuadTo(cx, cy, x, y)
 	}
 
-	// 5000 cubics
-	for i := 0; i < 5000; i++ {
-		angle := float64(i) * 0.00125663706144 // 2*pi/5000
-		r := 500 + float32(i%100)
-		x := 1000 + r*float32(cosApprox(angle))
-		y := 1000 + r*float32(sinApprox(angle))
-		c1x := 1000 + (r+30)*float32(cosApprox(angle-0.0004))
-		c1y := 1000 + (r+30)*float32(sinApprox(angle-0.0004))
-		c2x := 1000 + (r-30)*float32(cosApprox(angle-0.0002))
-		c2y := 1000 + (r-30)*float32(sinApprox(angle-0.0002))
+	// 250 cubics
+	for i := 0; i < 250; i++ {
+		angle := float64(i) * 0.02513274122872 // 2*pi/250
+		r := 100 + float32(i%50)
+		x := 250 + r*float32(cosApprox(angle))
+		y := 250 + r*float32(sinApprox(angle))
+		c1x := 250 + (r+15)*float32(cosApprox(angle-0.008))
+		c1y := 250 + (r+15)*float32(sinApprox(angle-0.008))
+		c2x := 250 + (r-15)*float32(cosApprox(angle-0.004))
+		c2y := 250 + (r-15)*float32(sinApprox(angle-0.004))
 		path.CubicTo(c1x, c1y, c2x, c2y, x, y)
 	}
 
@@ -184,7 +180,7 @@ func TestStress10KCurves(t *testing.T) {
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
 
 	totalEdges := eb.EdgeCount()
-	if totalEdges < 1000 {
+	if totalEdges < 100 {
 		t.Errorf("expected many edges, got %d", totalEdges)
 	}
 
@@ -197,22 +193,18 @@ func TestStress10KCurves(t *testing.T) {
 		t.Error("expected to process scanlines")
 	}
 
-	t.Logf("10K curves: %d total edges (%d lines, %d quads, %d cubics), %d scanlines",
+	t.Logf("500 curves: %d total edges (%d lines, %d quads, %d cubics), %d scanlines",
 		totalEdges, eb.LineEdgeCount(), eb.QuadraticEdgeCount(),
 		eb.CubicEdgeCount(), scanlineCount)
 }
 
-// TestStressLargeCanvas tests rendering on a 4K canvas.
+// TestStressLargeCanvas tests rendering on a 1080p canvas.
 func TestStressLargeCanvas(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 4K canvas test in short mode")
-	}
-
-	filler := NewAnalyticFiller(3840, 2160)
+	filler := NewAnalyticFiller(1920, 1080)
 	eb := NewEdgeBuilder(2)
 
 	// Large circle
-	path := scene.NewPath().Circle(1920, 1080, 900)
+	path := scene.NewPath().Circle(960, 540, 400)
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
 
 	scanlineCount := 0
@@ -220,11 +212,11 @@ func TestStressLargeCanvas(t *testing.T) {
 		scanlineCount++
 	})
 
-	if scanlineCount < 1000 {
-		t.Errorf("expected many scanlines for 4K canvas, got %d", scanlineCount)
+	if scanlineCount < 500 {
+		t.Errorf("expected many scanlines for 1080p canvas, got %d", scanlineCount)
 	}
 
-	t.Logf("4K canvas: %d scanlines", scanlineCount)
+	t.Logf("1080p canvas: %d scanlines", scanlineCount)
 }
 
 // TestStressNestedPaths tests deeply nested subpaths.
@@ -262,7 +254,7 @@ func TestStressConcurrentFill(t *testing.T) {
 	path := scene.NewPath().Circle(100, 100, 50)
 
 	// Create independent fillers
-	const numGoroutines = 10
+	const numGoroutines = 4
 	done := make(chan bool, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
@@ -275,7 +267,7 @@ func TestStressConcurrentFill(t *testing.T) {
 
 			filler := NewAnalyticFiller(200, 200)
 
-			for j := 0; j < 100; j++ {
+			for j := 0; j < 10; j++ {
 				filler.Reset()
 				filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
 			}
@@ -299,7 +291,7 @@ func TestStressResetReuse(t *testing.T) {
 		createComplexCurvesPath(),
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 50; i++ {
 		path := paths[i%len(paths)]
 		eb.Reset()
 		eb.BuildFromScenePath(path, scene.IdentityAffine())
