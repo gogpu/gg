@@ -357,6 +357,6 @@ func (fr FillRule) String() string {
 	case FillRuleEvenOdd:
 		return "EvenOdd"
 	default:
-		return "Unknown" //nolint:goconst // Standard pattern for unknown enum values
+		return "Unknown"
 	}
 }
