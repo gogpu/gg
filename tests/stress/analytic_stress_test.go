@@ -3,12 +3,13 @@
 
 //go:build stress
 
-package native
+package stress
 
 import (
 	"runtime"
 	"testing"
 
+	"github.com/gogpu/gg/backend/native"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -19,8 +20,8 @@ import (
 
 // TestStress100Circles tests rendering 100 circles.
 func TestStress100Circles(t *testing.T) {
-	filler := NewAnalyticFiller(800, 600)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(800, 600)
+	eb := native.NewEdgeBuilder(2)
 
 	// Create 100 circles
 	for i := 0; i < 100; i++ {
@@ -31,7 +32,7 @@ func TestStress100Circles(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -44,8 +45,8 @@ func TestStress100Circles(t *testing.T) {
 
 // TestStress1000Edges tests a path with 1000 edges.
 func TestStress1000Edges(t *testing.T) {
-	filler := NewAnalyticFiller(1000, 1000)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(1000, 1000)
+	eb := native.NewEdgeBuilder(2)
 
 	// Create path with 1000 line segments
 	path := scene.NewPath()
@@ -66,7 +67,7 @@ func TestStress1000Edges(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -79,8 +80,8 @@ func TestStress1000Edges(t *testing.T) {
 
 // TestStress100QuadraticCurves tests 100 quadratic Bezier curves.
 func TestStress100QuadraticCurves(t *testing.T) {
-	filler := NewAnalyticFiller(800, 600)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(800, 600)
+	eb := native.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(50, 300)
@@ -102,7 +103,7 @@ func TestStress100QuadraticCurves(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -112,8 +113,8 @@ func TestStress100QuadraticCurves(t *testing.T) {
 
 // TestStress100CubicCurves tests 100 cubic Bezier curves.
 func TestStress100CubicCurves(t *testing.T) {
-	filler := NewAnalyticFiller(1000, 600)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(1000, 600)
+	eb := native.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(50, 300)
@@ -137,7 +138,7 @@ func TestStress100CubicCurves(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -147,8 +148,8 @@ func TestStress100CubicCurves(t *testing.T) {
 
 // TestStress500Curves tests a path with 500 curves (reasonable for CI with race detector).
 func TestStress500Curves(t *testing.T) {
-	filler := NewAnalyticFiller(500, 500)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(500, 500)
+	eb := native.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(250, 50)
@@ -187,7 +188,7 @@ func TestStress500Curves(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -202,15 +203,15 @@ func TestStress500Curves(t *testing.T) {
 
 // TestStressLargeCanvas tests rendering on a 1080p canvas.
 func TestStressLargeCanvas(t *testing.T) {
-	filler := NewAnalyticFiller(1920, 1080)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(1920, 1080)
+	eb := native.NewEdgeBuilder(2)
 
 	// Large circle
 	path := scene.NewPath().Circle(960, 540, 400)
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -223,8 +224,8 @@ func TestStressLargeCanvas(t *testing.T) {
 
 // TestStressNestedPaths tests deeply nested subpaths.
 func TestStressNestedPaths(t *testing.T) {
-	filler := NewAnalyticFiller(500, 500)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(500, 500)
+	eb := native.NewEdgeBuilder(2)
 
 	// Create 50 nested rectangles
 	for i := 0; i < 50; i++ {
@@ -243,7 +244,7 @@ func TestStressNestedPaths(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -264,14 +265,14 @@ func TestStressConcurrentFill(t *testing.T) {
 			defer func() { done <- true }()
 
 			// Each goroutine has its own EdgeBuilder and Filler
-			eb := NewEdgeBuilder(2)
+			eb := native.NewEdgeBuilder(2)
 			eb.BuildFromScenePath(path, scene.IdentityAffine())
 
-			filler := NewAnalyticFiller(200, 200)
+			filler := native.NewAnalyticFiller(200, 200)
 
 			for j := 0; j < 10; j++ {
 				filler.Reset()
-				filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+				filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
 			}
 		}()
 	}
@@ -284,8 +285,8 @@ func TestStressConcurrentFill(t *testing.T) {
 
 // TestStressResetReuse tests repeated reset and reuse.
 func TestStressResetReuse(t *testing.T) {
-	filler := NewAnalyticFiller(500, 500)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(500, 500)
+	eb := native.NewEdgeBuilder(2)
 
 	paths := []*scene.Path{
 		scene.NewPath().Circle(250, 250, 100),
@@ -298,7 +299,7 @@ func TestStressResetReuse(t *testing.T) {
 		eb.Reset()
 		eb.BuildFromScenePath(path, scene.IdentityAffine())
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
 	}
 }
 
@@ -314,13 +315,13 @@ func TestMemoryUsageAnalytic(t *testing.T) {
 	runtime.ReadMemStats(&m1)
 
 	// Create filler and process path
-	filler := NewAnalyticFiller(1920, 1080)
-	eb := NewEdgeBuilder(2)
+	filler := native.NewAnalyticFiller(1920, 1080)
+	eb := native.NewEdgeBuilder(2)
 
 	path := scene.NewPath().Circle(960, 540, 400)
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
 
-	filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
 
 	runtime.GC()
 	var m2 runtime.MemStats
@@ -341,7 +342,7 @@ func TestMemoryUsageEdgeBuilder(t *testing.T) {
 	var m1 runtime.MemStats
 	runtime.ReadMemStats(&m1)
 
-	eb := NewEdgeBuilder(2)
+	eb := native.NewEdgeBuilder(2)
 
 	// Build 100 circles
 	for i := 0; i < 100; i++ {
@@ -372,7 +373,7 @@ func TestMemoryUsageAlphaRuns(t *testing.T) {
 	runtime.ReadMemStats(&m1)
 
 	// Create wide alpha runs (4K width)
-	ar := NewAlphaRuns(3840)
+	ar := native.NewAlphaRuns(3840)
 
 	// Simulate heavy usage
 	for i := 0; i < 1000; i++ {
