@@ -176,6 +176,14 @@ func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
 //	p(t) = A*t^2 + B*t + C
 //	where A = p0 - 2*p1 + p2, B = 2*(p1 - p0), C = p0
 type QuadraticEdge struct {
+	// TopY is the curve's overall top scanline (for AET insertion timing).
+	// This is set once at creation and never changes, unlike line.FirstY
+	// which changes as we step through curve segments.
+	TopY int32
+
+	// BottomY is the curve's overall bottom scanline.
+	BottomY int32
+
 	// line is the current line segment for AET compatibility.
 	line LineEdge
 
@@ -209,14 +217,8 @@ type QuadraticEdge struct {
 //   - p2: end point
 //   - shift: AA shift (0 for no AA, 2 for 4x AA quality)
 func NewQuadraticEdge(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
-	quad := newQuadraticEdgeSetup(p0, p1, p2, shift)
-	if quad == nil {
-		return nil
-	}
-	if quad.Update() {
-		return quad
-	}
-	return nil
+	// newQuadraticEdgeSetup already calls Update() to initialize the first segment
+	return newQuadraticEdgeSetup(p0, p1, p2, shift)
 }
 
 // newQuadraticEdgeSetup performs the setup for a quadratic edge.
@@ -317,14 +319,16 @@ func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
 		storedShift = 0
 	}
 
-	return &QuadraticEdge{
+	edge := &QuadraticEdge{
+		TopY:    top,    // Curve's overall top Y (for AET insertion)
+		BottomY: bottom, // Curve's overall bottom Y
 		line: LineEdge{
 			Prev:    -1,
 			Next:    -1,
 			X:       0,
 			DX:      0,
-			FirstY:  0,
-			LastY:   0,
+			FirstY:  top, // Will be updated by Update()
+			LastY:   bottom - 1,
 			Winding: winding,
 		},
 		curveCount: curveCount,
@@ -338,6 +342,14 @@ func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
 		qLastX:     qLastX,
 		qLastY:     qLastY,
 	}
+
+	// Initialize the first line segment by calling Update()
+	// This sets up X, DX, FirstY, LastY for the first curve segment
+	if !edge.Update() {
+		return nil // Degenerate curve
+	}
+
+	return edge
 }
 
 // Update advances the quadratic curve to the next line segment.
@@ -426,6 +438,14 @@ func (q *QuadraticEdge) Winding() int8 {
 //	C = -3*p0 + 3*p1
 //	D = p0
 type CubicEdge struct {
+	// TopY is the curve's overall top scanline (for AET insertion timing).
+	// This is set once at creation and never changes, unlike line.FirstY
+	// which changes as we step through curve segments.
+	TopY int32
+
+	// BottomY is the curve's overall bottom scanline.
+	BottomY int32
+
 	// line is the current line segment for AET compatibility.
 	line LineEdge
 
@@ -568,13 +588,15 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicE
 	cLastY := FDot6ToFDot16(y3)
 
 	return &CubicEdge{
+		TopY:    top, // Curve's overall top Y (for AET insertion)
+		BottomY: bot, // Curve's overall bottom Y
 		line: LineEdge{
 			Prev:    -1,
 			Next:    -1,
 			X:       0,
 			DX:      0,
-			FirstY:  0,
-			LastY:   0,
+			FirstY:  top, // Will be updated by Update()
+			LastY:   bot - 1,
 			Winding: winding,
 		},
 		curveCount: curveCount,
@@ -784,6 +806,38 @@ func (e *CurveEdgeVariant) AsLine() *LineEdge {
 		return &e.Cubic.line
 	default:
 		return nil
+	}
+}
+
+// TopY returns the curve's overall top Y coordinate (for AET insertion timing).
+// For line edges, this is the same as FirstY.
+// For curve edges, this is the curve's original top Y before stepping.
+func (e *CurveEdgeVariant) TopY() int32 {
+	switch e.Type {
+	case EdgeTypeLine:
+		return e.Line.FirstY
+	case EdgeTypeQuadratic:
+		return e.Quadratic.TopY
+	case EdgeTypeCubic:
+		return e.Cubic.TopY
+	default:
+		return 0
+	}
+}
+
+// BottomY returns the curve's overall bottom Y coordinate.
+// For line edges, this is the same as LastY + 1.
+// For curve edges, this is the curve's original bottom Y.
+func (e *CurveEdgeVariant) BottomY() int32 {
+	switch e.Type {
+	case EdgeTypeLine:
+		return e.Line.LastY + 1
+	case EdgeTypeQuadratic:
+		return e.Quadratic.BottomY
+	case EdgeTypeCubic:
+		return e.Cubic.BottomY
+	default:
+		return 0
 	}
 }
 

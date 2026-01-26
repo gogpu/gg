@@ -429,10 +429,10 @@ func (eb *EdgeBuilder) AllEdges() iter.Seq[CurveEdgeVariant] {
 			})
 		}
 
-		// Add quadratic edges
+		// Add quadratic edges (use TopY for sorting, not current segment's FirstY)
 		for _, quad := range eb.quadraticEdges {
 			edges = append(edges, sortableEdge{
-				topY: quad.line.FirstY,
+				topY: quad.TopY,
 				variant: CurveEdgeVariant{
 					Type:      EdgeTypeQuadratic,
 					Quadratic: quad,
@@ -440,10 +440,10 @@ func (eb *EdgeBuilder) AllEdges() iter.Seq[CurveEdgeVariant] {
 			})
 		}
 
-		// Add cubic edges
+		// Add cubic edges (use TopY for sorting, not current segment's FirstY)
 		for _, cubic := range eb.cubicEdges {
 			edges = append(edges, sortableEdge{
-				topY: cubic.line.FirstY,
+				topY: cubic.TopY,
 				variant: CurveEdgeVariant{
 					Type:  EdgeTypeCubic,
 					Cubic: cubic,

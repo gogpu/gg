@@ -104,6 +104,32 @@ func (aet *CurveAwareAET) RemoveExpired(y int32) {
 	aet.edges = aet.edges[:n]
 }
 
+// RemoveExpiredSubpixel removes edges that have completely ended.
+// Uses the edge's overall BottomY (not current segment) for expiration.
+//
+// This is used when coordinates are in sub-pixel space with AA scaling.
+// An edge is expired when its BottomY <= ySubpixel.
+func (aet *CurveAwareAET) RemoveExpiredSubpixel(ySubpixel int32) {
+	// Use in-place filtering to avoid allocations
+	n := 0
+	for i := range aet.edges {
+		edge := &aet.edges[i].edge
+
+		// Get the curve's overall bottom Y (not current segment)
+		bottomY := edge.BottomY()
+
+		// Edge is active if it hasn't completely ended
+		// Note: BottomY is exclusive (like LastY + 1)
+		isActive := bottomY > ySubpixel
+
+		if isActive {
+			aet.edges[n] = aet.edges[i]
+			n++
+		}
+	}
+	aet.edges = aet.edges[:n]
+}
+
 // StepCurves advances curve edges to their next line segment.
 // This should be called once per scanline after RemoveExpired.
 //
@@ -221,11 +247,11 @@ func (aet *CurveAwareAET) AdvanceX() {
 
 // EdgeRange represents a range of edges for a scanline span.
 type EdgeRange struct {
-	StartX    int32    // Left X of the span
-	EndX      int32    // Right X of the span
-	Winding   int32    // Accumulated winding number
-	Coverage  float32  // Accumulated coverage
-	EdgeCount int      // Number of edges in this range
+	StartX    int32   // Left X of the span
+	EndX      int32   // Right X of the span
+	Winding   int32   // Accumulated winding number
+	Coverage  float32 // Accumulated coverage
+	EdgeCount int     // Number of edges in this range
 }
 
 // ComputeSpans computes the horizontal spans for the current scanline.
@@ -331,6 +357,6 @@ func (fr FillRule) String() string {
 	case FillRuleEvenOdd:
 		return "EvenOdd"
 	default:
-		return "Unknown"
+		return "Unknown" //nolint:goconst // Standard pattern for unknown enum values
 	}
 }

@@ -392,12 +392,12 @@ func TestEdgeCase_AllEdgeTypesInOnePath(t *testing.T) {
 
 	path := scene.NewPath()
 	path.MoveTo(50, 50)
-	path.LineTo(100, 50)                      // Line
-	path.QuadTo(150, 50, 150, 100)            // Quadratic
+	path.LineTo(100, 50)                       // Line
+	path.QuadTo(150, 50, 150, 100)             // Quadratic
 	path.CubicTo(150, 150, 200, 150, 200, 200) // Cubic
-	path.LineTo(50, 200)                      // Line
-	path.QuadTo(50, 150, 100, 150)            // Quadratic
-	path.CubicTo(100, 100, 50, 100, 50, 50)   // Cubic back to start
+	path.LineTo(50, 200)                       // Line
+	path.QuadTo(50, 150, 100, 150)             // Quadratic
+	path.CubicTo(100, 100, 50, 100, 50, 50)    // Cubic back to start
 	path.Close()
 
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
@@ -435,7 +435,7 @@ func TestEdgeCase_TransformedPath(t *testing.T) {
 		{"translate", scene.TranslateAffine(200, 200)},
 		{"scale", scene.ScaleAffine(2, 2).Multiply(scene.TranslateAffine(200, 200))},
 		{"rotate45", scene.RotateAffine(0.785398).Multiply(scene.TranslateAffine(200, 200))}, // 45 degrees
-		{"shear", scene.Affine{A: 1, B: 0.5, C: 200, D: 0, E: 1, F: 200}},                   // Shear transform
+		{"shear", scene.Affine{A: 1, B: 0.5, C: 200, D: 0, E: 1, F: 200}},                    // Shear transform
 	}
 
 	for _, tt := range transforms {

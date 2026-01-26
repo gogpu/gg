@@ -87,7 +87,13 @@ func (af *AnalyticFiller) Fill(
 
 	bounds := eb.Bounds()
 
-	// Compute scanline range
+	// Get AA scaling factor from edge builder.
+	// Edge coordinates are in sub-pixel space: pixel * (1 << aaShift)
+	aaShift := eb.AAShift()
+	//nolint:gosec // G115: aaShift is bounded by MaxCoeffShift (6), safe conversion
+	aaScale := int32(1) << uint(aaShift)
+
+	// Compute scanline range in pixel coordinates
 	yMin := int(math.Floor(float64(bounds.MinY)))
 	yMax := int(math.Ceil(float64(bounds.MaxY)))
 
@@ -102,21 +108,32 @@ func (af *AnalyticFiller) Fill(
 	af.aet.Reset()
 	af.edgeIdx = 0
 
-	// Collect all edges sorted by top Y
+	// Collect all edges sorted by top Y (edges are sorted in sub-pixel space)
 	allEdges := make([]CurveEdgeVariant, 0, eb.EdgeCount())
 	for edge := range eb.AllEdges() {
 		allEdges = append(allEdges, edge)
 	}
 
-	// Process each scanline
+	// Process each scanline in pixel space
 	for y := yMin; y < yMax; y++ {
-		af.processScanline(y, allEdges, fillRule, callback)
+		af.processScanlineWithScale(y, aaScale, allEdges, fillRule, callback)
 	}
 }
 
-// processScanline processes a single scanline using the analytic algorithm.
-func (af *AnalyticFiller) processScanline(
+// processScanlineWithScale processes a single pixel scanline, accounting for AA scaling.
+//
+// Edge coordinates are in sub-pixel space (multiplied by aaScale).
+// The callback receives pixel coordinates.
+//
+// Parameters:
+//   - y: pixel Y coordinate
+//   - aaScale: sub-pixel scale factor (1 << aaShift)
+//   - allEdges: all edges sorted by TopY (in sub-pixel space)
+//   - fillRule: fill rule to apply
+//   - callback: receives pixel Y and alpha runs
+func (af *AnalyticFiller) processScanlineWithScale(
 	y int,
+	aaScale int32,
 	allEdges []CurveEdgeVariant,
 	fillRule FillRule,
 	callback func(y int, runs *AlphaRuns),
@@ -129,22 +146,24 @@ func (af *AnalyticFiller) processScanline(
 		af.winding[i] = 0
 	}
 
-	// Remove edges that have ended
+	// Convert pixel Y to sub-pixel space for edge comparisons
 	//nolint:gosec // y is bounded by height which fits in int32
-	af.aet.RemoveExpired(int32(y))
+	ySubpixel := int32(y) * aaScale
+	ySubpixelNext := ySubpixel + aaScale
 
-	// Add new edges that start at this scanline
+	// Remove edges that have ended (edges whose BottomY <= current sub-pixel Y)
+	af.aet.RemoveExpiredSubpixel(ySubpixel)
+
+	// Add new edges that start at or before this scanline
+	// Edge TopY is in sub-pixel coordinates, compare with sub-pixel Y
 	for af.edgeIdx < len(allEdges) {
 		edge := allEdges[af.edgeIdx]
-		line := edge.AsLine()
-		if line == nil {
-			af.edgeIdx++
-			continue
-		}
 
-		// Edges are sorted by FirstY, so stop when we hit edges starting below y
-		//nolint:gosec // y is bounded by height
-		if line.FirstY > int32(y) {
+		// Use TopY() which returns the curve's overall top Y (not current segment)
+		topY := edge.TopY()
+
+		// Edges are sorted by TopY, stop when we hit edges starting below this pixel
+		if topY >= ySubpixelNext {
 			break
 		}
 
@@ -153,15 +172,17 @@ func (af *AnalyticFiller) processScanline(
 		af.edgeIdx++
 	}
 
-	// Step curve edges to generate new line segments if needed
-	af.aet.StepCurves()
+	// NOTE: We don't call StepCurves() here anymore.
+	// Curve segments are stepped on-demand inside accumulateCoverageSubpixel
+	// when segments end within the current scanline.
 
 	// Sort edges by X for scanline processing
 	af.aet.SortByX()
 
 	// Process each edge, accumulating coverage
+	// Pass sub-pixel Y range for accurate coverage calculation
 	af.aet.ForEach(func(edge *CurveEdgeVariant) bool {
-		af.accumulateCoverage(edge, y, fillRule)
+		af.accumulateCoverageSubpixel(edge, ySubpixel, aaScale, fillRule)
 		return true
 	})
 
@@ -174,34 +195,115 @@ func (af *AnalyticFiller) processScanline(
 	// Advance edges for next scanline
 	af.aet.AdvanceX()
 
-	// Callback with the alpha runs
+	// Callback with the alpha runs (in pixel coordinates)
 	callback(y, af.alphaRuns)
 }
 
-// accumulateCoverage computes the coverage contribution of an edge to pixels.
+// accumulateCoverageSubpixel computes coverage with sub-pixel edge coordinates.
 //
-// This is the core of the analytic anti-aliasing algorithm, implementing
-// trapezoidal integration as described in vello's fine.rs.
-func (af *AnalyticFiller) accumulateCoverage(edge *CurveEdgeVariant, y int, _ FillRule) {
-	line := edge.AsLine()
-	if line == nil {
+// This version handles edges that use sub-pixel Y coordinates (multiplied by aaScale).
+// The X coordinates are also scaled by the AA factor.
+//
+// IMPORTANT: This function steps through curve segments as needed when a segment
+// ends within the current scanline. This ensures full coverage across the scanline.
+//
+// Parameters:
+//   - edge: the edge to process
+//   - ySubpixel: current scanline in sub-pixel coordinates
+//   - aaScale: sub-pixel scale factor (1 << aaShift)
+//   - fillRule: fill rule (unused, for interface compatibility)
+func (af *AnalyticFiller) accumulateCoverageSubpixel(
+	edge *CurveEdgeVariant,
+	ySubpixel int32,
+	aaScale int32,
+	_ FillRule,
+) {
+	aaScaleF := float32(aaScale)
+	ySubpixelEnd := ySubpixel + aaScale
+
+	// Pixel Y range for this scanline
+	yPixel := float32(ySubpixel) / aaScaleF
+	yPixelEnd := yPixel + 1.0
+
+	// Process all segments that intersect this scanline
+	// Segments can end mid-scanline, so we may need to step through multiple
+	for {
+		line := edge.AsLine()
+		if line == nil {
+			return
+		}
+
+		// Check if current segment intersects the scanline
+		segmentFirstY := line.FirstY
+		segmentLastY := line.LastY + 1 // Exclusive end
+
+		// Skip if segment is entirely after this scanline
+		if segmentFirstY >= ySubpixelEnd {
+			return
+		}
+
+		// Skip if segment is entirely before this scanline
+		if segmentLastY <= ySubpixel {
+			// Try to step to next segment
+			if !af.stepCurveSegment(edge) {
+				return
+			}
+			continue
+		}
+
+		// Segment intersects scanline - compute coverage
+		af.computeSegmentCoverage(line, ySubpixel, ySubpixelEnd, yPixel, yPixelEnd, aaScaleF)
+
+		// If segment ends within this scanline, step to next segment
+		if segmentLastY < ySubpixelEnd {
+			if !af.stepCurveSegment(edge) {
+				return // No more segments
+			}
+			// Continue to process next segment for remaining coverage
+			continue
+		}
+
+		// Segment extends past this scanline, we're done
 		return
 	}
+}
 
+// stepCurveSegment advances a curve edge to its next segment.
+// Returns true if a new segment was produced.
+func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
+	switch edge.Type {
+	case EdgeTypeQuadratic:
+		if edge.Quadratic.CurveCount() > 0 {
+			return edge.Quadratic.Update()
+		}
+	case EdgeTypeCubic:
+		// Cubic uses negative count, increments toward 0
+		if edge.Cubic.CurveCount() < 0 {
+			return edge.Cubic.Update()
+		}
+	}
+	return false
+}
+
+// computeSegmentCoverage computes coverage for a single line segment.
+func (af *AnalyticFiller) computeSegmentCoverage(
+	line *LineEdge,
+	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
+	yPixel, yPixelEnd, aaScaleF float32,
+) {
 	// Convert fixed-point coordinates to float
-	// Line.X is in FDot16 (16.16 fixed-point)
-	x := FDot16ToFloat32(line.X)
-	dx := FDot16ToFloat32(line.DX)
+	// Line.X is in FDot16 (16.16 fixed-point) and scaled by aaScale
+	// Line.DX is the slope (dimensionless ratio), NOT scaled
+	x := FDot16ToFloat32(line.X) / aaScaleF // Convert X to pixel space
+	dx := FDot16ToFloat32(line.DX)          // Slope is dimensionless, don't divide!
 
-	// Get Y range this edge covers for this scanline
-	yF := float32(y)
-	yTop := yF
-	yBot := yF + 1.0
+	// Edge's Y range is in sub-pixel coordinates, convert to pixel
+	firstY := float32(line.FirstY) / aaScaleF
+	lastY := float32(line.LastY+1) / aaScaleF // LastY is inclusive
 
-	// Clamp to edge's Y range
-	firstY := float32(line.FirstY)
-	lastY := float32(line.LastY + 1) // LastY is inclusive
-
+	// Clamp to scanline's Y range
+	yTop := yPixel
+	yBot := yPixelEnd
 	if yTop < firstY {
 		yTop = firstY
 	}
@@ -209,7 +311,7 @@ func (af *AnalyticFiller) accumulateCoverage(edge *CurveEdgeVariant, y int, _ Fi
 		yBot = lastY
 	}
 
-	// Skip if edge doesn't intersect this scanline
+	// Skip if segment doesn't intersect this scanline (shouldn't happen here)
 	dy := yBot - yTop
 	if dy <= 0 {
 		return
@@ -219,13 +321,15 @@ func (af *AnalyticFiller) accumulateCoverage(edge *CurveEdgeVariant, y int, _ Fi
 	sign := float32(line.Winding)
 
 	// Compute X coordinates at yTop and yBot
-	// X advances by DX per scanline
-	tTop := yTop - firstY
+	// In sub-pixel space: x_sub = x0_sub + DX * (y_sub - y0_sub)
+	// In pixel space: x_pix = x_sub/scale = x0_pix + DX * (y_pix - y0_pix)
+	// So DX remains unchanged when converting to pixel coordinates
+	tTop := yTop - firstY // Pixel delta
 	tBot := yBot - firstY
 	xTop := x + dx*tTop
 	xBot := x + dx*tBot
 
-	// Ensure xTop <= xBot for the algorithm
+	// Ensure xMin <= xMax for the algorithm
 	xMin := xTop
 	xMax := xBot
 	if xMin > xMax {
@@ -249,7 +353,7 @@ func (af *AnalyticFiller) accumulateCoverage(edge *CurveEdgeVariant, y int, _ Fi
 		coverage := af.computeTrapezoidalCoverage(
 			xTop, yTop,
 			xBot, yBot,
-			float32(px), yF,
+			float32(px), yPixel,
 		)
 
 		// Accumulate coverage with winding direction

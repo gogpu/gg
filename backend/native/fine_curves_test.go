@@ -77,7 +77,7 @@ func TestRasterizeCurvesWithQuadratic(t *testing.T) {
 	eb := NewEdgeBuilder(2)
 	eb.addQuad(
 		10, 10, // start point
-		32, 5,  // control point
+		32, 5, // control point
 		54, 10, // end point
 	)
 
@@ -355,45 +355,45 @@ func TestLineEdgeToSegment(t *testing.T) {
 // TestFillTileWithBackdrop verifies backdrop filling.
 func TestFillTileWithBackdrop(t *testing.T) {
 	tests := []struct {
-		name          string
-		backdrop      int32
-		fillRule      scene.FillStyle
-		expectEmpty   bool
+		name           string
+		backdrop       int32
+		fillRule       scene.FillStyle
+		expectEmpty    bool
 		expectCoverage uint8
 	}{
 		{
-			name:          "nonzero positive",
-			backdrop:      1,
-			fillRule:      scene.FillNonZero,
-			expectEmpty:   false,
+			name:           "nonzero positive",
+			backdrop:       1,
+			fillRule:       scene.FillNonZero,
+			expectEmpty:    false,
 			expectCoverage: 255,
 		},
 		{
-			name:          "nonzero negative",
-			backdrop:      -1,
-			fillRule:      scene.FillNonZero,
-			expectEmpty:   false,
+			name:           "nonzero negative",
+			backdrop:       -1,
+			fillRule:       scene.FillNonZero,
+			expectEmpty:    false,
 			expectCoverage: 255,
 		},
 		{
-			name:          "nonzero zero",
-			backdrop:      0,
-			fillRule:      scene.FillNonZero,
-			expectEmpty:   true,
+			name:           "nonzero zero",
+			backdrop:       0,
+			fillRule:       scene.FillNonZero,
+			expectEmpty:    true,
 			expectCoverage: 0,
 		},
 		{
-			name:          "evenodd odd",
-			backdrop:      1,
-			fillRule:      scene.FillEvenOdd,
-			expectEmpty:   false,
+			name:           "evenodd odd",
+			backdrop:       1,
+			fillRule:       scene.FillEvenOdd,
+			expectEmpty:    false,
 			expectCoverage: 255,
 		},
 		{
-			name:          "evenodd even",
-			backdrop:      2,
-			fillRule:      scene.FillEvenOdd,
-			expectEmpty:   true,
+			name:           "evenodd even",
+			backdrop:       2,
+			fillRule:       scene.FillEvenOdd,
+			expectEmpty:    true,
 			expectCoverage: 0,
 		},
 	}

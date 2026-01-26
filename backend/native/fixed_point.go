@@ -276,7 +276,6 @@ func maxInt32(a, b int32) int32 {
 	return b
 }
 
-
 // FDot6ToFixedDiv2 converts an FDot6 to FDot16 divided by 2.
 // This is used in quadratic edge setup to avoid overflow.
 // The result is (value / 2) in FDot16 representation.

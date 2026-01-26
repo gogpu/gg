@@ -310,8 +310,8 @@ func (fr *FineRasterizer) RasterizeCurves(curveBins map[uint64]*CurveTileBin) {
 	for key, bin := range curveBins {
 		// Decode tile coordinates from key
 		// Key format: Y in upper 32 bits, X in lower 32 bits
-		tileX := int32(key & 0xFFFFFFFF)  //nolint:gosec // Safe: extracting lower 32 bits
-		tileY := int32(key >> 32)         //nolint:gosec // Safe: extracting upper 32 bits
+		tileX := int32(key & 0xFFFFFFFF) //nolint:gosec // Safe: extracting lower 32 bits
+		tileY := int32(key >> 32)        //nolint:gosec // Safe: extracting upper 32 bits
 
 		// Skip tiles outside viewport
 		if tileX < 0 || tileX >= int32(fr.tileColumns) ||

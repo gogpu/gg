@@ -117,8 +117,8 @@ func TestFDot6ToFDot16(t *testing.T) {
 		want  FDot16
 	}{
 		{"zero", 0, 0},
-		{"one", 64, 65536},    // 1.0 in FDot6 -> 1.0 in FDot16
-		{"half", 32, 32768},   // 0.5 in FDot6 -> 0.5 in FDot16
+		{"one", 64, 65536},     // 1.0 in FDot6 -> 1.0 in FDot16
+		{"half", 32, 32768},    // 0.5 in FDot6 -> 0.5 in FDot16
 		{"quarter", 16, 16384}, // 0.25 in both
 		{"negative", -64, -65536},
 	}
@@ -141,10 +141,10 @@ func TestFDot16Mul(t *testing.T) {
 		want FDot16
 	}{
 		{"one times one", 65536, 65536, 65536},
-		{"half times half", 32768, 32768, 16384},   // 0.5 * 0.5 = 0.25
-		{"two times half", 131072, 32768, 65536},   // 2.0 * 0.5 = 1.0
-		{"negative", 65536, -65536, -65536},        // 1.0 * -1.0 = -1.0
-		{"small", 6553, 6553, 655},                 // ~0.1 * ~0.1 ≈ 0.01
+		{"half times half", 32768, 32768, 16384}, // 0.5 * 0.5 = 0.25
+		{"two times half", 131072, 32768, 65536}, // 2.0 * 0.5 = 1.0
+		{"negative", 65536, -65536, -65536},      // 1.0 * -1.0 = -1.0
+		{"small", 6553, 6553, 655},               // ~0.1 * ~0.1 ≈ 0.01
 	}
 
 	for _, tt := range tests {
@@ -241,8 +241,8 @@ func TestCheapDistance(t *testing.T) {
 		{"zero", 0, 0, 0, 0},
 		{"horizontal", 100, 0, 100, 100},
 		{"vertical", 0, 100, 100, 100},
-		{"diagonal", 100, 100, 140, 160}, // sqrt(2)*100 ≈ 141
-		{"3-4-5", 64*3, 64*4, 64*5 - 64, 64*5 + 64}, // ≈ 5
+		{"diagonal", 100, 100, 140, 160},                // sqrt(2)*100 ≈ 141
+		{"3-4-5", 64 * 3, 64 * 4, 64*5 - 64, 64*5 + 64}, // ≈ 5
 	}
 
 	for _, tt := range tests {
@@ -259,11 +259,11 @@ func TestCheapDistance(t *testing.T) {
 // TestLineEdge tests basic line edge creation.
 func TestLineEdge(t *testing.T) {
 	tests := []struct {
-		name      string
-		p0, p1    CurvePoint
-		shift     int
-		wantNil   bool
-		wantUp    bool // winding should be negative (upward)
+		name    string
+		p0, p1  CurvePoint
+		shift   int
+		wantNil bool
+		wantUp  bool // winding should be negative (upward)
 	}{
 		{
 			name:    "downward line",
@@ -335,7 +335,7 @@ func TestLineEdge(t *testing.T) {
 // TestQuadraticEdge tests quadratic Bezier edge creation and iteration.
 func TestQuadraticEdge(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		p0, p1, p2 CurvePoint
 		shift      int
 		wantNil    bool
@@ -457,7 +457,7 @@ func TestQuadraticEdgeForwardDifferencing(t *testing.T) {
 // TestCubicEdge tests cubic Bezier edge creation and iteration.
 func TestCubicEdge(t *testing.T) {
 	tests := []struct {
-		name          string
+		name           string
 		p0, p1, p2, p3 CurvePoint
 		shift          int
 		wantNil        bool
@@ -630,9 +630,9 @@ func TestEdgeVariant(t *testing.T) {
 // TestCubicDeltaFromLine tests the cubic deviation calculation.
 func TestCubicDeltaFromLine(t *testing.T) {
 	tests := []struct {
-		name        string
-		a, b, c, d  FDot6
-		expectZero  bool
+		name       string
+		a, b, c, d FDot6
+		expectZero bool
 	}{
 		{"flat line", 0, 0, 0, 0, true},
 		{"collinear", 0, 100, 200, 300, true}, // All points on a line

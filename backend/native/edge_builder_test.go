@@ -166,9 +166,9 @@ func TestChopCubicAtYExtrema(t *testing.T) {
 // TestIsNotMonotonic tests the monotonicity check.
 func TestIsNotMonotonic(t *testing.T) {
 	tests := []struct {
-		name     string
-		a, b, c  float32
-		wantNot  bool
+		name    string
+		a, b, c float32
+		wantNot bool
 	}{
 		{"increasing", 0, 50, 100, false},
 		{"decreasing", 100, 50, 0, false},
@@ -200,9 +200,9 @@ func TestValidUnitDivide(t *testing.T) {
 		wantLT float32 // Want result < this
 		wantOK bool    // Whether we expect a valid result
 	}{
-		{"half", 1, 2, 0, 1, true},            // 0.5
-		{"third", 1, 3, 0, 1, true},           // 0.333...
-		{"zero denom", 1, 0, 0, 0, false},     // Division by zero
+		{"half", 1, 2, 0, 1, true},              // 0.5
+		{"third", 1, 3, 0, 1, true},             // 0.333...
+		{"zero denom", 1, 0, 0, 0, false},       // Division by zero
 		{"negative result", -1, 2, 0, 0, false}, // -0.5, outside (0,1)
 		{"greater than one", 3, 2, 0, 0, false}, // 1.5, outside (0,1)
 		{"exactly zero", 0, 2, 0, 0, false},     // 0, not in (0,1)
@@ -237,9 +237,9 @@ func TestFindUnitQuadRoots(t *testing.T) {
 	}{
 		{"no roots (positive discriminant, outside)", 1, -3, 3, 0},
 		{"one root at 0.5", 1, -1, 0.25, 0}, // (t-0.5)^2 but double root
-		{"two roots", 1, -1.5, 0.5, 2},     // Roots at ~0.5 and ~1.0 (one valid)
-		{"no real roots", 1, 0, 1, 0},      // t^2 + 1 = 0
-		{"linear (a=0)", 0, 2, -1, 1},      // t = 0.5
+		{"two roots", 1, -1.5, 0.5, 2},      // Roots at ~0.5 and ~1.0 (one valid)
+		{"no real roots", 1, 0, 1, 0},       // t^2 + 1 = 0
+		{"linear (a=0)", 0, 2, -1, 1},       // t = 0.5
 	}
 
 	for _, tt := range tests {
@@ -563,9 +563,9 @@ func TestEdgeBuilderVerticalCombine(t *testing.T) {
 // TestQuadIsYMonotonic tests the monotonicity helper.
 func TestQuadIsYMonotonic(t *testing.T) {
 	tests := []struct {
-		name   string
+		name       string
 		p0, p1, p2 GeomPoint
-		want   bool
+		want       bool
 	}{
 		{"going down", GeomPoint{0, 0}, GeomPoint{50, 50}, GeomPoint{100, 100}, true},
 		{"going up", GeomPoint{0, 100}, GeomPoint{50, 50}, GeomPoint{100, 0}, true},
@@ -586,9 +586,9 @@ func TestQuadIsYMonotonic(t *testing.T) {
 // TestCubicIsYMonotonic tests cubic monotonicity.
 func TestCubicIsYMonotonic(t *testing.T) {
 	tests := []struct {
-		name       string
+		name           string
 		p0, p1, p2, p3 GeomPoint
-		want       bool
+		want           bool
 	}{
 		{
 			"straight down",
