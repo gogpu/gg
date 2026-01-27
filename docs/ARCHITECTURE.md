@@ -141,6 +141,19 @@ gg/
 ├── pixmap.go           # Pixel buffer operations
 ├── text.go             # Text rendering
 │
+├── core/               # Shared rendering primitives (v0.21.0)
+│   ├── path.go         # Unified Path type
+│   ├── paint.go        # Unified paint/brush definitions
+│   ├── transform.go    # 2D affine transformations
+│   └── scene.go        # Scene command builder
+│
+├── render/             # Cross-package rendering (v0.21.0)
+│   ├── renderer.go     # GPU/Software renderer interface
+│   ├── scene.go        # Scene with damage tracking
+│   ├── layers.go       # LayeredTarget for z-ordering
+│   ├── surface.go      # Render target abstraction
+│   └── types.go        # DeviceHandle (gpucontext.DeviceProvider)
+│
 ├── backend/            # Backend abstraction
 │   ├── backend.go      # RenderBackend interface
 │   ├── registry.go     # Auto-registration
@@ -410,6 +423,51 @@ dc.CubicTo(100, 50, 200, 150, 300, 100)
 dc.Fill()
 ```
 
+## Cross-Package Integration (render/)
+
+The `render/` package (v0.21.0+) enables gg to integrate with external GPU frameworks like gogpu:
+
+### DeviceHandle Pattern
+
+```go
+// DeviceHandle is an alias for gpucontext.DeviceProvider
+type DeviceHandle = gpucontext.DeviceProvider
+
+// Create renderer with injected device
+renderer := render.NewGPURenderer(deviceHandle)
+```
+
+### Scene with Damage Tracking
+
+```go
+scene := render.NewScene()
+
+// Partial invalidation for UI efficiency
+scene.Invalidate(render.DirtyRect{X: 100, Y: 100, Width: 50, Height: 50})
+
+// Check what needs redrawing
+if scene.NeedsFullRedraw() {
+    // Full redraw
+} else {
+    // Partial redraw using scene.DirtyRects()
+}
+```
+
+### LayeredTarget for Z-Ordering
+
+```go
+type LayeredTarget interface {
+    RenderTarget
+    CreateLayer(z int) (RenderTarget, error)
+    RemoveLayer(z int) error
+    SetLayerVisible(z int, visible bool)
+    Layers() []int
+    Composite()
+}
+```
+
+This enables UI frameworks to manage popups, dropdowns, and overlays efficiently.
+
 ## Rendering Modes
 
 ### Immediate Mode
@@ -440,25 +498,43 @@ renderer.RenderScene(pixmap, s)
 ## Relationship to gogpu Ecosystem
 
 ```
-naga (shader compiler)
-  │
-  └──► wgpu (Pure Go WebGPU)
-         │
-         ├──► gogpu (framework)
-         │
-         └──► gg (2D graphics) ◄── this project
+                    gpucontext (shared interfaces)
+                    gputypes (shared types) [planned]
+                           │
+naga (shader compiler)     │
+  │                        │
+  └──► wgpu ◄──────────────┤
+         │                 │
+         ├──► gogpu ───────┤ (implements DeviceProvider)
+         │                 │
+         └──► gg ──────────┘ (consumes DeviceProvider)
+                ↑
+          this project
 ```
 
-gg and gogpu are **independent libraries**:
+gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 
 | Aspect                | gg                    | gogpu                |
 |-----------------------|-----------------------|----------------------|
 | **Purpose**           | 2D graphics library   | GPU framework        |
-| **Dependencies**      | wgpu, naga            | wgpu                 |
+| **Dependencies**      | wgpu, naga, gpucontext| wgpu, gpucontext    |
 | **Backend interface** | 6 methods             | 120+ methods         |
 | **Software fallback** | Yes                   | No                   |
+| **gpucontext role**   | Consumer              | Provider             |
 
-Both use **gogpu/wgpu** as the shared WebGPU implementation.
+### Cross-Package Integration (v0.21.0+)
+
+gg can receive GPU device from gogpu via `gpucontext.DeviceProvider`:
+
+```go
+// gogpu provides device
+provider := app.GPUContextProvider()
+
+// gg receives device for rendering
+renderer := render.NewGPURenderer(provider)
+```
+
+This enables enterprise-grade dependency injection without circular imports.
 
 ## Key Design Patterns
 
