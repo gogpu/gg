@@ -185,6 +185,101 @@ func TestMatrix(t *testing.T) {
 	}
 }
 
+func TestContextTransform(t *testing.T) {
+	dc := NewContext(100, 100)
+
+	// Start with identity
+	if !dc.matrix.IsIdentity() {
+		t.Fatal("Initial matrix should be identity")
+	}
+
+	// Transform should multiply by the given matrix
+	dc.Transform(Translate(10, 20))
+	if dc.matrix.C != 10 || dc.matrix.F != 20 {
+		t.Errorf("Transform(Translate) failed: got C=%v, F=%v, want C=10, F=20",
+			dc.matrix.C, dc.matrix.F)
+	}
+
+	// Transform again - should compound the transformations
+	dc.Transform(Scale(2, 3))
+	// After T(10,20) * S(2,3): C stays 10, F stays 20, but A=2, E=3
+	if dc.matrix.A != 2 || dc.matrix.E != 3 {
+		t.Errorf("Transform(Scale) failed: got A=%v, E=%v, want A=2, E=3",
+			dc.matrix.A, dc.matrix.E)
+	}
+}
+
+func TestContextSetTransform(t *testing.T) {
+	dc := NewContext(100, 100)
+
+	// Apply some transformations first
+	dc.Translate(50, 50)
+	dc.Scale(2, 2)
+
+	// SetTransform should replace completely
+	customMatrix := Matrix{A: 1, B: 0.5, C: 100, D: -0.5, E: 1, F: 200}
+	dc.SetTransform(customMatrix)
+
+	if dc.matrix != customMatrix {
+		t.Errorf("SetTransform failed: got %+v, want %+v", dc.matrix, customMatrix)
+	}
+
+	// SetTransform with identity should reset
+	dc.SetTransform(Identity())
+	if !dc.matrix.IsIdentity() {
+		t.Errorf("SetTransform(Identity()) failed: got %+v", dc.matrix)
+	}
+}
+
+func TestContextGetTransform(t *testing.T) {
+	dc := NewContext(100, 100)
+
+	// Apply some transformations
+	dc.Translate(30, 40)
+	dc.Scale(1.5, 2.5)
+
+	// GetTransform should return current matrix
+	got := dc.GetTransform()
+	if got != dc.matrix {
+		t.Errorf("GetTransform returned wrong matrix: got %+v, want %+v", got, dc.matrix)
+	}
+
+	// GetTransform should return a COPY, not a reference
+	// Modifying the returned matrix should NOT affect the context
+	gotCopy := dc.GetTransform()
+	gotCopy.A = 999
+	gotCopy.C = 888
+
+	// Original context matrix should be unchanged
+	if dc.matrix.A == 999 || dc.matrix.C == 888 {
+		t.Error("GetTransform returned reference instead of copy - modifying it affected context")
+	}
+}
+
+func TestTransformSetTransformIntegration(t *testing.T) {
+	dc := NewContext(100, 100)
+
+	// Build up a complex transform
+	dc.Translate(50, 50)
+	dc.Rotate(math.Pi / 4)
+	dc.Scale(2, 2)
+
+	// Save it
+	saved := dc.GetTransform()
+
+	// Reset and do something else
+	dc.Identity()
+	dc.Translate(10, 10)
+
+	// Restore using SetTransform
+	dc.SetTransform(saved)
+	current := dc.GetTransform()
+
+	if current != saved {
+		t.Errorf("SetTransform didn't restore correctly: got %+v, want %+v", current, saved)
+	}
+}
+
 func BenchmarkDrawCircle(b *testing.B) {
 	dc := NewContext(512, 512)
 	dc.SetRGB(1, 0, 0)

@@ -488,6 +488,27 @@ func (c *Context) Shear(x, y float64) {
 	c.matrix = c.matrix.Multiply(Shear(x, y))
 }
 
+// Transform multiplies the current transformation matrix by the given matrix.
+// This is similar to CanvasRenderingContext2D.transform() in web browsers.
+// The transformation is applied in the order: current * m.
+func (c *Context) Transform(m Matrix) {
+	c.matrix = c.matrix.Multiply(m)
+}
+
+// SetTransform replaces the current transformation matrix with the given matrix.
+// This is similar to CanvasRenderingContext2D.setTransform() in web browsers.
+// Unlike Transform, this completely replaces the matrix rather than multiplying.
+func (c *Context) SetTransform(m Matrix) {
+	c.matrix = m
+}
+
+// GetTransform returns a copy of the current transformation matrix.
+// This is similar to CanvasRenderingContext2D.getTransform() in web browsers.
+// The returned matrix is a copy, so modifying it will not affect the context.
+func (c *Context) GetTransform() Matrix {
+	return c.matrix
+}
+
 // TransformPoint transforms a point by the current matrix.
 func (c *Context) TransformPoint(x, y float64) (float64, float64) {
 	p := c.matrix.TransformPoint(Pt(x, y))
