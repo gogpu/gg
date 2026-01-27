@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.20.2
+## Current State: v0.21.0
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
@@ -198,32 +198,51 @@ Professional-grade anti-aliasing using the tiny-skia algorithm.
 
 **Fixes:** [#43](https://github.com/gogpu/gg/issues/43) — Pixelated circles
 
-### v0.21.0 — Analytic Anti-Aliasing (Current)
+### v0.21.0 — Enterprise Architecture (Current)
 
-**Status:** Released | **Date:** 2026-01-26
+**Status:** Released | **Date:** 2026-01-27
 
-Enterprise-grade analytic AA for smooth bezier curves following vello/tiny-skia patterns.
+Enterprise-grade architecture for gogpu/ui integration following Skia, Vello, Cairo patterns.
 
-| Feature | Pattern Source | Description |
-|---------|---------------|-------------|
-| **Forward Differencing** | Skia | O(1) per-step curve evaluation |
-| **Fixed-Point Math** | Skia | FDot6/FDot16 sub-pixel precision |
-| **Trapezoidal Integration** | vello | Exact per-pixel coverage |
-| **Curve-Aware AET** | tiny-skia | Active Edge Table for all edge types |
-| **AlphaRuns RLE** | tiny-skia | Memory-efficient coverage storage |
+| Feature | Package | Description |
+|---------|---------|-------------|
+| **core/** | ARCH-003 | CPU rendering separated from GPU |
+| **surface/** | ARCH-004 | Unified Surface interface (Image, GPU) |
+| **render/** | INT-001 | Device integration (DeviceHandle, RenderTarget, Scene) |
+| **gpucontext** | ARCH-006 | Shared interfaces (DeviceProvider, EventSource, Registry) |
+| **Damage Tracking** | UI-ARCH-001 | Dirty region tracking for partial redraw |
+| **LayeredTarget** | UI-ARCH-001 | Z-ordered layers for popups/dropdowns |
+| **IME Support** | UI-ARCH-001 | CJK input support via gpucontext |
 
 ```go
-// Analytic AA is now the default for smooth curves
-renderer := gg.NewSoftwareRenderer(800, 600)
-renderer.SetRenderMode(gg.RenderModeAnalytic) // Optional, this is default
+// New: Device integration with gogpu
+renderer := render.NewGPURenderer(app.DeviceHandle())
+scene := render.NewScene()
+scene.Rectangle(10, 10, 100, 50)
+scene.SetFillColor(color.Red)
+scene.Fill()
+renderer.Render(target, scene)
 
-// Bezier curves render smoothly without segmentation
-ctx.CubicTo(100, 50, 200, 150, 300, 100) // Smooth!
+// New: Damage tracking for efficient UI
+scene.Invalidate(render.DirtyRect{X: 10, Y: 10, Width: 100, Height: 50})
+if scene.NeedsFullRedraw() {
+    // Redraw everything
+} else {
+    for _, rect := range scene.DirtyRects() {
+        // Redraw only dirty regions
+    }
+}
+
+// New: Layered surfaces for popups
+layered := render.NewLayeredPixmapTarget(800, 600)
+popup, _ := layered.CreateLayer(100) // z=100 on top
+layered.Composite() // Blend all layers
 ```
 
-**Performance:** QuadStep 7ns, CubicStep 9ns, 75% memory reduction
-
-**Fixes:** [#48](https://github.com/gogpu/gg/issues/48) — Bezier curves not smooth
+**Also includes:**
+- **BUG-001**: Dash pattern fix for analytic AA ([#52](https://github.com/gogpu/gg/issues/52))
+- **FEAT-001**: Direct Matrix API ([#51](https://github.com/gogpu/gg/issues/51))
+- **Context.Resize()**: Frame reuse without allocation
 
 ### v0.20.1 — Dependency Update
 

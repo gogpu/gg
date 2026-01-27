@@ -9,6 +9,16 @@ import (
 	"github.com/gogpu/gg/core"
 )
 
+// DirtyRect represents a region that needs redraw.
+// Used for damage tracking to enable efficient partial redraws.
+type DirtyRect struct {
+	X, Y, Width, Height float64
+}
+
+// maxDirtyRects is the threshold after which we switch to full redraw.
+// When more than this many rects accumulate, it's more efficient to redraw everything.
+const maxDirtyRects = 16
+
 // Scene represents a retained-mode drawing tree.
 //
 // Unlike immediate-mode drawing (Context.DrawCircle, etc.), a Scene captures
@@ -51,6 +61,10 @@ type Scene struct {
 
 	// currentFillRule is the fill rule for fill operations.
 	currentFillRule core.FillRule
+
+	// Damage tracking for efficient partial redraws
+	dirtyRects []DirtyRect
+	fullRedraw bool
 }
 
 // drawCommand represents a single drawing operation.
@@ -96,6 +110,67 @@ func (s *Scene) Reset() {
 	s.currentStrokeColor = color.Black
 	s.currentStrokeWidth = 1.0
 	s.currentFillRule = core.FillRuleNonZero
+	s.ClearDirty()
+}
+
+// Invalidate marks a rectangular region as needing redraw.
+// This is used for damage tracking to enable efficient partial redraws.
+// If the accumulated dirty rects exceed maxDirtyRects, the scene switches
+// to full redraw mode for efficiency.
+func (s *Scene) Invalidate(rect DirtyRect) {
+	if s.fullRedraw {
+		return // Already in full redraw mode
+	}
+
+	// Validate rect has positive dimensions
+	if rect.Width <= 0 || rect.Height <= 0 {
+		return
+	}
+
+	s.dirtyRects = append(s.dirtyRects, rect)
+
+	// If too many rects, switch to full redraw
+	if len(s.dirtyRects) > maxDirtyRects {
+		s.fullRedraw = true
+		s.dirtyRects = s.dirtyRects[:0] // Clear rects since we're doing full redraw
+	}
+}
+
+// InvalidateAll marks the entire scene as needing redraw.
+// This forces a full redraw on the next render pass.
+func (s *Scene) InvalidateAll() {
+	s.fullRedraw = true
+	s.dirtyRects = s.dirtyRects[:0] // Clear individual rects
+}
+
+// DirtyRects returns the accumulated dirty rectangles.
+// Returns nil if the scene needs a full redraw (check NeedsFullRedraw first).
+// The returned slice should not be modified by the caller.
+func (s *Scene) DirtyRects() []DirtyRect {
+	if s.fullRedraw {
+		return nil
+	}
+	return s.dirtyRects
+}
+
+// ClearDirty resets the dirty state after rendering.
+// This should be called after each render pass.
+func (s *Scene) ClearDirty() {
+	s.dirtyRects = s.dirtyRects[:0]
+	s.fullRedraw = false
+}
+
+// NeedsFullRedraw returns true if the scene should be fully redrawn.
+// This is true when InvalidateAll was called or when too many dirty rects
+// have accumulated (more than maxDirtyRects).
+func (s *Scene) NeedsFullRedraw() bool {
+	return s.fullRedraw
+}
+
+// HasDirtyRegions returns true if there are any dirty regions to redraw.
+// This includes both individual rects and full redraw state.
+func (s *Scene) HasDirtyRegions() bool {
+	return s.fullRedraw || len(s.dirtyRects) > 0
 }
 
 // SetFillColor sets the color for subsequent fill operations.

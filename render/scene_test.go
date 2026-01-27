@@ -326,3 +326,144 @@ func TestPathBuilderImplementsPathLike(t *testing.T) {
 		t.Errorf("Points() length = %d, want 6", len(path.Points()))
 	}
 }
+
+func TestSceneInvalidate(t *testing.T) {
+	scene := NewScene()
+
+	// Initially no dirty regions
+	if scene.HasDirtyRegions() {
+		t.Error("New scene should have no dirty regions")
+	}
+	if scene.NeedsFullRedraw() {
+		t.Error("New scene should not need full redraw")
+	}
+
+	// Add a dirty rect
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 30})
+
+	if !scene.HasDirtyRegions() {
+		t.Error("Scene should have dirty regions after Invalidate")
+	}
+	if scene.NeedsFullRedraw() {
+		t.Error("Scene should not need full redraw after single Invalidate")
+	}
+
+	rects := scene.DirtyRects()
+	if len(rects) != 1 {
+		t.Fatalf("DirtyRects() length = %d, want 1", len(rects))
+	}
+	if rects[0].X != 10 || rects[0].Y != 20 || rects[0].Width != 50 || rects[0].Height != 30 {
+		t.Errorf("DirtyRect = %v, want {10, 20, 50, 30}", rects[0])
+	}
+}
+
+func TestSceneInvalidateInvalidRect(t *testing.T) {
+	scene := NewScene()
+
+	// Invalid rects should be ignored
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 0, Height: 30})  // zero width
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 0})  // zero height
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: -5, Height: 30}) // negative width
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: -5}) // negative height
+
+	if scene.HasDirtyRegions() {
+		t.Error("Invalid rects should not be added")
+	}
+}
+
+func TestSceneInvalidateAll(t *testing.T) {
+	scene := NewScene()
+
+	// Add some dirty rects first
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 30})
+	scene.Invalidate(DirtyRect{X: 100, Y: 200, Width: 50, Height: 30})
+
+	// Mark for full redraw
+	scene.InvalidateAll()
+
+	if !scene.HasDirtyRegions() {
+		t.Error("Scene should have dirty regions after InvalidateAll")
+	}
+	if !scene.NeedsFullRedraw() {
+		t.Error("Scene should need full redraw after InvalidateAll")
+	}
+	if scene.DirtyRects() != nil {
+		t.Error("DirtyRects should return nil when full redraw is needed")
+	}
+}
+
+func TestSceneClearDirty(t *testing.T) {
+	scene := NewScene()
+
+	// Add dirty regions
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 30})
+	scene.InvalidateAll()
+
+	// Clear
+	scene.ClearDirty()
+
+	if scene.HasDirtyRegions() {
+		t.Error("Scene should have no dirty regions after ClearDirty")
+	}
+	if scene.NeedsFullRedraw() {
+		t.Error("Scene should not need full redraw after ClearDirty")
+	}
+}
+
+func TestSceneInvalidateTooManyRects(t *testing.T) {
+	scene := NewScene()
+
+	// Add more than maxDirtyRects (16) dirty regions
+	for i := 0; i < 20; i++ {
+		scene.Invalidate(DirtyRect{
+			X:      float64(i * 10),
+			Y:      float64(i * 10),
+			Width:  50,
+			Height: 30,
+		})
+	}
+
+	// Should switch to full redraw mode
+	if !scene.NeedsFullRedraw() {
+		t.Error("Scene should need full redraw after exceeding maxDirtyRects")
+	}
+	if scene.DirtyRects() != nil {
+		t.Error("DirtyRects should return nil when full redraw is needed")
+	}
+}
+
+func TestSceneInvalidateAfterFullRedraw(t *testing.T) {
+	scene := NewScene()
+
+	// Mark for full redraw
+	scene.InvalidateAll()
+
+	// Additional invalidates should be ignored
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 30})
+
+	// Still in full redraw mode, no individual rects
+	if !scene.NeedsFullRedraw() {
+		t.Error("Scene should still need full redraw")
+	}
+	if scene.DirtyRects() != nil {
+		t.Error("DirtyRects should return nil")
+	}
+}
+
+func TestSceneResetClearsDirty(t *testing.T) {
+	scene := NewScene()
+
+	// Add dirty regions
+	scene.Invalidate(DirtyRect{X: 10, Y: 20, Width: 50, Height: 30})
+	scene.InvalidateAll()
+
+	// Reset
+	scene.Reset()
+
+	if scene.HasDirtyRegions() {
+		t.Error("Scene should have no dirty regions after Reset")
+	}
+	if scene.NeedsFullRedraw() {
+		t.Error("Scene should not need full redraw after Reset")
+	}
+}

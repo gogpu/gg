@@ -85,6 +85,14 @@ func (r *SoftwareRenderer) SetAnalyticFiller(filler AnalyticFillerInterface) {
 	}
 }
 
+// Resize updates the renderer dimensions.
+// This should be called when the context is resized.
+func (r *SoftwareRenderer) Resize(width, height int) {
+	r.width = width
+	r.height = height
+	r.rasterizer = raster.NewRasterizer(width, height)
+}
+
 // pixmapAdapter adapts gg.Pixmap to raster.Pixmap interface.
 type pixmapAdapter struct {
 	pixmap *Pixmap
