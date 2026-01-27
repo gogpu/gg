@@ -5,10 +5,10 @@ package native
 
 import (
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/scene"
+	"github.com/gogpu/gg/core"
 )
 
-// AnalyticFillerAdapter adapts the native AnalyticFiller to gg.AnalyticFillerInterface.
+// AnalyticFillerAdapter adapts the core.AnalyticFiller to gg.AnalyticFillerInterface.
 // This allows the SoftwareRenderer to use analytic anti-aliasing without
 // creating an import cycle.
 //
@@ -18,8 +18,8 @@ import (
 //	adapter := native.NewAnalyticFillerAdapter(800, 600)
 //	renderer.SetAnalyticFiller(adapter)
 type AnalyticFillerAdapter struct {
-	edgeBuilder    *EdgeBuilder
-	analyticFiller *AnalyticFiller
+	edgeBuilder    *core.EdgeBuilder
+	analyticFiller *core.AnalyticFiller
 	width, height  int
 }
 
@@ -29,14 +29,14 @@ type AnalyticFillerAdapter struct {
 //
 // The adapter is reusable for multiple Fill calls.
 func NewAnalyticFillerAdapter(width, height int) *AnalyticFillerAdapter {
-	eb := NewEdgeBuilder(2) // 4x AA quality
+	eb := core.NewEdgeBuilder(2) // 4x AA quality
 	// Enable curve flattening for reliable analytic AA rendering.
 	// Curves are converted to line segments at build time, which the
 	// AnalyticFiller handles correctly.
 	eb.SetFlattenCurves(true)
 	return &AnalyticFillerAdapter{
 		edgeBuilder:    eb,
-		analyticFiller: NewAnalyticFiller(width, height),
+		analyticFiller: core.NewAnalyticFiller(width, height),
 		width:          width,
 		height:         height,
 	}
@@ -49,12 +49,12 @@ func (a *AnalyticFillerAdapter) Fill(
 	fillRule gg.FillRule,
 	callback func(y int, iter func(yield func(x int, alpha uint8) bool)),
 ) {
-	// Convert gg.Path to scene.Path
-	scenePath := convertGGPathToScenePath(path)
+	// Convert gg.Path to core.PathLike
+	pathAdapter := convertGGPathToCorePath(path)
 
 	// Build edges
 	a.edgeBuilder.Reset()
-	a.edgeBuilder.BuildFromScenePath(scenePath, scene.IdentityAffine())
+	a.edgeBuilder.BuildFromPath(pathAdapter, core.IdentityTransform{})
 
 	// If no edges, nothing to fill
 	if a.edgeBuilder.IsEmpty() {
@@ -62,13 +62,13 @@ func (a *AnalyticFillerAdapter) Fill(
 	}
 
 	// Convert fill rule
-	nativeFillRule := FillRuleNonZero
+	coreFillRule := core.FillRuleNonZero
 	if fillRule == gg.FillRuleEvenOdd {
-		nativeFillRule = FillRuleEvenOdd
+		coreFillRule = core.FillRuleEvenOdd
 	}
 
 	// Fill with analytic coverage
-	a.analyticFiller.Fill(a.edgeBuilder, nativeFillRule, func(y int, runs *AlphaRuns) {
+	a.analyticFiller.Fill(a.edgeBuilder, coreFillRule, func(y int, runs *core.AlphaRuns) {
 		// Create iterator wrapper for the callback
 		callback(y, func(yield func(x int, alpha uint8) bool) {
 			for x, alpha := range runs.Iter() {
@@ -87,33 +87,39 @@ func (a *AnalyticFillerAdapter) Reset() {
 	a.analyticFiller.Reset()
 }
 
-// convertGGPathToScenePath converts a gg.Path to a scene.Path.
-func convertGGPathToScenePath(p *gg.Path) *scene.Path {
-	result := scene.NewPath()
+// convertGGPathToCorePath converts a gg.Path to core.PathLike.
+func convertGGPathToCorePath(p *gg.Path) core.PathLike {
+	// Build verb and point arrays in core format
+	var verbs []core.PathVerb
+	var points []float32
 
 	for _, elem := range p.Elements() {
 		switch e := elem.(type) {
 		case gg.MoveTo:
-			result.MoveTo(float32(e.Point.X), float32(e.Point.Y))
+			verbs = append(verbs, core.VerbMoveTo)
+			points = append(points, float32(e.Point.X), float32(e.Point.Y))
 		case gg.LineTo:
-			result.LineTo(float32(e.Point.X), float32(e.Point.Y))
+			verbs = append(verbs, core.VerbLineTo)
+			points = append(points, float32(e.Point.X), float32(e.Point.Y))
 		case gg.QuadTo:
-			result.QuadTo(
+			verbs = append(verbs, core.VerbQuadTo)
+			points = append(points,
 				float32(e.Control.X), float32(e.Control.Y),
 				float32(e.Point.X), float32(e.Point.Y),
 			)
 		case gg.CubicTo:
-			result.CubicTo(
+			verbs = append(verbs, core.VerbCubicTo)
+			points = append(points,
 				float32(e.Control1.X), float32(e.Control1.Y),
 				float32(e.Control2.X), float32(e.Control2.Y),
 				float32(e.Point.X), float32(e.Point.Y),
 			)
 		case gg.Close:
-			result.Close()
+			verbs = append(verbs, core.VerbClose)
 		}
 	}
 
-	return result
+	return core.NewScenePathAdapter(len(verbs) == 0, verbs, points)
 }
 
 // Verify that AnalyticFillerAdapter implements gg.AnalyticFillerInterface.
