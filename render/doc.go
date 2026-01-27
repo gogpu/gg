@@ -70,29 +70,29 @@
 //
 // # Architecture
 //
-//	                    User Application
-//	                          │
-//	         ┌────────────────┼────────────────┐
-//	         │                │                │
-//	         ▼                ▼                ▼
-//	    gogpu.App       gg.Context         gg.Scene
-//	    (windowing)     (immediate)        (retained)
-//	         │                │                │
-//	         └────────────────┼────────────────┘
-//	                          │
-//	                          ▼
-//	                  gg/render package
-//	         ┌────────────────┼────────────────┐
-//	         │                │                │
-//	         ▼                ▼                ▼
-//	   DeviceHandle     RenderTarget       Renderer
-//	   (GPU access)    (output target)   (execution)
-//	         │                │                │
-//	         └────────────────┼────────────────┘
-//	                          │
-//	                          ▼
-//	                  gg/core package
-//	                  (CPU rasterization)
+//	                 User Application
+//	                       │
+//	      ┌────────────────┼────────────────┐
+//	      │                │                │
+//	      ▼                ▼                ▼
+//	 gogpu.App       gg.Context         gg.Scene
+//	 (windowing)     (immediate)        (retained)
+//	      │                │                │
+//	      └────────────────┼────────────────┘
+//	                       │
+//	                       ▼
+//	               gg/render package
+//	      ┌────────────────┼────────────────┐
+//	      │                │                │
+//	      ▼                ▼                ▼
+//	DeviceHandle     RenderTarget       Renderer
+//	(GPU access)    (output target)   (execution)
+//	      │                │                │
+//	      └────────────────┼────────────────┘
+//	                       │
+//	                       ▼
+//	               gg/core package
+//	               (CPU rasterization)
 //
 // # Thread Safety
 //

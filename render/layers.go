@@ -52,9 +52,9 @@ type layer struct {
 // LayeredPixmapTarget is a CPU-backed implementation of LayeredTarget.
 // It uses *image.RGBA for each layer and composites them in z-order.
 type LayeredPixmapTarget struct {
-	base   *image.RGBA          // Base layer (z=0 equivalent, always visible)
-	layers map[int]*layer       // Additional layers by z-order
-	zOrder []int                // Cached sorted z-order list
+	base   *image.RGBA    // Base layer (z=0 equivalent, always visible)
+	layers map[int]*layer // Additional layers by z-order
+	zOrder []int          // Cached sorted z-order list
 	width  int
 	height int
 }

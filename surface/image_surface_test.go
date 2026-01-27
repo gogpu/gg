@@ -259,8 +259,8 @@ func TestImageSurfaceFillRule(t *testing.T) {
 
 	// Create a path with overlapping squares (self-intersecting)
 	path := NewPath()
-	path.Rectangle(20, 20, 60, 60)   // Outer
-	path.Rectangle(35, 35, 30, 30)   // Inner (hole with EvenOdd)
+	path.Rectangle(20, 20, 60, 60) // Outer
+	path.Rectangle(35, 35, 30, 30) // Inner (hole with EvenOdd)
 
 	// Fill with EvenOdd rule
 	s.Fill(path, FillStyle{

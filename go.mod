@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/go-webgpu/webgpu v0.1.4
-	github.com/gogpu/gpucontext v0.1.1
+	github.com/gogpu/gpucontext v0.2.0
 	github.com/gogpu/naga v0.8.4
 	github.com/gogpu/wgpu v0.10.2
 	golang.org/x/image v0.35.0
