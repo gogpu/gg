@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -488,6 +489,27 @@ func (c *Context) Shear(x, y float64) {
 	c.matrix = c.matrix.Multiply(Shear(x, y))
 }
 
+// Transform multiplies the current transformation matrix by the given matrix.
+// This is similar to CanvasRenderingContext2D.transform() in web browsers.
+// The transformation is applied in the order: current * m.
+func (c *Context) Transform(m Matrix) {
+	c.matrix = c.matrix.Multiply(m)
+}
+
+// SetTransform replaces the current transformation matrix with the given matrix.
+// This is similar to CanvasRenderingContext2D.setTransform() in web browsers.
+// Unlike Transform, this completely replaces the matrix rather than multiplying.
+func (c *Context) SetTransform(m Matrix) {
+	c.matrix = m
+}
+
+// GetTransform returns a copy of the current transformation matrix.
+// This is similar to CanvasRenderingContext2D.getTransform() in web browsers.
+// The returned matrix is a copy, so modifying it will not affect the context.
+func (c *Context) GetTransform() Matrix {
+	return c.matrix
+}
+
 // TransformPoint transforms a point by the current matrix.
 func (c *Context) TransformPoint(x, y float64) (float64, float64) {
 	p := c.matrix.TransformPoint(Pt(x, y))
@@ -641,4 +663,54 @@ func (c *Context) EncodePNG(w io.Writer) error {
 // EncodeJPEG writes the image as JPEG with the given quality (1-100).
 func (c *Context) EncodeJPEG(w io.Writer, quality int) error {
 	return jpeg.Encode(w, c.Image(), &jpeg.Options{Quality: quality})
+}
+
+// Resize changes the context dimensions, reusing internal buffers where possible.
+// If the dimensions haven't changed, this is a no-op.
+// Returns an error if width or height is <= 0.
+//
+// After Resize:
+//   - The pixmap is reallocated only if dimensions changed
+//   - The clip region is reset to the full rectangle
+//   - The transformation matrix is preserved (Push/Pop stack is preserved)
+//   - The current path is cleared
+//
+// This method is useful for UI frameworks that need to resize the canvas
+// when the window size changes, without creating a new Context.
+func (c *Context) Resize(width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("invalid dimensions: width=%d, height=%d (both must be > 0)", width, height)
+	}
+
+	// No-op if dimensions haven't changed
+	if c.width == width && c.height == height {
+		return nil
+	}
+
+	// Update dimensions
+	c.width = width
+	c.height = height
+
+	// Reallocate pixmap
+	c.pixmap = NewPixmap(width, height)
+
+	// Resize renderer if it supports resizing
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.Resize(width, height)
+	}
+
+	// Reset clip stack to full rectangle
+	c.clipStack = nil
+
+	// Clear any existing path
+	c.ClearPath()
+
+	return nil
+}
+
+// ResizeTarget returns the underlying pixmap for resize operations.
+// This is primarily used by renderers and advanced users who need
+// direct access to the target buffer during resize operations.
+func (c *Context) ResizeTarget() *Pixmap {
+	return c.pixmap
 }

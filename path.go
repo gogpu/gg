@@ -122,6 +122,11 @@ func (p *Path) HasCurrentPoint() bool {
 	return len(p.elements) > 0
 }
 
+// isEmpty returns true if the path has no elements.
+func (p *Path) isEmpty() bool {
+	return len(p.elements) == 0
+}
+
 // Transform applies a transformation matrix to all points in the path.
 func (p *Path) Transform(m Matrix) *Path {
 	result := NewPath()

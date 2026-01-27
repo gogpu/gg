@@ -12,6 +12,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.21.0] - 2026-01-27
+
+### Added
+
+- **Enterprise Architecture** for gogpu/ui integration
+
+#### Package Restructuring
+- **core/** (ARCH-003) — CPU rendering internals separated from GPU code
+- **surface/** (ARCH-004) — Unified Surface interface (ImageSurface, GPUSurface)
+- **render/** (INT-001) — Device integration package
+  - `DeviceHandle` — alias for gpucontext.DeviceProvider
+  - `RenderTarget` — interface for CPU/GPU render targets
+  - `Scene` — retained-mode drawing commands
+  - `Renderer` — interface for render implementations
+
+#### UI Integration (UI-ARCH-001)
+- **Damage Tracking** — `Scene.Invalidate()`, `DirtyRects()`, `NeedsFullRedraw()`
+- **LayeredTarget** — Z-ordered layers for popups, dropdowns, tooltips
+- **Context.Resize()** — Frame reuse without allocation
+
+#### gpucontext Integration (ARCH-006)
+- Uses `github.com/gogpu/gpucontext` v0.2.0
+- DeviceProvider, EventSource interfaces
+- IME support for CJK input
+
+### Fixed
+
+- **Dash patterns** with analytic AA (BUG-001, [#52](https://github.com/gogpu/gg/issues/52))
+
+### Changed
+
+- **Direct Matrix API** (FEAT-001, [#51](https://github.com/gogpu/gg/issues/51))
+  - Added `Transform(m Matrix)` — apply transform
+  - Added `SetTransform(m Matrix)` — replace transform
+  - Added `GetTransform() Matrix` — get current transform
+
 ## [0.20.2] - 2026-01-26
 
 ### Fixed
