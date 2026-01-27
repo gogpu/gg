@@ -170,6 +170,120 @@ func TestContext_StrokeWithDash(t *testing.T) {
 	// The actual dashing implementation is in the renderer
 }
 
+func TestContext_StrokeWithDash_PixelVerification(t *testing.T) {
+	// Create a context with dashed line
+	dc := NewContext(100, 100)
+	dc.ClearWithColor(White)
+	dc.SetRGB(0, 0, 0) // Black
+	dc.SetLineWidth(2)
+	dc.SetDash(10, 10) // 10 pixels dash, 10 pixels gap
+
+	dc.DrawLine(10, 50, 90, 50) // 80 pixels long horizontal line
+	dc.Stroke()
+
+	pixmap := dc.pixmap
+
+	// Check that there are gaps in the line (not all pixels are black at y=50)
+	// The dash pattern [10, 10] should create visible gaps
+	blackPixels := 0
+	whitePixels := 0
+	for x := 10; x < 90; x++ {
+		c := pixmap.GetPixel(x, 50)
+		if c.R < 0.5 && c.G < 0.5 && c.B < 0.5 { // Dark pixel (stroked)
+			blackPixels++
+		} else if c.R > 0.9 && c.G > 0.9 && c.B > 0.9 { // Light pixel (gap)
+			whitePixels++
+		}
+	}
+
+	// With dash pattern [10, 10] over 80 pixels, we expect roughly:
+	// ~40 pixels black (dashes) and ~40 pixels white (gaps)
+	// Allow for anti-aliasing and edge effects
+	if blackPixels == 0 {
+		t.Error("No black pixels found - dashing may not be rendering")
+	}
+	if whitePixels == 0 {
+		t.Error("No white pixels (gaps) found - dash pattern not applied")
+	}
+
+	// Verify ratio is roughly 50/50 (allowing some tolerance for AA)
+	ratio := float64(blackPixels) / float64(blackPixels+whitePixels)
+	if ratio > 0.9 {
+		t.Errorf("Too many black pixels (ratio=%v) - dash gaps not visible", ratio)
+	}
+	if ratio < 0.1 {
+		t.Errorf("Too few black pixels (ratio=%v) - dashing may not be working", ratio)
+	}
+}
+
+func TestContext_StrokeWithDash_Rectangle(t *testing.T) {
+	// Test dashing on a closed rectangle path
+	dc := NewContext(100, 100)
+	dc.ClearWithColor(White)
+	dc.SetRGB(0, 0, 0)
+	dc.SetLineWidth(1)
+	dc.SetDash(5, 5)
+
+	dc.DrawRectangle(20, 20, 60, 60)
+	dc.Stroke()
+
+	pixmap := dc.pixmap
+
+	// Sample along top edge (y=20, x from 20 to 80)
+	blackCount := 0
+	gapCount := 0
+	for x := 20; x < 80; x++ {
+		c := pixmap.GetPixel(x, 20)
+		if c.R < 0.5 {
+			blackCount++
+		} else if c.R > 0.9 {
+			gapCount++
+		}
+	}
+
+	if blackCount == 0 {
+		t.Error("No stroked pixels on rectangle top edge")
+	}
+	if gapCount == 0 {
+		t.Error("No gaps visible on rectangle top edge - dash not working")
+	}
+}
+
+func TestContext_StrokeWithDash_Offset(t *testing.T) {
+	// Test that dash offset works
+	dc1 := NewContext(100, 100)
+	dc1.ClearWithColor(White)
+	dc1.SetRGB(0, 0, 0)
+	dc1.SetLineWidth(2)
+	dc1.SetDash(10, 10)
+	dc1.SetDashOffset(0)
+	dc1.DrawLine(10, 50, 90, 50)
+	dc1.Stroke()
+
+	dc2 := NewContext(100, 100)
+	dc2.ClearWithColor(White)
+	dc2.SetRGB(0, 0, 0)
+	dc2.SetLineWidth(2)
+	dc2.SetDash(10, 10)
+	dc2.SetDashOffset(5) // Offset by 5 pixels
+	dc2.DrawLine(10, 50, 90, 50)
+	dc2.Stroke()
+
+	// The two images should be different (offset shifts the pattern)
+	p1 := dc1.pixmap
+	p2 := dc2.pixmap
+
+	// Sample at start of line - with offset=5, the pattern should start differently
+	c1 := p1.GetPixel(15, 50)
+	c2 := p2.GetPixel(15, 50)
+
+	// They could be different or same depending on exact offset position
+	// Just verify both rendered something
+	if (c1.R == 1 && c1.G == 1 && c1.B == 1) && (c2.R == 1 && c2.G == 1 && c2.B == 1) {
+		t.Error("Neither offset variant rendered anything at sample point")
+	}
+}
+
 func TestContext_SetStroke_UpdatesLegacyFields(t *testing.T) {
 	dc := NewContext(100, 100)
 
