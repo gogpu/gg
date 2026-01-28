@@ -216,7 +216,8 @@ Enterprise-grade architecture for gogpu/ui integration following Skia, Vello, Ca
 
 ```go
 // New: Device integration with gogpu
-renderer := render.NewGPURenderer(app.DeviceHandle())
+provider := app.GPUContextProvider() // gpucontext.DeviceProvider
+renderer, _ := render.NewGPURenderer(provider)
 scene := render.NewScene()
 scene.Rectangle(10, 10, 100, 50)
 scene.SetFillColor(color.Red)
