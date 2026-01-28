@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.21.1
+## Current State: v0.21.2
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
@@ -245,7 +245,33 @@ layered.Composite() // Blend all layers
 - **FEAT-001**: Direct Matrix API ([#51](https://github.com/gogpu/gg/issues/51))
 - **Context.Resize()**: Frame reuse without allocation
 
-### v0.21.1 — Subpath Fix (Current)
+### v0.21.2 — Stroke Quality Fix (Current)
+
+**Status:** Released | **Date:** 2026-01-28
+
+Complete stroke rendering overhaul following tiny-skia/Skia patterns for high-quality thin and thick strokes.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **Hairline Detection** | tiny-skia | `treatAsHairline()` for width ≤1px after transform |
+| **AA Hairline Algorithm** | tiny-skia/Skia | FDot6/FDot16 fixed-point, +0.5 centering |
+| **Hairline Blitter** | tiny-skia | Direct pixel blitting with coverage |
+| **Line Cap Support** | tiny-skia | Butt, Round, Square caps for hairlines |
+| **Transform Scale** | tiny-skia | `Matrix.ScaleFactor()`, `Paint.TransformScale` |
+| **Dash Scaling** | Cairo/Skia | `Dash.Scale()` for transform-aware patterns |
+| **Stroke Expansion Fix** | tiny-skia | Save `lastNorm` for correct end cap geometry |
+
+**Fixes:** [#56](https://github.com/gogpu/gg/issues/56) — Thin dashed strokes render as disconnected pixels
+
+**Root Causes & Solutions:**
+1. **Thin strokes (≤1px):** Stroke expansion creates paths too thin for 4x supersampling coverage
+   → Hairline rendering bypasses expansion, draws pixels directly with calculated coverage
+2. **Thick strokes with scale:** `finish()` computed wrong normal for end cap
+   → Save `lastNorm` in `doLine()`, use for end cap (tiny-skia pattern)
+
+**New Files:** `internal/raster/hairline_aa.go`, `hairline_blitter.go`, `hairline_caps.go`, `hairline_types.go`
+
+### v0.21.1 — Subpath Fix
 
 **Status:** Released | **Date:** 2026-01-28
 
@@ -366,7 +392,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.21.1** | **2026-01-28** | **Subpath fix for dashed strokes ([#54](https://github.com/gogpu/gg/issues/54))** | **+200** |
+| **v0.21.2** | **2026-01-28** | **Hairline rendering for thin strokes ([#56](https://github.com/gogpu/gg/issues/56))** | **+1,900** |
+| v0.21.1 | 2026-01-28 | Subpath fix for dashed strokes ([#54](https://github.com/gogpu/gg/issues/54)) | +200 |
 | v0.21.0 | 2026-01-26 | Enterprise Architecture, UI integration | +8,163 |
 | v0.20.1 | 2026-01-24 | wgpu v0.10.2 (CGO fix) | — |
 | v0.20.0 | 2026-01-22 | GPU Backend Completion (enterprise-grade) | +8,700 |
