@@ -19,17 +19,20 @@ import (
 // Example:
 //
 //	app := gogpu.NewApp(gogpu.Config{...})
+//	var renderer *render.GPURenderer
+//	var initialized bool
 //
-//	app.OnInit(func(gc *gogpu.Context) {
-//	    // Create GPU renderer with device from gogpu
-//	    renderer, err := render.NewGPURenderer(gc.DeviceHandle())
-//	    if err != nil {
-//	        log.Fatal(err)
+//	app.OnDraw(func(dc *gogpu.Context) {
+//	    if !initialized {
+//	        provider := app.GPUContextProvider()
+//	        if provider != nil {
+//	            renderer, _ = render.NewGPURenderer(provider)
+//	            initialized = true
+//	        }
 //	    }
-//	})
-//
-//	app.OnDraw(func(gc *gogpu.Context) {
-//	    renderer.Render(gc.SurfaceTarget(), scene)
+//	    // Render scene (CPU target for now, GPU targets in Phase 3)
+//	    target := render.NewPixmapTarget(800, 600)
+//	    renderer.Render(target, scene)
 //	})
 type GPURenderer struct {
 	// handle is the GPU device handle from the host application.

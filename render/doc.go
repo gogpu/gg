@@ -37,21 +37,28 @@
 //	app := gogpu.NewApp(gogpu.Config{...})
 //	var renderer render.Renderer
 //	var scene *Scene
+//	var initialized bool
 //
-//	app.OnInit(func(gc *gogpu.Context) {
-//	    // gg receives GPU device from gogpu (zero overhead)
-//	    renderer, _ = render.NewGPURenderer(gc.DeviceHandle())
+//	app.OnDraw(func(dc *gogpu.Context) {
+//	    if !initialized {
+//	        // Get gpucontext.DeviceProvider from gogpu
+//	        provider := app.GPUContextProvider()
+//	        if provider != nil {
+//	            // gg receives GPU device from gogpu (zero overhead)
+//	            renderer, _ = render.NewGPURenderer(provider)
 //
-//	    // Build scene (retained mode)
-//	    scene = NewScene()
-//	    scene.SetFillColor(Red)
-//	    scene.Circle(100, 100, 50)
-//	    scene.Fill()
-//	})
+//	            // Build scene (retained mode)
+//	            scene = NewScene()
+//	            scene.SetFillColor(Red)
+//	            scene.Circle(100, 100, 50)
+//	            scene.Fill()
+//	            initialized = true
+//	        }
+//	    }
 //
-//	app.OnDraw(func(gc *gogpu.Context) {
-//	    // Render scene to window surface (zero-copy)
-//	    renderer.Render(gc.SurfaceTarget(), scene)
+//	    // Render scene to CPU target (GPU targets in Phase 3)
+//	    target := render.NewPixmapTarget(800, 600)
+//	    renderer.Render(target, scene)
 //	})
 //
 // Software rendering fallback:
