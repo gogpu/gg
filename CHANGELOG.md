@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.21.1] - 2026-01-28
+
+### Fixed
+
+- **Dashed strokes with scale** (BUG-002, [#54](https://github.com/gogpu/gg/issues/54))
+  - Root cause: `path.Flatten()` lost subpath boundaries, causing rasterizer to create incorrect "connecting edges" between separate subpaths
+  - Solution: New `path.EdgeIter` following tiny-skia pattern — iterates over edges directly without creating inter-subpath connections
+  - Added `raster.FillAAFromEdges()` for correct edge-based rasterization
+
 ## [0.21.0] - 2026-01-27
 
 ### Added

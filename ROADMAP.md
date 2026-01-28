@@ -28,7 +28,7 @@
 
 ---
 
-## Current State: v0.21.0
+## Current State: v0.21.1
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
@@ -244,6 +244,23 @@ layered.Composite() // Blend all layers
 - **FEAT-001**: Direct Matrix API ([#51](https://github.com/gogpu/gg/issues/51))
 - **Context.Resize()**: Frame reuse without allocation
 
+### v0.21.1 — Subpath Fix (Current)
+
+**Status:** Released | **Date:** 2026-01-28
+
+Critical fix for dashed strokes with scale transformation.
+
+| Feature | Pattern Source | Description |
+|---------|---------------|-------------|
+| **EdgeIter** | tiny-skia | Edge iterator with proper subpath handling |
+| **FillAAFromEdges** | tiny-skia | Edge-based rasterization without subpath leaks |
+
+**Fixes:** [#54](https://github.com/gogpu/gg/issues/54) — Dashed strokes with scale rendered incorrectly
+
+**Root Cause:** `path.Flatten()` returned flat point list, losing subpath boundaries. Rasterizer created incorrect "connecting edges" between separate subpaths.
+
+**Solution:** New `path.EdgeIter` following tiny-skia pattern — iterates over edges directly, tracks `moveTo` per subpath, never creates inter-subpath edges.
+
 ### v0.20.1 — Dependency Update
 
 **Status:** Released | **Date:** 2026-01-24
@@ -348,7 +365,8 @@ PushLayer(blend, opacity) → Draw operations → PopLayer() → Composite
 
 | Version | Date | Highlights | LOC |
 |---------|------|------------|-----|
-| **v0.21.0** | **2026-01-26** | **Analytic AA for smooth bezier curves** | **+8,163** |
+| **v0.21.1** | **2026-01-28** | **Subpath fix for dashed strokes ([#54](https://github.com/gogpu/gg/issues/54))** | **+200** |
+| v0.21.0 | 2026-01-26 | Enterprise Architecture, UI integration | +8,163 |
 | v0.20.1 | 2026-01-24 | wgpu v0.10.2 (CGO fix) | — |
 | v0.20.0 | 2026-01-22 | GPU Backend Completion (enterprise-grade) | +8,700 |
 | v0.19.0 | 2026-01-22 | Anti-Aliased Rendering (tiny-skia) | +700 |

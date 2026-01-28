@@ -182,6 +182,18 @@ func convertPoints(points []path.Point) []raster.Point {
 	return result
 }
 
+// convertEdges converts path.Edge slice to raster.PathEdge slice.
+func convertEdges(edges []path.Edge) []raster.PathEdge {
+	result := make([]raster.PathEdge, len(edges))
+	for i, e := range edges {
+		result[i] = raster.PathEdge{
+			P0: raster.Point{X: e.P0.X, Y: e.P0.Y},
+			P1: raster.Point{X: e.P1.X, Y: e.P1.Y},
+		}
+	}
+	return result
+}
+
 // Fill implements Renderer.Fill with anti-aliasing enabled by default.
 // The rendering method is determined by the current RenderMode.
 func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
@@ -217,12 +229,16 @@ func (r *SoftwareRenderer) fillAnalytic(pixmap *Pixmap, p *Path, paint *Paint) e
 	return nil
 }
 
-// fillSupersampled renders the path using 4x supersampling (legacy method).
+// fillSupersampled renders the path using 4x supersampling.
+// Uses EdgeIter to correctly handle subpath boundaries (BUG-002 fix).
 func (r *SoftwareRenderer) fillSupersampled(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Convert path to internal format and flatten
+	// Convert path to internal format
 	elements := convertPath(p)
-	flattenedPath := path.Flatten(elements)
-	rasterPoints := convertPoints(flattenedPath)
+
+	// Use EdgeIter to collect edges - this correctly handles subpath boundaries
+	// by not creating edges between separate subpaths (unlike the old Flatten approach)
+	pathEdges := path.CollectEdges(elements)
+	rasterEdges := convertEdges(pathEdges)
 
 	// Get color from paint
 	color := r.getColorFromPaint(paint)
@@ -235,7 +251,7 @@ func (r *SoftwareRenderer) fillSupersampled(pixmap *Pixmap, p *Path, paint *Pain
 
 	// Rasterize with anti-aliasing (4x supersampling)
 	adapter := &pixmapAdapter{pixmap: pixmap}
-	r.rasterizer.FillAA(adapter, rasterPoints, fillRule, raster.RGBA{
+	r.rasterizer.FillAAFromEdges(adapter, rasterEdges, fillRule, raster.RGBA{
 		R: color.R,
 		G: color.G,
 		B: color.B,
