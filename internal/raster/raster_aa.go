@@ -4,8 +4,41 @@ package raster
 
 import "math"
 
+// PathEdge represents an edge from external path processing.
+// This is used to receive edges from path.EdgeIter which correctly
+// handles subpath boundaries.
+type PathEdge struct {
+	P0, P1 Point
+}
+
+// FillAAFromEdges rasterizes edges with anti-aliasing onto a pixmap.
+// This function accepts pre-computed edges from path.EdgeIter, which
+// correctly handles subpath boundaries (no connecting edges between subpaths).
+// Uses 4x supersampling for smooth edges.
+func (r *Rasterizer) FillAAFromEdges(pixmap AAPixmap, pathEdges []PathEdge, fillRule FillRule, color RGBA) {
+	if len(pathEdges) < 2 {
+		return
+	}
+
+	// Build edge list from path edges
+	edges := make([]Edge, 0, len(pathEdges))
+	for _, pe := range pathEdges {
+		// Skip horizontal edges
+		if math.Abs(pe.P1.Y-pe.P0.Y) < 0.001 {
+			continue
+		}
+		edges = append(edges, NewEdge(pe.P0, pe.P1))
+	}
+
+	r.fillAAWithEdges(pixmap, edges, fillRule, color)
+}
+
 // FillAA rasterizes a filled path with anti-aliasing onto a pixmap.
 // Uses 4x supersampling for smooth edges.
+//
+// Deprecated: This function creates edges from consecutive point pairs,
+// which incorrectly connects separate subpaths. Use FillAAFromEdges with
+// path.EdgeIter for correct subpath handling.
 func (r *Rasterizer) FillAA(pixmap AAPixmap, points []Point, fillRule FillRule, color RGBA) {
 	if len(points) < 2 {
 		return
@@ -28,6 +61,11 @@ func (r *Rasterizer) FillAA(pixmap AAPixmap, points []Point, fillRule FillRule, 
 		edges = append(edges, NewEdge(p0, p1))
 	}
 
+	r.fillAAWithEdges(pixmap, edges, fillRule, color)
+}
+
+// fillAAWithEdges is the internal implementation shared by FillAA and FillAAFromEdges.
+func (r *Rasterizer) fillAAWithEdges(pixmap AAPixmap, edges []Edge, fillRule FillRule, color RGBA) {
 	if len(edges) == 0 {
 		return
 	}
