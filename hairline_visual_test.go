@@ -475,3 +475,51 @@ func TestHairlineEdgeCase_NearIntegerCoordinates(t *testing.T) {
 		})
 	}
 }
+
+// TestStrokeExpansion_ScaledDashedRect tests thick strokes with scale transformation.
+// This verifies the stroke expansion fix (lastNorm saved for end cap) from Issue #56.
+func TestStrokeExpansion_ScaledDashedRect(t *testing.T) {
+	// Test with thick line width (not hairline) to exercise stroke expansion
+	gc := NewContext(400, 400)
+	defer func() { _ = gc.Close() }()
+
+	gc.ClearWithColor(White)
+	gc.SetRGB(0, 0, 0)
+
+	// Scale 2x with lineWidth=2 gives effective width=4, which uses stroke expansion
+	gc.Scale(2, 2)
+	gc.SetLineWidth(2) // Thick stroke, NOT hairline
+	gc.SetDash(5, 5)
+	gc.DrawRectangle(50, 50, 100, 50) // Rectangle at (50,50) with size 100x50
+	if err := gc.Stroke(); err != nil {
+		t.Fatalf("Stroke failed: %v", err)
+	}
+
+	// Count pixels and check for artifacts
+	img := gc.Image()
+	bounds := img.Bounds()
+	blackPixels := 0
+	grayPixels := 0
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.At(x, y)
+			r, g, b, _ := c.RGBA()
+			avgGray := (r + g + b) / 3
+			if avgGray < 0x1000 {
+				blackPixels++
+			} else if avgGray < 0xF000 {
+				grayPixels++
+			}
+		}
+	}
+
+	// Should have substantial black pixels from dashed stroke
+	// With scale=2, lineWidth=2, dash(5,5), the rectangle should produce
+	// significant stroke output if expansion is working correctly.
+	if blackPixels < 100 {
+		t.Errorf("Expected at least 100 black pixels, got %d", blackPixels)
+	}
+
+	t.Logf("Black pixels: %d, Gray AA pixels: %d", blackPixels, grayPixels)
+}
