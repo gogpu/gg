@@ -77,6 +77,11 @@ type Paint struct {
 	// When Stroke is set, it takes precedence over the individual
 	// LineWidth, LineCap, LineJoin, and MiterLimit fields.
 	Stroke *Stroke
+
+	// TransformScale is the scale factor from the current transform matrix.
+	// Used internally by the renderer to determine effective stroke width.
+	// Set automatically by Context.Stroke() before rendering.
+	TransformScale float64
 }
 
 // NewPaint creates a new Paint with default values.

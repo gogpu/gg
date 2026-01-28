@@ -346,21 +346,44 @@ func (r *SoftwareRenderer) FillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 }
 
 // Stroke implements Renderer.Stroke with anti-aliasing support.
-// Strokes are expanded to fill paths and rendered with the Fill method
-// to get smooth anti-aliased edges.
+// For thin strokes (<=1px after transform), uses optimized hairline rendering.
+// For thicker strokes, expands to fill paths and renders with the Fill method.
 func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Apply dash pattern if set
+	// Get effective line width
+	width := paint.EffectiveLineWidth()
+
+	// Get transform scale for dash pattern scaling
+	transformScale := paint.TransformScale
+	if transformScale <= 0 {
+		transformScale = 1.0
+	}
+
+	// Check for hairline rendering based on TRANSFORMED line width.
+	// Per tiny-skia: hairline only when transformed width <= 1.
+	// At Scale(2,2) with lineWidth=1, transformed width = 2, so NOT hairline.
+	effectiveWidth := width * transformScale
+	if useHairline, coverage := treatAsHairline(effectiveWidth); useHairline {
+		return r.strokeHairline(pixmap, p, paint, coverage)
+	}
+
+	// Apply dash pattern if set (for thick strokes)
+	// Scale dash pattern by transform scale (Cairo/Skia convention)
 	pathToDraw := p
 	if paint.IsDashed() {
-		pathToDraw = dashPath(p, paint.EffectiveDash())
+		dash := paint.EffectiveDash()
+		if transformScale > 1.0 {
+			dash = dash.Scale(transformScale)
+		}
+		pathToDraw = dashPath(p, dash)
 	}
 
 	// Convert gg.Path to stroke.PathElement
 	strokeElements := convertPathToStrokeElements(pathToDraw)
 
 	// Create stroke style from paint (use effective methods for unified Stroke struct)
+	// Scale line width by transform scale (path coordinates are already transformed)
 	strokeStyle := stroke.Stroke{
-		Width:      paint.EffectiveLineWidth(),
+		Width:      paint.EffectiveLineWidth() * transformScale,
 		Cap:        convertLineCap(paint.EffectiveLineCap()),
 		Join:       convertLineJoin(paint.EffectiveLineJoin()),
 		MiterLimit: paint.EffectiveMiterLimit(),
@@ -381,6 +404,243 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 
 	// Fill the stroke path - this gives us anti-aliased strokes
 	return r.Fill(pixmap, strokePath, paint)
+}
+
+// treatAsHairline determines if a stroke should use hairline rendering.
+// Returns (useHairline, coverageFactor) where coverageFactor is the
+// opacity multiplier for very thin lines.
+//
+// Hairline rendering produces smoother results for strokes <= 1px because
+// it calculates per-pixel coverage directly, rather than expanding to a
+// fill path which can produce jagged edges for thin lines.
+//
+// NOTE: We use the nominal line width, not considering transform.
+// Path coordinates are already transformed by Context, so checking
+// the user-specified width is correct. A user setting lineWidth=1
+// wants a 1px line regardless of transform.
+func treatAsHairline(width float64) (bool, float64) {
+	// Zero width is always a hairline
+	if width == 0 {
+		return true, 1.0
+	}
+
+	// Threshold for hairline rendering
+	// Strokes <= 1px are rendered as hairlines for better quality
+	const hairlineThreshold = 1.0
+
+	if width <= hairlineThreshold {
+		// For widths between 0.5 and 1.0, use full coverage
+		// For widths < 0.5, scale the coverage to maintain visibility
+		coverage := width
+		if coverage < 0.5 {
+			coverage = 0.5 // Minimum visibility
+		}
+		return true, coverage
+	}
+
+	return false, 0
+}
+
+// strokeHairline renders a path as a hairline (1px or thinner stroke).
+// This provides smoother results than stroke expansion for thin lines.
+func (r *SoftwareRenderer) strokeHairline(pixmap *Pixmap, p *Path, paint *Paint, coverage float64) error {
+	// Apply dash pattern if set
+	// IMPORTANT: Scale the dash pattern by transform scale because path coordinates
+	// are already transformed. Per Cairo/Skia convention, dash lengths are in
+	// user-space units evaluated at stroke time.
+	pathToDraw := p
+	if paint.IsDashed() {
+		dash := paint.EffectiveDash()
+		// Scale dash pattern if transform is applied
+		if paint.TransformScale > 1.0 {
+			dash = dash.Scale(paint.TransformScale)
+		}
+		pathToDraw = dashPath(p, dash)
+	}
+
+	// Get color from paint
+	color := r.getColorFromPaint(paint)
+
+	// Create hairline blitter
+	adapter := &pixmapAdapter{pixmap: pixmap}
+	blitter := raster.NewRGBAHairlineBlitter(adapter, raster.RGBA{
+		R: color.R,
+		G: color.G,
+		B: color.B,
+		A: color.A,
+	})
+
+	// Convert line cap
+	lineCap := convertToHairlineCap(paint.EffectiveLineCap())
+
+	// Convert path to subpaths and render each independently
+	subpaths := flattenPathToHairlineSubpaths(pathToDraw)
+	for _, subpath := range subpaths {
+		if len(subpath) >= 2 {
+			raster.StrokeHairlineAA(blitter, subpath, lineCap, coverage)
+		}
+	}
+
+	return nil
+}
+
+// convertToHairlineCap converts gg.LineCap to raster.HairlineLineCap.
+func convertToHairlineCap(c LineCap) raster.HairlineLineCap {
+	switch c {
+	case LineCapButt:
+		return raster.HairlineCapButt
+	case LineCapRound:
+		return raster.HairlineCapRound
+	case LineCapSquare:
+		return raster.HairlineCapSquare
+	default:
+		return raster.HairlineCapButt
+	}
+}
+
+// flattenPathToHairlineSubpaths converts a path to a slice of subpaths.
+// Each subpath (started by MoveTo) becomes a separate point slice.
+// Curves are flattened to line segments with fine tolerance for smooth hairlines.
+func flattenPathToHairlineSubpaths(p *Path) [][]raster.HairlinePoint {
+	var subpaths [][]raster.HairlinePoint
+	var currentSubpath []raster.HairlinePoint
+	var current raster.HairlinePoint
+	var start raster.HairlinePoint
+	inSubpath := false
+
+	// Fine tolerance for hairline flattening
+	const tolerance = 0.25
+
+	for _, elem := range p.Elements() {
+		switch e := elem.(type) {
+		case MoveTo:
+			// Start new subpath - save previous one first if exists
+			if len(currentSubpath) >= 2 {
+				subpaths = append(subpaths, currentSubpath)
+			}
+			currentSubpath = nil
+
+			current = raster.HairlinePoint{X: e.Point.X, Y: e.Point.Y}
+			start = current
+			currentSubpath = append(currentSubpath, current)
+			inSubpath = true
+
+		case LineTo:
+			if inSubpath {
+				current = raster.HairlinePoint{X: e.Point.X, Y: e.Point.Y}
+				currentSubpath = append(currentSubpath, current)
+			}
+
+		case QuadTo:
+			if inSubpath {
+				// Flatten quadratic curve
+				flatPts := flattenQuadForHairline(
+					current.X, current.Y,
+					e.Control.X, e.Control.Y,
+					e.Point.X, e.Point.Y,
+					tolerance,
+				)
+				currentSubpath = append(currentSubpath, flatPts...)
+				current = raster.HairlinePoint{X: e.Point.X, Y: e.Point.Y}
+			}
+
+		case CubicTo:
+			if inSubpath {
+				// Flatten cubic curve
+				flatPts := flattenCubicForHairline(
+					current.X, current.Y,
+					e.Control1.X, e.Control1.Y,
+					e.Control2.X, e.Control2.Y,
+					e.Point.X, e.Point.Y,
+					tolerance,
+				)
+				currentSubpath = append(currentSubpath, flatPts...)
+				current = raster.HairlinePoint{X: e.Point.X, Y: e.Point.Y}
+			}
+
+		case Close:
+			if inSubpath && (current.X != start.X || current.Y != start.Y) {
+				// Close back to start
+				currentSubpath = append(currentSubpath, start)
+			}
+			inSubpath = false
+		}
+	}
+
+	// Add final subpath
+	if len(currentSubpath) >= 2 {
+		subpaths = append(subpaths, currentSubpath)
+	}
+
+	return subpaths
+}
+
+// flattenQuadForHairline flattens a quadratic bezier for hairline rendering.
+func flattenQuadForHairline(x0, y0, cx, cy, x1, y1, tolerance float64) []raster.HairlinePoint {
+	var points []raster.HairlinePoint
+	flattenQuadRecForHairline(x0, y0, cx, cy, x1, y1, tolerance, &points)
+	return points
+}
+
+func flattenQuadRecForHairline(x0, y0, cx, cy, x1, y1, tolerance float64, points *[]raster.HairlinePoint) {
+	// Check if curve is flat enough
+	mx := (x0 + x1) / 2
+	my := (y0 + y1) / 2
+	dx := cx - mx
+	dy := cy - my
+	dist := math.Sqrt(dx*dx + dy*dy)
+
+	if dist < tolerance {
+		*points = append(*points, raster.HairlinePoint{X: x1, Y: y1})
+		return
+	}
+
+	// Subdivide using de Casteljau
+	x01 := (x0 + cx) / 2
+	y01 := (y0 + cy) / 2
+	x12 := (cx + x1) / 2
+	y12 := (cy + y1) / 2
+	x012 := (x01 + x12) / 2
+	y012 := (y01 + y12) / 2
+
+	flattenQuadRecForHairline(x0, y0, x01, y01, x012, y012, tolerance, points)
+	flattenQuadRecForHairline(x012, y012, x12, y12, x1, y1, tolerance, points)
+}
+
+// flattenCubicForHairline flattens a cubic bezier for hairline rendering.
+func flattenCubicForHairline(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float64) []raster.HairlinePoint {
+	var points []raster.HairlinePoint
+	flattenCubicRecForHairline(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, &points)
+	return points
+}
+
+func flattenCubicRecForHairline(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float64, points *[]raster.HairlinePoint) {
+	// Check if curve is flat enough
+	d1 := pointLineDistance(c1x, c1y, x0, y0, x1, y1)
+	d2 := pointLineDistance(c2x, c2y, x0, y0, x1, y1)
+	dist := math.Max(d1, d2)
+
+	if dist < tolerance {
+		*points = append(*points, raster.HairlinePoint{X: x1, Y: y1})
+		return
+	}
+
+	// Subdivide using de Casteljau
+	x01 := (x0 + c1x) / 2
+	y01 := (y0 + c1y) / 2
+	x12 := (c1x + c2x) / 2
+	y12 := (c1y + c2y) / 2
+	x23 := (c2x + x1) / 2
+	y23 := (c2y + y1) / 2
+	x012 := (x01 + x12) / 2
+	y012 := (y01 + y12) / 2
+	x123 := (x12 + x23) / 2
+	y123 := (y12 + y23) / 2
+	x0123 := (x012 + x123) / 2
+	y0123 := (y012 + y123) / 2
+
+	flattenCubicRecForHairline(x0, y0, x01, y01, x012, y012, x0123, y0123, tolerance, points)
+	flattenCubicRecForHairline(x0123, y0123, x123, y123, x23, y23, x1, y1, tolerance, points)
 }
 
 // convertPathToStrokeElements converts gg.Path elements to stroke.PathElement.

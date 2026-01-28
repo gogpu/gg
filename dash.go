@@ -138,6 +138,26 @@ func (d *Dash) NormalizedOffset() float64 {
 	return offset
 }
 
+// Scale returns a new Dash with all lengths multiplied by the given factor.
+// This is used to scale dash patterns when a transform is applied to the path.
+// Per Cairo/Skia convention, dash lengths are in user-space units, so they
+// must be scaled along with the coordinate transform.
+func (d *Dash) Scale(factor float64) *Dash {
+	if d == nil || factor <= 0 {
+		return d
+	}
+
+	scaledArray := make([]float64, len(d.Array))
+	for i, l := range d.Array {
+		scaledArray[i] = l * factor
+	}
+
+	return &Dash{
+		Array:  scaledArray,
+		Offset: d.Offset * factor,
+	}
+}
+
 // effectiveArray returns the array with odd-length arrays duplicated.
 // This is used internally for pattern iteration.
 func (d *Dash) effectiveArray() []float64 {

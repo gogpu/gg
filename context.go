@@ -391,6 +391,8 @@ func (c *Context) Fill() error {
 // Stroke strokes the current path and clears it.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
+	// Set transform scale for renderer to determine effective stroke width
+	c.paint.TransformScale = c.matrix.ScaleFactor()
 	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
@@ -405,6 +407,8 @@ func (c *Context) FillPreserve() error {
 // StrokePreserve strokes the current path without clearing it.
 // Returns an error if the rendering operation fails.
 func (c *Context) StrokePreserve() error {
+	// Set transform scale for renderer to determine effective stroke width
+	c.paint.TransformScale = c.matrix.ScaleFactor()
 	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
