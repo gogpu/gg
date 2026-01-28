@@ -208,6 +208,7 @@ type StrokeExpander struct {
 	startTan  Vec2
 	lastPt    Point
 	lastTan   Vec2
+	lastNorm  Vec2 // Normal at lastPt (scaled by radius), used for end cap
 
 	// Join threshold for skipping small joins
 	joinThresh float64
@@ -280,6 +281,7 @@ func (e *StrokeExpander) reset() {
 	e.startTan = Vec2{}
 	e.lastPt = Point{}
 	e.lastTan = Vec2{}
+	e.lastNorm = Vec2{}
 	e.joinThresh = 2.0 * e.tolerance / e.style.Width
 }
 
@@ -387,6 +389,7 @@ func (e *StrokeExpander) doLine(tangent Vec2, p1 Point) {
 	e.forward.lineTo(p1.Add(norm.Neg()))
 	e.backward.lineTo(p1.Add(norm))
 	e.lastPt = p1
+	e.lastNorm = norm // Save normal for end cap (tiny-skia pattern)
 }
 
 // doQuad handles a quadratic Bezier curve by flattening it.
@@ -426,12 +429,14 @@ func (e *StrokeExpander) finish() {
 	// Copy forward path to output
 	e.output.appendPath(e.forward)
 
-	// Apply end cap
-	backElems := e.backward.elements
-	if len(backElems) > 0 {
-		returnP := getEndPoint(backElems[len(backElems)-1])
-		d := e.lastPt.Sub(returnP)
-		e.applyCap(e.style.Cap, e.lastPt, d, false)
+	// Apply end cap using saved normal from last line segment.
+	// This follows the tiny-skia pattern: use prev_normal instead of
+	// computing from points, which would give incorrect cap direction.
+	// Note: lastNorm points toward backward path, but applyCap expects
+	// the normal pointing toward forward path (from where we're drawing),
+	// so we negate it.
+	if len(e.backward.elements) > 0 {
+		e.applyCap(e.style.Cap, e.lastPt, e.lastNorm.Neg(), false)
 	}
 
 	// Append reversed backward path

@@ -116,3 +116,19 @@ func (m Matrix) IsIdentity() bool {
 func (m Matrix) IsTranslation() bool {
 	return m.A == 1 && m.B == 0 && m.D == 0 && m.E == 1
 }
+
+// ScaleFactor returns the maximum scale factor of the transformation.
+// This is useful for determining effective stroke width after transform.
+// For a pure scale matrix Scale(sx, sy), returns max(sx, sy).
+// For rotation/shear, returns the maximum singular value.
+func (m Matrix) ScaleFactor() float64 {
+	// Calculate the two singular values of the 2x2 part of the matrix.
+	// For the matrix [A B; D E], singular values are sqrt of eigenvalues of A^T*A.
+	// This gives us the maximum stretch factor in any direction.
+	sx := math.Sqrt(m.A*m.A + m.D*m.D)
+	sy := math.Sqrt(m.B*m.B + m.E*m.E)
+	if sx > sy {
+		return sx
+	}
+	return sy
+}

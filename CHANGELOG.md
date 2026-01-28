@@ -12,6 +12,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.21.2] - 2026-01-28
+
+### Added
+
+- **Hairline rendering** (BUG-003, [#56](https://github.com/gogpu/gg/issues/56))
+  - Dual-path stroke rendering following tiny-skia/Skia pattern
+  - Thin strokes (width <= 1px after transform) use direct hairline rendering
+  - Fixed-point arithmetic (FDot6/FDot16) for sub-pixel precision
+  - +0.5 centering fix for correct pixel distribution on integer coordinates
+  - Line cap support (butt, round, square) for hairlines
+
+- **Transform-aware stroke system**
+  - `Matrix.ScaleFactor()` — extracts max scale from transform matrix
+  - `Paint.TransformScale` — passes transform info to renderer
+  - `Dash.Scale()` — scales dash pattern by transform (Cairo/Skia convention)
+
+### Fixed
+
+- **Thin dashed strokes render as disconnected pixels** ([#56](https://github.com/gogpu/gg/issues/56))
+  - Root cause 1: Stroke expansion creates paths too thin for proper coverage
+  - Solution: Hairline rendering for strokes ≤1px (after transform)
+
+- **Stroke expansion artifacts with scale > 1** ([#56](https://github.com/gogpu/gg/issues/56))
+  - Root cause 2: `finish()` computed wrong normal for end cap from point difference
+  - Solution: Save `lastNorm` in `doLine()`, use it for end cap (tiny-skia pattern)
+  - Eliminates horizontal stripes inside dash segments at scale > 1
+
+### New Files
+
+- `internal/raster/hairline_aa.go` — Core AA hairline algorithm
+- `internal/raster/hairline_blitter.go` — Hairline blitter interface
+- `internal/raster/hairline_caps.go` — Line cap handling
+- `internal/raster/hairline_types.go` — Fixed-point types
+
 ## [0.21.1] - 2026-01-28
 
 ### Fixed

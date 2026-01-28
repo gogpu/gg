@@ -229,19 +229,26 @@ func TestContext_StrokeWithDash_Rectangle(t *testing.T) {
 
 	pixmap := dc.pixmap
 
-	// Sample along top edge (y=20, x from 20 to 80)
-	blackCount := 0
+	// Sample along top edge. Hairline rendering distributes coverage between
+	// two adjacent pixel rows (y=19 and y=20), so we check both rows.
+	// With 1px hairline, each row gets ~50% coverage, so we use < 0.9 threshold.
+	strokedCount := 0
 	gapCount := 0
 	for x := 20; x < 80; x++ {
-		c := pixmap.GetPixel(x, 20)
-		if c.R < 0.5 {
-			blackCount++
-		} else if c.R > 0.9 {
+		// Check both y=19 and y=20 since hairline distributes coverage
+		c19 := pixmap.GetPixel(x, 19)
+		c20 := pixmap.GetPixel(x, 20)
+		// Pixel is "stroked" if either row has some color (R < 0.9)
+		if c19.R < 0.9 || c20.R < 0.9 {
+			strokedCount++
+		}
+		// Pixel is a "gap" if both rows are white (R > 0.95)
+		if c19.R > 0.95 && c20.R > 0.95 {
 			gapCount++
 		}
 	}
 
-	if blackCount == 0 {
+	if strokedCount == 0 {
 		t.Error("No stroked pixels on rectangle top edge")
 	}
 	if gapCount == 0 {
