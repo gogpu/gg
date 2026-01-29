@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.21.3] - 2026-01-29
+
+### Changed
+
+- Migrate to unified `gputypes` package for WebGPU types
+  - Replace `wgpu/types` imports with `gputypes`
+  - Update `render/` package to use `gputypes.TextureFormat`
+  - Update `backend/native/` for gputypes compatibility
+
+### Dependencies
+
+- Add `github.com/gogpu/gputypes` v0.1.0
+- Update `github.com/gogpu/gpucontext` v0.2.0 → v0.3.0
+- Update `github.com/gogpu/wgpu` v0.10.2 → v0.11.1
+
 ## [0.21.2] - 2026-01-28
 
 ### Added

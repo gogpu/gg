@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Pipeline cache errors.
@@ -301,26 +301,26 @@ type RenderPipelineDescriptor struct {
 	VertexBufferLayouts []VertexBufferLayout
 
 	// PrimitiveTopology is the primitive type (triangles, lines, points).
-	PrimitiveTopology types.PrimitiveTopology
+	PrimitiveTopology gputypes.PrimitiveTopology
 
 	// FrontFace defines which face is considered front-facing.
-	FrontFace types.FrontFace
+	FrontFace gputypes.FrontFace
 
 	// CullMode defines which faces to cull.
-	CullMode types.CullMode
+	CullMode gputypes.CullMode
 
 	// ColorFormat is the format of the color attachment.
-	ColorFormat types.TextureFormat
+	ColorFormat gputypes.TextureFormat
 
 	// DepthFormat is the format of the depth attachment (optional).
 	// Use TextureFormatUndefined for no depth attachment.
-	DepthFormat types.TextureFormat
+	DepthFormat gputypes.TextureFormat
 
 	// DepthWriteEnabled enables depth buffer writes.
 	DepthWriteEnabled bool
 
 	// DepthCompare is the depth comparison function.
-	DepthCompare types.CompareFunction
+	DepthCompare gputypes.CompareFunction
 
 	// BlendState is the color blending configuration (optional).
 	// Nil means no blending (source replaces destination).
@@ -336,7 +336,7 @@ type VertexBufferLayout struct {
 	ArrayStride uint64
 
 	// StepMode is the input rate (per vertex or per instance).
-	StepMode types.VertexStepMode
+	StepMode gputypes.VertexStepMode
 
 	// Attributes describes the vertex attributes in this buffer.
 	Attributes []VertexAttribute
@@ -348,7 +348,7 @@ type VertexAttribute struct {
 	ShaderLocation uint32
 
 	// Format is the attribute data format.
-	Format types.VertexFormat
+	Format gputypes.VertexFormat
 
 	// Offset is the byte offset from the start of the vertex.
 	Offset uint64
@@ -366,13 +366,13 @@ type BlendState struct {
 // BlendComponent describes a blend component (color or alpha).
 type BlendComponent struct {
 	// SrcFactor is the source blend factor.
-	SrcFactor types.BlendFactor
+	SrcFactor gputypes.BlendFactor
 
 	// DstFactor is the destination blend factor.
-	DstFactor types.BlendFactor
+	DstFactor gputypes.BlendFactor
 
 	// Operation is the blend operation.
-	Operation types.BlendOperation
+	Operation gputypes.BlendOperation
 }
 
 // ComputePipelineDescriptor describes a compute pipeline to create.
@@ -658,7 +658,7 @@ func createRenderPipeline(device hal.Device, desc *RenderPipelineDescriptor) (*R
 	//         Targets: []hal.ColorTargetState{{
 	//             Format:    desc.ColorFormat,
 	//             Blend:     convertBlendState(desc.BlendState),
-	//             WriteMask: types.ColorWriteMaskAll,
+	//             WriteMask: gputypes.ColorWriteMaskAll,
 	//         }},
 	//     },
 	//     Primitive: hal.PrimitiveState{

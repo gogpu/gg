@@ -4,7 +4,7 @@ package native
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // =============================================================================
@@ -285,7 +285,7 @@ func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
 func TestRenderPassEncoder_SetBlendConstant(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		p := &RenderPassEncoder{state: RenderPassStateRecording}
-		color := types.Color{R: 1, G: 0, B: 0, A: 1}
+		color := gputypes.Color{R: 1, G: 0, B: 0, A: 1}
 		err := p.SetBlendConstant(color)
 		if err != nil {
 			t.Errorf("SetBlendConstant() error = %v, want nil", err)
@@ -294,7 +294,7 @@ func TestRenderPassEncoder_SetBlendConstant(t *testing.T) {
 
 	t.Run("ended pass error", func(t *testing.T) {
 		p := &RenderPassEncoder{state: RenderPassStateEnded}
-		err := p.SetBlendConstant(types.Color{})
+		err := p.SetBlendConstant(gputypes.Color{})
 		if err == nil {
 			t.Error("SetBlendConstant() on ended pass should return error")
 		}

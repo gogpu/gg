@@ -385,7 +385,7 @@ func TestEdgeCase_LoopingCubic(t *testing.T) {
 		eb.CubicEdgeCount(), scanlineCount)
 }
 
-// TestEdgeCase_AllEdgeTypesInOnePath tests a path with all edge types.
+// TestEdgeCase_AllEdgeTypesInOnePath tests a path with all edge gputypes.
 func TestEdgeCase_AllEdgeTypesInOnePath(t *testing.T) {
 	filler := NewAnalyticFiller(300, 300)
 	eb := NewEdgeBuilder(2)

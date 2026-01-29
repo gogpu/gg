@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg/scene"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 //go:embed shaders/flatten.wgsl
@@ -194,42 +194,42 @@ func (r *GPUFlattenRasterizer) createBindGroupLayouts() error {
 	// Input bind group layout (group 0)
 	inputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "flatten_input_layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type:           types.BufferBindingTypeUniform,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
 					MinBindingSize: 32, // sizeof(FlattenConfig)
 				},
 			},
 			{
 				Binding:    1,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type:           types.BufferBindingTypeUniform,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
 					MinBindingSize: 32, // sizeof(AffineTransform)
 				},
 			},
 			{
 				Binding:    2,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeReadOnlyStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeReadOnlyStorage,
 				},
 			},
 			{
 				Binding:    3,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeReadOnlyStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeReadOnlyStorage,
 				},
 			},
 			{
 				Binding:    4,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeReadOnlyStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeReadOnlyStorage,
 				},
 			},
 		},
@@ -242,26 +242,26 @@ func (r *GPUFlattenRasterizer) createBindGroupLayouts() error {
 	// Output bind group layout (group 1)
 	outputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "flatten_output_layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
 				},
 			},
 			{
 				Binding:    1,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
 				},
 			},
 			{
 				Binding:    2,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
 				},
 			},
 		},

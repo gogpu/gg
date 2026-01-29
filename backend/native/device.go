@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // GPUInfo contains information about the selected GPU.
@@ -15,9 +15,9 @@ type GPUInfo struct {
 	// Vendor is the GPU vendor.
 	Vendor string
 	// DeviceType is the type of GPU (discrete, integrated, etc.).
-	DeviceType types.DeviceType
+	DeviceType gputypes.DeviceType
 	// Backend is the graphics API in use (Vulkan, Metal, DX12).
-	Backend types.Backend
+	Backend gputypes.Backend
 	// Driver is the driver version string.
 	Driver string
 }
@@ -60,11 +60,11 @@ func logGPUInfo(adapterID core.AdapterID) {
 // createDevice creates a logical device from an adapter.
 // This is a helper function that encapsulates device creation logic.
 func createDevice(adapterID core.AdapterID, label string) (core.DeviceID, error) {
-	desc := &types.DeviceDescriptor{
+	desc := &gputypes.DeviceDescriptor{
 		Label: label,
 		// Use default limits and no special features for now
 		RequiredFeatures: nil,
-		RequiredLimits:   types.DefaultLimits(),
+		RequiredLimits:   gputypes.DefaultLimits(),
 	}
 
 	deviceID, err := core.RequestDevice(adapterID, desc)

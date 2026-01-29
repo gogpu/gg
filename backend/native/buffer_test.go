@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // =============================================================================
@@ -17,7 +17,7 @@ import (
 // mockHALBuffer is a test double for hal.Buffer.
 type mockHALBuffer struct {
 	size   uint64
-	usage  types.BufferUsage
+	usage  gputypes.BufferUsage
 	label  string
 	mapped bool
 }
@@ -66,11 +66,11 @@ func (d *bufferMockHALDevice) DestroyBuffer(buffer hal.Buffer) {
 
 func TestNewBuffer(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
 	desc := &BufferDescriptor{
 		Label: "test-buffer",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -84,7 +84,7 @@ func TestNewBuffer(t *testing.T) {
 	if buf.Size() != 1024 {
 		t.Errorf("Size = %d, want 1024", buf.Size())
 	}
-	if buf.Usage() != types.BufferUsageVertex {
+	if buf.Usage() != gputypes.BufferUsageVertex {
 		t.Errorf("Usage = %v, want Vertex", buf.Usage())
 	}
 	if buf.IsDestroyed() {
@@ -97,11 +97,11 @@ func TestNewBuffer(t *testing.T) {
 
 func TestNewBuffer_MappedAtCreation(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 512, usage: types.BufferUsageMapWrite, mapped: true}
+	halBuf := &mockHALBuffer{size: 512, usage: gputypes.BufferUsageMapWrite, mapped: true}
 	desc := &BufferDescriptor{
 		Label:            "mapped-buffer",
 		Size:             512,
-		Usage:            types.BufferUsageMapWrite,
+		Usage:            gputypes.BufferUsageMapWrite,
 		MappedAtCreation: true,
 	}
 
@@ -118,11 +118,11 @@ func TestNewBuffer_MappedAtCreation(t *testing.T) {
 
 func TestBuffer_MapAsync_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "map-test",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -130,7 +130,7 @@ func TestBuffer_MapAsync_Success(t *testing.T) {
 	var callbackInvoked bool
 	var callbackStatus BufferMapAsyncStatus
 
-	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(status BufferMapAsyncStatus) {
+	err := buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(status BufferMapAsyncStatus) {
 		callbackInvoked = true
 		callbackStatus = status
 	})
@@ -160,17 +160,17 @@ func TestBuffer_MapAsync_Success(t *testing.T) {
 
 func TestBuffer_MapAsync_WriteMode(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 512, usage: types.BufferUsageMapWrite}
+	halBuf := &mockHALBuffer{size: 512, usage: gputypes.BufferUsageMapWrite}
 	desc := &BufferDescriptor{
 		Label: "write-map-test",
 		Size:  512,
-		Usage: types.BufferUsageMapWrite,
+		Usage: gputypes.BufferUsageMapWrite,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
-	err := buf.MapAsync(types.MapModeWrite, 0, 512, func(s BufferMapAsyncStatus) {
+	err := buf.MapAsync(gputypes.MapModeWrite, 0, 512, func(s BufferMapAsyncStatus) {
 		status = s
 	})
 
@@ -187,18 +187,18 @@ func TestBuffer_MapAsync_WriteMode(t *testing.T) {
 
 func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label:            "already-mapped",
 		Size:             1024,
-		Usage:            types.BufferUsageMapRead | types.BufferUsageMapWrite,
+		Usage:            gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
 		MappedAtCreation: true,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
-	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
+	err := buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
 		status = s
 	})
 
@@ -212,17 +212,17 @@ func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 
 func TestBuffer_MapAsync_UsageMismatch(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
 	desc := &BufferDescriptor{
 		Label: "usage-mismatch",
 		Size:  1024,
-		Usage: types.BufferUsageVertex, // No MapRead or MapWrite
+		Usage: gputypes.BufferUsageVertex, // No MapRead or MapWrite
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	var status BufferMapAsyncStatus
-	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
+	err := buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
 		status = s
 	})
 
@@ -236,11 +236,11 @@ func TestBuffer_MapAsync_UsageMismatch(t *testing.T) {
 
 func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -268,7 +268,7 @@ func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
 			buf.mu.Unlock()
 
 			var status BufferMapAsyncStatus
-			err := buf.MapAsync(types.MapModeRead, tt.offset, tt.size, func(s BufferMapAsyncStatus) {
+			err := buf.MapAsync(gputypes.MapModeRead, tt.offset, tt.size, func(s BufferMapAsyncStatus) {
 				status = s
 			})
 
@@ -290,16 +290,16 @@ func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
 
 func TestBuffer_MapAsync_NilCallback(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "nil-callback",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
-	err := buf.MapAsync(types.MapModeRead, 0, 1024, nil)
+	err := buf.MapAsync(gputypes.MapModeRead, 0, 1024, nil)
 
 	if !errors.Is(err, ErrCallbackNil) {
 		t.Errorf("MapAsync with nil callback: got %v, want ErrCallbackNil", err)
@@ -308,17 +308,17 @@ func TestBuffer_MapAsync_NilCallback(t *testing.T) {
 
 func TestBuffer_MapAsync_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "destroyed",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 	buf.Destroy()
 
-	err := buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	err := buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 
 	if !errors.Is(err, ErrBufferDestroyed) {
 		t.Errorf("MapAsync after destroy: got %v, want ErrBufferDestroyed", err)
@@ -331,17 +331,17 @@ func TestBuffer_MapAsync_AfterDestroy(t *testing.T) {
 
 func TestBuffer_GetMappedRange_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Map the buffer
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 	buf.PollMapAsync()
 
 	// Get mapped range
@@ -356,17 +356,17 @@ func TestBuffer_GetMappedRange_Success(t *testing.T) {
 
 func TestBuffer_GetMappedRange_PartialMap(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "partial-map",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Map partial range (256 to 768)
-	_ = buf.MapAsync(types.MapModeRead, 256, 512, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 256, 512, func(_ BufferMapAsyncStatus) {})
 	buf.PollMapAsync()
 
 	// Valid access within mapped region
@@ -387,11 +387,11 @@ func TestBuffer_GetMappedRange_PartialMap(t *testing.T) {
 
 func TestBuffer_GetMappedRange_NotMapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "not-mapped",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -405,17 +405,17 @@ func TestBuffer_GetMappedRange_NotMapped(t *testing.T) {
 
 func TestBuffer_GetMappedRange_Pending(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "pending",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Start mapping but don't poll
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 
 	_, err := buf.GetMappedRange(0, 512)
 
@@ -430,17 +430,17 @@ func TestBuffer_GetMappedRange_Pending(t *testing.T) {
 
 func TestBuffer_Unmap_Success(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "unmap-test",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Map and poll
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 	buf.PollMapAsync()
 
 	// Unmap
@@ -455,17 +455,17 @@ func TestBuffer_Unmap_Success(t *testing.T) {
 
 func TestBuffer_Unmap_Pending(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "unmap-pending",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackStatus BufferMapAsyncStatus
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
 		callbackStatus = s
 	})
 
@@ -484,11 +484,11 @@ func TestBuffer_Unmap_Pending(t *testing.T) {
 
 func TestBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "already-unmapped",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -502,11 +502,11 @@ func TestBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
 
 func TestBuffer_Unmap_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "unmap-destroyed",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -525,11 +525,11 @@ func TestBuffer_Unmap_AfterDestroy(t *testing.T) {
 
 func TestBuffer_Destroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
 	desc := &BufferDescriptor{
 		Label: "destroy-test",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -548,11 +548,11 @@ func TestBuffer_Destroy(t *testing.T) {
 
 func TestBuffer_Destroy_Idempotent(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
 	desc := &BufferDescriptor{
 		Label: "idempotent-destroy",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -570,17 +570,17 @@ func TestBuffer_Destroy_Idempotent(t *testing.T) {
 
 func TestBuffer_Destroy_WhilePending(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "destroy-pending",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	var callbackStatus BufferMapAsyncStatus
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
 		callbackStatus = s
 	})
 
@@ -601,11 +601,11 @@ func TestBuffer_Destroy_WhilePending(t *testing.T) {
 
 func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead | types.BufferUsageMapWrite}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite}
 	desc := &BufferDescriptor{
 		Label: "concurrent",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead | types.BufferUsageMapWrite,
+		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -618,7 +618,7 @@ func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+			_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 			buf.PollMapAsync()
 			_ = buf.Unmap()
 		}()
@@ -635,17 +635,17 @@ func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 
 func TestBuffer_ConcurrentGetMappedRange(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "concurrent-read",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Map the buffer
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 	buf.PollMapAsync()
 
 	const numReaders = 10
@@ -679,7 +679,7 @@ func TestCreateBuffer(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label: "created-buffer",
 		Size:  1024,
-		Usage: types.BufferUsageVertex | types.BufferUsageCopyDst,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 	}
 
 	buf, err := CreateBuffer(device, desc)
@@ -701,7 +701,7 @@ func TestCreateBuffer_NilDevice(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label: "test",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	_, err := CreateBuffer(nil, desc)
@@ -724,7 +724,7 @@ func TestCreateBuffer_ZeroSize(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label: "zero-size",
 		Size:  0,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	_, err := CreateBuffer(device, desc)
@@ -752,7 +752,7 @@ func TestCreateBuffer_SizeAlignment(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label: "alignment-test",
 		Size:  1001, // Not aligned to 4 bytes
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	buf, err := CreateBuffer(device, desc)
@@ -769,14 +769,14 @@ func TestCreateBuffer_SizeAlignment(t *testing.T) {
 func TestCreateBufferSimple(t *testing.T) {
 	device := &bufferMockHALDevice{}
 
-	buf, err := CreateBufferSimple(device, 2048, types.BufferUsageStorage, "simple-buffer")
+	buf, err := CreateBufferSimple(device, 2048, gputypes.BufferUsageStorage, "simple-buffer")
 	if err != nil {
 		t.Fatalf("CreateBufferSimple failed: %v", err)
 	}
 	if buf.Size() != 2048 {
 		t.Errorf("Size = %d, want 2048", buf.Size())
 	}
-	if buf.Usage() != types.BufferUsageStorage {
+	if buf.Usage() != gputypes.BufferUsageStorage {
 		t.Errorf("Usage = %v, want Storage", buf.Usage())
 	}
 	if buf.Label() != "simple-buffer" {
@@ -792,7 +792,7 @@ func TestCreateStagingBuffer_Upload(t *testing.T) {
 		t.Fatalf("CreateStagingBuffer (upload) failed: %v", err)
 	}
 
-	expectedUsage := types.BufferUsageMapWrite | types.BufferUsageCopySrc
+	expectedUsage := gputypes.BufferUsageMapWrite | gputypes.BufferUsageCopySrc
 	if buf.Usage() != expectedUsage {
 		t.Errorf("Usage = %v, want MapWrite|CopySrc", buf.Usage())
 	}
@@ -811,7 +811,7 @@ func TestCreateStagingBuffer_Readback(t *testing.T) {
 		t.Fatalf("CreateStagingBuffer (readback) failed: %v", err)
 	}
 
-	expectedUsage := types.BufferUsageMapRead | types.BufferUsageCopyDst
+	expectedUsage := gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst
 	if buf.Usage() != expectedUsage {
 		t.Errorf("Usage = %v, want MapRead|CopyDst", buf.Usage())
 	}
@@ -874,11 +874,11 @@ func TestBufferMapAsyncStatus_String(t *testing.T) {
 
 func TestBuffer_Descriptor(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 2048, usage: types.BufferUsageUniform}
+	halBuf := &mockHALBuffer{size: 2048, usage: gputypes.BufferUsageUniform}
 	desc := &BufferDescriptor{
 		Label: "descriptor-test",
 		Size:  2048,
-		Usage: types.BufferUsageUniform,
+		Usage: gputypes.BufferUsageUniform,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -897,11 +897,11 @@ func TestBuffer_Descriptor(t *testing.T) {
 
 func TestBuffer_Raw_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageVertex}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
 	desc := &BufferDescriptor{
 		Label: "raw-destroy-test",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -921,11 +921,11 @@ func TestBuffer_Raw_AfterDestroy(t *testing.T) {
 
 func TestBuffer_MapAsync_InvalidMode(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "invalid-mode",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -945,11 +945,11 @@ func TestBuffer_MapAsync_InvalidMode(t *testing.T) {
 
 func TestBuffer_PollMapAsync_NotPending(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "poll-not-pending",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -962,11 +962,11 @@ func TestBuffer_PollMapAsync_NotPending(t *testing.T) {
 
 func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "poll-destroyed",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
@@ -975,7 +975,7 @@ func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 	var callbackCalled bool
 
 	// Start mapping
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(s BufferMapAsyncStatus) {
 		callbackStatus = s
 		callbackCalled = true
 	})
@@ -1000,17 +1000,17 @@ func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 
 func TestBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
 	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: types.BufferUsageMapRead}
+	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
 	desc := &BufferDescriptor{
 		Label: "range-destroy",
 		Size:  1024,
-		Usage: types.BufferUsageMapRead,
+		Usage: gputypes.BufferUsageMapRead,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
 
 	// Map and poll
-	_ = buf.MapAsync(types.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
+	_ = buf.MapAsync(gputypes.MapModeRead, 0, 1024, func(_ BufferMapAsyncStatus) {})
 	buf.PollMapAsync()
 
 	// Destroy
@@ -1028,7 +1028,7 @@ func TestCreateBuffer_MappedAtCreationValidation(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label:            "mapped-validation",
 		Size:             1024,
-		Usage:            types.BufferUsageVertex, // No MapWrite or CopyDst
+		Usage:            gputypes.BufferUsageVertex, // No MapWrite or CopyDst
 		MappedAtCreation: true,
 	}
 
@@ -1047,7 +1047,7 @@ func TestCreateBuffer_HALError(t *testing.T) {
 	desc := &BufferDescriptor{
 		Label: "hal-error",
 		Size:  1024,
-		Usage: types.BufferUsageVertex,
+		Usage: gputypes.BufferUsageVertex,
 	}
 
 	_, err := CreateBuffer(device, desc)

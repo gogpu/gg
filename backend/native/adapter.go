@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gg/gpucore"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // HALAdapter implements gpucore.GPUAdapter using gogpu/wgpu/hal directly.
@@ -24,7 +24,7 @@ type HALAdapter struct {
 	queue  hal.Queue
 
 	// Adapter limits and capabilities
-	limits       types.Limits
+	limits       gputypes.Limits
 	hasCompute   bool
 	maxBufferSz  uint64
 	maxWorkgroup [3]uint32
@@ -49,12 +49,12 @@ type HALAdapter struct {
 // NewHALAdapter creates a new HALAdapter wrapping the given device and queue.
 // The limits parameter provides the adapter's capability limits.
 // If limits is nil, default limits are used.
-func NewHALAdapter(device hal.Device, queue hal.Queue, limits *types.Limits) *HALAdapter {
-	var lim types.Limits
+func NewHALAdapter(device hal.Device, queue hal.Queue, limits *gputypes.Limits) *HALAdapter {
+	var lim gputypes.Limits
 	if limits != nil {
 		lim = *limits
 	} else {
-		lim = types.DefaultLimits()
+		lim = gputypes.DefaultLimits()
 	}
 
 	adapter := &HALAdapter{
@@ -212,7 +212,7 @@ func (a *HALAdapter) ReadBuffer(id gpucore.BufferID, offset, size uint64) ([]byt
 	stagingDesc := &hal.BufferDescriptor{
 		Label:            "staging-readback",
 		Size:             size,
-		Usage:            types.BufferUsageMapRead | types.BufferUsageCopyDst,
+		Usage:            gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 		MappedAtCreation: true,
 	}
 
@@ -293,9 +293,9 @@ func (a *HALAdapter) CreateTexture(width, height int, format gpucore.TextureForm
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
+		Dimension:     gputypes.TextureDimension2D,
 		Format:        convertTextureFormat(format),
-		Usage:         types.TextureUsageCopySrc | types.TextureUsageCopyDst | types.TextureUsageStorageBinding,
+		Usage:         gputypes.TextureUsageCopySrc | gputypes.TextureUsageCopyDst | gputypes.TextureUsageStorageBinding,
 	}
 
 	texture, err := a.device.CreateTexture(desc)
@@ -344,7 +344,7 @@ func (a *HALAdapter) WriteTexture(id gpucore.TextureID, data []byte) {
 		Texture:  texture,
 		MipLevel: 0,
 		Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
-		Aspect:   types.TextureAspectAll,
+		Aspect:   gputypes.TextureAspectAll,
 	}
 
 	// Placeholder dimensions - real implementation needs texture metadata
@@ -386,7 +386,7 @@ func (a *HALAdapter) CreateBindGroupLayout(desc *gpucore.BindGroupLayoutDesc) (g
 		return gpucore.InvalidID, fmt.Errorf("nil bind group layout descriptor")
 	}
 
-	halEntries := make([]types.BindGroupLayoutEntry, len(desc.Entries))
+	halEntries := make([]gputypes.BindGroupLayoutEntry, len(desc.Entries))
 	for i, entry := range desc.Entries {
 		halEntries[i] = convertBindGroupLayoutEntry(entry)
 	}
@@ -535,7 +535,7 @@ func (a *HALAdapter) CreateBindGroup(layout gpucore.BindGroupLayoutID, entries [
 		return gpucore.InvalidID, fmt.Errorf("bind group layout %d not found", layout)
 	}
 
-	halEntries := make([]types.BindGroupEntry, len(entries))
+	halEntries := make([]gputypes.BindGroupEntry, len(entries))
 	for i, entry := range entries {
 		halEntry, err := a.convertBindGroupEntry(entry)
 		if err != nil {
@@ -663,103 +663,103 @@ func (a *HALAdapter) WaitIdle() {
 
 // === Type Conversion Helpers ===
 
-// convertBufferUsage converts gpucore.BufferUsage to types.BufferUsage.
-func convertBufferUsage(usage gpucore.BufferUsage) types.BufferUsage {
-	var result types.BufferUsage
+// convertBufferUsage converts gpucore.BufferUsage to gputypes.BufferUsage.
+func convertBufferUsage(usage gpucore.BufferUsage) gputypes.BufferUsage {
+	var result gputypes.BufferUsage
 
 	if usage&gpucore.BufferUsageMapRead != 0 {
-		result |= types.BufferUsageMapRead
+		result |= gputypes.BufferUsageMapRead
 	}
 	if usage&gpucore.BufferUsageMapWrite != 0 {
-		result |= types.BufferUsageMapWrite
+		result |= gputypes.BufferUsageMapWrite
 	}
 	if usage&gpucore.BufferUsageCopySrc != 0 {
-		result |= types.BufferUsageCopySrc
+		result |= gputypes.BufferUsageCopySrc
 	}
 	if usage&gpucore.BufferUsageCopyDst != 0 {
-		result |= types.BufferUsageCopyDst
+		result |= gputypes.BufferUsageCopyDst
 	}
 	if usage&gpucore.BufferUsageIndex != 0 {
-		result |= types.BufferUsageIndex
+		result |= gputypes.BufferUsageIndex
 	}
 	if usage&gpucore.BufferUsageVertex != 0 {
-		result |= types.BufferUsageVertex
+		result |= gputypes.BufferUsageVertex
 	}
 	if usage&gpucore.BufferUsageUniform != 0 {
-		result |= types.BufferUsageUniform
+		result |= gputypes.BufferUsageUniform
 	}
 	if usage&gpucore.BufferUsageStorage != 0 {
-		result |= types.BufferUsageStorage
+		result |= gputypes.BufferUsageStorage
 	}
 	if usage&gpucore.BufferUsageIndirect != 0 {
-		result |= types.BufferUsageIndirect
+		result |= gputypes.BufferUsageIndirect
 	}
 
 	return result
 }
 
-// convertTextureFormat converts gpucore.TextureFormat to types.TextureFormat.
-func convertTextureFormat(format gpucore.TextureFormat) types.TextureFormat {
+// convertTextureFormat converts gpucore.TextureFormat to gputypes.TextureFormat.
+func convertTextureFormat(format gpucore.TextureFormat) gputypes.TextureFormat {
 	switch format {
 	case gpucore.TextureFormatRGBA8Unorm:
-		return types.TextureFormatRGBA8Unorm
+		return gputypes.TextureFormatRGBA8Unorm
 	case gpucore.TextureFormatRGBA8UnormSRGB:
-		return types.TextureFormatRGBA8UnormSrgb
+		return gputypes.TextureFormatRGBA8UnormSrgb
 	case gpucore.TextureFormatBGRA8Unorm:
-		return types.TextureFormatBGRA8Unorm
+		return gputypes.TextureFormatBGRA8Unorm
 	case gpucore.TextureFormatBGRA8UnormSRGB:
-		return types.TextureFormatBGRA8UnormSrgb
+		return gputypes.TextureFormatBGRA8UnormSrgb
 	case gpucore.TextureFormatR8Unorm:
-		return types.TextureFormatR8Unorm
+		return gputypes.TextureFormatR8Unorm
 	case gpucore.TextureFormatR32Float:
-		return types.TextureFormatR32Float
+		return gputypes.TextureFormatR32Float
 	case gpucore.TextureFormatRG32Float:
-		return types.TextureFormatRG32Float
+		return gputypes.TextureFormatRG32Float
 	case gpucore.TextureFormatRGBA32Float:
-		return types.TextureFormatRGBA32Float
+		return gputypes.TextureFormatRGBA32Float
 	default:
-		return types.TextureFormatRGBA8Unorm
+		return gputypes.TextureFormatRGBA8Unorm
 	}
 }
 
-// convertBindGroupLayoutEntry converts gpucore.BindGroupLayoutEntry to types.BindGroupLayoutEntry.
-func convertBindGroupLayoutEntry(entry gpucore.BindGroupLayoutEntry) types.BindGroupLayoutEntry {
-	result := types.BindGroupLayoutEntry{
+// convertBindGroupLayoutEntry converts gpucore.BindGroupLayoutEntry to gputypes.BindGroupLayoutEntry.
+func convertBindGroupLayoutEntry(entry gpucore.BindGroupLayoutEntry) gputypes.BindGroupLayoutEntry {
+	result := gputypes.BindGroupLayoutEntry{
 		Binding:    entry.Binding,
-		Visibility: types.ShaderStageCompute, // Default to compute for gpucore
+		Visibility: gputypes.ShaderStageCompute, // Default to compute for gpucore
 	}
 
 	switch entry.Type {
 	case gpucore.BindingTypeUniformBuffer:
-		result.Buffer = &types.BufferBindingLayout{
-			Type:           types.BufferBindingTypeUniform,
+		result.Buffer = &gputypes.BufferBindingLayout{
+			Type:           gputypes.BufferBindingTypeUniform,
 			MinBindingSize: entry.MinBindingSize,
 		}
 	case gpucore.BindingTypeStorageBuffer:
-		result.Buffer = &types.BufferBindingLayout{
-			Type:           types.BufferBindingTypeStorage,
+		result.Buffer = &gputypes.BufferBindingLayout{
+			Type:           gputypes.BufferBindingTypeStorage,
 			MinBindingSize: entry.MinBindingSize,
 		}
 	case gpucore.BindingTypeReadOnlyStorageBuffer:
-		result.Buffer = &types.BufferBindingLayout{
-			Type:           types.BufferBindingTypeReadOnlyStorage,
+		result.Buffer = &gputypes.BufferBindingLayout{
+			Type:           gputypes.BufferBindingTypeReadOnlyStorage,
 			MinBindingSize: entry.MinBindingSize,
 		}
 	case gpucore.BindingTypeStorageTexture:
-		result.Storage = &types.StorageTextureBindingLayout{
-			Access:        types.StorageTextureAccessReadWrite,
-			Format:        types.TextureFormatRGBA8Unorm,
-			ViewDimension: types.TextureViewDimension2D,
+		result.StorageTexture = &gputypes.StorageTextureBindingLayout{
+			Access:        gputypes.StorageTextureAccessReadWrite,
+			Format:        gputypes.TextureFormatRGBA8Unorm,
+			ViewDimension: gputypes.TextureViewDimension2D,
 		}
 	}
 
 	return result
 }
 
-// convertBindGroupEntry converts gpucore.BindGroupEntry to types.BindGroupEntry.
+// convertBindGroupEntry converts gpucore.BindGroupEntry to gputypes.BindGroupEntry.
 // Must be called with mu.RLock held.
-func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (types.BindGroupEntry, error) {
-	result := types.BindGroupEntry{
+func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (gputypes.BindGroupEntry, error) {
+	result := gputypes.BindGroupEntry{
 		Binding: entry.Binding,
 	}
 
@@ -774,8 +774,8 @@ func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (types.
 		// In a real implementation, we'd need to track buffer handles or use type assertions
 		_ = buffer
 
-		result.Resource = types.BufferBinding{
-			Buffer: types.BufferHandle(entry.Buffer), // Use gpucore ID as placeholder
+		result.Resource = gputypes.BufferBinding{
+			Buffer: uintptr(entry.Buffer), // Use gpucore ID as placeholder
 			Offset: entry.Offset,
 			Size:   entry.Size,
 		}
@@ -788,8 +788,8 @@ func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (types.
 		// Create texture view for binding
 		_ = texture
 
-		result.Resource = types.TextureViewBinding{
-			TextureView: types.TextureViewHandle(entry.Texture), // Placeholder
+		result.Resource = gputypes.TextureViewBinding{
+			TextureView: uintptr(entry.Texture), // Placeholder
 		}
 	}
 

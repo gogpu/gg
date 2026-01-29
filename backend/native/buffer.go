@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Buffer errors.
@@ -157,7 +157,7 @@ type Buffer struct {
 	mapState BufferMapState
 
 	// mapMode is the mode used for the current mapping.
-	mapMode types.MapMode
+	mapMode gputypes.MapMode
 
 	// mapOffset is the offset of the current mapping.
 	mapOffset uint64
@@ -184,7 +184,7 @@ type BufferDescriptor struct {
 	Size uint64
 
 	// Usage specifies how the buffer will be used.
-	Usage types.BufferUsage
+	Usage gputypes.BufferUsage
 
 	// MappedAtCreation creates the buffer pre-mapped for writing.
 	MappedAtCreation bool
@@ -212,7 +212,7 @@ func NewBuffer(halBuffer hal.Buffer, device hal.Device, desc *BufferDescriptor) 
 	// If mapped at creation, set state to mapped
 	if desc.MappedAtCreation {
 		buf.mapState = BufferMapStateMapped
-		buf.mapMode = types.MapModeWrite
+		buf.mapMode = gputypes.MapModeWrite
 		buf.mapOffset = 0
 		buf.mapSize = desc.Size
 	}
@@ -231,7 +231,7 @@ func (b *Buffer) Size() uint64 {
 }
 
 // Usage returns the buffer usage flags.
-func (b *Buffer) Usage() types.BufferUsage {
+func (b *Buffer) Usage() gputypes.BufferUsage {
 	return b.descriptor.Usage
 }
 
@@ -290,7 +290,7 @@ func (b *Buffer) Raw() hal.Buffer {
 //   - The mode doesn't match buffer usage flags
 //   - The range is out of bounds
 //   - The callback is nil
-func (b *Buffer) MapAsync(mode types.MapMode, offset, size uint64, callback func(BufferMapAsyncStatus)) error {
+func (b *Buffer) MapAsync(mode gputypes.MapMode, offset, size uint64, callback func(BufferMapAsyncStatus)) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -319,11 +319,11 @@ func (b *Buffer) MapAsync(mode types.MapMode, offset, size uint64, callback func
 	}
 
 	// Validate mode matches usage
-	if mode == types.MapModeRead && !b.descriptor.Usage.Contains(types.BufferUsageMapRead) {
+	if mode == gputypes.MapModeRead && !b.descriptor.Usage.Contains(gputypes.BufferUsageMapRead) {
 		callback(BufferMapAsyncStatusValidationError)
 		return fmt.Errorf("%w: buffer does not have MapRead usage", ErrMapUsageMismatch)
 	}
-	if mode == types.MapModeWrite && !b.descriptor.Usage.Contains(types.BufferUsageMapWrite) {
+	if mode == gputypes.MapModeWrite && !b.descriptor.Usage.Contains(gputypes.BufferUsageMapWrite) {
 		callback(BufferMapAsyncStatusValidationError)
 		return fmt.Errorf("%w: buffer does not have MapWrite usage", ErrMapUsageMismatch)
 	}
@@ -585,8 +585,8 @@ func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
 
 	// Validate MappedAtCreation requires MapWrite usage
 	if desc.MappedAtCreation {
-		if !desc.Usage.Contains(types.BufferUsageMapWrite) &&
-			!desc.Usage.Contains(types.BufferUsageCopyDst) {
+		if !desc.Usage.Contains(gputypes.BufferUsageMapWrite) &&
+			!desc.Usage.Contains(gputypes.BufferUsageCopyDst) {
 			return nil, fmt.Errorf("MappedAtCreation requires MapWrite or CopyDst usage")
 		}
 	}
@@ -631,7 +631,7 @@ func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
 func CreateBufferSimple(
 	device hal.Device,
 	size uint64,
-	usage types.BufferUsage,
+	usage gputypes.BufferUsage,
 	label string,
 ) (*Buffer, error) {
 	desc := &BufferDescriptor{
@@ -664,11 +664,11 @@ func CreateStagingBuffer(
 	forUpload bool,
 	label string,
 ) (*Buffer, error) {
-	var usage types.BufferUsage
+	var usage gputypes.BufferUsage
 	if forUpload {
-		usage = types.BufferUsageMapWrite | types.BufferUsageCopySrc
+		usage = gputypes.BufferUsageMapWrite | gputypes.BufferUsageCopySrc
 	} else {
-		usage = types.BufferUsageMapRead | types.BufferUsageCopyDst
+		usage = gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst
 	}
 
 	desc := &BufferDescriptor{

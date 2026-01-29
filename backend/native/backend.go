@@ -9,8 +9,8 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/backend"
 	"github.com/gogpu/gg/scene"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // init registers the native backend on package import.
@@ -67,15 +67,15 @@ func (b *NativeBackend) Init() error {
 	}
 
 	// Step 1: Create Instance
-	desc := &types.InstanceDescriptor{
-		Backends: types.BackendsPrimary,
+	desc := &gputypes.InstanceDescriptor{
+		Backends: gputypes.BackendsPrimary,
 		Flags:    0,
 	}
 	b.instance = core.NewInstance(desc)
 
 	// Step 2: Request Adapter (prefer high performance GPU)
-	adapterID, err := b.instance.RequestAdapter(&types.RequestAdapterOptions{
-		PowerPreference: types.PowerPreferenceHighPerformance,
+	adapterID, err := b.instance.RequestAdapter(&gputypes.RequestAdapterOptions{
+		PowerPreference: gputypes.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrNoGPU, err)

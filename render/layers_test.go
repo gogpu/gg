@@ -7,7 +7,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 func TestNewLayeredPixmapTarget(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNewLayeredPixmapTarget(t *testing.T) {
 	if target.Height() != 600 {
 		t.Errorf("Height() = %d, want 600", target.Height())
 	}
-	if target.Format() != gpucontext.TextureFormatRGBA8Unorm {
+	if target.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format() = %v, want RGBA8Unorm", target.Format())
 	}
 	if target.TextureView() != nil {

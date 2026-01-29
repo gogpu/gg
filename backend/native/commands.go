@@ -48,18 +48,18 @@ func (e *CommandEncoder) BeginRenderPass(target *GPUTexture, clearTarget bool) *
 	e.passCount++
 
 	// TODO: When wgpu is ready:
-	// loadOp := types.LoadOpLoad
+	// loadOp := gputypes.LoadOpLoad
 	// if clearTarget {
-	//     loadOp = types.LoadOpClear
+	//     loadOp = gputypes.LoadOpClear
 	// }
 	//
-	// desc := &types.RenderPassDescriptor{
-	//     ColorAttachments: []types.RenderPassColorAttachment{
+	// desc := &gputypes.RenderPassDescriptor{
+	//     ColorAttachments: []gputypes.RenderPassColorAttachment{
 	//         {
 	//             View:       target.ViewID(),
 	//             LoadOp:     loadOp,
-	//             StoreOp:    types.StoreOpStore,
-	//             ClearValue: types.Color{R: 0, G: 0, B: 0, A: 0},
+	//             StoreOp:    gputypes.StoreOpStore,
+	//             ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 	//         },
 	//     },
 	// }
@@ -102,9 +102,9 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *GPUTexture, width, heigh
 	// TODO: When wgpu is ready:
 	// core.CommandEncoderCopyTextureToTexture(
 	//     e.encoder,
-	//     &types.ImageCopyTexture{Texture: src.TextureID()},
-	//     &types.ImageCopyTexture{Texture: dst.TextureID()},
-	//     &types.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1},
+	//     &gputypes.ImageCopyTexture{Texture: src.TextureID()},
+	//     &gputypes.ImageCopyTexture{Texture: dst.TextureID()},
+	//     &gputypes.Extent3D{Width: uint32(width), Height: uint32(height), DepthOrArrayLayers: 1},
 	// )
 
 	_ = src
@@ -122,9 +122,9 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *GPUTexture, dst StubBufferID, 
 	// TODO: When wgpu is ready:
 	// core.CommandEncoderCopyTextureToBuffer(
 	//     e.encoder,
-	//     &types.ImageCopyTexture{Texture: src.TextureID()},
-	//     &types.ImageCopyBuffer{Buffer: dst, Layout: types.TextureDataLayout{BytesPerRow: bytesPerRow}},
-	//     &types.Extent3D{Width: uint32(src.Width()), Height: uint32(src.Height()), DepthOrArrayLayers: 1},
+	//     &gputypes.ImageCopyTexture{Texture: src.TextureID()},
+	//     &gputypes.ImageCopyBuffer{Buffer: dst, Layout: gputypes.TextureDataLayout{BytesPerRow: bytesPerRow}},
+	//     &gputypes.Extent3D{Width: uint32(src.Width()), Height: uint32(src.Height()), DepthOrArrayLayers: 1},
 	// )
 
 	_ = src
@@ -392,13 +392,13 @@ func (s *QueueSubmitter) WriteTexture(texture *GPUTexture, data []byte) {
 	// TODO: When wgpu is ready:
 	// core.QueueWriteTexture(
 	//     s.queue,
-	//     &types.ImageCopyTexture{Texture: texture.TextureID()},
+	//     &gputypes.ImageCopyTexture{Texture: texture.TextureID()},
 	//     data,
-	//     &types.TextureDataLayout{
+	//     &gputypes.TextureDataLayout{
 	//         BytesPerRow: uint32(texture.Width() * texture.Format().BytesPerPixel()),
 	//         RowsPerImage: uint32(texture.Height()),
 	//     },
-	//     &types.Extent3D{
+	//     &gputypes.Extent3D{
 	//         Width: uint32(texture.Width()),
 	//         Height: uint32(texture.Height()),
 	//         DepthOrArrayLayers: 1,

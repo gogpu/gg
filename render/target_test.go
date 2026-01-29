@@ -8,7 +8,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 func TestNewPixmapTarget(t *testing.T) {
@@ -34,7 +34,7 @@ func TestNewPixmapTarget(t *testing.T) {
 			if target.Height() != tt.height {
 				t.Errorf("Height() = %d, want %d", target.Height(), tt.height)
 			}
-			if target.Format() != gpucontext.TextureFormatRGBA8Unorm {
+			if target.Format() != gputypes.TextureFormatRGBA8Unorm {
 				t.Errorf("Format() = %v, want RGBA8Unorm", target.Format())
 			}
 			if target.TextureView() != nil {
@@ -158,7 +158,7 @@ func TestPixmapTargetImage(t *testing.T) {
 
 func TestTextureTarget(t *testing.T) {
 	// Test with null device handle
-	target, err := NewTextureTarget(NullDeviceHandle{}, 512, 512, gpucontext.TextureFormatRGBA8Unorm)
+	target, err := NewTextureTarget(NullDeviceHandle{}, 512, 512, gputypes.TextureFormatRGBA8Unorm)
 	if err != nil {
 		t.Fatalf("NewTextureTarget() error = %v", err)
 	}
@@ -169,7 +169,7 @@ func TestTextureTarget(t *testing.T) {
 	if target.Height() != 512 {
 		t.Errorf("Height() = %d, want 512", target.Height())
 	}
-	if target.Format() != gpucontext.TextureFormatRGBA8Unorm {
+	if target.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format() = %v, want RGBA8Unorm", target.Format())
 	}
 	if target.Pixels() != nil {
@@ -184,7 +184,7 @@ func TestTextureTarget(t *testing.T) {
 }
 
 func TestSurfaceTarget(t *testing.T) {
-	target := NewSurfaceTarget(800, 600, gpucontext.TextureFormatBGRA8Unorm, nil)
+	target := NewSurfaceTarget(800, 600, gputypes.TextureFormatBGRA8Unorm, nil)
 
 	if target.Width() != 800 {
 		t.Errorf("Width() = %d, want 800", target.Width())
@@ -192,7 +192,7 @@ func TestSurfaceTarget(t *testing.T) {
 	if target.Height() != 600 {
 		t.Errorf("Height() = %d, want 600", target.Height())
 	}
-	if target.Format() != gpucontext.TextureFormatBGRA8Unorm {
+	if target.Format() != gputypes.TextureFormatBGRA8Unorm {
 		t.Errorf("Format() = %v, want BGRA8Unorm", target.Format())
 	}
 	if target.Pixels() != nil {
@@ -202,11 +202,11 @@ func TestSurfaceTarget(t *testing.T) {
 
 func TestRenderTargetInterface(t *testing.T) {
 	// Verify all target types implement RenderTarget
-	textureTarget, _ := NewTextureTarget(NullDeviceHandle{}, 100, 100, gpucontext.TextureFormatRGBA8Unorm)
+	textureTarget, _ := NewTextureTarget(NullDeviceHandle{}, 100, 100, gputypes.TextureFormatRGBA8Unorm)
 	targets := []RenderTarget{
 		NewPixmapTarget(100, 100),
 		textureTarget,
-		NewSurfaceTarget(100, 100, gpucontext.TextureFormatBGRA8Unorm, nil),
+		NewSurfaceTarget(100, 100, gputypes.TextureFormatBGRA8Unorm, nil),
 	}
 
 	for i, target := range targets {
