@@ -397,7 +397,7 @@ func (p *TextPipeline) GetOrCreateAtlasBindGroup(atlasIndex int, atlasTexture *G
 
 	// Create new bind group
 	// TODO: When wgpu is ready:
-	// entries := []types.BindGroupEntry{
+	// entries := []gputypes.BindGroupEntry{
 	//     {Binding: 0, Buffer: p.uniformBuffer},
 	//     {Binding: 1, TextureView: atlasTexture.ViewID()},
 	//     {Binding: 2, Sampler: p.sampler},

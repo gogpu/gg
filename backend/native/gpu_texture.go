@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Texture-related errors.
@@ -66,18 +66,18 @@ func (f TextureFormat) BytesPerPixel() int {
 	}
 }
 
-// ToWGPUFormat converts to wgpu types.TextureFormat.
+// ToWGPUFormat converts to wgpu gputypes.TextureFormat.
 // This will be used when actual GPU texture creation is implemented.
-func (f TextureFormat) ToWGPUFormat() types.TextureFormat {
+func (f TextureFormat) ToWGPUFormat() gputypes.TextureFormat {
 	switch f {
 	case TextureFormatRGBA8:
-		return types.TextureFormatRGBA8Unorm
+		return gputypes.TextureFormatRGBA8Unorm
 	case TextureFormatBGRA8:
-		return types.TextureFormatBGRA8Unorm
+		return gputypes.TextureFormatBGRA8Unorm
 	case TextureFormatR8:
-		return types.TextureFormatR8Unorm
+		return gputypes.TextureFormatR8Unorm
 	default:
-		return types.TextureFormatRGBA8Unorm
+		return gputypes.TextureFormatRGBA8Unorm
 	}
 }
 
@@ -123,11 +123,11 @@ type TextureConfig struct {
 	Label string
 
 	// Usage flags (default: CopySrc | CopyDst | TextureBinding)
-	Usage types.TextureUsage
+	Usage gputypes.TextureUsage
 }
 
 // DefaultTextureUsage is the default usage for textures created without specific flags.
-const DefaultTextureUsage = types.TextureUsageCopySrc | types.TextureUsageCopyDst | types.TextureUsageTextureBinding
+const DefaultTextureUsage = gputypes.TextureUsageCopySrc | gputypes.TextureUsageCopyDst | gputypes.TextureUsageTextureBinding
 
 // CreateTexture creates a new GPU texture with the given configuration.
 // The texture is uninitialized and should be filled with UploadPixmap.
@@ -156,16 +156,16 @@ func CreateTexture(backend *NativeBackend, config TextureConfig) (*GPUTexture, e
 	// TODO: Actual wgpu texture creation when available
 	// For now, create stub IDs to track the logical texture
 	//
-	// desc := &types.TextureDescriptor{
+	// desc := &gputypes.TextureDescriptor{
 	//     Label: config.Label,
-	//     Size: types.Extent3D{
+	//     Size: gputypes.Extent3D{
 	//         Width:              uint32(config.Width),
 	//         Height:             uint32(config.Height),
 	//         DepthOrArrayLayers: 1,
 	//     },
 	//     MipLevelCount: 1,
 	//     SampleCount:   1,
-	//     Dimension:     types.TextureDimension2D,
+	//     Dimension:     gputypes.TextureDimension2D,
 	//     Format:        config.Format.toWGPUFormat(),
 	//     Usage:         usage,
 	// }
@@ -278,16 +278,16 @@ func (t *GPUTexture) UploadPixmap(pixmap *gg.Pixmap) error {
 	// data := pixmap.Data()
 	// queue := backend.Queue()
 	//
-	// core.QueueWriteTexture(queue, &types.ImageCopyTexture{
+	// core.QueueWriteTexture(queue, &gputypes.ImageCopyTexture{
 	//     Texture:  uintptr(t.textureID.Raw()),
 	//     MipLevel: 0,
-	//     Origin:   types.Origin3D{X: 0, Y: 0, Z: 0},
-	//     Aspect:   types.TextureAspectAll,
-	// }, data, &types.TextureDataLayout{
+	//     Origin:   gputypes.Origin3D{X: 0, Y: 0, Z: 0},
+	//     Aspect:   gputypes.TextureAspectAll,
+	// }, data, &gputypes.TextureDataLayout{
 	//     Offset:       0,
 	//     BytesPerRow:  uint32(t.width * t.format.BytesPerPixel()),
 	//     RowsPerImage: uint32(t.height),
-	// }, &types.Extent3D{
+	// }, &gputypes.Extent3D{
 	//     Width:              uint32(t.width),
 	//     Height:             uint32(t.height),
 	//     DepthOrArrayLayers: 1,

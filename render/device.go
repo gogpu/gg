@@ -5,6 +5,7 @@ package render
 
 import (
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // DeviceHandle provides GPU device access from the host application.
@@ -63,7 +64,7 @@ type TextureDescriptor struct {
 	SampleCount uint32
 
 	// Format is the texture pixel format.
-	Format gpucontext.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Usage specifies how the texture will be used.
 	Usage TextureUsage
@@ -100,7 +101,7 @@ type Texture interface {
 	Height() uint32
 
 	// Format returns the texture pixel format.
-	Format() gpucontext.TextureFormat
+	Format() gputypes.TextureFormat
 
 	// CreateView creates a view for this texture.
 	CreateView() TextureView
@@ -118,7 +119,7 @@ type TextureView interface {
 
 // DefaultTextureDescriptor returns a TextureDescriptor with sensible defaults.
 // Only Width, Height, and Format need to be set.
-func DefaultTextureDescriptor(width, height uint32, format gpucontext.TextureFormat) TextureDescriptor {
+func DefaultTextureDescriptor(width, height uint32, format gputypes.TextureFormat) TextureDescriptor {
 	return TextureDescriptor{
 		Width:         width,
 		Height:        height,
@@ -166,8 +167,8 @@ func (NullDeviceHandle) Queue() gpucontext.Queue { return nil }
 func (NullDeviceHandle) Adapter() gpucontext.Adapter { return nil }
 
 // SurfaceFormat returns undefined format for the null device.
-func (NullDeviceHandle) SurfaceFormat() gpucontext.TextureFormat {
-	return gpucontext.TextureFormatUndefined
+func (NullDeviceHandle) SurfaceFormat() gputypes.TextureFormat {
+	return gputypes.TextureFormatUndefined
 }
 
 // Ensure NullDeviceHandle implements DeviceHandle.

@@ -10,7 +10,7 @@ import (
 	"image/draw"
 	"slices"
 
-	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // LayeredTarget supports z-ordered layers for popups, dropdowns, and tooltips.
@@ -81,8 +81,8 @@ func (t *LayeredPixmapTarget) Height() int {
 }
 
 // Format returns the pixel format (RGBA8).
-func (t *LayeredPixmapTarget) Format() gpucontext.TextureFormat {
-	return gpucontext.TextureFormatRGBA8Unorm
+func (t *LayeredPixmapTarget) Format() gputypes.TextureFormat {
+	return gputypes.TextureFormatRGBA8Unorm
 }
 
 // TextureView returns nil as this is a CPU-only target.

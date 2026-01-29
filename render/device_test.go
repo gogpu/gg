@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 func TestNullDeviceHandle(t *testing.T) {
@@ -21,13 +22,13 @@ func TestNullDeviceHandle(t *testing.T) {
 	if handle.Adapter() != nil {
 		t.Error("NullDeviceHandle.Adapter() should return nil")
 	}
-	if handle.SurfaceFormat() != gpucontext.TextureFormatUndefined {
+	if handle.SurfaceFormat() != gputypes.TextureFormatUndefined {
 		t.Error("NullDeviceHandle.SurfaceFormat() should return Undefined")
 	}
 }
 
 func TestTextureDescriptorDefault(t *testing.T) {
-	desc := DefaultTextureDescriptor(256, 128, gpucontext.TextureFormatRGBA8Unorm)
+	desc := DefaultTextureDescriptor(256, 128, gputypes.TextureFormatRGBA8Unorm)
 
 	if desc.Width != 256 {
 		t.Errorf("Width = %d, want 256", desc.Width)
@@ -44,7 +45,7 @@ func TestTextureDescriptorDefault(t *testing.T) {
 	if desc.SampleCount != 1 {
 		t.Errorf("SampleCount = %d, want 1", desc.SampleCount)
 	}
-	if desc.Format != gpucontext.TextureFormatRGBA8Unorm {
+	if desc.Format != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format = %v, want RGBA8Unorm", desc.Format)
 	}
 

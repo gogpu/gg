@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 //go:embed shaders/coarse.wgsl
@@ -132,20 +132,20 @@ func (r *GPUCoarseRasterizer) createBindGroupLayouts() error {
 	// Input bind group layout (group 0)
 	inputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "coarse_input_layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type:           types.BufferBindingTypeUniform,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type:           gputypes.BufferBindingTypeUniform,
 					MinBindingSize: 32, // sizeof(CoarseConfig)
 				},
 			},
 			{
 				Binding:    1,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeReadOnlyStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeReadOnlyStorage,
 				},
 			},
 		},
@@ -158,19 +158,19 @@ func (r *GPUCoarseRasterizer) createBindGroupLayouts() error {
 	// Output bind group layout (group 1)
 	outputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
 		Label: "coarse_output_layout",
-		Entries: []types.BindGroupLayoutEntry{
+		Entries: []gputypes.BindGroupLayoutEntry{
 			{
 				Binding:    0,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
 				},
 			},
 			{
 				Binding:    1,
-				Visibility: types.ShaderStageCompute,
-				Buffer: &types.BufferBindingLayout{
-					Type: types.BufferBindingTypeStorage,
+				Visibility: gputypes.ShaderStageCompute,
+				Buffer: &gputypes.BufferBindingLayout{
+					Type: gputypes.BufferBindingTypeStorage,
 				},
 			},
 		},

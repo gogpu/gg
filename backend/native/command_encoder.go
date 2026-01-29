@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Command encoder errors.
@@ -422,7 +422,7 @@ func (e *CoreCommandEncoder) CopyBufferToBuffer(src, dst *core.Buffer, srcOffset
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *CoreCommandEncoder) CopyBufferToTexture(source *ImageCopyBuffer, destination *ImageCopyTexture, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyBufferToTexture(source *ImageCopyBuffer, destination *ImageCopyTexture, copySize gputypes.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -453,7 +453,7 @@ func (e *CoreCommandEncoder) CopyBufferToTexture(source *ImageCopyBuffer, destin
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *CoreCommandEncoder) CopyTextureToBuffer(source *ImageCopyTexture, destination *ImageCopyBuffer, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyTextureToBuffer(source *ImageCopyTexture, destination *ImageCopyBuffer, copySize gputypes.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -484,7 +484,7 @@ func (e *CoreCommandEncoder) CopyTextureToBuffer(source *ImageCopyTexture, desti
 //
 // Returns nil on success.
 // Returns an error if validation fails or the encoder state is invalid.
-func (e *CoreCommandEncoder) CopyTextureToTexture(source, destination *ImageCopyTexture, copySize types.Extent3D) error {
+func (e *CoreCommandEncoder) CopyTextureToTexture(source, destination *ImageCopyTexture, copySize gputypes.Extent3D) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -650,13 +650,13 @@ type RenderPassColorAttachment struct {
 	ResolveTarget *TextureView
 
 	// LoadOp specifies what to do at pass start.
-	LoadOp types.LoadOp
+	LoadOp gputypes.LoadOp
 
 	// StoreOp specifies what to do at pass end.
-	StoreOp types.StoreOp
+	StoreOp gputypes.StoreOp
 
 	// ClearValue is the clear color (used if LoadOp is Clear).
-	ClearValue types.Color
+	ClearValue gputypes.Color
 }
 
 // RenderPassDepthStencilAttachment describes a depth/stencil attachment.
@@ -665,10 +665,10 @@ type RenderPassDepthStencilAttachment struct {
 	View *TextureView
 
 	// DepthLoadOp specifies what to do with depth at pass start.
-	DepthLoadOp types.LoadOp
+	DepthLoadOp gputypes.LoadOp
 
 	// DepthStoreOp specifies what to do with depth at pass end.
-	DepthStoreOp types.StoreOp
+	DepthStoreOp gputypes.StoreOp
 
 	// DepthClearValue is the depth clear value.
 	DepthClearValue float32
@@ -677,10 +677,10 @@ type RenderPassDepthStencilAttachment struct {
 	DepthReadOnly bool
 
 	// StencilLoadOp specifies what to do with stencil at pass start.
-	StencilLoadOp types.LoadOp
+	StencilLoadOp gputypes.LoadOp
 
 	// StencilStoreOp specifies what to do with stencil at pass end.
-	StencilStoreOp types.StoreOp
+	StencilStoreOp gputypes.StoreOp
 
 	// StencilClearValue is the stencil clear value.
 	StencilClearValue uint32
@@ -716,7 +716,7 @@ type ImageCopyBuffer struct {
 	Buffer *core.Buffer
 
 	// Layout describes how the data is laid out in the buffer.
-	Layout types.TextureDataLayout
+	Layout gputypes.TextureDataLayout
 }
 
 // ImageCopyTexture describes a texture for copy operations.
@@ -728,10 +728,10 @@ type ImageCopyTexture struct {
 	MipLevel uint32
 
 	// Origin is the origin of the copy in the texture.
-	Origin types.Origin3D
+	Origin gputypes.Origin3D
 
 	// Aspect is the aspect of the texture to copy.
-	Aspect types.TextureAspect
+	Aspect gputypes.TextureAspect
 }
 
 // Note: TextureView is defined in hal_texture.go with full implementation.

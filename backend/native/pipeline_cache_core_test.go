@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gogpu/wgpu/types"
+	"github.com/gogpu/gputypes"
 )
 
 // =============================================================================
@@ -32,20 +32,20 @@ func mockRenderPipelineDescriptor(vertexHash, fragmentHash uint64) *RenderPipeli
 		VertexBufferLayouts: []VertexBufferLayout{
 			{
 				ArrayStride: 32,
-				StepMode:    types.VertexStepModeVertex,
+				StepMode:    gputypes.VertexStepModeVertex,
 				Attributes: []VertexAttribute{
-					{ShaderLocation: 0, Format: types.VertexFormatFloat32x3, Offset: 0},
-					{ShaderLocation: 1, Format: types.VertexFormatFloat32x2, Offset: 12},
+					{ShaderLocation: 0, Format: gputypes.VertexFormatFloat32x3, Offset: 0},
+					{ShaderLocation: 1, Format: gputypes.VertexFormatFloat32x2, Offset: 12},
 				},
 			},
 		},
-		PrimitiveTopology: types.PrimitiveTopologyTriangleList,
-		FrontFace:         types.FrontFaceCCW,
-		CullMode:          types.CullModeBack,
-		ColorFormat:       types.TextureFormatBGRA8Unorm,
-		DepthFormat:       types.TextureFormatDepth24PlusStencil8,
+		PrimitiveTopology: gputypes.PrimitiveTopologyTriangleList,
+		FrontFace:         gputypes.FrontFaceCCW,
+		CullMode:          gputypes.CullModeBack,
+		ColorFormat:       gputypes.TextureFormatBGRA8Unorm,
+		DepthFormat:       gputypes.TextureFormatDepth24PlusStencil8,
 		DepthWriteEnabled: true,
-		DepthCompare:      types.CompareFunctionLess,
+		DepthCompare:      gputypes.CompareFunctionLess,
 		SampleCount:       1,
 	}
 }
@@ -363,7 +363,7 @@ func TestHashRenderPipelineDescriptor_DifferentShaders(t *testing.T) {
 func TestHashRenderPipelineDescriptor_DifferentTopology(t *testing.T) {
 	desc1 := mockRenderPipelineDescriptor(100, 200)
 	desc2 := mockRenderPipelineDescriptor(100, 200)
-	desc2.PrimitiveTopology = types.PrimitiveTopologyLineList
+	desc2.PrimitiveTopology = gputypes.PrimitiveTopologyLineList
 
 	hash1 := HashRenderPipelineDescriptor(desc1)
 	hash2 := HashRenderPipelineDescriptor(desc2)
@@ -376,7 +376,7 @@ func TestHashRenderPipelineDescriptor_DifferentTopology(t *testing.T) {
 func TestHashRenderPipelineDescriptor_DifferentFormat(t *testing.T) {
 	desc1 := mockRenderPipelineDescriptor(100, 200)
 	desc2 := mockRenderPipelineDescriptor(100, 200)
-	desc2.ColorFormat = types.TextureFormatRGBA8Unorm
+	desc2.ColorFormat = gputypes.TextureFormatRGBA8Unorm
 
 	hash1 := HashRenderPipelineDescriptor(desc1)
 	hash2 := HashRenderPipelineDescriptor(desc2)
@@ -393,14 +393,14 @@ func TestHashRenderPipelineDescriptor_DifferentBlendState(t *testing.T) {
 	desc2 := mockRenderPipelineDescriptor(100, 200)
 	desc2.BlendState = &BlendState{
 		Color: BlendComponent{
-			SrcFactor: types.BlendFactorSrcAlpha,
-			DstFactor: types.BlendFactorOneMinusSrcAlpha,
-			Operation: types.BlendOperationAdd,
+			SrcFactor: gputypes.BlendFactorSrcAlpha,
+			DstFactor: gputypes.BlendFactorOneMinusSrcAlpha,
+			Operation: gputypes.BlendOperationAdd,
 		},
 		Alpha: BlendComponent{
-			SrcFactor: types.BlendFactorOne,
-			DstFactor: types.BlendFactorZero,
-			Operation: types.BlendOperationAdd,
+			SrcFactor: gputypes.BlendFactorOne,
+			DstFactor: gputypes.BlendFactorZero,
+			Operation: gputypes.BlendOperationAdd,
 		},
 	}
 

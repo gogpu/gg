@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // =============================================================================
@@ -135,7 +135,7 @@ func (d *mockHALDevice) Destroy() {}
 type mockHALTexture struct {
 	width  uint32
 	height uint32
-	format types.TextureFormat
+	format gputypes.TextureFormat
 }
 
 // Destroy implements hal.Resource.
@@ -156,19 +156,19 @@ func (v *mockHALTextureView) Destroy() {}
 
 func TestNewTexture(t *testing.T) {
 	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256, format: types.TextureFormatRGBA8Unorm}
+	halTex := &mockHALTexture{width: 256, height: 256, format: gputypes.TextureFormatRGBA8Unorm}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -185,7 +185,7 @@ func TestNewTexture(t *testing.T) {
 	if tex.Height() != 256 {
 		t.Errorf("Height = %d, want 256", tex.Height())
 	}
-	if tex.Format() != types.TextureFormatRGBA8Unorm {
+	if tex.Format() != gputypes.TextureFormatRGBA8Unorm {
 		t.Errorf("Format = %v, want RGBA8Unorm", tex.Format())
 	}
 	if tex.IsDestroyed() {
@@ -198,16 +198,16 @@ func TestTexture_GetDefaultView(t *testing.T) {
 	halTex := &mockHALTexture{width: 512, height: 512}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              512,
 			Height:             512,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 4,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -245,16 +245,16 @@ func TestTexture_GetDefaultView_Concurrent(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "concurrent-test",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -296,16 +296,16 @@ func TestTexture_CreateView(t *testing.T) {
 	halTex := &mockHALTexture{width: 512, height: 512}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              512,
 			Height:             512,
 			DepthOrArrayLayers: 4,
 		},
 		MipLevelCount: 4,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -313,9 +313,9 @@ func TestTexture_CreateView(t *testing.T) {
 	// Create custom view
 	viewDesc := &TextureViewDescriptor{
 		Label:           "custom-view",
-		Format:          types.TextureFormatRGBA8Unorm,
-		Dimension:       types.TextureViewDimension2D,
-		Aspect:          types.TextureAspectAll,
+		Format:          gputypes.TextureFormatRGBA8Unorm,
+		Dimension:       gputypes.TextureViewDimension2D,
+		Aspect:          gputypes.TextureAspectAll,
 		BaseMipLevel:    1,
 		MipLevelCount:   2,
 		BaseArrayLayer:  0,
@@ -351,16 +351,16 @@ func TestTexture_CreateView_NilDescriptor(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -383,16 +383,16 @@ func TestTexture_Destroy(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -422,16 +422,16 @@ func TestTexture_Destroy_Idempotent(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -452,16 +452,16 @@ func TestTexture_GetDefaultView_AfterDestroy(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -483,16 +483,16 @@ func TestTextureView_Destroy_NonDefault(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -518,16 +518,16 @@ func TestTextureView_Destroy_Default_NoOp(t *testing.T) {
 	halTex := &mockHALTexture{width: 256, height: 256}
 	desc := &TextureDescriptor{
 		Label: "test-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
 	}
 
 	tex := NewTexture(halTex, device, desc)
@@ -554,16 +554,16 @@ func TestCreateCoreTexture(t *testing.T) {
 	device := &mockHALDevice{}
 	desc := &TextureDescriptor{
 		Label: "created-texture",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              512,
 			Height:             512,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
-		Format:        types.TextureFormatRGBA8Unorm,
-		Usage:         types.TextureUsageTextureBinding | types.TextureUsageCopyDst,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
 	}
 
 	tex, err := CreateCoreTexture(device, desc)
@@ -587,7 +587,7 @@ func TestCreateCoreTexture(t *testing.T) {
 func TestCreateCoreTexture_NilDevice(t *testing.T) {
 	desc := &TextureDescriptor{
 		Label: "test",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              256,
 			Height:             256,
 			DepthOrArrayLayers: 1,
@@ -626,7 +626,7 @@ func TestCreateCoreTexture_InvalidSize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			desc := &TextureDescriptor{
 				Label: "test",
-				Size: types.Extent3D{
+				Size: gputypes.Extent3D{
 					Width:              tt.width,
 					Height:             tt.height,
 					DepthOrArrayLayers: 1,
@@ -645,16 +645,16 @@ func TestCreateCoreTexture_DefaultValues(t *testing.T) {
 	device := &mockHALDevice{}
 	desc := &TextureDescriptor{
 		Label: "defaults-test",
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:  256,
 			Height: 256,
 			// DepthOrArrayLayers: 0 (should default to 1)
 		},
 		// MipLevelCount: 0 (should default to 1)
 		// SampleCount: 0 (should default to 1)
-		Dimension: types.TextureDimension2D,
-		Format:    types.TextureFormatRGBA8Unorm,
-		Usage:     types.TextureUsageTextureBinding,
+		Dimension: gputypes.TextureDimension2D,
+		Format:    gputypes.TextureFormatRGBA8Unorm,
+		Usage:     gputypes.TextureUsageTextureBinding,
 	}
 
 	tex, err := CreateCoreTexture(device, desc)
@@ -679,8 +679,8 @@ func TestCreateCoreTextureSimple(t *testing.T) {
 	tex, err := CreateCoreTextureSimple(
 		device,
 		1024, 768,
-		types.TextureFormatBGRA8Unorm,
-		types.TextureUsageRenderAttachment|types.TextureUsageCopySrc,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureUsageRenderAttachment|gputypes.TextureUsageCopySrc,
 		"simple-texture",
 	)
 	if err != nil {
@@ -692,13 +692,13 @@ func TestCreateCoreTextureSimple(t *testing.T) {
 	if tex.Height() != 768 {
 		t.Errorf("Height = %d, want 768", tex.Height())
 	}
-	if tex.Format() != types.TextureFormatBGRA8Unorm {
+	if tex.Format() != gputypes.TextureFormatBGRA8Unorm {
 		t.Errorf("Format = %v, want BGRA8Unorm", tex.Format())
 	}
 	if tex.Label() != "simple-texture" {
 		t.Errorf("Label = %q, want %q", tex.Label(), "simple-texture")
 	}
-	if tex.Dimension() != types.TextureDimension2D {
+	if tex.Dimension() != gputypes.TextureDimension2D {
 		t.Errorf("Dimension = %v, want 2D", tex.Dimension())
 	}
 }
@@ -709,12 +709,12 @@ func TestCreateCoreTextureSimple(t *testing.T) {
 
 func TestTextureViewDimensionFromTexture(t *testing.T) {
 	tests := []struct {
-		input types.TextureDimension
-		want  types.TextureViewDimension
+		input gputypes.TextureDimension
+		want  gputypes.TextureViewDimension
 	}{
-		{types.TextureDimension1D, types.TextureViewDimension1D},
-		{types.TextureDimension2D, types.TextureViewDimension2D},
-		{types.TextureDimension3D, types.TextureViewDimension3D},
+		{gputypes.TextureDimension1D, gputypes.TextureViewDimension1D},
+		{gputypes.TextureDimension2D, gputypes.TextureViewDimension2D},
+		{gputypes.TextureDimension3D, gputypes.TextureViewDimension3D},
 	}
 
 	for _, tt := range tests {

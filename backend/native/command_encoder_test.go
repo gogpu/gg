@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // =============================================================================
@@ -168,9 +168,9 @@ func TestCoreCommandEncoder_BeginRenderPass(t *testing.T) {
 				Label: "render-pass",
 				ColorAttachments: []RenderPassColorAttachment{
 					{
-						LoadOp:     types.LoadOpClear,
-						StoreOp:    types.StoreOpStore,
-						ClearValue: types.Color{R: 0, G: 0, B: 0, A: 1},
+						LoadOp:     gputypes.LoadOpClear,
+						StoreOp:    gputypes.StoreOpStore,
+						ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
 					},
 				},
 			},
@@ -420,7 +420,7 @@ func TestCoreCommandEncoder_CopyBufferToTexture(t *testing.T) {
 		encoder *CoreCommandEncoder
 		source  *ImageCopyBuffer
 		dest    *ImageCopyTexture
-		size    types.Extent3D
+		size    gputypes.Extent3D
 		wantErr bool
 	}{
 		{
@@ -430,7 +430,7 @@ func TestCoreCommandEncoder_CopyBufferToTexture(t *testing.T) {
 			dest: &ImageCopyTexture{
 				Texture: texture,
 			},
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 		{
@@ -440,7 +440,7 @@ func TestCoreCommandEncoder_CopyBufferToTexture(t *testing.T) {
 				Buffer: buffer,
 			},
 			dest:    nil,
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 		{
@@ -454,7 +454,7 @@ func TestCoreCommandEncoder_CopyBufferToTexture(t *testing.T) {
 			dest: &ImageCopyTexture{
 				Texture: texture,
 			},
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 	}
@@ -486,7 +486,7 @@ func TestCoreCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 		encoder *CoreCommandEncoder
 		source  *ImageCopyTexture
 		dest    *ImageCopyBuffer
-		size    types.Extent3D
+		size    gputypes.Extent3D
 		wantErr bool
 	}{
 		{
@@ -496,7 +496,7 @@ func TestCoreCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 			dest: &ImageCopyBuffer{
 				Buffer: buffer,
 			},
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 		{
@@ -506,7 +506,7 @@ func TestCoreCommandEncoder_CopyTextureToBuffer(t *testing.T) {
 				Texture: texture,
 			},
 			dest:    nil,
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 	}
@@ -538,7 +538,7 @@ func TestCoreCommandEncoder_CopyTextureToTexture(t *testing.T) {
 		encoder *CoreCommandEncoder
 		source  *ImageCopyTexture
 		dest    *ImageCopyTexture
-		size    types.Extent3D
+		size    gputypes.Extent3D
 		wantErr bool
 	}{
 		{
@@ -548,7 +548,7 @@ func TestCoreCommandEncoder_CopyTextureToTexture(t *testing.T) {
 			dest: &ImageCopyTexture{
 				Texture: texture2,
 			},
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 		{
@@ -558,7 +558,7 @@ func TestCoreCommandEncoder_CopyTextureToTexture(t *testing.T) {
 				Texture: texture1,
 			},
 			dest:    nil,
-			size:    types.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
+			size:    gputypes.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1},
 			wantErr: true,
 		},
 	}
@@ -813,9 +813,9 @@ func TestRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 			Label: "test-pass",
 			ColorAttachments: []RenderPassColorAttachment{
 				{
-					LoadOp:     types.LoadOpClear,
-					StoreOp:    types.StoreOpStore,
-					ClearValue: types.Color{R: 1, G: 0, B: 0, A: 1},
+					LoadOp:     gputypes.LoadOpClear,
+					StoreOp:    gputypes.StoreOpStore,
+					ClearValue: gputypes.Color{R: 1, G: 0, B: 0, A: 1},
 				},
 			},
 		}
@@ -833,7 +833,7 @@ func TestRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 			t.Errorf("color attachments = %d, want 1", len(coreDesc.ColorAttachments))
 		}
 
-		if coreDesc.ColorAttachments[0].LoadOp != types.LoadOpClear {
+		if coreDesc.ColorAttachments[0].LoadOp != gputypes.LoadOpClear {
 			t.Errorf("load op = %v, want Clear", coreDesc.ColorAttachments[0].LoadOp)
 		}
 	})
@@ -842,12 +842,12 @@ func TestRenderPassDescriptor_toCoreDescriptor(t *testing.T) {
 		desc := &RenderPassDescriptor{
 			Label: "test-pass",
 			DepthStencilAttachment: &RenderPassDepthStencilAttachment{
-				DepthLoadOp:       types.LoadOpClear,
-				DepthStoreOp:      types.StoreOpStore,
+				DepthLoadOp:       gputypes.LoadOpClear,
+				DepthStoreOp:      gputypes.StoreOpStore,
 				DepthClearValue:   1.0,
 				DepthReadOnly:     false,
-				StencilLoadOp:     types.LoadOpClear,
-				StencilStoreOp:    types.StoreOpDiscard,
+				StencilLoadOp:     gputypes.LoadOpClear,
+				StencilStoreOp:    gputypes.StoreOpDiscard,
 				StencilClearValue: 0,
 				StencilReadOnly:   true,
 			},
@@ -926,9 +926,9 @@ func TestCoreCommandEncoder_RenderWorkflow(t *testing.T) {
 		Label: "main-pass",
 		ColorAttachments: []RenderPassColorAttachment{
 			{
-				LoadOp:     types.LoadOpClear,
-				StoreOp:    types.StoreOpStore,
-				ClearValue: types.Color{R: 0, G: 0, B: 0, A: 1},
+				LoadOp:     gputypes.LoadOpClear,
+				StoreOp:    gputypes.StoreOpStore,
+				ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
 			},
 		},
 	})

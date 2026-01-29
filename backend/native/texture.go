@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Texture errors.
@@ -80,7 +80,7 @@ type TextureDescriptor struct {
 	Label string
 
 	// Size is the texture dimensions.
-	Size types.Extent3D
+	Size gputypes.Extent3D
 
 	// MipLevelCount is the number of mip levels (1+ required).
 	MipLevelCount uint32
@@ -89,16 +89,16 @@ type TextureDescriptor struct {
 	SampleCount uint32
 
 	// Dimension is the texture dimension (1D, 2D, 3D).
-	Dimension types.TextureDimension
+	Dimension gputypes.TextureDimension
 
 	// Format is the texture pixel format.
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Usage specifies how the texture will be used.
-	Usage types.TextureUsage
+	Usage gputypes.TextureUsage
 
 	// ViewFormats are additional formats for texture views.
-	ViewFormats []types.TextureFormat
+	ViewFormats []gputypes.TextureFormat
 }
 
 // NewTexture creates a new Texture from a texture handle.
@@ -126,7 +126,7 @@ func (t *Texture) Label() string {
 }
 
 // Size returns the texture dimensions.
-func (t *Texture) Size() types.Extent3D {
+func (t *Texture) Size() gputypes.Extent3D {
 	return t.descriptor.Size
 }
 
@@ -156,17 +156,17 @@ func (t *Texture) SampleCount() uint32 {
 }
 
 // Dimension returns the texture dimension (1D, 2D, 3D).
-func (t *Texture) Dimension() types.TextureDimension {
+func (t *Texture) Dimension() gputypes.TextureDimension {
 	return t.descriptor.Dimension
 }
 
 // Format returns the texture pixel format.
-func (t *Texture) Format() types.TextureFormat {
+func (t *Texture) Format() gputypes.TextureFormat {
 	return t.descriptor.Format
 }
 
 // Usage returns the texture usage flags.
-func (t *Texture) Usage() types.TextureUsage {
+func (t *Texture) Usage() gputypes.TextureUsage {
 	return t.descriptor.Usage
 }
 
@@ -250,9 +250,9 @@ func (t *Texture) createDefaultView() (*TextureView, error) {
 	// Create default view descriptor - use zero values to inherit from texture
 	halDesc := &hal.TextureViewDescriptor{
 		Label:           t.descriptor.Label + " (default view)",
-		Format:          types.TextureFormatUndefined, // Inherit from texture
-		Dimension:       types.TextureViewDimensionUndefined,
-		Aspect:          types.TextureAspectAll,
+		Format:          gputypes.TextureFormatUndefined, // Inherit from texture
+		Dimension:       gputypes.TextureViewDimensionUndefined,
+		Aspect:          gputypes.TextureAspectAll,
 		BaseMipLevel:    0,
 		MipLevelCount:   0, // 0 means all remaining levels
 		BaseArrayLayer:  0,
@@ -411,13 +411,13 @@ type TextureViewDescriptor struct {
 	Label string
 
 	// Format is the view format (use TextureFormatUndefined to inherit from texture).
-	Format types.TextureFormat
+	Format gputypes.TextureFormat
 
 	// Dimension is the view dimension (use TextureViewDimensionUndefined to inherit).
-	Dimension types.TextureViewDimension
+	Dimension gputypes.TextureViewDimension
 
 	// Aspect specifies which aspect to view (color, depth, stencil).
-	Aspect types.TextureAspect
+	Aspect gputypes.TextureAspect
 
 	// BaseMipLevel is the first mip level in the view.
 	BaseMipLevel uint32
@@ -439,17 +439,17 @@ func (v *TextureView) Label() string {
 
 // Format returns the view's format.
 // Returns TextureFormatUndefined if the view inherits from the texture.
-func (v *TextureView) Format() types.TextureFormat {
+func (v *TextureView) Format() gputypes.TextureFormat {
 	return v.descriptor.Format
 }
 
 // Dimension returns the view's dimension.
-func (v *TextureView) Dimension() types.TextureViewDimension {
+func (v *TextureView) Dimension() gputypes.TextureViewDimension {
 	return v.descriptor.Dimension
 }
 
 // Aspect returns the view's aspect.
-func (v *TextureView) Aspect() types.TextureAspect {
+func (v *TextureView) Aspect() gputypes.TextureAspect {
 	return v.descriptor.Aspect
 }
 
@@ -556,10 +556,10 @@ func halViewDescToViewDesc(halDesc *hal.TextureViewDescriptor, tex *Texture) Tex
 	}
 
 	// Resolve inherited values
-	if desc.Format == types.TextureFormatUndefined {
+	if desc.Format == gputypes.TextureFormatUndefined {
 		desc.Format = tex.Format()
 	}
-	if desc.Dimension == types.TextureViewDimensionUndefined {
+	if desc.Dimension == gputypes.TextureViewDimensionUndefined {
 		desc.Dimension = textureViewDimensionFromTexture(tex.Dimension())
 	}
 	if desc.MipLevelCount == 0 {
@@ -573,16 +573,16 @@ func halViewDescToViewDesc(halDesc *hal.TextureViewDescriptor, tex *Texture) Tex
 }
 
 // textureViewDimensionFromTexture returns the default view dimension for a texture dimension.
-func textureViewDimensionFromTexture(dim types.TextureDimension) types.TextureViewDimension {
+func textureViewDimensionFromTexture(dim gputypes.TextureDimension) gputypes.TextureViewDimension {
 	switch dim {
-	case types.TextureDimension1D:
-		return types.TextureViewDimension1D
-	case types.TextureDimension2D:
-		return types.TextureViewDimension2D
-	case types.TextureDimension3D:
-		return types.TextureViewDimension3D
+	case gputypes.TextureDimension1D:
+		return gputypes.TextureViewDimension1D
+	case gputypes.TextureDimension2D:
+		return gputypes.TextureViewDimension2D
+	case gputypes.TextureDimension3D:
+		return gputypes.TextureViewDimension3D
 	default:
-		return types.TextureViewDimension2D
+		return gputypes.TextureViewDimension2D
 	}
 }
 
@@ -688,20 +688,20 @@ func CreateCoreTexture(device hal.Device, desc *TextureDescriptor) (*Texture, er
 func CreateCoreTextureSimple(
 	device hal.Device,
 	width, height uint32,
-	format types.TextureFormat,
-	usage types.TextureUsage,
+	format gputypes.TextureFormat,
+	usage gputypes.TextureUsage,
 	label string,
 ) (*Texture, error) {
 	desc := &TextureDescriptor{
 		Label: label,
-		Size: types.Extent3D{
+		Size: gputypes.Extent3D{
 			Width:              width,
 			Height:             height,
 			DepthOrArrayLayers: 1,
 		},
 		MipLevelCount: 1,
 		SampleCount:   1,
-		Dimension:     types.TextureDimension2D,
+		Dimension:     gputypes.TextureDimension2D,
 		Format:        format,
 		Usage:         usage,
 	}

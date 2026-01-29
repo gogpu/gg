@@ -100,21 +100,21 @@ func (pc *PipelineCache) createBlitPipeline() error {
 	pc.blitLayout = StubBindGroupLayoutID(1)
 
 	// TODO: When wgpu is ready, create actual bind group layout:
-	// layoutDesc := &types.BindGroupLayoutDescriptor{
-	//     Entries: []types.BindGroupLayoutEntry{
+	// layoutDesc := &gputypes.BindGroupLayoutDescriptor{
+	//     Entries: []gputypes.BindGroupLayoutEntry{
 	//         {
 	//             Binding:    0,
-	//             Visibility: types.ShaderStageFragment,
-	//             Texture: &types.TextureBindingLayout{
-	//                 SampleType:    types.TextureSampleTypeFloat,
-	//                 ViewDimension: types.TextureViewDimension2D,
+	//             Visibility: gputypes.ShaderStageFragment,
+	//             Texture: &gputypes.TextureBindingLayout{
+	//                 SampleType:    gputypes.TextureSampleTypeFloat,
+	//                 ViewDimension: gputypes.TextureViewDimension2D,
 	//             },
 	//         },
 	//         {
 	//             Binding:    1,
-	//             Visibility: types.ShaderStageFragment,
-	//             Sampler: &types.SamplerBindingLayout{
-	//                 Type: types.SamplerBindingTypeFiltering,
+	//             Visibility: gputypes.ShaderStageFragment,
+	//             Sampler: &gputypes.SamplerBindingLayout{
+	//                 Type: gputypes.SamplerBindingTypeFiltering,
 	//             },
 	//         },
 	//     },
@@ -140,9 +140,9 @@ func (pc *PipelineCache) createStripPipeline() error {
 	pc.stripLayout = StubBindGroupLayoutID(2)
 
 	// TODO: When wgpu is ready, create actual compute pipeline:
-	// pipelineDesc := &types.ComputePipelineDescriptor{
+	// pipelineDesc := &gputypes.ComputePipelineDescriptor{
 	//     Layout: pipelineLayoutID,
-	//     Compute: types.ProgrammableStageDescriptor{
+	//     Compute: gputypes.ProgrammableStageDescriptor{
 	//         Module:     pc.shaders.Strip,
 	//         EntryPoint: "main",
 	//     },
@@ -334,7 +334,7 @@ func (b *BindGroupBuilder) Build() StubBindGroupID {
 // CreateBlitBindGroup creates a bind group for blit operations.
 func (pc *PipelineCache) CreateBlitBindGroup(tex *GPUTexture) StubBindGroupID {
 	// TODO: When wgpu is ready:
-	// entries := []types.BindGroupEntry{
+	// entries := []gputypes.BindGroupEntry{
 	//     {Binding: 0, TextureView: tex.ViewID()},
 	//     {Binding: 1, Sampler: pc.defaultSampler},
 	// }

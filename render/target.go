@@ -7,7 +7,7 @@ import (
 	"image"
 	"image/color"
 
-	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // RenderTarget defines where rendering output goes.
@@ -27,7 +27,7 @@ type RenderTarget interface {
 	Height() int
 
 	// Format returns the pixel format of the target.
-	Format() gpucontext.TextureFormat
+	Format() gputypes.TextureFormat
 
 	// TextureView returns the GPU texture view for this target.
 	// Returns nil for CPU-only targets.
@@ -81,8 +81,8 @@ func (t *PixmapTarget) Height() int {
 }
 
 // Format returns the pixel format (RGBA8).
-func (t *PixmapTarget) Format() gpucontext.TextureFormat {
-	return gpucontext.TextureFormatRGBA8Unorm
+func (t *PixmapTarget) Format() gputypes.TextureFormat {
+	return gputypes.TextureFormatRGBA8Unorm
 }
 
 // TextureView returns nil as this is a CPU-only target.
@@ -154,7 +154,7 @@ var _ RenderTarget = (*PixmapTarget)(nil)
 type TextureTarget struct {
 	width  int
 	height int
-	format gpucontext.TextureFormat
+	format gputypes.TextureFormat
 	view   TextureView
 }
 
@@ -162,7 +162,7 @@ type TextureTarget struct {
 // Requires a DeviceHandle to create the texture.
 //
 // Note: This is a stub. Full implementation in Phase 3.
-func NewTextureTarget(handle DeviceHandle, width, height int, format gpucontext.TextureFormat) (*TextureTarget, error) {
+func NewTextureTarget(handle DeviceHandle, width, height int, format gputypes.TextureFormat) (*TextureTarget, error) {
 	// TODO(Phase 3): Create actual GPU texture using handle.Device()
 	return &TextureTarget{
 		width:  width,
@@ -183,7 +183,7 @@ func (t *TextureTarget) Height() int {
 }
 
 // Format returns the pixel format.
-func (t *TextureTarget) Format() gpucontext.TextureFormat {
+func (t *TextureTarget) Format() gputypes.TextureFormat {
 	return t.format
 }
 
@@ -224,7 +224,7 @@ var _ RenderTarget = (*TextureTarget)(nil)
 type SurfaceTarget struct {
 	width  int
 	height int
-	format gpucontext.TextureFormat
+	format gputypes.TextureFormat
 	view   TextureView
 }
 
@@ -232,7 +232,7 @@ type SurfaceTarget struct {
 //
 // Note: This is a stub. Full implementation in Phase 3 will accept
 // a Surface interface from the host application.
-func NewSurfaceTarget(width, height int, format gpucontext.TextureFormat, view TextureView) *SurfaceTarget {
+func NewSurfaceTarget(width, height int, format gputypes.TextureFormat, view TextureView) *SurfaceTarget {
 	return &SurfaceTarget{
 		width:  width,
 		height: height,
@@ -252,7 +252,7 @@ func (t *SurfaceTarget) Height() int {
 }
 
 // Format returns the surface pixel format.
-func (t *SurfaceTarget) Format() gpucontext.TextureFormat {
+func (t *SurfaceTarget) Format() gputypes.TextureFormat {
 	return t.format
 }
 

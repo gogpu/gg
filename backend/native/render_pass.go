@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/types"
 )
 
 // Render pass errors.
@@ -364,7 +364,7 @@ func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) error {
 //
 // Returns nil on success.
 // Returns an error if the pass has ended.
-func (p *RenderPassEncoder) SetBlendConstant(color types.Color) error {
+func (p *RenderPassEncoder) SetBlendConstant(color gputypes.Color) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
