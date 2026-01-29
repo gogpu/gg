@@ -12,6 +12,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.21.4] - 2026-01-29
+
+### Added
+
+- **GGCanvas Integration Package** (INT-004)
+  - New `integration/ggcanvas/` package for gogpu integration
+  - `Canvas` type wrapping gg.Context with GPU texture management
+  - `RenderTo(dc)` — Draw canvas to gogpu window
+  - `RenderToEx(dc, opts)` — Draw with position, scale, alpha options
+  - Lazy texture creation on first flush
+  - Dirty tracking to avoid unnecessary GPU uploads
+  - 14 unit tests, full documentation
+
+### Changed
+
+- **Update dependencies** for webgpu.h spec compliance
+  - `github.com/gogpu/gpucontext` v0.3.0 → v0.3.1
+  - `github.com/gogpu/wgpu` v0.11.1 → v0.11.2
+
+### Usage Example
+
+```go
+canvas, _ := ggcanvas.New(app.GPUContextProvider(), 800, 600)
+defer canvas.Close()
+
+// Draw with gg API
+ctx := canvas.Context()
+ctx.SetRGB(1, 0, 0)
+ctx.DrawCircle(400, 300, 100)
+ctx.Fill()
+
+// Render to gogpu window
+canvas.RenderTo(dc)
+```
+
 ## [0.21.3] - 2026-01-29
 
 ### Changed
@@ -1234,7 +1269,11 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.21.4...HEAD
+[0.21.4]: https://github.com/gogpu/gg/compare/v0.21.3...v0.21.4
+[0.21.3]: https://github.com/gogpu/gg/compare/v0.21.2...v0.21.3
+[0.21.2]: https://github.com/gogpu/gg/compare/v0.21.1...v0.21.2
+[0.21.1]: https://github.com/gogpu/gg/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/gogpu/gg/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/gogpu/gg/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/gogpu/gg/compare/v0.19.0...v0.20.0

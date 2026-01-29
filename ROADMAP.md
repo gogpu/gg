@@ -19,13 +19,14 @@
 
 ---
 
-## Current State: v0.21.x
+## Current State: v0.21.4
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
 - Anti-aliased rendering (4x supersampling)
 - GPU backend (sparse strips, compute shaders)
 - Enterprise architecture for UI integration
+- **GGCanvas integration** for gogpu windows
 
 ---
 
