@@ -3,7 +3,7 @@ module github.com/gogpu/gg
 go 1.25
 
 require (
-	github.com/go-webgpu/webgpu v0.1.4
+	github.com/go-webgpu/webgpu v0.2.1
 	github.com/gogpu/gpucontext v0.3.1
 	github.com/gogpu/gputypes v0.2.0
 	github.com/gogpu/naga v0.8.4
@@ -13,3 +13,5 @@ require (
 )
 
 require github.com/go-webgpu/goffi v0.3.8 // indirect
+
+replace github.com/gogpu/gpucontext => ../gpucontext

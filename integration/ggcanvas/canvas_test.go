@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 package ggcanvas
 
@@ -46,6 +46,7 @@ func (m *mockProvider) Adapter() gpucontext.Adapter           { return m.adapter
 func (m *mockProvider) SurfaceFormat() gputypes.TextureFormat { return m.format }
 
 // mockTexture implements the texture interfaces for testing.
+// Implements gpucontext.Texture interface.
 type mockTexture struct {
 	width     int
 	height    int
@@ -53,6 +54,9 @@ type mockTexture struct {
 	destroyed bool
 	updated   int
 }
+
+func (m *mockTexture) Width() int  { return m.width }
+func (m *mockTexture) Height() int { return m.height }
 
 func (m *mockTexture) UpdateData(data []byte) {
 	m.data = make([]byte, len(data))
@@ -64,13 +68,13 @@ func (m *mockTexture) Destroy() {
 	m.destroyed = true
 }
 
-// mockRenderer implements rendererWithTextureCreation for testing.
+// mockRenderer implements gpucontext.TextureCreator for testing.
 type mockRenderer struct {
 	textures []*mockTexture
 	failNext bool
 }
 
-func (m *mockRenderer) NewTextureFromRGBA(width, height int, data []byte) (any, error) {
+func (m *mockRenderer) NewTextureFromRGBA(width, height int, data []byte) (gpucontext.Texture, error) {
 	if m.failNext {
 		m.failNext = false
 		return nil, errors.New("mock texture creation failed")
@@ -85,21 +89,28 @@ func (m *mockRenderer) NewTextureFromRGBA(width, height int, data []byte) (any, 
 	return tex, nil
 }
 
-// mockDrawContext implements textureDrawer for testing.
+// mockDrawContext implements gpucontext.TextureDrawer for testing.
 type mockDrawContext struct {
 	renderer     *mockRenderer
-	drawnTexture any
+	drawnTexture gpucontext.Texture
 	drawnX       float32
 	drawnY       float32
 	drawCount    int
 }
 
-func (m *mockDrawContext) DrawTexture(tex any, x, y float32) error {
+func (m *mockDrawContext) DrawTexture(tex gpucontext.Texture, x, y float32) error {
 	m.drawnTexture = tex
 	m.drawnX = x
 	m.drawnY = y
 	m.drawCount++
 	return nil
+}
+
+func (m *mockDrawContext) TextureCreator() gpucontext.TextureCreator {
+	if m.renderer == nil {
+		return nil
+	}
+	return m.renderer
 }
 
 func (m *mockDrawContext) Renderer() any {
@@ -443,22 +454,6 @@ func TestRenderToPosition(t *testing.T) {
 
 	if dc.drawnX != 50 || dc.drawnY != 75 {
 		t.Errorf("Drawn position = (%f, %f), want (50, 75)", dc.drawnX, dc.drawnY)
-	}
-}
-
-// TestRenderToInvalidContext tests error handling for invalid contexts.
-func TestRenderToInvalidContext(t *testing.T) {
-	provider := newMockProvider()
-	c, err := New(provider, 100, 100)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer c.Close()
-
-	// Pass non-drawer type
-	err = c.RenderTo("not a drawer")
-	if !errors.Is(err, ErrInvalidDrawContext) {
-		t.Errorf("RenderTo(string) error = %v, want %v", err, ErrInvalidDrawContext)
 	}
 }
 

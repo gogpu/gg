@@ -141,6 +141,9 @@ type mockHALTexture struct {
 // Destroy implements hal.Resource.
 func (t *mockHALTexture) Destroy() {}
 
+// NativeHandle implements hal.NativeHandle.
+func (t *mockHALTexture) NativeHandle() uintptr { return 0 }
+
 // mockHALTextureView is a test double for hal.TextureView.
 type mockHALTextureView struct {
 	texture hal.Texture
@@ -149,6 +152,9 @@ type mockHALTextureView struct {
 
 // Destroy implements hal.Resource.
 func (v *mockHALTextureView) Destroy() {}
+
+// NativeHandle implements hal.NativeHandle.
+func (v *mockHALTextureView) NativeHandle() uintptr { return 0 }
 
 // =============================================================================
 // Texture Tests
