@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.22.1] - 2026-01-30
+
+### Fixed
+
+- **LineJoinRound rendering** ([#62](https://github.com/gogpu/gg/issues/62))
+  - Round join arc now correctly starts from previous segment's normal
+  - Fixes angular/incorrect appearance when using `LineJoinRound`
+
 ## [0.22.0] - 2026-01-30
 
 ### Added

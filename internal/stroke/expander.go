@@ -370,14 +370,19 @@ func (e *StrokeExpander) computeMiterPoint(p0 Point, norm, ab, cd Vec2, cross fl
 }
 
 // applyRoundJoin applies a round join at the given point.
+// The arc goes from the previous segment's normal (lastNorm) to the current normal (norm).
 func (e *StrokeExpander) applyRoundJoin(p0 Point, norm Vec2, cross, dot float64) {
+	// Compute lastNorm from lastTan (same pattern as computeMiterPoint)
+	lastScale := 0.5 * e.style.Width / e.lastTan.Length()
+	lastNorm := e.lastTan.Perp().Scale(lastScale)
+
 	angle := math.Atan2(cross, dot)
 	if angle > 0.0 {
 		e.backward.lineTo(p0.Add(norm))
-		e.roundJoin(e.forward, p0, norm.Neg(), angle)
+		e.roundJoin(e.forward, p0, lastNorm.Neg(), angle)
 	} else {
 		e.forward.lineTo(p0.Add(norm.Neg()))
-		e.roundJoinRev(e.backward, p0, norm, -angle)
+		e.roundJoinRev(e.backward, p0, lastNorm, -angle)
 	}
 }
 
