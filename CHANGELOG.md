@@ -67,10 +67,10 @@ canvas, _ := ggcanvas.New(app.GPUContextProvider(), 800, 600)
 defer canvas.Close()
 
 // Draw with gg API
-ctx := canvas.Context()
-ctx.SetRGB(1, 0, 0)
-ctx.DrawCircle(400, 300, 100)
-ctx.Fill()
+cc := canvas.Context()
+cc.SetRGB(1, 0, 0)
+cc.DrawCircle(400, 300, 100)
+cc.Fill()
 
 // Render to gogpu window
 canvas.RenderTo(dc)
