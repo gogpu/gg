@@ -25,6 +25,9 @@ type mockHALBuffer struct {
 // Destroy implements hal.Resource.
 func (b *mockHALBuffer) Destroy() {}
 
+// NativeHandle implements hal.NativeHandle.
+func (b *mockHALBuffer) NativeHandle() uintptr { return 0 }
+
 // =============================================================================
 // Extended mockHALDevice for Buffer Tests
 // =============================================================================

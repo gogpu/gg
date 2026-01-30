@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Package ggcanvas provides seamless integration between gg 2D graphics and
 // gogpu GPU-accelerated windows.

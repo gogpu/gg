@@ -3,11 +3,11 @@ module github.com/gogpu/gg
 go 1.25
 
 require (
-	github.com/go-webgpu/webgpu v0.1.4
-	github.com/gogpu/gpucontext v0.3.1
+	github.com/go-webgpu/webgpu v0.2.1
+	github.com/gogpu/gpucontext v0.4.0
 	github.com/gogpu/gputypes v0.2.0
-	github.com/gogpu/naga v0.8.4
-	github.com/gogpu/wgpu v0.11.2
+	github.com/gogpu/naga v0.9.0
+	github.com/gogpu/wgpu v0.12.0
 	golang.org/x/image v0.35.0
 	golang.org/x/text v0.33.0
 )
