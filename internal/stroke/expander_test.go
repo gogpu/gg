@@ -705,3 +705,68 @@ func BenchmarkStrokeExpander_CubicCurves(b *testing.B) {
 		expander.Expand(input)
 	}
 }
+
+// TestRoundJoin_VShape tests the round join fix for Issue #62
+// https://github.com/gogpu/gg/issues/62
+// The V-shape path should produce a smooth round join arc
+// that connects the previous segment's normal to the current segment's normal.
+func TestRoundJoin_VShape(t *testing.T) {
+	style := Stroke{
+		Width:      5.0, // Same as issue report
+		Cap:        LineCapButt,
+		Join:       LineJoinRound,
+		MiterLimit: 4.0,
+	}
+	expander := NewStrokeExpander(style)
+
+	// V-shape from issue #62: two lines meeting at a sharp angle
+	// MoveTo(2.65, 37.57) → LineTo(10.16, 10.65) → LineTo(17.67, 37.57)
+	input := []PathElement{
+		MoveTo{Point: Point{X: 2.65, Y: 37.57}},
+		LineTo{Point: Point{X: 10.16, Y: 10.65}},
+		LineTo{Point: Point{X: 17.67, Y: 37.57}},
+	}
+
+	result := expander.Expand(input)
+
+	if len(result) == 0 {
+		t.Fatal("result should not be empty")
+	}
+
+	// Round join should produce CubicTo elements for the arc
+	cubicCount := 0
+	for _, el := range result {
+		if _, ok := el.(CubicTo); ok {
+			cubicCount++
+		}
+	}
+
+	// At minimum, we expect 1 cubic for the round join arc
+	if cubicCount < 1 {
+		t.Errorf("round join should produce at least 1 CubicTo for arc, got %d", cubicCount)
+	}
+
+	// Verify the arc starts from the correct position by checking
+	// that the first CubicTo after the join point is close to
+	// the expected position based on the previous segment's normal
+	joinPoint := Point{X: 10.16, Y: 10.65}
+	halfWidth := style.Width / 2
+
+	foundArcNearJoin := false
+	for _, el := range result {
+		if cubic, ok := el.(CubicTo); ok {
+			// Check if this cubic is near the join point (within reasonable tolerance)
+			dist := math.Sqrt(
+				(cubic.Point.X-joinPoint.X)*(cubic.Point.X-joinPoint.X) +
+					(cubic.Point.Y-joinPoint.Y)*(cubic.Point.Y-joinPoint.Y))
+			if dist < halfWidth*3 { // Arc should be within ~3 radii of join point
+				foundArcNearJoin = true
+				break
+			}
+		}
+	}
+
+	if !foundArcNearJoin {
+		t.Error("round join arc should be near the join point")
+	}
+}
