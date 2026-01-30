@@ -12,6 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.22.0] - 2026-01-30
+
+### Added
+
+- **gpucontext.TextureDrawer integration** — Unified cross-package texture API
+  - `ggcanvas.RenderTo()` now accepts `gpucontext.TextureDrawer` interface
+  - Enables seamless integration with any GPU framework implementing the interface
+  - No direct gogpu imports required in ggcanvas
+
+### Changed
+
+- **Update gpucontext v0.3.1 → v0.4.0** — Texture, Touch interfaces
+- **Update wgpu v0.11.2 → v0.12.0** — BufferRowLength fix (aspect ratio)
+- **Update naga v0.8.4 → v0.9.0** — Shader compiler improvements
+- **Update go-webgpu/webgpu v0.1.4 → v0.2.1** — Latest FFI bindings
+
+### Fixed
+
+- Test mocks for new `hal.NativeHandle` interface
+- ggcanvas tests for new `gpucontext.TextureDrawer` interface
+
 ## [0.21.4] - 2026-01-29
 
 ### Added

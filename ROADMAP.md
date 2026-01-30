@@ -19,20 +19,20 @@
 
 ---
 
-## Current State: v0.21.4
+## Current State: v0.22.0
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
 - Anti-aliased rendering (4x supersampling)
 - GPU backend (sparse strips, compute shaders)
 - Enterprise architecture for UI integration
-- **GGCanvas integration** for gogpu windows
+- **GGCanvas integration** with gpucontext.TextureDrawer interface
 
 ---
 
 ## Upcoming
 
-### v0.22.0 — Polish & Performance
+### v0.23.0 — Polish & Performance
 - [ ] Vello-style AA improvements
 - [ ] Performance optimizations
 - [ ] API cleanup before v1.0
@@ -86,7 +86,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.21.x** | 2026-01 | Enterprise architecture, stroke quality fixes |
+| **v0.22.x** | 2026-01 | gpucontext.TextureDrawer integration |
+| v0.21.x | 2026-01 | Enterprise architecture, stroke quality fixes |
 | v0.20.x | 2026-01 | GPU backend completion |
 | v0.19.x | 2026-01 | Anti-aliased rendering |
 | v0.15.x | 2025-12 | GPU compute shaders |
