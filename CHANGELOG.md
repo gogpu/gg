@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Update naga v0.9.0 → v0.10.0** — Storage textures, switch statements
+- **Update wgpu v0.12.0 → v0.13.0** — Format capabilities, array textures, render bundles
+
 ### Planned for v1.0.0
 - API Review and cleanup
 - Comprehensive documentation

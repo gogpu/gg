@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.22.0
+## Current State: v0.22.1
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
@@ -27,6 +27,7 @@
 - GPU backend (sparse strips, compute shaders)
 - Enterprise architecture for UI integration
 - **GGCanvas integration** with gpucontext.TextureDrawer interface
+- LineJoinRound fix for correct arc rendering
 
 ---
 
