@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Update naga v0.9.0 → v0.10.0** — Storage textures, switch statements
-- **Update wgpu v0.12.0 → v0.13.0** — Format capabilities, array textures, render bundles
-
 ### Planned for v1.0.0
 - API Review and cleanup
 - Comprehensive documentation
 - Performance benchmarks
+
+## [0.22.2] - 2026-02-01
+
+### Changed
+
+- **Update naga v0.9.0 → v0.10.0** — Storage textures, switch statements
+- **Update wgpu v0.12.0 → v0.13.0** — Format capabilities, array textures, render bundles
 
 ## [0.22.1] - 2026-01-30
 
@@ -1303,7 +1305,10 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.21.4...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.22.2...HEAD
+[0.22.2]: https://github.com/gogpu/gg/compare/v0.22.1...v0.22.2
+[0.22.1]: https://github.com/gogpu/gg/compare/v0.22.0...v0.22.1
+[0.22.0]: https://github.com/gogpu/gg/compare/v0.21.4...v0.22.0
 [0.21.4]: https://github.com/gogpu/gg/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/gogpu/gg/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/gogpu/gg/compare/v0.21.1...v0.21.2
