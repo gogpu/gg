@@ -417,19 +417,26 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 				continue
 			}
 
-			// top_edge detection from path_count.rs
-			// top_edge is true when segment enters tile from the top edge.
-			// For i==0: check if segment starts at tile boundary (y0 == s0y)
-			// For i>0: check if segment enters tile from top (lastZ == z)
-			topEdge := false
+			// Backdrop propagation logic from path_count.rs
+			// When a segment affects a tile row, tiles to the RIGHT of the segment
+			// need backdrop to inherit the winding number.
+			//
+			// For i==0: segment STARTS in this tile. Even if it starts inside the tile
+			// (not at boundary), it affects winding for the entire tile row, so we
+			// ALWAYS add backdrop to x+1.
+			//
+			// For i>0: add backdrop when entering tile from TOP (lastZ == z means
+			// we moved down, not right, so same X tile as before).
+			addBackdrop := false
 			if i == 0 {
-				topEdge = (tileY0 == s0y)
+				// Always add backdrop for starting tile - segment affects this row
+				addBackdrop = true
 			} else {
-				topEdge = (lastZ == z)
+				// Add backdrop when entering tile from top (moved down within same X tile)
+				addBackdrop = (lastZ == z)
 			}
 
-			// Add backdrop to tile x+1 when crossing from top
-			if topEdge && tileX+1 < tr.tilesX {
+			if addBackdrop && tileX+1 < tr.tilesX {
 				xBump := tileX + 1
 				if xBump < bboxMinX {
 					xBump = bboxMinX
