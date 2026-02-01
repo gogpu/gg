@@ -38,9 +38,10 @@ type PathSegment struct {
 
 // VelloTile represents a tile with its segments and backdrop.
 type VelloTile struct {
-	Backdrop      int           // Winding number from tiles to the left
-	Segments      []PathSegment // Segments in this tile
-	IsProblemTile bool          // True if tile needs special handling (Fix #19)
+	Backdrop        int           // Winding number from tiles to the left
+	Segments        []PathSegment // Segments in this tile
+	IsProblemTile   bool          // True if tile needs special handling (Fix #19)
+	IsBottomProblem bool          // True if tile has bottom artifact pattern (Fix #22)
 }
 
 // TileRasterizer implements Vello-style tile-based analytic AA.
@@ -76,6 +77,7 @@ func (tr *TileRasterizer) Reset() {
 		tr.tiles[i].Segments = tr.tiles[i].Segments[:0]
 		tr.tiles[i].Backdrop = 0
 		tr.tiles[i].IsProblemTile = false
+		tr.tiles[i].IsBottomProblem = false
 	}
 }
 
@@ -169,36 +171,57 @@ func (tr *TileRasterizer) computeBackdropPrefixSum() {
 	}
 }
 
-// markProblemTiles identifies tiles with the top-right corner artifact pattern.
+// markProblemTiles identifies tiles with artifact patterns.
 // These tiles need special handling because yEdge accumulation causes spurious fill.
+// Two patterns:
+// 1. Top-right: segments exit LEFT (dx<0) and go UP (dy<=0) - yEdge negative, backdrop=0
+// 2. Bottom: segments enter from LEFT (dx>0) and go DOWN (dy>=0) - backdrop can be negative
 func (tr *TileRasterizer) markProblemTiles() {
 	for i := range tr.tiles {
 		tile := &tr.tiles[i]
-		if tile.Backdrop != 0 {
-			continue
-		}
+		// Pattern 1 (top-right) requires backdrop=0
+		// Pattern 2 (bottom) can have backdrop != 0, checked separately below
 
 		// Count segments touching left edge, check directions
 		leftEdgeCount := 0
 		allNegativeDx := true
 		allNonPositiveDy := true
+		allPositiveDx := true
+		allNonNegativeDy := true
 
 		for _, seg := range tile.Segments {
 			if seg.YEdge < 1e8 {
 				leftEdgeCount++
 				dx := seg.Point1[0] - seg.Point0[0]
 				dy := seg.Point1[1] - seg.Point0[1]
+				// Top-right pattern checks
 				if dx >= 0 {
 					allNegativeDx = false
 				}
 				if dy > 0 {
 					allNonPositiveDy = false
 				}
+				// Bottom pattern checks
+				if dx <= 0 {
+					allPositiveDx = false
+				}
+				if dy < 0 {
+					allNonNegativeDy = false
+				}
 			}
 		}
 
-		// Problem: 2+ segments touch left edge, all going left-up
-		tile.IsProblemTile = leftEdgeCount >= 2 && allNegativeDx && allNonPositiveDy
+		// Pattern 1: Top-right - backdrop=0, 2+ segments touch left edge, all going left-up
+		tile.IsProblemTile = tile.Backdrop == 0 && leftEdgeCount >= 2 && allNegativeDx && allNonPositiveDy
+
+		// Pattern 2: Bottom - DISABLED due to false positives
+		// The bottom artifact (tile 6,11, 3 pixels) is a known issue.
+		// Cause: backdrop=-1 after prefix sum, yEdge(+0.33) and a*dy(-0.33) give +0.25 contribution
+		// Result: area = -1 + 0.25 = -0.75, abs = 0.75, alpha = 191 (should be 255)
+		// This is visually minor (25% alpha difference on 3 pixels at circle edge).
+		// TODO: Investigate more precise detection criteria.
+		_ = allPositiveDx
+		_ = allNonNegativeDy
 	}
 }
 
@@ -848,6 +871,145 @@ func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, f
 	}
 }
 
+// fillBottomProblemTileScanline handles bottom problem tiles using Y mirror algorithm.
+// FIX #22: For bottom tiles, segments ENTER from left (dx>0) and go DOWN (dy>0).
+// The problem is: yEdge (+) and a*dy (-) cancel out, giving 0 instead of 1.
+// Solution: Use backdrop=1 since tile is clearly inside the shape.
+// fillBottomProblemTileScanline was intended to fix bottom artifacts but caused false positives.
+// Kept for reference. See markProblemTiles() for analysis.
+func (tr *TileRasterizer) fillBottomProblemTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+	yf := float32(localY)
+
+	// Find Y range of ALL segments
+	var minSegY float32 = 1000
+	var maxSegY float32 = -1
+	for _, seg := range tile.Segments {
+		y0, y1 := seg.Point0[1], seg.Point1[1]
+		if y0 < minSegY {
+			minSegY = y0
+		}
+		if y1 < minSegY {
+			minSegY = y1
+		}
+		if y0 > maxSegY {
+			maxSegY = y0
+		}
+		if y1 > maxSegY {
+			maxSegY = y1
+		}
+	}
+
+	// For rows OUTSIDE segment range, standard with backdrop=1
+	// Bottom tiles are inside shape, so backdrop should be 1
+	if yf < minSegY-1 || yf >= float32(int(maxSegY)) {
+		// Use backdrop=1 for rows outside segment range
+		for i := 0; i < VelloTileWidth; i++ {
+			tr.area[i] = 1.0
+		}
+		// Apply fill rule
+		if fillRule == FillRuleEvenOdd {
+			for i := 0; i < VelloTileWidth; i++ {
+				a := tr.area[i]
+				im := float32(int32(0.5*a + 0.5))
+				tr.area[i] = abs32(a - 2.0*im)
+			}
+		} else {
+			for i := 0; i < VelloTileWidth; i++ {
+				a := tr.area[i]
+				if a < 0 {
+					a = -a
+				}
+				if a > 1 {
+					a = 1
+				}
+				tr.area[i] = a
+			}
+		}
+		return
+	}
+
+	// For rows WITH segments, use backdrop=1 to fix cancellation
+	backdropF := float32(1) // FIX: Use 1 instead of 0
+	for i := 0; i < VelloTileWidth; i++ {
+		tr.area[i] = backdropF
+	}
+
+	for _, seg := range tile.Segments {
+		delta := [2]float32{
+			seg.Point1[0] - seg.Point0[0],
+			seg.Point1[1] - seg.Point0[1],
+		}
+
+		y := seg.Point0[1] - yf
+		y0 := clamp32(y, 0, 1)
+		y1 := clamp32(y+delta[1], 0, 1)
+		dy := y0 - y1
+
+		var yEdge float32
+		if delta[0] > 0 {
+			yEdge = clamp32(yf-seg.YEdge+1.0, 0, 1)
+		} else if delta[0] < 0 {
+			yEdge = -clamp32(yf-seg.YEdge+1.0, 0, 1)
+		}
+
+		if dy != 0 {
+			vecYRecip := 1.0 / delta[1]
+			t0 := (y0 - y) * vecYRecip
+			t1 := (y1 - y) * vecYRecip
+
+			startX := seg.Point0[0]
+			segX0 := startX + t0*delta[0]
+			segX1 := startX + t1*delta[0]
+
+			xmin0 := min32f(segX0, segX1)
+			xmax0 := max32f(segX0, segX1)
+
+			for i := 0; i < VelloTileWidth; i++ {
+				iF := float32(i)
+
+				xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
+				xmax := xmax0 - iF
+
+				b := min32f(xmax, 1.0)
+				c := max32f(b, 0.0)
+				d := max32f(xmin, 0.0)
+
+				denom := xmax - xmin
+				var a float32
+				if denom != 0 {
+					a = (b + 0.5*(d*d-c*c) - xmin) / denom
+				}
+
+				tr.area[i] += yEdge + a*dy
+			}
+		} else if yEdge != 0 {
+			for i := 0; i < VelloTileWidth; i++ {
+				tr.area[i] += yEdge
+			}
+		}
+	}
+
+	// Apply fill rule
+	if fillRule == FillRuleEvenOdd {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			im := float32(int32(0.5*a + 0.5))
+			tr.area[i] = abs32(a - 2.0*im)
+		}
+	} else {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			if a < 0 {
+				a = -a
+			}
+			if a > 1 {
+				a = 1
+			}
+			tr.area[i] = a
+		}
+	}
+}
+
 // fillTileScanlineStandard is the original Vello algorithm without problem tile handling.
 func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, fillRule FillRule) {
 	backdropF := float32(tile.Backdrop)
@@ -941,12 +1103,18 @@ func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, 
 // fillTileScanline computes coverage for one scanline within a tile.
 // Direct port of fine.rs fill_path function for a single row.
 func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
-	// FIX #19: For problem tiles, use simple winding-based algorithm
-	// instead of Vello's yEdge accumulation which causes artifacts.
+	// FIX #19: For problem tiles (top-right), use mirror algorithm
 	if tile.IsProblemTile {
 		tr.fillProblemTileScanline(tile, localY, fillRule)
 		return
 	}
+
+	// FIX #22: For bottom problem tiles - DISABLED (see markProblemTiles)
+	// The bottom artifact is a known issue with minor visual impact.
+	// if tile.IsBottomProblem {
+	// 	tr.fillBottomProblemTileScanline(tile, localY, fillRule)
+	// 	return
+	// }
 
 	// Initialize area with backdrop (only for first VelloTileWidth elements)
 	backdropF := float32(tile.Backdrop)
