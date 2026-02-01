@@ -688,84 +688,163 @@ func (tr *TileRasterizer) addSegmentToTile(
 	})
 }
 
-// fillProblemTileScanline handles problem tiles with a simple scanline algorithm.
-// Instead of Vello's yEdge accumulation, directly compute coverage per pixel.
-// FIX #19: Simple winding-based fill for top-right corner artifacts.
+// fillProblemTileScanline handles problem tiles using TRUE MIRROR algorithm.
+// FIX #21: 100% mathematical mirror transformation:
+// 1. Mirror segment X coordinates: x' = TileWidth - x
+// 2. Compute mirrored YEdge (right edge becomes "left" in mirror space)
+// 3. Run standard Vello algorithm on mirrored data
+// 4. Mirror result back: area[i] ↔ area[TileWidth-1-i]
 func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
 	yf := float32(localY)
 
-	// Find Y range of problematic segments (those with YEdge)
+	// Find Y range of ALL segments
 	var minSegY float32 = 1000
 	var maxSegY float32 = -1
 	for _, seg := range tile.Segments {
-		if seg.YEdge < 1e8 {
-			// This is a "problem" segment
-			y0, y1 := seg.Point0[1], seg.Point1[1]
-			if y0 < minSegY {
-				minSegY = y0
-			}
-			if y1 < minSegY {
-				minSegY = y1
-			}
-			if y0 > maxSegY {
-				maxSegY = y0
-			}
-			if y1 > maxSegY {
-				maxSegY = y1
-			}
+		y0, y1 := seg.Point0[1], seg.Point1[1]
+		if y0 < minSegY {
+			minSegY = y0
+		}
+		if y1 < minSegY {
+			minSegY = y1
+		}
+		if y0 > maxSegY {
+			maxSegY = y0
+		}
+		if y1 > maxSegY {
+			maxSegY = y1
 		}
 	}
 
-	// For rows OUTSIDE the problem segment range, use standard Vello algorithm
-	// The artifact only occurs where the problem segments cross
-	if yf < minSegY-1 || yf > maxSegY+1 {
-		// Delegate to standard algorithm for this row
+	// For rows OUTSIDE segment range, use standard algorithm
+	// (mirror only helps where yEdge artifacts occur)
+	// Use floor(maxSegY) as upper bound - rows at segment boundary need standard
+	if yf < minSegY-1 || yf >= float32(int(maxSegY)) {
 		tr.fillTileScanlineStandard(tile, localY, fillRule)
 		return
 	}
 
-	// For rows in the problem range, use supersampled winding
-	for px := 0; px < VelloTileWidth; px++ {
-		samples := 0
-		hits := 0
+	// Step 1: Create mirrored segments
+	mirroredSegs := make([]PathSegment, len(tile.Segments))
+	tileW := float32(VelloTileWidth)
 
-		// 4x4 supersampling
-		for sy := 0; sy < 4; sy++ {
-			for sx := 0; sx < 4; sx++ {
-				samples++
-				xf := float32(px) + float32(sx)/4.0 + 0.125
-				yfSample := float32(localY) + float32(sy)/4.0 + 0.125
+	for i, seg := range tile.Segments {
+		// Mirror X coordinates: x' = TileWidth - x
+		mirroredSegs[i] = PathSegment{
+			Point0: [2]float32{tileW - seg.Point0[0], seg.Point0[1]},
+			Point1: [2]float32{tileW - seg.Point1[0], seg.Point1[1]},
+			YEdge:  1e9, // Will be recomputed
+		}
 
-				// Count winding: segment crossings from sample point going RIGHT
-				winding := 0
-				for _, seg := range tile.Segments {
-					y0, y1 := seg.Point0[1], seg.Point1[1]
-					if (y0 <= yfSample && y1 > yfSample) || (y1 <= yfSample && y0 > yfSample) {
-						t := (yfSample - y0) / (y1 - y0)
-						xIntersect := seg.Point0[0] + t*(seg.Point1[0]-seg.Point0[0])
-						if xIntersect >= xf {
-							if y1 > y0 {
-								winding++
-							} else {
-								winding--
-							}
-						}
-					}
+		// Step 2: Compute YEdge for mirrored segment
+		// Original right edge (x=TileWidth) becomes left edge (x=0) in mirror space
+		// Segment crosses x=0 if one point is <= 0 and other is > 0
+		mx0, mx1 := mirroredSegs[i].Point0[0], mirroredSegs[i].Point1[0]
+		my0, my1 := mirroredSegs[i].Point0[1], mirroredSegs[i].Point1[1]
+
+		if (mx0 <= 0 && mx1 > 0) || (mx1 <= 0 && mx0 > 0) {
+			// Segment crosses x=0 in mirror space
+			dx := mx1 - mx0
+			if dx != 0 {
+				t := (0 - mx0) / dx
+				yEdge := my0 + t*(my1-my0)
+				mirroredSegs[i].YEdge = yEdge
+			}
+		}
+	}
+
+	// Step 3: Run standard Vello on mirrored segments
+	// Use backdrop=0 for problem tiles (right edge of shape)
+	backdropF := float32(0)
+	for i := 0; i < VelloTileWidth; i++ {
+		tr.area[i] = backdropF
+	}
+
+	for _, seg := range mirroredSegs {
+		delta := [2]float32{
+			seg.Point1[0] - seg.Point0[0],
+			seg.Point1[1] - seg.Point0[1],
+		}
+
+		y := seg.Point0[1] - yf
+		y0 := clamp32(y, 0, 1)
+		y1 := clamp32(y+delta[1], 0, 1)
+		dy := y0 - y1
+
+		var yEdge float32
+		if delta[0] > 0 {
+			yEdge = clamp32(yf-seg.YEdge+1.0, 0, 1)
+		} else if delta[0] < 0 {
+			yEdge = -clamp32(yf-seg.YEdge+1.0, 0, 1)
+		}
+
+		if dy != 0 {
+			vecYRecip := 1.0 / delta[1]
+			t0 := (y0 - y) * vecYRecip
+			t1 := (y1 - y) * vecYRecip
+
+			startX := seg.Point0[0]
+			segX0 := startX + t0*delta[0]
+			segX1 := startX + t1*delta[0]
+
+			xmin0 := min32f(segX0, segX1)
+			xmax0 := max32f(segX0, segX1)
+
+			for i := 0; i < VelloTileWidth; i++ {
+				iF := float32(i)
+
+				xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
+				xmax := xmax0 - iF
+
+				b := min32f(xmax, 1.0)
+				c := max32f(b, 0.0)
+				d := max32f(xmin, 0.0)
+
+				denom := xmax - xmin
+				var a float32
+				if denom != 0 {
+					a = (b + 0.5*(d*d-c*c) - xmin) / denom
 				}
 
-				inside := false
-				if fillRule == FillRuleEvenOdd {
-					inside = winding&1 != 0
-				} else {
-					inside = winding != 0
+				effectiveYEdge := yEdge
+				if yf < float32(int(seg.YEdge)) {
+					effectiveYEdge = 0
 				}
-				if inside {
-					hits++
+				tr.area[i] += effectiveYEdge + a*dy
+			}
+		} else if yEdge != 0 {
+			if yf >= float32(int(seg.YEdge)) {
+				for i := 0; i < VelloTileWidth; i++ {
+					tr.area[i] += yEdge
 				}
 			}
 		}
+	}
 
-		tr.area[px] = float32(hits) / float32(samples)
+	// Apply fill rule
+	if fillRule == FillRuleEvenOdd {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			im := float32(int32(0.5*a + 0.5))
+			tr.area[i] = abs32(a - 2.0*im)
+		}
+	} else {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			if a < 0 {
+				a = -a
+			}
+			if a > 1 {
+				a = 1
+			}
+			tr.area[i] = a
+		}
+	}
+
+	// Step 4: Mirror result back
+	for i := 0; i < VelloTileWidth/2; i++ {
+		j := VelloTileWidth - 1 - i
+		tr.area[i], tr.area[j] = tr.area[j], tr.area[i]
 	}
 }
 
