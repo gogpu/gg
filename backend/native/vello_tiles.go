@@ -468,6 +468,12 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 				}
 			}
 
+			// NOTE (2026-02-01): Backdrop propagation experiments (#3-#6) were tried here
+			// but all broke either circles or squares. The actual fix is in fillTileScanline:
+			// limiting yEdge application to rows >= floor(seg.YEdge).
+			// See docs/dev/VELLO_RUST_COMPARISON.md for full experiment log.
+			_ = bounds // Used in vertical edge fix above
+
 			// Now add the segment to this tile using path_tiling.rs logic
 			tr.addSegmentToTile(x0, y0, x1, y1, tileX, tileY, isDown, i, imin, imax, a, b, tileY0, sign, isPositiveSlope, epsilon, noYEdge)
 
@@ -655,6 +661,62 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 
 	yf := float32(localY)
 
+	// FIX #16 (2026-02-01): Detect problematic rows with PRECISE conditions.
+	// A row is problematic ONLY when:
+	// 1. backdrop = 0 (we haven't entered the shape from left)
+	// 2. >=2 segments have active YEdge in THIS row
+	// 3. ALL such segments have dx < 0 (going left)
+	// 4. ALL such segments have dy <= 0 (going up = exiting shape)
+	// This pattern occurs ONLY at top-right corners where shape "retreats" left-up.
+	var activeYEdgeCount int
+	var maxSegmentXWithYEdge float32 = -1
+	allActiveNegativeDx := true
+	allActiveNonPositiveDy := true
+
+	for _, seg := range tile.Segments {
+		dx := seg.Point1[0] - seg.Point0[0]
+		dy := seg.Point1[1] - seg.Point0[1]
+
+		// Check if this segment has active YEdge AND actually crosses this row
+		// YEdge being active means the accumulated effect applies, but we only
+		// count segments that CROSS this specific row (dy != 0 in row terms)
+		if seg.YEdge < 1e8 && yf >= float32(int(seg.YEdge)) {
+			// Check if segment actually crosses this row
+			y := seg.Point0[1] - yf
+			y0 := clamp32(y, 0, 1)
+			y1 := clamp32(y+dy, 0, 1)
+			rowDy := y0 - y1
+
+			if rowDy != 0 {
+				// Segment crosses this row AND has active YEdge
+				activeYEdgeCount++
+				if dx >= 0 {
+					allActiveNegativeDx = false
+				}
+				if dy > 0 {
+					allActiveNonPositiveDy = false
+				}
+
+				// Track max X of segments with active YEdge
+				vecYRecip := 1.0 / dy
+				t0 := (y0 - y) * vecYRecip
+				t1 := (y1 - y) * vecYRecip
+				segX0 := seg.Point0[0] + t0*dx
+				segX1 := seg.Point0[0] + t1*dx
+				xmax0 := max32f(segX0, segX1)
+				if xmax0 > maxSegmentXWithYEdge {
+					maxSegmentXWithYEdge = xmax0
+				}
+			}
+		}
+	}
+
+	// Problematic row: unique pattern of top-right corner artifact
+	isProblemRow := backdropF == 0 &&
+		activeYEdgeCount >= 2 &&
+		allActiveNegativeDx &&
+		allActiveNonPositiveDy
+
 	// Process each segment
 	for _, seg := range tile.Segments {
 		delta := [2]float32{
@@ -710,12 +772,22 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 				}
 
 				// KEY: y_edge is added together with a*dy
-				tr.area[i] += yEdge + a*dy
+				// FIX (2026-02-01): Only apply yEdge for rows at or below seg.YEdge
+				effectiveYEdge := yEdge
+				if yf < float32(int(seg.YEdge)) {
+					effectiveYEdge = 0
+				}
+				tr.area[i] += effectiveYEdge + a*dy
 			}
 		} else if yEdge != 0 {
-			// No Y delta but segment crosses left edge - just add y_edge
-			for i := 0; i < VelloTileWidth; i++ {
-				tr.area[i] += yEdge
+			// No Y delta but segment crosses left edge - add y_edge.
+			//
+			// FIX (2026-02-01): Only apply yEdge when current row is at or below
+			// the segment's YEdge position.
+			if yf >= float32(int(seg.YEdge)) {
+				for i := 0; i < VelloTileWidth; i++ {
+					tr.area[i] += yEdge
+				}
 			}
 		}
 	}
@@ -729,10 +801,18 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 		}
 	} else {
 		// Non-zero: clamp(abs(a), 0, 1)
+		// FIX #16: For PROBLEM ROWS (top-right corner pattern), pixels beyond
+		// segment X range have spurious negative area from yEdge - set to 0.
 		for i := 0; i < VelloTileWidth; i++ {
 			a := tr.area[i]
-			if a < 0 {
-				a = -a
+
+			if isProblemRow && a < 0 && float32(i) > maxSegmentXWithYEdge {
+				// Pixel is beyond segment coverage in problem row, negative area is artifact
+				a = 0
+			} else {
+				if a < 0 {
+					a = -a
+				}
 			}
 			if a > 1 {
 				a = 1
