@@ -190,13 +190,25 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 	const epsilon float32 = 1e-6
 	const noYEdge float32 = 1e9
 
-	// Get path's first tile row (for top_edge handling)
-	// In Vello, path.bbox[1] determines the first row. We use EdgeBuilder bounds.
+	// Get path's bounding box in tile coordinates.
+	// In Vello, path.bbox determines where backdrop is added.
 	// Note: eb.Bounds() returns pixel coordinates, NOT sub-pixel!
 	bounds := eb.Bounds()
-	pathFirstTileY := int(math.Floor(float64(bounds.MinY * velloTileScale)))
-	if pathFirstTileY < 0 {
-		pathFirstTileY = 0
+	pathBboxMinX := int(math.Floor(float64(bounds.MinX * velloTileScale)))
+	pathBboxMinY := int(math.Floor(float64(bounds.MinY * velloTileScale)))
+	pathBboxMaxX := int(math.Ceil(float64(bounds.MaxX * velloTileScale)))
+	pathBboxMaxY := int(math.Ceil(float64(bounds.MaxY * velloTileScale)))
+	if pathBboxMinX < 0 {
+		pathBboxMinX = 0
+	}
+	if pathBboxMinY < 0 {
+		pathBboxMinY = 0
+	}
+	if pathBboxMaxX > tr.tilesX {
+		pathBboxMaxX = tr.tilesX
+	}
+	if pathBboxMaxY > tr.tilesY {
+		pathBboxMaxY = tr.tilesY
 	}
 
 	for edge := range eb.AllEdges() {
@@ -276,11 +288,11 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 			tileX0 -= 1.0
 		}
 
-		// Bounding box in tiles
-		bboxMinX := 0
-		bboxMinY := 0
-		bboxMaxX := tr.tilesX
-		bboxMaxY := tr.tilesY
+		// Use path's bounding box in tiles (computed once at start)
+		bboxMinX := pathBboxMinX
+		bboxMinY := pathBboxMinY
+		bboxMaxX := pathBboxMaxX
+		bboxMaxY := pathBboxMaxY
 
 		xmin := s0x
 		if s1x < xmin {
