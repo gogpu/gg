@@ -280,8 +280,12 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 0, G: 100, B: 200, A: alpha}
-				velloImg.Set(x, y, c)
+				// Alpha blend with white background
+				a := float32(alpha) / 255.0
+				r := uint8(float32(0)*a + 255*(1-a))
+				g := uint8(float32(100)*a + 255*(1-a))
+				b := uint8(float32(200)*a + 255*(1-a))
+				velloImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -300,8 +304,12 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 0, G: 100, B: 200, A: alpha}
-				origImg.Set(x, y, c)
+				// Alpha blend with white background
+				a := float32(alpha) / 255.0
+				r := uint8(float32(0)*a + 255*(1-a))
+				g := uint8(float32(100)*a + 255*(1-a))
+				b := uint8(float32(200)*a + 255*(1-a))
+				origImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -437,8 +445,9 @@ func TestVelloGoldenComparison(t *testing.T) {
 				for x, alpha := range runs.Iter() {
 					if alpha > 0 {
 						// Alpha blend blue onto black background
-						c := color.RGBA{R: 0, G: 0, B: 255, A: alpha}
-						rendered.Set(x, y, c)
+						a := float32(alpha) / 255.0
+						b := uint8(255 * a)
+						rendered.Set(x, y, color.RGBA{R: 0, G: 0, B: b, A: 255})
 					}
 				}
 			})
@@ -511,8 +520,12 @@ func TestVelloSmokeSquare(t *testing.T) {
 	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 0, G: 0, B: 255, A: alpha}
-				img.Set(x, y, c)
+				// Alpha blend blue with white background
+				a := float32(alpha) / 255.0
+				r := uint8(255 * (1 - a))
+				g := uint8(255 * (1 - a))
+				b := uint8(255*a + 255*(1-a))
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -556,8 +569,12 @@ func TestVelloSmokeCircle(t *testing.T) {
 	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 0, G: 0, B: 255, A: alpha}
-				img.Set(x, y, c)
+				// Alpha blend blue with white background
+				a := float32(alpha) / 255.0
+				r := uint8(255 * (1 - a))
+				g := uint8(255 * (1 - a))
+				b := uint8(255*a + 255*(1-a))
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -604,8 +621,12 @@ func TestVelloCompareDiagonal(t *testing.T) {
 	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 220, G: 50, B: 50, A: alpha}
-				velloImg.Set(x, y, c)
+				// Alpha blend red with white background
+				a := float32(alpha) / 255.0
+				r := uint8(220*a + 255*(1-a))
+				g := uint8(50*a + 255*(1-a))
+				b := uint8(50*a + 255*(1-a))
+				velloImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -624,8 +645,12 @@ func TestVelloCompareDiagonal(t *testing.T) {
 	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				c := color.RGBA{R: 220, G: 50, B: 50, A: alpha}
-				origImg.Set(x, y, c)
+				// Alpha blend red with white background
+				a := float32(alpha) / 255.0
+				r := uint8(220*a + 255*(1-a))
+				g := uint8(50*a + 255*(1-a))
+				b := uint8(50*a + 255*(1-a))
+				origImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
