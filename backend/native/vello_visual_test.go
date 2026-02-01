@@ -251,7 +251,7 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 
 	// Create a circle path
 	cx, cy := float32(100), float32(100)
-	radius := float32(60)
+	radius := float32(80)
 	const k = 0.5522847498
 
 	buildCircle := func(eb *EdgeBuilder) {
