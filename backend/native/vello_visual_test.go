@@ -350,6 +350,116 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	// Dark bands would show as significant difference at tile boundaries
 }
 
+// TestVelloCompareSquare compares Vello tile rasterizer output
+// with the original analytic filler for a square shape.
+func TestVelloCompareSquare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping visual test in short mode")
+	}
+
+	width, height := 20, 20
+
+	// Create a square path
+	buildSquare := func(eb *EdgeBuilder) {
+		path := scene.NewPath()
+		path.MoveTo(7, 7)
+		path.LineTo(13, 7)
+		path.LineTo(13, 13)
+		path.LineTo(7, 13)
+		path.Close()
+		eb.SetFlattenCurves(true)
+		eb.BuildFromScenePath(path, scene.IdentityAffine())
+	}
+
+	// Render with Vello tile rasterizer
+	velloImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			velloImg.Set(x, y, color.White)
+		}
+	}
+
+	tr := NewTileRasterizer(width, height)
+	eb1 := NewEdgeBuilder(2)
+	buildSquare(eb1)
+	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		for x, alpha := range runs.Iter() {
+			if alpha > 0 {
+				// Alpha blend blue with white background
+				a := float32(alpha) / 255.0
+				r := uint8(255 * (1 - a))
+				g := uint8(255 * (1 - a))
+				b := uint8(255*a + 255*(1-a))
+				velloImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			}
+		}
+	})
+
+	// Render with original analytic filler
+	origImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			origImg.Set(x, y, color.White)
+		}
+	}
+
+	af := NewAnalyticFiller(width, height)
+	eb2 := NewEdgeBuilder(2)
+	buildSquare(eb2)
+	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		for x, alpha := range runs.Iter() {
+			if alpha > 0 {
+				// Alpha blend blue with white background
+				a := float32(alpha) / 255.0
+				r := uint8(255 * (1 - a))
+				g := uint8(255 * (1 - a))
+				b := uint8(255*a + 255*(1-a))
+				origImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			}
+		}
+	})
+
+	// Create difference image
+	diffImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	var diffCount int
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			v := velloImg.RGBAAt(x, y)
+			o := origImg.RGBAAt(x, y)
+
+			if v.R != o.R || v.G != o.G || v.B != o.B || v.A != o.A {
+				diffCount++
+				// Highlight difference in red
+				diffImg.Set(x, y, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+				if diffCount <= 20 {
+					// Calc alpha from blue component (b = 255*a + 255*(1-a) = 255, so use R or G)
+					// r = 255 * (1 - a), so a = 1 - r/255
+					vAlpha := 255 - int(v.R)
+					oAlpha := 255 - int(o.R)
+					t.Logf("Diff at (%d,%d): Vello α=%d, Orig α=%d, diff=%d",
+						x, y, vAlpha, oAlpha, vAlpha-oAlpha)
+				}
+			} else {
+				// Grayscale the matching pixels
+				gray := uint8((uint32(v.R) + uint32(v.G) + uint32(v.B)) / 3)
+				diffImg.Set(x, y, color.RGBA{R: gray, G: gray, B: gray, A: 255})
+			}
+		}
+	}
+
+	// Save all three images
+	tmpDir := "../../tmp"
+	_ = os.MkdirAll(tmpDir, 0o755)
+
+	saveImage(t, velloImg, filepath.Join(tmpDir, "square_vello.png"))
+	saveImage(t, origImg, filepath.Join(tmpDir, "square_original.png"))
+	saveImage(t, diffImg, filepath.Join(tmpDir, "square_diff.png"))
+
+	t.Logf("Difference pixels: %d (%.2f%%)", diffCount, float64(diffCount)/float64(width*height)*100)
+	t.Logf("Images saved to: %s", tmpDir)
+}
+
 func saveImage(t *testing.T, img image.Image, path string) {
 	t.Helper()
 	// Scale up 3x for better visibility of artifacts

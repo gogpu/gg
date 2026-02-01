@@ -442,9 +442,13 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 			// FIX: When a PERFECTLY VERTICAL edge (dx = 0) starts INSIDE a tile (i==0 && !topEdge)
 			// and is in the leftmost column, tiles to the right need fill for rows >= startY.
 			// Only apply for truly vertical edges (dx exactly 0) to avoid artifacts on curved shapes.
+			// CRITICAL: Only apply when the shape ACTUALLY extends beyond the current tile's right edge.
+			// Check the original bounds.MaxX against the tile's right boundary.
 			edgeDx := x1 - x0
-			isVertical := edgeDx == 0 // Only truly vertical edges
-			if i == 0 && !topEdge && tileX == bboxMinX && isVertical && tileX+1 < tr.tilesX {
+			isVertical := edgeDx == 0                              // Only truly vertical edges
+			tileRightEdge := float32((tileX + 1) * VelloTileWidth) // Right edge of current tile
+			shapeExtendsRightOfTile := bounds.MaxX > tileRightEdge // Shape goes beyond this tile
+			if i == 0 && !topEdge && tileX == bboxMinX && isVertical && shapeExtendsRightOfTile && tileX+1 < tr.tilesX {
 				// Segment start Y in tile coords
 				segStartY := (s0y - float32(tileY)) * VelloTileHeight
 				if segStartY < 0 {
