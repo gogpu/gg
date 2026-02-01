@@ -3,30 +3,36 @@
 
 // Package native provides CPU-based rendering with Vello-style analytic AA.
 //
-// This file implements tile-based rendering following the Vello architecture:
-// - 4x4 pixel tiles (using TileSize from tile.go)
-// - Backdrop accumulation for correct fill
-// - Analytic coverage computation per pixel
+// This file is a 1:1 port of Vello's CPU fine rasterizer from:
+// - vello_shaders/src/cpu/fine.rs (fill_path function)
+// - vello_shaders/src/cpu/path_tiling.rs (segment binning with y_edge)
+// - vello_shaders/src/cpu/path_count.rs (backdrop computation)
+// - vello_shaders/src/cpu/backdrop.rs (backdrop prefix sum)
 
 package native
 
-import "fmt"
+import "math"
 
-// VelloSegment represents a line segment clipped to a tile.
-// Coordinates are relative to tile origin (0 to TileSize).
-type VelloSegment struct {
-	X0, Y0 float32 // Start point (tile-relative)
-	X1, Y1 float32 // End point (tile-relative)
-	YEdge  float32 // Y coordinate where segment crosses left tile edge (x=0), or 1e9 if none
+// TileWidth and TileHeight match Vello's tile dimensions.
+// Using 16x16 tiles as in the original Vello implementation.
+const (
+	VelloTileWidth  = 16
+	VelloTileHeight = 16
+	VelloTileSize   = VelloTileWidth * VelloTileHeight
+)
+
+// PathSegment is a direct port of Vello's PathSegment struct.
+// Coordinates are relative to tile origin (0..TileWidth, 0..TileHeight).
+type PathSegment struct {
+	Point0 [2]float32 // Start point (tile-relative)
+	Point1 [2]float32 // End point (tile-relative)
+	YEdge  float32    // Y coordinate where segment touches x=0 (left edge), or 1e9 if none
 }
 
-const noYEdge = float32(1e9)
-
-// VelloTile represents a 4x4 pixel tile with its segments and backdrop.
+// VelloTile represents a tile with its segments and backdrop.
 type VelloTile struct {
-	X, Y     int            // Tile position in tile coordinates
-	Backdrop int            // Accumulated winding from tiles to the left
-	Segments []VelloSegment // Segments intersecting this tile
+	Backdrop int           // Winding number from tiles to the left
+	Segments []PathSegment // Segments in this tile
 }
 
 // TileRasterizer implements Vello-style tile-based analytic AA.
@@ -34,14 +40,15 @@ type TileRasterizer struct {
 	width, height  int
 	tilesX, tilesY int
 	tiles          []VelloTile
-	alphaRuns      *AlphaRuns
-	rowCoverage    []float32 // Coverage buffer for current row of tiles
+	area           []float32  // Per-tile pixel area buffer (TileSize elements)
+	rowCoverage    []float32  // Full scanline coverage buffer
+	alphaRuns      *AlphaRuns // Output alpha runs
 }
 
-// NewTileRasterizer creates a new tile-based rasterizer.
+// NewTileRasterizer creates a new Vello-style tile rasterizer.
 func NewTileRasterizer(width, height int) *TileRasterizer {
-	tilesX := (width + TileSize - 1) / TileSize
-	tilesY := (height + TileSize - 1) / TileSize
+	tilesX := (width + VelloTileWidth - 1) / VelloTileWidth
+	tilesY := (height + VelloTileHeight - 1) / VelloTileHeight
 
 	return &TileRasterizer{
 		width:       width,
@@ -49,37 +56,21 @@ func NewTileRasterizer(width, height int) *TileRasterizer {
 		tilesX:      tilesX,
 		tilesY:      tilesY,
 		tiles:       make([]VelloTile, tilesX*tilesY),
-		alphaRuns:   NewAlphaRuns(width),
+		area:        make([]float32, VelloTileSize),
 		rowCoverage: make([]float32, width),
+		alphaRuns:   NewAlphaRuns(width),
 	}
 }
 
-// Reset clears the rasterizer state.
+// Reset clears the rasterizer for reuse.
 func (tr *TileRasterizer) Reset() {
 	for i := range tr.tiles {
 		tr.tiles[i].Segments = tr.tiles[i].Segments[:0]
 		tr.tiles[i].Backdrop = 0
 	}
-	tr.alphaRuns.Reset()
 }
 
-// debugTileRasterizer enables debug output.
-var debugTileRasterizer = false
-var debugTileY = -1
-var debugVerbose = false
-
-// SetDebugTileRasterizer enables debug output for tile rasterizer.
-func SetDebugTileRasterizer(enable bool, y int) {
-	debugTileRasterizer = enable
-	debugTileY = y
-}
-
-// SetDebugTileRasterizerVerbose enables verbose debug output.
-func SetDebugTileRasterizerVerbose(enable bool) {
-	debugVerbose = enable
-}
-
-// Fill renders a path using tile-based analytic AA.
+// Fill renders a path using Vello's tile-based algorithm.
 func (tr *TileRasterizer) Fill(
 	eb *EdgeBuilder,
 	fillRule FillRule,
@@ -89,35 +80,75 @@ func (tr *TileRasterizer) Fill(
 		return
 	}
 
-	// Reset tiles
 	tr.Reset()
 
 	// Get AA scale
 	aaShift := eb.AAShift()
-	//nolint:gosec // aaShift is bounded by EdgeBuilder
+	//nolint:gosec // aaShift is bounded
 	aaScale := float32(int32(1) << uint(aaShift))
 
-	// 1. Bin segments to tiles
+	// 1. Bin segments to tiles (port of path_count.rs + path_tiling.rs)
 	tr.binSegments(eb, aaScale)
 
-	// 2. Compute backdrop for each tile row
-	tr.computeBackdrops()
+	// 2. Prefix sum for backdrop (port of backdrop.rs)
+	tr.computeBackdropPrefixSum()
 
-	// 3. Rasterize each tile row and emit scanlines
+	// 3. Rasterize row by row
 	for tileY := 0; tileY < tr.tilesY; tileY++ {
-		tr.rasterizeTileRow(tileY, fillRule, callback)
+		// Process each scanline within this tile row
+		for localY := 0; localY < VelloTileHeight; localY++ {
+			pixelY := tileY*VelloTileHeight + localY
+			if pixelY >= tr.height {
+				break
+			}
+
+			// Clear row coverage
+			for i := range tr.rowCoverage {
+				tr.rowCoverage[i] = 0
+			}
+
+			// Process all tiles in this row
+			for tileX := 0; tileX < tr.tilesX; tileX++ {
+				tileIdx := tileY*tr.tilesX + tileX
+				tile := &tr.tiles[tileIdx]
+
+				// Fill this tile's area buffer for this scanline
+				tr.fillTileScanline(tile, localY, fillRule)
+
+				// Copy to row coverage
+				baseX := tileX * VelloTileWidth
+				for i := 0; i < VelloTileWidth && baseX+i < tr.width; i++ {
+					tr.rowCoverage[baseX+i] = tr.area[i]
+				}
+			}
+
+			// Convert to alpha runs and emit
+			tr.emitScanline(pixelY, callback)
+		}
 	}
 }
 
-// binSegments distributes edge segments to tiles they intersect.
-// Implements Vello path_tiling.wgsl algorithm with correct y_edge and backdrop.
-//
-//nolint:gocognit,gocyclo,cyclop,funlen // Direct port of Vello algorithm, complexity is inherent
-func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
-	// Track backdrop deltas separately - will accumulate in computeBackdrops
-	backdropDeltas := make([]int, tr.tilesX*tr.tilesY)
+// computeBackdropPrefixSum applies prefix sum to backdrop values.
+// Direct port of backdrop.rs - for each row, sum backdrops from left to right.
+func (tr *TileRasterizer) computeBackdropPrefixSum() {
+	for ty := 0; ty < tr.tilesY; ty++ {
+		sum := 0
+		for tx := 0; tx < tr.tilesX; tx++ {
+			idx := ty*tr.tilesX + tx
+			sum += tr.tiles[idx].Backdrop
+			tr.tiles[idx].Backdrop = sum
+		}
+	}
+}
 
-	edgeIdx := 0
+// binSegments distributes edge segments to tiles.
+// Port of path_count.rs (backdrop) + path_tiling.rs (segments with y_edge).
+//
+//nolint:gocognit,gocyclo,cyclop,funlen,maintidx // Direct port of Vello algorithm
+func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
+	const epsilon float32 = 1e-6
+	const noYEdge float32 = 1e9
+
 	for edge := range eb.AllEdges() {
 		line := edge.AsLine()
 		if line == nil {
@@ -131,309 +162,332 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 		dx := FDot16ToFloat32(line.DX)
 		x1 := x0 + dx*(y1-y0)
 
-		if debugVerbose {
-			fmt.Printf("Edge[%d]: (%.2f,%.2f)-(%.2f,%.2f) winding=%d\n",
-				edgeIdx, x0, y0, x1, y1, line.Winding)
+		// Direct port from path_count.rs line 85:
+		// let delta = if is_down { -1 } else { 1 };
+		// is_down means original segment goes down (increasing Y)
+		// EdgeBuilder normalizes edges so FirstY <= LastY, but stores original direction in Winding
+		// Winding > 0 means segment originally went DOWN
+		// Winding < 0 means segment originally went UP
+		isDown := line.Winding > 0
+		delta := 1
+		if isDown {
+			delta = -1
 		}
-		edgeIdx++
 
-		// Winding direction: +1 for downward (y increasing), -1 for upward
-		winding := int32(1)
-		if line.Winding < 0 {
-			winding = -1
-		}
+		// Edges are already normalized by EdgeBuilder (y0 < y1)
+		// No swap needed
 
 		// Find tile range
 		xMin, xMax := x0, x1
 		if xMin > xMax {
 			xMin, xMax = xMax, xMin
 		}
-		yMin, yMax := y0, y1
-		if yMin > yMax {
-			yMin, yMax = yMax, yMin
-		}
 
-		tileXMin := int(xMin) / TileSize
-		tileXMax := int(xMax) / TileSize
-		tileYMin := int(yMin) / TileSize
-		tileYMax := int(yMax) / TileSize
+		tileYMin := int(y0) / VelloTileHeight
+		tileYMax := int(y1) / VelloTileHeight
+		tileXMin := int(xMin) / VelloTileWidth
+		tileXMax := int(xMax) / VelloTileWidth
 
 		// Clamp to valid range
-		if tileXMin < 0 {
-			tileXMin = 0
-		}
-		if tileXMax >= tr.tilesX {
-			tileXMax = tr.tilesX - 1
-		}
 		if tileYMin < 0 {
 			tileYMin = 0
 		}
 		if tileYMax >= tr.tilesY {
 			tileYMax = tr.tilesY - 1
 		}
+		if tileXMin < 0 {
+			tileXMin = 0
+		}
+		if tileXMax >= tr.tilesX {
+			tileXMax = tr.tilesX - 1
+		}
 
-		// Process each tile row
+		// Port of path_count.rs lines 127-130:
+		// If segment is entirely to the left of image, add backdrop to first tile of each row
+		if xMax < 0 {
+			yMinTile := int(float32(math.Ceil(float64(y0)))) / VelloTileHeight
+			yMaxTile := int(float32(math.Ceil(float64(y1)))) / VelloTileHeight
+			for ty := yMinTile; ty < yMaxTile && ty < tr.tilesY; ty++ {
+				if ty >= 0 {
+					tr.tiles[ty*tr.tilesX].Backdrop += delta
+				}
+			}
+		}
+
+		// Process each tile the segment might intersect
 		for ty := tileYMin; ty <= tileYMax; ty++ {
-			tileTopY := float32(ty * TileSize)
+			tileTopY := float32(ty * VelloTileHeight)
+			tileBotY := float32((ty + 1) * VelloTileHeight)
 
-			// BACKDROP: Add delta when segment crosses TOP EDGE of tile row
-			// This is the key fix - backdrop affects ALL tiles to the right
-			if y0 < tileTopY && y1 >= tileTopY {
-				// Segment crosses top of this tile row (going down)
-				// Find X coordinate at the crossing
-				t := (tileTopY - y0) / (y1 - y0)
-				xCross := x0 + t*(x1-x0)
-				tileCross := int(xCross) / TileSize
-				if tileCross < 0 {
-					tileCross = 0
+			// Port of path_count.rs lines 140-144:
+			// top_edge: segment enters tile row from top
+			// When this happens, add backdrop to the tile to the RIGHT of crossing point
+			//
+			// A segment enters from top if:
+			// - First row: segment starts at or above tile top
+			// - Other rows: segment came from above (always true if segment spans multiple rows)
+			var xAtTop float32
+			if y0 <= tileTopY {
+				// Segment starts above or at tile top - compute X at tileTopY
+				if y0 == tileTopY {
+					xAtTop = x0
+				} else {
+					t := (tileTopY - y0) / (y1 - y0)
+					xAtTop = x0 + t*(x1-x0)
 				}
-				// Add delta to all tiles RIGHT of crossing point
-				for tx := tileCross; tx < tr.tilesX; tx++ {
-					backdropDeltas[ty*tr.tilesX+tx] += int(winding)
-				}
-			} else if y1 < tileTopY && y0 >= tileTopY {
-				// Segment crosses top of this tile row (going up)
-				t := (tileTopY - y1) / (y0 - y1)
-				xCross := x1 + t*(x0-x1)
-				tileCross := int(xCross) / TileSize
-				if tileCross < 0 {
-					tileCross = 0
-				}
-				// Subtract delta (upward = negative winding contribution)
-				for tx := tileCross; tx < tr.tilesX; tx++ {
-					backdropDeltas[ty*tr.tilesX+tx] -= int(winding)
+				// Add backdrop to tile to the right of crossing point
+				txCross := int(xAtTop) / VelloTileWidth
+				if txCross >= 0 && txCross+1 < tr.tilesX {
+					tr.tiles[ty*tr.tilesX+txCross+1].Backdrop += delta
 				}
 			}
 
-			// Add segment to each tile it intersects in this row
+			// Clip segment to tile's Y range
+			segY0 := y0
+			segY1 := y1
+			segX0 := x0
+			segX1 := x1
+
+			if segY0 < tileTopY {
+				t := (tileTopY - y0) / (y1 - y0)
+				segX0 = x0 + t*(x1-x0)
+				segY0 = tileTopY
+			}
+			if segY1 > tileBotY {
+				t := (tileBotY - y0) / (y1 - y0)
+				segX1 = x0 + t*(x1-x0)
+				segY1 = tileBotY
+			}
+
+			// Skip if segment doesn't intersect this tile row
+			if segY0 >= segY1 {
+				continue
+			}
+
 			for tx := tileXMin; tx <= tileXMax; tx++ {
-				tileIdx := ty*tr.tilesX + tx
-				tileX := float32(tx * TileSize)
+				tileLeftX := float32(tx * VelloTileWidth)
+				tileRightX := float32((tx + 1) * VelloTileWidth)
+
+				// Check if segment intersects this tile's X range
+				segXMin := min32f(segX0, segX1)
+				segXMax := max32f(segX0, segX1)
+				if segXMax < tileLeftX || segXMin > tileRightX {
+					continue
+				}
+
+				// Clip segment to tile's X range (critical for y_edge!)
+				// This follows Vello's path_tiling.rs clipping logic
+				clipX0, clipY0 := segX0, segY0
+				clipX1, clipY1 := segX1, segY1
+				isPositiveSlope := segX1 >= segX0
+
+				// Clip start point if outside tile
+				if clipX0 < tileLeftX {
+					// Segment enters from left
+					t := (tileLeftX - segX0) / (segX1 - segX0)
+					clipX0 = tileLeftX
+					clipY0 = segY0 + t*(segY1-segY0)
+				} else if clipX0 > tileRightX {
+					// Segment enters from right
+					t := (tileRightX - segX0) / (segX1 - segX0)
+					clipX0 = tileRightX
+					clipY0 = segY0 + t*(segY1-segY0)
+				}
+
+				// Clip end point if outside tile
+				if clipX1 < tileLeftX {
+					// Segment exits from left
+					t := (tileLeftX - segX0) / (segX1 - segX0)
+					clipX1 = tileLeftX
+					clipY1 = segY0 + t*(segY1-segY0)
+				} else if clipX1 > tileRightX {
+					// Segment exits from right
+					t := (tileRightX - segX0) / (segX1 - segX0)
+					clipX1 = tileRightX
+					clipY1 = segY0 + t*(segY1-segY0)
+				}
+
+				// Skip if segment becomes degenerate
+				if clipY0 >= clipY1 || (clipX0 == clipX1 && clipY0 == clipY1) {
+					continue
+				}
 
 				// Convert to tile-relative coordinates
-				relX0 := x0 - tileX
-				relY0 := y0 - tileTopY
-				relX1 := x1 - tileX
-				relY1 := y1 - tileTopY
+				p0x := clipX0 - tileLeftX
+				p0y := clipY0 - tileTopY
+				p1x := clipX1 - tileLeftX
+				p1y := clipY1 - tileTopY
 
-				// y_edge: Y coordinate where segment TOUCHES x=0 (left tile edge)
-				// KEY FIX: Only record when segment endpoint is AT x=0, not when crossing
-				// This follows Vello path_tiling.wgsl logic exactly
+				// Compute y_edge: Y coordinate where segment touches left tile edge (x=0)
+				// Direct port of path_tiling.rs lines 116-144
+				// y_edge is set when segment STARTS or ENDS at x=0 (left tile edge)
 				yEdge := noYEdge
-				const epsilon = 1e-6
+				_ = isPositiveSlope // Used for understanding, may be needed later
 
-				// Apply Vello's numerical robustness logic
-				//nolint:nestif,gocritic // Direct port of Vello path_tiling.wgsl
-				if abs32(relX0) < epsilon {
-					// Segment starts at (or very close to) left edge
-					if abs32(relX1) < epsilon {
-						// Vertical segment on left edge - shift slightly to avoid singularity
-						relX0 = epsilon
-					} else if abs32(relY0) < epsilon {
-						// Starts at top-left corner - shift to avoid singularity
-						relX0 = epsilon
-					} else if relY0 > 0 && relY0 < float32(TileSize) {
-						// Starts on left edge, not at corner - record y_edge
-						yEdge = relY0
+				//nolint:nestif,gocritic // Direct port
+				if p0x == 0.0 {
+					if p1x == 0.0 {
+						// Both endpoints on left edge - make segment disappear
+						p0x = epsilon
+						if p0y == 0.0 {
+							p1x = epsilon
+							p1y = float32(VelloTileHeight)
+						} else {
+							p1x = 2.0 * epsilon
+							p1y = p0y
+						}
+					} else if p0y == 0.0 {
+						p0x = epsilon
+					} else {
+						yEdge = p0y
 					}
-				} else if abs32(relX1) < epsilon {
-					// Segment ends at (or very close to) left edge
-					if abs32(relY1) < epsilon {
-						// Ends at top-left corner - shift to avoid singularity
-						relX1 = epsilon
-					} else if relY1 > 0 && relY1 < float32(TileSize) {
-						// Ends on left edge, not at corner - record y_edge
-						yEdge = relY1
+				} else if p1x == 0.0 {
+					if p1y == 0.0 {
+						p1x = epsilon
+					} else {
+						yEdge = p1y
 					}
 				}
 
-				seg := VelloSegment{
-					X0:    relX0,
-					Y0:    relY0,
-					X1:    relX1,
-					Y1:    relY1,
-					YEdge: yEdge,
+				// Handle pixel boundary
+				if p0x == float32(int(p0x)) && p0x != 0.0 {
+					p0x -= epsilon
 				}
-				tr.tiles[tileIdx].Segments = append(tr.tiles[tileIdx].Segments, seg)
-				tr.tiles[tileIdx].X = tx
-				tr.tiles[tileIdx].Y = ty
-			}
-		}
-	}
+				if p1x == float32(int(p1x)) && p1x != 0.0 {
+					p1x -= epsilon
+				}
 
-	// Copy backdrop deltas to tiles
-	for i := range tr.tiles {
-		tr.tiles[i].Backdrop = backdropDeltas[i]
-	}
-}
+				// Restore original direction if needed
+				if !isDown {
+					p0x, p1x = p1x, p0x
+					p0y, p1y = p1y, p0y
+				}
 
-// computeBackdrops is now a no-op since binSegments directly computes
-// cumulative backdrop values by adding to all tiles to the right of crossings.
-// Kept for API compatibility and potential future optimizations.
-func (tr *TileRasterizer) computeBackdrops() {
-	// Backdrops are already cumulative from binSegments - nothing to do
-	// Debug output if needed
-	if debugVerbose {
-		for ty := 0; ty < tr.tilesY; ty++ {
-			for tx := 0; tx < tr.tilesX; tx++ {
+				// Add segment to tile
 				tileIdx := ty*tr.tilesX + tx
-				if tr.tiles[tileIdx].Backdrop != 0 {
-					fmt.Printf("Tile(%d,%d) backdrop=%d\n", tx, ty, tr.tiles[tileIdx].Backdrop)
-				}
+				tr.tiles[tileIdx].Segments = append(tr.tiles[tileIdx].Segments, PathSegment{
+					Point0: [2]float32{p0x, p0y},
+					Point1: [2]float32{p1x, p1y},
+					YEdge:  yEdge,
+				})
 			}
 		}
 	}
 }
 
-// rasterizeTileRow processes one row of tiles and emits scanlines.
-func (tr *TileRasterizer) rasterizeTileRow(tileY int, fillRule FillRule, callback func(y int, runs *AlphaRuns)) {
-	// Process each scanline within the tile row
-	for localY := 0; localY < TileSize; localY++ {
-		pixelY := tileY*TileSize + localY
-		if pixelY >= tr.height {
-			break
-		}
-
-		// Clear coverage buffer
-		for i := range tr.rowCoverage {
-			tr.rowCoverage[i] = 0
-		}
-
-		// Process each tile in the row
-		for tileX := 0; tileX < tr.tilesX; tileX++ {
-			tileIdx := tileY*tr.tilesX + tileX
-			tile := &tr.tiles[tileIdx]
-
-			// Rasterize this tile for this scanline
-			tr.rasterizeTileScanline(tile, localY, tileX)
-		}
-
-		// Convert coverage to alpha runs
-		tr.coverageToRuns(pixelY, fillRule, callback)
+// fillTileScanline computes coverage for one scanline within a tile.
+// Direct port of fine.rs fill_path function for a single row.
+func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+	// Initialize area with backdrop (only for first VelloTileWidth elements)
+	backdropF := float32(tile.Backdrop)
+	for i := 0; i < VelloTileWidth; i++ {
+		tr.area[i] = backdropF
 	}
-}
 
-// rasterizeTileScanline computes coverage for one scanline within a tile.
-// Implements Vello's fine rasterizer algorithm with analytic coverage.
-func (tr *TileRasterizer) rasterizeTileScanline(tile *VelloTile, localY int, tileX int) {
 	yf := float32(localY)
-	baseX := tileX * TileSize
-	pixelY := tile.Y*TileSize + localY
-
-	// Initialize with backdrop (accumulated winding from tiles to the left)
-	backdrop := float32(tile.Backdrop)
-	for i := 0; i < TileSize && baseX+i < tr.width; i++ {
-		tr.rowCoverage[baseX+i] = backdrop
-	}
-
-	if debugTileRasterizer && (debugTileY < 0 || pixelY == debugTileY) && len(tile.Segments) > 0 {
-		fmt.Printf("Tile(%d,%d) Y=%d: backdrop=%d, %d segments\n",
-			tile.X, tile.Y, pixelY, tile.Backdrop, len(tile.Segments))
-		for i, seg := range tile.Segments {
-			fmt.Printf("  seg[%d]: (%.2f,%.2f)-(%.2f,%.2f) yEdge=%.2f\n",
-				i, seg.X0, seg.Y0, seg.X1, seg.Y1, seg.YEdge)
-		}
-	}
 
 	// Process each segment
 	for _, seg := range tile.Segments {
-		delta := [2]float32{seg.X1 - seg.X0, seg.Y1 - seg.Y0}
+		delta := [2]float32{
+			seg.Point1[0] - seg.Point0[0],
+			seg.Point1[1] - seg.Point0[1],
+		}
 
-		// Y relative to this scanline within tile
-		relY := seg.Y0 - yf
-
-		// Clamp Y range to [0, 1] (one pixel row)
-		y0 := clamp32(relY, 0, 1)
-		y1 := clamp32(relY+delta[1], 0, 1)
+		// y relative to segment start within this row
+		y := seg.Point0[1] - yf
+		y0 := clamp32(y, 0, 1)
+		y1 := clamp32(y+delta[1], 0, 1)
 		dy := y0 - y1
 
-		// y_edge contribution for winding propagation
-		// This is applied to ALL pixels, not just those where segment has passed
-		// Formula: sign(delta.x) * clamp(y - y_edge + 1, 0, 1)
-		var yEdgeContrib float32
-		if seg.YEdge < noYEdge { // Only if segment crosses left tile edge
-			if delta[0] > 0 {
-				yEdgeContrib = clamp32(yf-seg.YEdge+1.0, 0, 1)
-			} else if delta[0] < 0 {
-				yEdgeContrib = -clamp32(yf-seg.YEdge+1.0, 0, 1)
-			}
-			// Apply y_edge contribution to ALL pixels in tile
-			for i := 0; i < TileSize && baseX+i < tr.width; i++ {
-				tr.rowCoverage[baseX+i] += yEdgeContrib
-			}
+		// y_edge contribution: signum(delta.x) * clamp(yi - y_edge + 1, 0, 1)
+		var yEdge float32
+		if delta[0] > 0 {
+			yEdge = clamp32(yf-seg.YEdge+1.0, 0, 1)
+		} else if delta[0] < 0 {
+			yEdge = -clamp32(yf-seg.YEdge+1.0, 0, 1)
 		}
 
 		if dy != 0 {
-			// Calculate intersection parameters
+			// Segment crosses this row - compute coverage
 			vecYRecip := 1.0 / delta[1]
-			t0 := (y0 - relY) * vecYRecip
-			t1 := (y1 - relY) * vecYRecip
+			t0 := (y0 - y) * vecYRecip
+			t1 := (y1 - y) * vecYRecip
 
-			x0 := seg.X0 + t0*delta[0]
-			x1 := seg.X0 + t1*delta[0]
+			// X positions at intersection points
+			startX := seg.Point0[0]
+			x0 := startX + t0*delta[0]
+			x1 := startX + t1*delta[0]
 
 			xmin0 := min32f(x0, x1)
 			xmax0 := max32f(x0, x1)
 
-			// Process each pixel in tile
-			for i := 0; i < TileSize && baseX+i < tr.width; i++ {
+			// Process each pixel in row
+			for i := 0; i < VelloTileWidth; i++ {
 				iF := float32(i)
 
+				// Coverage formula from Vello
 				xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
 				xmax := xmax0 - iF
 
-				// Vello coverage formula: computes fraction of pixel to the left of segment
 				b := min32f(xmax, 1.0)
 				c := max32f(b, 0.0)
 				d := max32f(xmin, 0.0)
 
+				// Trapezoidal area calculation
 				denom := xmax - xmin
 				var a float32
-				if denom > 1e-6 || denom < -1e-6 {
+				if denom != 0 {
 					a = (b + 0.5*(d*d-c*c) - xmin) / denom
 				}
 
-				tr.rowCoverage[baseX+i] += a * dy
+				// KEY: y_edge is added together with a*dy
+				tr.area[i] += yEdge + a*dy
 			}
+		} else if yEdge != 0 {
+			// No Y delta but segment crosses left edge - just add y_edge
+			for i := 0; i < VelloTileWidth; i++ {
+				tr.area[i] += yEdge
+			}
+		}
+	}
+
+	// Apply fill rule
+	if fillRule == FillRuleEvenOdd {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			im := float32(int32(0.5*a + 0.5))
+			tr.area[i] = abs32(a - 2.0*im)
+		}
+	} else {
+		// Non-zero: clamp(abs(a), 0, 1)
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			if a < 0 {
+				a = -a
+			}
+			if a > 1 {
+				a = 1
+			}
+			tr.area[i] = a
 		}
 	}
 }
 
-// coverageToRuns converts coverage buffer to alpha runs.
-func (tr *TileRasterizer) coverageToRuns(y int, fillRule FillRule, callback func(y int, runs *AlphaRuns)) {
+// emitScanline converts row coverage to alpha runs and calls callback.
+func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *AlphaRuns)) {
 	tr.alphaRuns.Reset()
 
+	var runStart int
 	var currentAlpha uint8
-	runStart := 0
 
 	for i := 0; i < tr.width; i++ {
-		w := tr.rowCoverage[i]
-
-		var coverage float32
-		switch fillRule {
-		case FillRuleNonZero:
-			if w < 0 {
-				w = -w
-			}
-			coverage = clamp32(w, 0, 1)
-		case FillRuleEvenOdd:
-			if w < 0 {
-				w = -w
-			}
-			// Even-odd: abs(w - 2 * round(0.5 * w))
-			im1 := float32(int32(w*0.5 + 0.5))
-			coverage = clamp32(abs32(w-2.0*im1), 0, 1)
-		}
-
-		alpha := uint8(coverage * 255.0)
+		coverage := tr.rowCoverage[i]
+		alpha := uint8(clamp32(coverage, 0, 1) * 255.0)
 
 		if i == 0 {
 			currentAlpha = alpha
 			runStart = 0
-			continue
-		}
-
-		if alpha != currentAlpha {
+		} else if alpha != currentAlpha {
 			if currentAlpha > 0 {
 				runLen := i - runStart
 				tr.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
@@ -443,12 +497,100 @@ func (tr *TileRasterizer) coverageToRuns(y int, fillRule FillRule, callback func
 		}
 	}
 
+	// Emit final run
 	if currentAlpha > 0 {
 		runLen := tr.width - runStart
-		tr.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+		if runLen > 0 {
+			tr.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+		}
 	}
 
-	callback(y, tr.alphaRuns)
+	callback(pixelY, tr.alphaRuns)
+}
+
+// fillPath is kept for compatibility with tests.
+//
+//nolint:gocognit // Direct port of Vello algorithm, complexity is inherent
+func (tr *TileRasterizer) fillPath(tile *VelloTile, fillRule FillRule) {
+	// Initialize full area buffer with backdrop
+	backdropF := float32(tile.Backdrop)
+	for i := range tr.area {
+		tr.area[i] = backdropF
+	}
+
+	// Process each segment for all rows
+	for _, seg := range tile.Segments {
+		deltaX := seg.Point1[0] - seg.Point0[0]
+		deltaY := seg.Point1[1] - seg.Point0[1]
+
+		for yi := 0; yi < VelloTileHeight; yi++ {
+			y := seg.Point0[1] - float32(yi)
+			y0 := clamp32(y, 0, 1)
+			y1 := clamp32(y+deltaY, 0, 1)
+			dy := y0 - y1
+
+			var yEdge float32
+			if deltaX > 0 {
+				yEdge = clamp32(float32(yi)-seg.YEdge+1.0, 0, 1)
+			} else if deltaX < 0 {
+				yEdge = -clamp32(float32(yi)-seg.YEdge+1.0, 0, 1)
+			}
+
+			if dy != 0 {
+				vecYRecip := 1.0 / deltaY
+				t0 := (y0 - y) * vecYRecip
+				t1 := (y1 - y) * vecYRecip
+
+				x0 := seg.Point0[0] + t0*deltaX
+				x1 := seg.Point0[0] + t1*deltaX
+
+				xmin0 := min32f(x0, x1)
+				xmax0 := max32f(x0, x1)
+
+				for i := 0; i < VelloTileWidth; i++ {
+					iF := float32(i)
+					xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
+					xmax := xmax0 - iF
+
+					b := min32f(xmax, 1.0)
+					c := max32f(b, 0.0)
+					d := max32f(xmin, 0.0)
+
+					denom := xmax - xmin
+					var a float32
+					if denom != 0 {
+						a = (b + 0.5*(d*d-c*c) - xmin) / denom
+					}
+
+					tr.area[yi*VelloTileWidth+i] += yEdge + a*dy
+				}
+			} else if yEdge != 0 {
+				for i := 0; i < VelloTileWidth; i++ {
+					tr.area[yi*VelloTileWidth+i] += yEdge
+				}
+			}
+		}
+	}
+
+	// Apply fill rule
+	if fillRule == FillRuleEvenOdd {
+		for i := range tr.area {
+			a := tr.area[i]
+			im := float32(int32(0.5*a + 0.5))
+			tr.area[i] = abs32(a - 2.0*im)
+		}
+	} else {
+		for i := range tr.area {
+			a := tr.area[i]
+			if a < 0 {
+				a = -a
+			}
+			if a > 1 {
+				a = 1
+			}
+			tr.area[i] = a
+		}
+	}
 }
 
 // abs32 returns absolute value of float32.
