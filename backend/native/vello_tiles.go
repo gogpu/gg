@@ -38,8 +38,9 @@ type PathSegment struct {
 
 // VelloTile represents a tile with its segments and backdrop.
 type VelloTile struct {
-	Backdrop int           // Winding number from tiles to the left
-	Segments []PathSegment // Segments in this tile
+	Backdrop      int           // Winding number from tiles to the left
+	Segments      []PathSegment // Segments in this tile
+	IsProblemTile bool          // True if tile needs special handling (Fix #19)
 }
 
 // TileRasterizer implements Vello-style tile-based analytic AA.
@@ -74,6 +75,7 @@ func (tr *TileRasterizer) Reset() {
 	for i := range tr.tiles {
 		tr.tiles[i].Segments = tr.tiles[i].Segments[:0]
 		tr.tiles[i].Backdrop = 0
+		tr.tiles[i].IsProblemTile = false
 	}
 }
 
@@ -112,7 +114,10 @@ func (tr *TileRasterizer) Fill(
 	// 2. Prefix sum for backdrop (port of backdrop.rs)
 	tr.computeBackdropPrefixSum()
 
-	// 3. Rasterize row by row
+	// 3. Mark problem tiles that need special handling (Fix #19)
+	tr.markProblemTiles()
+
+	// 4. Rasterize row by row
 	for tileY := 0; tileY < tr.tilesY; tileY++ {
 		// Process each scanline within this tile row
 		for localY := 0; localY < VelloTileHeight; localY++ {
@@ -161,6 +166,39 @@ func (tr *TileRasterizer) computeBackdropPrefixSum() {
 			sum += tr.tiles[idx].Backdrop
 			tr.tiles[idx].Backdrop = sum
 		}
+	}
+}
+
+// markProblemTiles identifies tiles with the top-right corner artifact pattern.
+// These tiles need special handling because yEdge accumulation causes spurious fill.
+func (tr *TileRasterizer) markProblemTiles() {
+	for i := range tr.tiles {
+		tile := &tr.tiles[i]
+		if tile.Backdrop != 0 {
+			continue
+		}
+
+		// Count segments touching left edge, check directions
+		leftEdgeCount := 0
+		allNegativeDx := true
+		allNonPositiveDy := true
+
+		for _, seg := range tile.Segments {
+			if seg.YEdge < 1e8 {
+				leftEdgeCount++
+				dx := seg.Point1[0] - seg.Point0[0]
+				dy := seg.Point1[1] - seg.Point0[1]
+				if dx >= 0 {
+					allNegativeDx = false
+				}
+				if dy > 0 {
+					allNonPositiveDy = false
+				}
+			}
+		}
+
+		// Problem: 2+ segments touch left edge, all going left-up
+		tile.IsProblemTile = leftEdgeCount >= 2 && allNegativeDx && allNonPositiveDy
 	}
 }
 
@@ -650,9 +688,187 @@ func (tr *TileRasterizer) addSegmentToTile(
 	})
 }
 
+// fillProblemTileScanline handles problem tiles with a simple scanline algorithm.
+// Instead of Vello's yEdge accumulation, directly compute coverage per pixel.
+// FIX #19: Simple winding-based fill for top-right corner artifacts.
+func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+	yf := float32(localY)
+
+	// Find Y range of problematic segments (those with YEdge)
+	var minSegY float32 = 1000
+	var maxSegY float32 = -1
+	for _, seg := range tile.Segments {
+		if seg.YEdge < 1e8 {
+			// This is a "problem" segment
+			y0, y1 := seg.Point0[1], seg.Point1[1]
+			if y0 < minSegY {
+				minSegY = y0
+			}
+			if y1 < minSegY {
+				minSegY = y1
+			}
+			if y0 > maxSegY {
+				maxSegY = y0
+			}
+			if y1 > maxSegY {
+				maxSegY = y1
+			}
+		}
+	}
+
+	// For rows OUTSIDE the problem segment range, use standard Vello algorithm
+	// The artifact only occurs where the problem segments cross
+	if yf < minSegY-1 || yf > maxSegY+1 {
+		// Delegate to standard algorithm for this row
+		tr.fillTileScanlineStandard(tile, localY, fillRule)
+		return
+	}
+
+	// For rows in the problem range, use supersampled winding
+	for px := 0; px < VelloTileWidth; px++ {
+		samples := 0
+		hits := 0
+
+		// 4x4 supersampling
+		for sy := 0; sy < 4; sy++ {
+			for sx := 0; sx < 4; sx++ {
+				samples++
+				xf := float32(px) + float32(sx)/4.0 + 0.125
+				yfSample := float32(localY) + float32(sy)/4.0 + 0.125
+
+				// Count winding: segment crossings from sample point going RIGHT
+				winding := 0
+				for _, seg := range tile.Segments {
+					y0, y1 := seg.Point0[1], seg.Point1[1]
+					if (y0 <= yfSample && y1 > yfSample) || (y1 <= yfSample && y0 > yfSample) {
+						t := (yfSample - y0) / (y1 - y0)
+						xIntersect := seg.Point0[0] + t*(seg.Point1[0]-seg.Point0[0])
+						if xIntersect >= xf {
+							if y1 > y0 {
+								winding++
+							} else {
+								winding--
+							}
+						}
+					}
+				}
+
+				inside := false
+				if fillRule == FillRuleEvenOdd {
+					inside = winding&1 != 0
+				} else {
+					inside = winding != 0
+				}
+				if inside {
+					hits++
+				}
+			}
+		}
+
+		tr.area[px] = float32(hits) / float32(samples)
+	}
+}
+
+// fillTileScanlineStandard is the original Vello algorithm without problem tile handling.
+func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, fillRule FillRule) {
+	backdropF := float32(tile.Backdrop)
+	for i := 0; i < VelloTileWidth; i++ {
+		tr.area[i] = backdropF
+	}
+
+	yf := float32(localY)
+
+	for _, seg := range tile.Segments {
+		delta := [2]float32{
+			seg.Point1[0] - seg.Point0[0],
+			seg.Point1[1] - seg.Point0[1],
+		}
+
+		y := seg.Point0[1] - yf
+		y0 := clamp32(y, 0, 1)
+		y1 := clamp32(y+delta[1], 0, 1)
+		dy := y0 - y1
+
+		var yEdge float32
+		if delta[0] > 0 {
+			yEdge = clamp32(yf-seg.YEdge+1.0, 0, 1)
+		} else if delta[0] < 0 {
+			yEdge = -clamp32(yf-seg.YEdge+1.0, 0, 1)
+		}
+
+		if dy != 0 {
+			vecYRecip := 1.0 / delta[1]
+			t0 := (y0 - y) * vecYRecip
+			t1 := (y1 - y) * vecYRecip
+
+			startX := seg.Point0[0]
+			segX0 := startX + t0*delta[0]
+			segX1 := startX + t1*delta[0]
+
+			xmin0 := min32f(segX0, segX1)
+			xmax0 := max32f(segX0, segX1)
+
+			for i := 0; i < VelloTileWidth; i++ {
+				iF := float32(i)
+
+				xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
+				xmax := xmax0 - iF
+
+				b := min32f(xmax, 1.0)
+				c := max32f(b, 0.0)
+				d := max32f(xmin, 0.0)
+
+				denom := xmax - xmin
+				var a float32
+				if denom != 0 {
+					a = (b + 0.5*(d*d-c*c) - xmin) / denom
+				}
+
+				effectiveYEdge := yEdge
+				if yf < float32(int(seg.YEdge)) {
+					effectiveYEdge = 0
+				}
+				tr.area[i] += effectiveYEdge + a*dy
+			}
+		} else if yEdge != 0 {
+			if yf >= float32(int(seg.YEdge)) {
+				for i := 0; i < VelloTileWidth; i++ {
+					tr.area[i] += yEdge
+				}
+			}
+		}
+	}
+
+	if fillRule == FillRuleEvenOdd {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			im := float32(int32(0.5*a + 0.5))
+			tr.area[i] = abs32(a - 2.0*im)
+		}
+	} else {
+		for i := 0; i < VelloTileWidth; i++ {
+			a := tr.area[i]
+			if a < 0 {
+				a = -a
+			}
+			if a > 1 {
+				a = 1
+			}
+			tr.area[i] = a
+		}
+	}
+}
+
 // fillTileScanline computes coverage for one scanline within a tile.
 // Direct port of fine.rs fill_path function for a single row.
 func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+	// FIX #19: For problem tiles, use simple winding-based algorithm
+	// instead of Vello's yEdge accumulation which causes artifacts.
+	if tile.IsProblemTile {
+		tr.fillProblemTileScanline(tile, localY, fillRule)
+		return
+	}
+
 	// Initialize area with backdrop (only for first VelloTileWidth elements)
 	backdropF := float32(tile.Backdrop)
 	for i := 0; i < VelloTileWidth; i++ {
