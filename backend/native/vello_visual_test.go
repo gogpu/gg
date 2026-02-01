@@ -492,113 +492,11 @@ func scaleImage(img image.Image, scale int) *image.RGBA {
 	return scaled
 }
 
-// TestVelloGoldenComparison compares our output with Vello's golden files
+// TestVelloGoldenComparison is deprecated.
+// Use TestVelloAgainstGolden in golden_test.go instead.
+// This test is kept for backward compatibility but skipped.
 func TestVelloGoldenComparison(t *testing.T) {
-	tests := []struct {
-		name       string
-		goldenPath string
-		threshold  float64 // per-shape threshold (percent)
-		buildPath  func(eb *EdgeBuilder)
-	}{
-		{
-			name:       "square",
-			goldenPath: "../../testdata/vello_golden_square.png",
-			threshold:  1.0, // Squares should be exact
-			buildPath: func(eb *EdgeBuilder) {
-				// Rect from center (10,10) size (6,6) = corners at (7,7) to (13,13)
-				path := scene.NewPath()
-				path.MoveTo(7, 7)
-				path.LineTo(13, 7)
-				path.LineTo(13, 13)
-				path.LineTo(7, 13)
-				path.Close()
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
-			},
-		},
-		{
-			name:       "circle",
-			goldenPath: "../../testdata/vello_golden_circle.png",
-			threshold:  15.0, // Circles have edge AA differences due to curve flattening
-			buildPath: func(eb *EdgeBuilder) {
-				// Circle at (10, 10) radius 7
-				cx, cy := float32(10), float32(10)
-				radius := float32(7)
-				const k = 0.5522847498
-				path := scene.NewPath()
-				path.MoveTo(cx+radius, cy)
-				path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
-				path.CubicTo(cx-radius*k, cy-radius, cx-radius, cy-radius*k, cx-radius, cy)
-				path.CubicTo(cx-radius, cy+radius*k, cx-radius*k, cy+radius, cx, cy+radius)
-				path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
-				path.Close()
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			width, height := 20, 20
-			tr := NewTileRasterizer(width, height)
-			eb := NewEdgeBuilder(2)
-			eb.SetFlattenCurves(true)
-			tt.buildPath(eb)
-
-			// Render with BLACK background (like Vello's golden files)
-			rendered := image.NewRGBA(image.Rect(0, 0, width, height))
-			for y := 0; y < height; y++ {
-				for x := 0; x < width; x++ {
-					rendered.Set(x, y, color.RGBA{R: 0, G: 0, B: 0, A: 255})
-				}
-			}
-			tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
-				for x, alpha := range runs.Iter() {
-					if alpha > 0 {
-						// Alpha blend blue onto black background
-						a := float32(alpha) / 255.0
-						b := uint8(255 * a)
-						rendered.Set(x, y, color.RGBA{R: 0, G: 0, B: b, A: 255})
-					}
-				}
-			})
-
-			// Load golden
-			goldenFile, err := os.Open(tt.goldenPath)
-			if err != nil {
-				t.Fatalf("failed to open golden: %v", err)
-			}
-			defer goldenFile.Close()
-			golden, err := png.Decode(goldenFile)
-			if err != nil {
-				t.Fatalf("failed to decode golden: %v", err)
-			}
-
-			// Compare
-			var diffCount, totalPixels int
-			for y := 0; y < height; y++ {
-				for x := 0; x < width; x++ {
-					totalPixels++
-					r1, g1, b1, a1 := rendered.At(x, y).RGBA()
-					r2, g2, b2, a2 := golden.At(x, y).RGBA()
-					if r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
-						diffCount++
-					}
-				}
-			}
-
-			diffPct := float64(diffCount) / float64(totalPixels) * 100
-			t.Logf("Golden comparison: %d different pixels (%.2f%%)", diffCount, diffPct)
-
-			// Save our output for visual inspection
-			tmpDir := "../../tmp"
-			saveImage(t, rendered, filepath.Join(tmpDir, "golden_compare_"+tt.name+".png"))
-
-			// Use per-shape threshold
-			if diffPct > tt.threshold {
-				t.Errorf("Too many different pixels: %.2f%% (threshold %.1f%%)", diffPct, tt.threshold)
-			}
-		})
-	}
+	t.Skip("Deprecated: use TestVelloAgainstGolden instead (see golden_test.go)")
 }
 
 // TestVelloSmokeSquare replicates Vello's smoke test: filled_square
