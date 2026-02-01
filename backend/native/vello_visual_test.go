@@ -119,12 +119,13 @@ func TestVelloVisualRectangle(t *testing.T) {
 	eb := NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
-	// Create a rectangle from (40, 40) to (160, 160)
+	// Create a rectangle ALIGNED to tile boundaries (multiples of 16)
+	// This ensures backdrop propagation works correctly
 	path := scene.NewPath()
-	path.MoveTo(40, 40)
-	path.LineTo(160, 40)
+	path.MoveTo(32, 32) // Tile boundary
+	path.LineTo(160, 32)
 	path.LineTo(160, 160)
-	path.LineTo(40, 160)
+	path.LineTo(32, 160)
 	path.Close()
 	eb.BuildFromScenePath(path, scene.IdentityAffine())
 

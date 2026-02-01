@@ -379,8 +379,8 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 			}
 
 			// top_edge detection from path_count.rs
-			// IMPORTANT: Vello uses "i == 0", not "i == imin"!
-			// When imin > 0 (segment clipped at bbox), first iteration still uses last_z check
+			// For i==0: check if segment starts at tile boundary (y0 == s0y)
+			// For i>0: check if segment enters tile from top (lastZ == z)
 			topEdge := false
 			if i == 0 {
 				topEdge = (tileY0 == s0y)
