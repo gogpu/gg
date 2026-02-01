@@ -129,9 +129,9 @@ func (d *mockHALDevice) DestroyFence(_ hal.Fence)        {}
 func (d *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
 	return true, nil
 }
-func (d *mockHALDevice) ResetFence(_ hal.Fence) error        { return nil }
+func (d *mockHALDevice) ResetFence(_ hal.Fence) error             { return nil }
 func (d *mockHALDevice) GetFenceStatus(_ hal.Fence) (bool, error) { return true, nil }
-func (d *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer) {}
+func (d *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer)    {}
 
 //nolint:nilnil // Mock: unused interface methods.
 func (d *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
