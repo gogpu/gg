@@ -390,6 +390,34 @@ func TestDebugCircleArtifact(t *testing.T) {
 		t.Logf("  %d: P0=(%.2f,%.2f) P1=(%.2f,%.2f) YEdge=%.2f",
 			i, seg.Point0[0], seg.Point0[1], seg.Point1[0], seg.Point1[1], seg.YEdge)
 	}
+
+	// Check tile (9, 6) - inside circle, should have edge segments
+	tileIdx = 6*tr.tilesX + 9
+	t.Logf("\nSegments in tile (9, 6) [idx=%d]:", tileIdx)
+	for i, seg := range tr.tiles[tileIdx].Segments {
+		t.Logf("  %d: P0=(%.4f,%.4f) P1=(%.4f,%.4f) YEdge=%.4f",
+			i, seg.Point0[0], seg.Point0[1], seg.Point1[0], seg.Point1[1], seg.YEdge)
+	}
+
+	// Print actual coverage for one scanline to understand the issue
+	t.Log("\nCoverage at y=100 (localY=4 in tile row 6):")
+	// Process tile 9
+	tile9 := &tr.tiles[6*tr.tilesX+9]
+	area9 := make([]float32, 16)
+	for i := range area9 {
+		area9[i] = float32(tile9.Backdrop)
+	}
+	t.Logf("Tile 9 initial (backdrop=%d): [%.2f %.2f ... %.2f %.2f]",
+		tile9.Backdrop, area9[0], area9[1], area9[14], area9[15])
+
+	// Process tile 10
+	tile10 := &tr.tiles[6*tr.tilesX+10]
+	area10 := make([]float32, 16)
+	for i := range area10 {
+		area10[i] = float32(tile10.Backdrop)
+	}
+	t.Logf("Tile 10 initial (backdrop=%d): [%.2f %.2f ... %.2f %.2f]",
+		tile10.Backdrop, area10[0], area10[1], area10[14], area10[15])
 }
 
 // Benchmark fillPath

@@ -75,13 +75,17 @@ func TestVelloVisualCircle(t *testing.T) {
 		}
 	}
 
-	// Render the circle
+	// Render the circle with proper alpha blending
 	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				// Blue fill
-				c := color.RGBA{R: 0, G: 100, B: 200, A: alpha}
-				img.Set(x, y, c)
+				// Alpha blend blue (0, 100, 200) over white background
+				alphaF := float32(alpha) / 255.0
+				invAlpha := 1.0 - alphaF
+				r := uint8(0*alphaF + 255*invAlpha)
+				g := uint8(100*alphaF + 255*invAlpha)
+				b := uint8(200*alphaF + 255*invAlpha)
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -134,13 +138,17 @@ func TestVelloVisualRectangle(t *testing.T) {
 		}
 	}
 
-	// Render the rectangle
+	// Render the rectangle with proper alpha blending
 	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				// Green fill
-				c := color.RGBA{R: 0, G: 180, B: 100, A: alpha}
-				img.Set(x, y, c)
+				// Alpha blend green (0, 180, 100) over white background
+				alphaF := float32(alpha) / 255.0
+				invAlpha := 1.0 - alphaF
+				r := uint8(0*alphaF + 255*invAlpha)
+				g := uint8(180*alphaF + 255*invAlpha)
+				b := uint8(100*alphaF + 255*invAlpha)
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -198,13 +206,17 @@ func TestVelloVisualDiagonalLine(t *testing.T) {
 		}
 	}
 
-	// Render the diagonal
+	// Render the diagonal with proper alpha blending
 	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
-				// Red fill
-				c := color.RGBA{R: 220, G: 50, B: 50, A: alpha}
-				img.Set(x, y, c)
+				// Alpha blend red (220, 50, 50) over white background
+				alphaF := float32(alpha) / 255.0
+				invAlpha := 1.0 - alphaF
+				r := uint8(220*alphaF + 255*invAlpha)
+				g := uint8(50*alphaF + 255*invAlpha)
+				b := uint8(50*alphaF + 255*invAlpha)
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 			}
 		}
 	})
@@ -331,14 +343,34 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 
 func saveImage(t *testing.T, img image.Image, path string) {
 	t.Helper()
+	// Scale up 3x for better visibility of artifacts
+	scaled := scaleImage(img, 3)
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatalf("failed to create %s: %v", path, err)
 	}
 	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
+	if err := png.Encode(f, scaled); err != nil {
 		t.Fatalf("failed to encode %s: %v", path, err)
 	}
+}
+
+// scaleImage scales an image by the given factor using nearest neighbor.
+func scaleImage(img image.Image, scale int) *image.RGBA {
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	scaled := image.NewRGBA(image.Rect(0, 0, w*scale, h*scale))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c := img.At(bounds.Min.X+x, bounds.Min.Y+y)
+			for dy := 0; dy < scale; dy++ {
+				for dx := 0; dx < scale; dx++ {
+					scaled.Set(x*scale+dx, y*scale+dy, c)
+				}
+			}
+		}
+	}
+	return scaled
 }
 
 // TestVelloGoldenComparison compares our output with Vello's golden files
