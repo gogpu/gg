@@ -755,7 +755,9 @@ func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *Al
 		} else if alpha != currentAlpha {
 			if currentAlpha > 0 {
 				runLen := i - runStart
-				tr.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+				// FIX: Use AddWithCoverage with maxValue=currentAlpha
+				// All pixels in the run have the same alpha value (not 255)
+				tr.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
 			}
 			currentAlpha = alpha
 			runStart = i
@@ -766,7 +768,8 @@ func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *Al
 	if currentAlpha > 0 {
 		runLen := tr.width - runStart
 		if runLen > 0 {
-			tr.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+			// FIX: Use AddWithCoverage with maxValue=currentAlpha
+			tr.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
 		}
 	}
 

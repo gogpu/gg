@@ -807,3 +807,122 @@ func TestVelloCircleDebug(t *testing.T) {
 		}
 	}
 }
+
+// TestVelloCircleBottomDebug finds exact coordinates of difference pixels at circle bottom
+func TestVelloCircleBottomDebug(t *testing.T) {
+	width, height := 200, 200
+
+	// Create Vello image
+	tr := NewTileRasterizer(width, height)
+	eb := NewEdgeBuilder(2)
+
+	cx, cy := float32(100), float32(100)
+	radius := float32(60)
+	const k = 0.5522847498
+
+	path := scene.NewPath()
+	path.MoveTo(cx+radius, cy)
+	path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
+	path.CubicTo(cx-radius*k, cy-radius, cx-radius, cy-radius*k, cx-radius, cy)
+	path.CubicTo(cx-radius, cy+radius*k, cx-radius*k, cy+radius, cx, cy+radius)
+	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
+	path.Close()
+	eb.SetFlattenCurves(true)
+	eb.BuildFromScenePath(path, scene.IdentityAffine())
+
+	velloImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			velloImg.Set(x, y, color.White)
+		}
+	}
+
+	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		for x, alpha := range runs.Iter() {
+			if alpha > 0 {
+				a := float32(alpha) / 255.0
+				r := uint8(float32(0)*a + 255*(1-a))
+				g := uint8(float32(100)*a + 255*(1-a))
+				b := uint8(float32(200)*a + 255*(1-a))
+				velloImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			}
+		}
+	})
+
+	// Create reference (AnalyticFiller) image
+	origImg := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			origImg.Set(x, y, color.White)
+		}
+	}
+
+	af := NewAnalyticFiller(width, height)
+	eb2 := NewEdgeBuilder(2)
+	path2 := scene.NewPath()
+	path2.MoveTo(cx+radius, cy)
+	path2.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
+	path2.CubicTo(cx-radius*k, cy-radius, cx-radius, cy-radius*k, cx-radius, cy)
+	path2.CubicTo(cx-radius, cy+radius*k, cx-radius*k, cy+radius, cx, cy+radius)
+	path2.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
+	path2.Close()
+	eb2.SetFlattenCurves(true)
+	eb2.BuildFromScenePath(path2, scene.IdentityAffine())
+
+	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		for x, alpha := range runs.Iter() {
+			if alpha > 0 {
+				a := float32(alpha) / 255.0
+				r := uint8(float32(0)*a + 255*(1-a))
+				g := uint8(float32(100)*a + 255*(1-a))
+				b := uint8(float32(200)*a + 255*(1-a))
+				origImg.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			}
+		}
+	})
+
+	// Find all difference pixels
+	t.Log("=== DIFFERENCE PIXELS (Vello vs AnalyticFiller) ===")
+	t.Log("Circle: center=(100,100), radius=60")
+	t.Log("Bottom of circle at Y=160")
+
+	var diffPixels [][4]int // x, y, velloAlpha, origAlpha
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			v := velloImg.RGBAAt(x, y)
+			o := origImg.RGBAAt(x, y)
+			if v.R != o.R || v.G != o.G || v.B != o.B {
+				// Compute approximate alpha from blue channel
+				vAlpha := 255 - int(v.R)
+				oAlpha := 255 - int(o.R)
+				diffPixels = append(diffPixels, [4]int{x, y, vAlpha, oAlpha})
+			}
+		}
+	}
+
+	t.Logf("Total difference pixels: %d", len(diffPixels))
+	for _, p := range diffPixels {
+		tileX, tileY := p[0]/16, p[1]/16
+		t.Logf("  (%3d, %3d) Tile(%d,%d) - Vello alpha≈%3d, Orig alpha≈%3d, diff=%+d",
+			p[0], p[1], tileX, tileY, p[2], p[3], p[2]-p[3])
+	}
+
+	// Debug tiles around bottom of circle (Y=155-165, X=90-130)
+	t.Log("\n=== TILES AROUND BOTTOM OF CIRCLE ===")
+	for ty := 9; ty <= 10 && ty < tr.tilesY; ty++ {
+		for tx := 5; tx <= 8 && tx < tr.tilesX; tx++ {
+			tile := &tr.tiles[ty*tr.tilesX+tx]
+			if tile.Backdrop != 0 || len(tile.Segments) > 0 {
+				t.Logf("Tile(%d,%d) [X=%d-%d, Y=%d-%d]: Backdrop=%d, Segments=%d",
+					tx, ty, tx*16, tx*16+15, ty*16, ty*16+15, tile.Backdrop, len(tile.Segments))
+				for si, seg := range tile.Segments {
+					dx := seg.Point1[0] - seg.Point0[0]
+					dy := seg.Point1[1] - seg.Point0[1]
+					t.Logf("  Seg[%d]: (%.2f,%.2f)→(%.2f,%.2f) dx=%.2f dy=%.2f yEdge=%.2f",
+						si, seg.Point0[0], seg.Point0[1], seg.Point1[0], seg.Point1[1],
+						dx, dy, seg.YEdge)
+				}
+			}
+		}
+	}
+}
