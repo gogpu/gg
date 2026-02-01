@@ -94,6 +94,18 @@ func (tr *TileRasterizer) Fill(
 	//nolint:gosec // aaShift is bounded
 	aaScale := float32(int32(1) << uint(aaShift))
 
+	// Get path bounds for correct backdrop application
+	// Backdrop should only apply to scanlines >= path's minY
+	bounds := eb.Bounds()
+	pathMinY := int(math.Floor(float64(bounds.MinY)))
+	pathMaxY := int(math.Ceil(float64(bounds.MaxY)))
+	if pathMinY < 0 {
+		pathMinY = 0
+	}
+	if pathMaxY > tr.height {
+		pathMaxY = tr.height
+	}
+
 	// 1. Bin segments to tiles (port of path_count.rs + path_tiling.rs)
 	tr.binSegments(eb, aaScale)
 
@@ -105,8 +117,12 @@ func (tr *TileRasterizer) Fill(
 		// Process each scanline within this tile row
 		for localY := 0; localY < VelloTileHeight; localY++ {
 			pixelY := tileY*VelloTileHeight + localY
-			if pixelY >= tr.height {
+			if pixelY >= tr.height || pixelY >= pathMaxY {
 				break
+			}
+			// Skip scanlines above path's minimum Y
+			if pixelY < pathMinY {
+				continue
 			}
 
 			// Clear row coverage
@@ -173,6 +189,15 @@ func velloSpan(a, b float32) int {
 func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 	const epsilon float32 = 1e-6
 	const noYEdge float32 = 1e9
+
+	// Get path's first tile row (for top_edge handling)
+	// In Vello, path.bbox[1] determines the first row. We use EdgeBuilder bounds.
+	// Note: eb.Bounds() returns pixel coordinates, NOT sub-pixel!
+	bounds := eb.Bounds()
+	pathFirstTileY := int(math.Floor(float64(bounds.MinY * velloTileScale)))
+	if pathFirstTileY < 0 {
+		pathFirstTileY = 0
+	}
 
 	for edge := range eb.AllEdges() {
 		line := edge.AsLine()
@@ -358,9 +383,11 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 		}
 
 		// Add backdrop for segments crossing into bounding box from left
+		// In Vello: base = path.tiles + (y - bbox[1]) * stride, then tile[base].backdrop += delta
+		// This adds backdrop to the FIRST column of the BBOX, not column 0 of the grid
 		for y := ymin; y < ymax; y++ {
-			if y >= 0 && y < tr.tilesY {
-				tr.tiles[y*tr.tilesX].Backdrop += delta
+			if y >= 0 && y < tr.tilesY && bboxMinX >= 0 && bboxMinX < tr.tilesX {
+				tr.tiles[y*tr.tilesX+bboxMinX].Backdrop += delta
 			}
 		}
 
@@ -379,6 +406,7 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 			}
 
 			// top_edge detection from path_count.rs
+			// top_edge is true when segment enters tile from the top edge.
 			// For i==0: check if segment starts at tile boundary (y0 == s0y)
 			// For i>0: check if segment enters tile from top (lastZ == z)
 			topEdge := false
