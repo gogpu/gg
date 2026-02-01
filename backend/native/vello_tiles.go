@@ -417,32 +417,50 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 				continue
 			}
 
-			// Backdrop propagation logic from path_count.rs
-			// When a segment affects a tile row, tiles to the RIGHT of the segment
-			// need backdrop to inherit the winding number.
-			//
-			// For i==0: segment STARTS in this tile. Even if it starts inside the tile
-			// (not at boundary), it affects winding for the entire tile row, so we
-			// ALWAYS add backdrop to x+1.
-			//
-			// For i>0: add backdrop when entering tile from TOP (lastZ == z means
-			// we moved down, not right, so same X tile as before).
-			addBackdrop := false
+			// top_edge detection from path_count.rs
+			// top_edge is true when segment enters tile from the top edge.
+			// For i==0: check if segment starts at tile boundary (y0 == s0y)
+			// For i>0: check if segment enters tile from top (lastZ == z)
+			topEdge := false
 			if i == 0 {
-				// Always add backdrop for starting tile - segment affects this row
-				addBackdrop = true
+				topEdge = (tileY0 == s0y)
 			} else {
-				// Add backdrop when entering tile from top (moved down within same X tile)
-				addBackdrop = (lastZ == z)
+				topEdge = (lastZ == z)
 			}
 
-			if addBackdrop && tileX+1 < tr.tilesX {
+			// Add backdrop to tile x+1 when crossing from top
+			if topEdge && tileX+1 < tr.tilesX {
 				xBump := tileX + 1
 				if xBump < bboxMinX {
 					xBump = bboxMinX
 				}
 				if xBump < tr.tilesX {
 					tr.tiles[tileY*tr.tilesX+xBump].Backdrop += delta
+				}
+			}
+
+			// FIX: When a PERFECTLY VERTICAL edge (dx = 0) starts INSIDE a tile (i==0 && !topEdge)
+			// and is in the leftmost column, tiles to the right need fill for rows >= startY.
+			// Only apply for truly vertical edges (dx exactly 0) to avoid artifacts on curved shapes.
+			edgeDx := x1 - x0
+			isVertical := edgeDx == 0 // Only truly vertical edges
+			if i == 0 && !topEdge && tileX == bboxMinX && isVertical && tileX+1 < tr.tilesX {
+				// Segment start Y in tile coords
+				segStartY := (s0y - float32(tileY)) * VelloTileHeight
+				if segStartY < 0 {
+					segStartY = 0
+				}
+				// Add minimal segment at x=0 with y_edge to fill interior
+				xBump := tileX + 1
+				if xBump < tr.tilesX {
+					tileIdx := tileY*tr.tilesX + xBump
+					syntheticYEdge := segStartY
+					// Add segment with positive dx (going right) to add fill via y_edge
+					tr.tiles[tileIdx].Segments = append(tr.tiles[tileIdx].Segments, PathSegment{
+						Point0: [2]float32{0, segStartY},
+						Point1: [2]float32{epsilon, segStartY},
+						YEdge:  syntheticYEdge,
+					})
 				}
 			}
 
@@ -564,6 +582,17 @@ func (tr *TileRasterizer) addSegmentToTile(
 
 	// Apply numerical robustness and compute y_edge (from path_tiling.rs)
 	yEdge := noYEdge
+
+	// FIX DISABLED FOR TESTING - was causing over-fill on circle
+	// Original fix: for segments entering from TOP and exiting through RIGHT,
+	// set y_edge to provide fill compensation.
+	// Problem: this fills ALL pixels in the row, including exterior pixels to the left.
+	//
+	// exitsRight := p1x >= tileW-epsilon && p1x <= tileW+epsilon
+	// if i == 0 && p0x > 0 && p0y > 0 && exitsRight {
+	// 	yEdge = p0y
+	// }
+
 	//nolint:nestif,gocritic // Direct port
 	if p0x == 0.0 {
 		if p1x == 0.0 {

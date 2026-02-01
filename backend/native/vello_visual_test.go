@@ -684,3 +684,126 @@ func TestVelloCompareDiagonal(t *testing.T) {
 	t.Logf("Diagonal difference pixels: %d (%.2f%%)", diffCount, float64(diffCount)/float64(width*height)*100)
 	t.Logf("Images saved to: %s", tmpDir)
 }
+
+// TestEdgeDebug shows what edges are created for the diagonal polygon
+func TestEdgeDebug(t *testing.T) {
+	eb := NewEdgeBuilder(2)
+
+	thickness := float32(20)
+	path := scene.NewPath()
+	path.MoveTo(10, 10)
+	path.LineTo(10+thickness, 10)   // → (30, 10)
+	path.LineTo(190, 190-thickness) // → (190, 170)
+	path.LineTo(190, 190)
+	path.LineTo(190-thickness, 190) // → (170, 190)
+	path.LineTo(10, 10+thickness)   // → (10, 30)
+	path.Close()
+	eb.SetFlattenCurves(true)
+	eb.BuildFromScenePath(path, scene.IdentityAffine())
+
+	t.Log("Edges in polygon:")
+	i := 0
+	for edge := range eb.AllEdges() {
+		line := edge.AsLine()
+		x0 := float32(line.X) / 65536.0 // FDot16 to float
+		dx := float32(line.DX) / 65536.0
+		y0 := float32(line.FirstY)
+		y1 := float32(line.LastY)
+		x1 := x0 + dx*(y1-y0)
+		t.Logf("  Edge %d: (%.1f,%.1f) → (%.1f,%.1f)  DX=%.3f  Y range=[%d,%d]",
+			i, x0, y0, x1, y1, dx, line.FirstY, line.LastY)
+		i++
+	}
+}
+
+// TestVelloTileDebugDiagonal shows tile structure for diagonal to debug backdrop issue
+func TestVelloTileDebugDiagonal(t *testing.T) {
+	width, height := 200, 200
+	tr := NewTileRasterizer(width, height)
+	eb := NewEdgeBuilder(2)
+
+	// Same diagonal as comparison test
+	thickness := float32(20)
+	path := scene.NewPath()
+	path.MoveTo(10, 10)
+	path.LineTo(10+thickness, 10)
+	path.LineTo(190, 190-thickness)
+	path.LineTo(190, 190)
+	path.LineTo(190-thickness, 190)
+	path.LineTo(10, 10+thickness)
+	path.Close()
+	eb.SetFlattenCurves(true)
+	eb.BuildFromScenePath(path, scene.IdentityAffine())
+
+	// Process tiles
+	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+
+	// Show first 4x4 tiles
+	t.Logf("Tile structure (first 4x4 tiles):")
+	t.Logf("Note: Tile(x,y) covers pixels X=[%d*16, %d*16+15], Y=[y*16, y*16+15]", 0, 0)
+	for ty := 0; ty < 4 && ty < tr.tilesY; ty++ {
+		for tx := 0; tx < 4 && tx < tr.tilesX; tx++ {
+			tile := &tr.tiles[ty*tr.tilesX+tx]
+			if tile.Backdrop != 0 || len(tile.Segments) > 0 {
+				t.Logf("  Tile(%d,%d) [pix X=%d-%d, Y=%d-%d]: Backdrop=%d, Segments=%d",
+					tx, ty, tx*16, tx*16+15, ty*16, ty*16+15, tile.Backdrop, len(tile.Segments))
+				for si, seg := range tile.Segments {
+					t.Logf("    Seg[%d]: P0=(%.1f,%.1f) P1=(%.1f,%.1f) YEdge=%.1f",
+						si, seg.Point0[0], seg.Point0[1], seg.Point1[0], seg.Point1[1], seg.YEdge)
+				}
+			}
+		}
+	}
+}
+
+// TestVelloCircleDebug shows tile structure for circle at bottom-left where artifacts occur
+func TestVelloCircleDebug(t *testing.T) {
+	width, height := 200, 200
+	tr := NewTileRasterizer(width, height)
+	eb := NewEdgeBuilder(2)
+
+	// Same circle as comparison test
+	cx, cy := float32(100), float32(100)
+	radius := float32(60)
+	const k = 0.5522847498
+
+	path := scene.NewPath()
+	path.MoveTo(cx+radius, cy)
+	path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
+	path.CubicTo(cx-radius*k, cy-radius, cx-radius, cy-radius*k, cx-radius, cy)
+	path.CubicTo(cx-radius, cy+radius*k, cx-radius*k, cy+radius, cx, cy+radius)
+	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
+	path.Close()
+	eb.SetFlattenCurves(true)
+	eb.BuildFromScenePath(path, scene.IdentityAffine())
+
+	// Process tiles
+	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+
+	// Circle: center (100,100), radius 60
+	// Left edge at X=40, tiles around tx=2 (32-47)
+	// Artifacts at Y≈123-133, tiles ty=7 (112-127) and ty=8 (128-143)
+	t.Logf("Circle debug: center=(%.0f,%.0f), radius=%.0f", cx, cy, radius)
+	t.Logf("Left edge at X=%.0f (tile X=2, pixels 32-47)", cx-radius)
+	t.Log("Tiles around bottom-left of circle (where artifacts occur):")
+
+	for ty := 6; ty <= 10 && ty < tr.tilesY; ty++ {
+		for tx := 1; tx <= 4 && tx < tr.tilesX; tx++ {
+			tile := &tr.tiles[ty*tr.tilesX+tx]
+			if tile.Backdrop != 0 || len(tile.Segments) > 0 {
+				t.Logf("  Tile(%d,%d) [X=%d-%d, Y=%d-%d]: Backdrop=%d, Segments=%d",
+					tx, ty, tx*16, tx*16+15, ty*16, ty*16+15, tile.Backdrop, len(tile.Segments))
+				for si, seg := range tile.Segments {
+					dx := seg.Point1[0] - seg.Point0[0]
+					dy := seg.Point1[1] - seg.Point0[1]
+					exitsRight := seg.Point1[0] >= 15.9 && seg.Point1[0] <= 16.1
+					exitsBottom := seg.Point1[1] >= 15.9 && seg.Point1[1] <= 16.1
+					exitsLeft := seg.Point1[0] <= 0.1
+					t.Logf("    Seg[%d]: (%.2f,%.2f)→(%.2f,%.2f) dx=%.2f dy=%.2f yEdge=%.2f exits[R=%v,B=%v,L=%v]",
+						si, seg.Point0[0], seg.Point0[1], seg.Point1[0], seg.Point1[1],
+						dx, dy, seg.YEdge, exitsRight, exitsBottom, exitsLeft)
+				}
+			}
+		}
+	}
+}
