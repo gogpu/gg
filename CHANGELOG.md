@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.22.3] - 2026-02-02
+
+### Fixed
+
+- **Semi-transparent color blending** ([#73](https://github.com/gogpu/gg/issues/73))
+  - `BlendPixelAlpha` now correctly checks color alpha before using fast path
+  - Fixes "mosaic" artifacts when filling shapes with alpha < 255
+  - Thanks to @i2534 for reporting
+
 ## [0.22.2] - 2026-02-01
 
 ### Changed

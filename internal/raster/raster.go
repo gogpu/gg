@@ -42,7 +42,7 @@ func (a *AAPixmapAdapter) BlendPixelAlpha(x, y int, c RGBA, alpha uint8) {
 	if alpha == 0 {
 		return
 	}
-	if alpha == 255 {
+	if alpha == 255 && c.A >= 1.0 {
 		a.Pixmap.SetPixel(x, y, c)
 		return
 	}

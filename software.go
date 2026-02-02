@@ -122,7 +122,7 @@ func (p *pixmapAdapter) BlendPixelAlpha(x, y int, c raster.RGBA, alpha uint8) {
 		return
 	}
 
-	if alpha == 255 {
+	if alpha == 255 && c.A >= 1.0 {
 		p.pixmap.SetPixel(x, y, RGBA{R: c.R, G: c.G, B: c.B, A: c.A})
 		return
 	}
