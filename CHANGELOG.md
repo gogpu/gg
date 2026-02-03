@@ -12,6 +12,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.23.0] - 2026-02-03
+
+### Added
+
+#### Recording System for Vector Export (ARCH-011)
+
+Command-based drawing recording system enabling vector export to PDF, SVG, and other formats.
+
+**Architecture (Cairo/Skia-inspired)**
+- **Command Pattern** — Typed command structs for all drawing operations
+- **Resource Pooling** — PathRef, BrushRef, ImageRef for efficient storage
+- **Backend Interface** — Pluggable renderers via `recording.Backend`
+- **Driver Pattern** — database/sql style registration via blank imports
+
+**Core Types (recording/)**
+- **Recorder** — Captures drawing operations with full gg.Context-like API
+  - Path operations: MoveTo, LineTo, QuadraticTo, CubicTo, ClosePath
+  - Shape helpers: DrawRectangle, DrawRoundedRectangle, DrawCircle, DrawEllipse, DrawArc
+  - Fill/stroke with solid colors and gradients
+  - Line styles: width, cap, join, miter limit, dash patterns
+  - Transformations: Translate, Rotate, Scale, matrix operations
+  - Clipping: path-based clipping with fill rules
+  - State management: Push/Pop (Save/Restore)
+  - Text rendering, image drawing
+- **Recording** — Immutable command sequence for playback
+  - `Commands()` — Access recorded commands
+  - `Resources()` — Access resource pool
+  - `Playback(backend)` — Render to any backend
+- **ResourcePool** — Deduplicating storage for paths, brushes, images, fonts
+
+**Brush Types**
+- **SolidBrush** — Single solid color
+- **LinearGradientBrush** — Linear color gradient with spread modes
+- **RadialGradientBrush** — Radial color gradient
+- **SweepGradientBrush** — Angular/conic gradient
+
+**Backend Interface**
+- **Backend** — Core rendering interface
+  - `Begin(width, height)`, `End()`
+  - `Save()`, `Restore()`
+  - `SetTransform(m Matrix)`
+  - `SetClip(path, rule)`, `ClearClip()`
+  - `FillPath(path, brush, rule)`
+  - `StrokePath(path, brush, stroke)`
+  - `FillRect(rect, brush)`
+  - `DrawImage(img, src, dst, opts)`
+  - `DrawText(s, x, y, face, brush)`
+- **WriterBackend** — `WriteTo(w io.Writer)` for streaming
+- **FileBackend** — `SaveToFile(path)` for file output
+- **PixmapBackend** — `Pixmap()` for raster access
+
+**Backend Registry**
+- `Register(name, factory)` — Register backend factory
+- `NewBackend(name)` — Create backend by name
+- `IsRegistered(name)` — Check availability
+- `Backends()` — List all registered backends
+
+**Built-in Raster Backend (recording/backends/raster/)**
+- Renders to gg.Context for PNG output
+- Auto-registers as "raster" backend
+- Implements Backend, WriterBackend, FileBackend, PixmapBackend
+
+**External Export Backends**
+- **github.com/gogpu/gg-pdf** — PDF export via gxpdf
+- **github.com/gogpu/gg-svg** — SVG export (pure Go)
+
+### Example
+
+```go
+import (
+    "github.com/gogpu/gg/recording"
+    _ "github.com/gogpu/gg/recording/backends/raster"
+    _ "github.com/gogpu/gg-pdf" // Optional PDF export
+    _ "github.com/gogpu/gg-svg" // Optional SVG export
+)
+
+// Record drawing
+rec := recording.NewRecorder(800, 600)
+rec.SetFillRGBA(1, 0, 0, 1)
+rec.DrawCircle(400, 300, 100)
+rec.Fill()
+r := rec.FinishRecording()
+
+// Export to multiple formats
+for _, name := range []string{"raster", "pdf", "svg"} {
+    if backend, err := recording.NewBackend(name); err == nil {
+        r.Playback(backend)
+        backend.(recording.FileBackend).SaveToFile("output." + name)
+    }
+}
+```
+
+### Statistics
+- **~3,500 LOC** in recording/ package
+- **20+ command types** for all drawing operations
+- **4 brush types** with gradient support
+- **3 backend interfaces** for flexible output
+- **Comprehensive tests** with 90%+ coverage
+
 ## [0.22.3] - 2026-02-02
 
 ### Fixed

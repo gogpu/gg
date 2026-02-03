@@ -181,6 +181,15 @@ gg/
 │   ├── scene.go        # Scene graph
 │   └── renderer.go     # Parallel tile renderer
 │
+├── recording/          # Drawing recording for vector export (v0.23.0)
+│   ├── recorder.go     # Command-based drawing recorder
+│   ├── recording.go    # Recording with ResourcePool
+│   ├── commands.go     # Typed command definitions
+│   ├── brush.go        # Brush types (Solid, Gradient)
+│   ├── backend.go      # Backend interface (Writer, File)
+│   ├── registry.go     # Backend registration
+│   └── raster/         # Built-in raster backend
+│
 ├── text/               # Text rendering
 │   ├── shaper.go       # Pluggable text shaping
 │   ├── layout.go       # Multi-line layout engine
@@ -510,6 +519,11 @@ naga (shader compiler)     │
          └──► gg ──────────┘ (consumes DeviceProvider)
                 ↑
           this project
+                │
+         ┌──────┴──────┐
+         │             │
+      gg-pdf        gg-svg
+    (PDF export)  (SVG export)
 ```
 
 gg and gogpu are **independent libraries** that can interoperate via gpucontext:
@@ -536,6 +550,110 @@ renderer := render.NewGPURenderer(provider)
 
 This enables enterprise-grade dependency injection without circular imports.
 
+## Recording System (v0.23.0)
+
+The `recording/` package provides command-based drawing recording for vector export.
+
+### Architecture (Cairo/Skia-inspired)
+
+```
+User Code → Recorder → Commands → Recording → Backend → Output
+                          ↓
+                    ResourcePool
+                   (paths, brushes)
+```
+
+### Core Types
+
+```go
+// Recorder captures drawing operations
+rec := recording.NewRecorder(800, 600)
+rec.SetColor(gg.Blue)
+rec.DrawCircle(400, 300, 100)
+rec.Fill()
+
+// Recording holds captured commands
+recording := rec.Recording()
+
+// Export via pluggable backends
+recording.SaveToFile("output.pdf", "pdf")
+recording.SaveToFile("output.svg", "svg")
+```
+
+### Command Pattern
+
+All drawing operations become typed commands:
+
+```go
+type FillPathCmd struct {
+    PathRef  PathRef    // Reference to pooled path
+    BrushRef BrushRef   // Reference to pooled brush
+}
+
+type SetTransformCmd struct {
+    Matrix Matrix  // 3x3 affine transform
+}
+```
+
+### Resource Pooling
+
+Deduplication for paths, brushes, images:
+
+```go
+type ResourcePool struct {
+    paths   []Path
+    brushes []Brush
+    images  []image.Image
+}
+
+// Same brush returns same reference
+ref1 := pool.AddBrush(solidBlue)
+ref2 := pool.AddBrush(solidBlue) // ref1 == ref2
+```
+
+### Backend Interface
+
+Pluggable renderers via database/sql driver pattern:
+
+```go
+type Backend interface {
+    Name() string
+    Play(recording *Recording) error
+}
+
+type WriterBackend interface {
+    Backend
+    PlayToWriter(recording *Recording, w io.Writer) error
+}
+
+type FileBackend interface {
+    Backend
+    PlayToFile(recording *Recording, filename string) error
+}
+```
+
+### Backend Registration
+
+```go
+// External backends register via init()
+func init() {
+    recording.Register("pdf", &pdfBackend{})
+    recording.Register("svg", &svgBackend{})
+}
+
+// Users enable via blank import
+import _ "github.com/gogpu/gg-pdf"
+import _ "github.com/gogpu/gg-svg"
+```
+
+### Available Backends
+
+| Backend | Package | Format |
+|---------|---------|--------|
+| **Raster** | `recording/raster` | Built-in PNG/image |
+| **PDF** | `github.com/gogpu/gg-pdf` | PDF documents |
+| **SVG** | `github.com/gogpu/gg-svg` | SVG vector graphics |
+
 ## Key Design Patterns
 
 | Pattern | Source | Implementation |
@@ -550,6 +668,8 @@ This enables enterprise-grade dependency injection without circular imports.
 | **Fixed-Point Math** | Skia | FDot6/FDot16 sub-pixel precision |
 | **Trapezoidal Coverage** | vello | Exact per-pixel AA calculation |
 | **Y-Monotonic Chopping** | tiny-skia | Curve splitting for scanline traversal |
+| **Command Pattern** | Cairo/Skia | Recording system for vector export |
+| **Driver Pattern** | database/sql | Backend registration via blank import |
 
 ## See Also
 
