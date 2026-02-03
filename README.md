@@ -34,6 +34,7 @@
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG I/O, mipmaps, affine transforms |
+| **Vector Export** | Recording system with PDF and SVG backends |
 | **Performance** | Tile-based parallel rendering, LRU caching |
 
 ---
@@ -308,6 +309,32 @@ dc2.DrawRectangle(0, 0, 400, 400)
 dc2.Fill() // Only visible through mask
 ```
 
+### Recording & Vector Export
+
+Record drawing operations and export to PDF or SVG:
+
+```go
+import (
+    "github.com/gogpu/gg/recording"
+    _ "github.com/gogpu/gg-pdf" // Register PDF backend
+    _ "github.com/gogpu/gg-svg" // Register SVG backend
+)
+
+// Create recorder
+rec := recording.NewRecorder(800, 600)
+
+// Draw using familiar API
+rec.SetColor(gg.Blue)
+rec.DrawCircle(400, 300, 100)
+rec.Fill()
+
+// Export to PDF
+rec.Recording().SaveToFile("output.pdf", "pdf")
+
+// Or export to SVG
+rec.Recording().SaveToFile("output.svg", "svg")
+```
+
 ---
 
 ## Why "Context" Instead of "Canvas"?
@@ -353,6 +380,8 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 | [gogpu/wgpu](https://github.com/gogpu/wgpu) | Pure Go WebGPU implementation |
 | [gogpu/naga](https://github.com/gogpu/naga) | Shader compiler (WGSL to SPIR-V, MSL, GLSL) |
 | **gogpu/gg** | **2D graphics (this repo)** |
+| [gogpu/gg-pdf](https://github.com/gogpu/gg-pdf) | PDF export backend for recording |
+| [gogpu/gg-svg](https://github.com/gogpu/gg-svg) | SVG export backend for recording |
 | [gogpu/ui](https://github.com/gogpu/ui) | GUI toolkit (planned) |
 
 ---

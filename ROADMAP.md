@@ -19,22 +19,21 @@
 
 ---
 
-## Current State: v0.22.2
+## Current State: v0.23.0
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
 - Anti-aliased rendering (4x supersampling)
 - GPU backend (sparse strips, compute shaders)
 - Enterprise architecture for UI integration
-- **GGCanvas integration** with gpucontext.TextureDrawer interface
-- LineJoinRound fix for correct arc rendering
-- Updated naga v0.10.0, wgpu v0.13.0
+- **Recording System** for vector export (PDF, SVG)
+- GGCanvas integration with gpucontext.TextureDrawer interface
 
 ---
 
 ## Upcoming
 
-### v0.23.0 — Polish & Performance
+### v0.24.0 — Polish & Performance
 - [ ] Vello-style AA improvements
 - [ ] Performance optimizations
 - [ ] API cleanup before v1.0
@@ -53,8 +52,7 @@
 | Theme | Description |
 |-------|-------------|
 | **WebAssembly** | WASM target for browser rendering |
-| **SVG Support** | SVG import/export |
-| **PDF Export** | Vector PDF generation |
+| **SVG Import** | SVG file parsing and rendering |
 | **Advanced Text** | Complex text shaping (HarfBuzz-style) |
 
 ---
@@ -88,7 +86,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.22.x** | 2026-01/02 | gpucontext.TextureDrawer integration, naga v0.10.0, wgpu v0.13.0 |
+| **v0.23.0** | 2026-02 | Recording System for vector export (PDF, SVG backends) |
+| v0.22.x | 2026-01/02 | gpucontext.TextureDrawer integration, naga v0.10.0, wgpu v0.13.0 |
 | v0.21.x | 2026-01 | Enterprise architecture, stroke quality fixes |
 | v0.20.x | 2026-01 | GPU backend completion |
 | v0.19.x | 2026-01 | Anti-aliased rendering |
