@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GoTextShaper: HarfBuzz-level text shaping** ([#78](https://github.com/gogpu/gg/issues/78))
+  - `GoTextShaper` wraps go-text/typesetting's HarfBuzz engine
+  - Supports ligatures, kerning, contextual alternates, complex scripts
+  - Opt-in via `text.SetShaper(text.NewGoTextShaper())`
+  - Thread-safe: `sync.Pool` for HarfBuzz shapers, cached `font.Font` (read-only)
+  - Fixed concurrency bug: `font.Face` and `HarfbuzzShaper` are not goroutine-safe
+  - Uses `font.Font` cache (thread-safe) + per-call `font.NewFace()` (lightweight)
+  - Uses deprecated `ClusterIndex` replaced with `TextIndex()`
+  - 20+ tests including concurrency, kerning, ligatures, cache management
+  - 3 benchmarks (short, standard, long text)
+
 - **WebP image format support** ([#77](https://github.com/gogpu/gg/issues/77))
   - `LoadWebP()`, `DecodeWebP()` for explicit WebP decoding
   - `LoadImage()` and `LoadImageFromBytes()` auto-detect WebP via registered decoder

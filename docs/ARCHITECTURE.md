@@ -191,7 +191,9 @@ gg/
 │   └── raster/         # Built-in raster backend
 │
 ├── text/               # Text rendering
-│   ├── shaper.go       # Pluggable text shaping
+│   ├── shaper.go       # Pluggable shaper interface + global registry
+│   ├── shaper_builtin.go # Default shaper (x/image, basic LTR)
+│   ├── shaper_gotext.go  # HarfBuzz shaper (go-text/typesetting)
 │   ├── layout.go       # Multi-line layout engine
 │   ├── glyph_cache.go  # LRU glyph cache (16-shard)
 │   ├── glyph_run.go    # GlyphRunBuilder for batching
