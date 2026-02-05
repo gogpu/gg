@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned for v1.0.0
+- API Review and cleanup
+- Comprehensive documentation
+- Performance benchmarks
+
+## [0.24.0] - 2026-02-05
+
 ### Added
 
 - **GoTextShaper: HarfBuzz-level text shaping** ([#78](https://github.com/gogpu/gg/issues/78))
@@ -25,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `LoadImage()` and `LoadImageFromBytes()` auto-detect WebP via registered decoder
   - Uses `golang.org/x/image/webp` (already in go.mod)
 
+- **gogpu_integration example** — moved from `gogpu/examples/gg_integration/` to fix inverted dependency (gogpu no longer depends on gg)
+  - Isolated Go module with own `go.mod`
+  - Demonstrates gg + gogpu rendering via ggcanvas
+
 ### Fixed
 
 - **Custom Pattern implementations always render black** ([#75](https://github.com/gogpu/gg/issues/75))
@@ -39,11 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix: use shared `gpucontext.TextureUpdater` interface with proper error handling
   - Added auto-dirty in `RenderToEx()` — calling `RenderTo` now always uploads current content
   - Compile-time interface check for mock in tests
-
-### Planned for v1.0.0
-- API Review and cleanup
-- Comprehensive documentation
-- Performance benchmarks
 
 ## [0.23.0] - 2026-02-03
 
@@ -1446,7 +1452,10 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.22.2...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/gogpu/gg/compare/v0.23.0...v0.24.0
+[0.23.0]: https://github.com/gogpu/gg/compare/v0.22.3...v0.23.0
+[0.22.3]: https://github.com/gogpu/gg/compare/v0.22.2...v0.22.3
 [0.22.2]: https://github.com/gogpu/gg/compare/v0.22.1...v0.22.2
 [0.22.1]: https://github.com/gogpu/gg/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/gogpu/gg/compare/v0.21.4...v0.22.0
