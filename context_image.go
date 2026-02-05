@@ -234,13 +234,17 @@ func (c *Context) CreateImagePattern(img *ImageBuf, x, y, w, h int) Pattern {
 }
 
 // SetFillPattern sets the fill pattern.
+// It also updates the Brush field for consistency with ColorAt precedence.
 func (c *Context) SetFillPattern(pattern Pattern) {
 	c.paint.Pattern = pattern
+	c.paint.Brush = BrushFromPattern(pattern)
 }
 
 // SetStrokePattern sets the stroke pattern.
+// It also updates the Brush field for consistency with ColorAt precedence.
 func (c *Context) SetStrokePattern(pattern Pattern) {
 	c.paint.Pattern = pattern
+	c.paint.Brush = BrushFromPattern(pattern)
 }
 
 // ImagePattern represents an image-based pattern.
