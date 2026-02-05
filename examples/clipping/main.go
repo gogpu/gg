@@ -41,11 +41,11 @@ func main() {
 	example6ResetClip(dc)
 
 	// Save the result
-	err := dc.SavePNG("examples/clipping/output.png")
+	err := dc.SavePNG("output.png")
 	if err != nil {
 		log.Fatalf("Failed to save PNG: %v", err)
 	}
-	log.Println("Saved: examples/clipping/output.png")
+	log.Println("Saved: output.png")
 }
 
 // example1CircularClip demonstrates basic circular clipping.

@@ -28,12 +28,12 @@ func main() {
 	drawExamples(dc, testImg)
 
 	// Save the result
-	if err := dc.SavePNG("examples/images/output.png"); err != nil {
+	if err := dc.SavePNG("output.png"); err != nil {
 		log.Fatalf("Failed to save image: %v", err)
 	}
 
 	fmt.Println("Image drawing example completed successfully!")
-	fmt.Println("Output saved to: examples/images/output.png")
+	fmt.Println("Output saved to: output.png")
 }
 
 // createTestImage creates a simple colorful test pattern.
