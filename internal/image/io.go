@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/image/webp" // also registers WebP decoder for image.Decode
 )
 
 // I/O errors.
@@ -44,8 +46,19 @@ func LoadJPEG(path string) (*ImageBuf, error) {
 	return DecodeJPEG(f)
 }
 
+// LoadWebP loads a WebP image from the given file path.
+func LoadWebP(path string) (*ImageBuf, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("image: open file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	return DecodeWebP(f)
+}
+
 // LoadImage loads an image from the given file path, auto-detecting the format.
-// Supported formats: PNG, JPEG.
+// Supported formats: PNG, JPEG, WebP.
 func LoadImage(path string) (*ImageBuf, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -53,6 +66,8 @@ func LoadImage(path string) (*ImageBuf, error) {
 		return LoadPNG(path)
 	case ".jpg", ".jpeg":
 		return LoadJPEG(path)
+	case ".webp":
+		return LoadWebP(path)
 	default:
 		// Try to detect from content
 		f, err := os.Open(filepath.Clean(path))
@@ -99,6 +114,15 @@ func DecodeJPEG(r io.Reader) (*ImageBuf, error) {
 	img, err := jpeg.Decode(r)
 	if err != nil {
 		return nil, fmt.Errorf("image: decode JPEG: %w", err)
+	}
+	return FromStdImage(img), nil
+}
+
+// DecodeWebP decodes a WebP image from the given reader.
+func DecodeWebP(r io.Reader) (*ImageBuf, error) {
+	img, err := webp.Decode(r)
+	if err != nil {
+		return nil, fmt.Errorf("image: decode WebP: %w", err)
 	}
 	return FromStdImage(img), nil
 }
