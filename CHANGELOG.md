@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Custom Pattern implementations always render black** ([#75](https://github.com/gogpu/gg/issues/75))
+  - Root cause 1: `getColorFromPaint()` only handled `*SolidPattern`, returned Black for everything else
+  - Root cause 2: `SetFillPattern()`/`SetStrokePattern()` didn't sync `paint.Brush`, breaking `ColorAt()` precedence
+  - Fix: New `painterPixmapAdapter` samples `paint.ColorAt(x,y)` per-pixel for non-solid paints
+  - Solid paints still use fast single-color path (no performance regression)
+  - New `Painter` interface (`painter.go`) for future span-based optimizations
+
 - **ggcanvas texture updates silently failing** ([#79](https://github.com/gogpu/gg/issues/79))
   - Root cause: local `textureUpdater` interface expected `UpdateData(data []byte)` (no error return), but `gogpu.Texture.UpdateData` returns `error` — type assertion failed silently
   - Fix: use shared `gpucontext.TextureUpdater` interface with proper error handling

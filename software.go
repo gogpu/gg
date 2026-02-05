@@ -214,17 +214,20 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 // fillAnalytic renders the path using analytic coverage calculation.
 // This provides high quality anti-aliasing without supersampling overhead.
 func (r *SoftwareRenderer) fillAnalytic(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Get color from paint
-	color := r.getColorFromPaint(paint)
-
 	// Reset the filler for new path
 	r.analyticFiller.Reset()
 
-	// Fill using the analytic filler interface
-	r.analyticFiller.Fill(p, paint.FillRule, func(y int, iter func(yield func(x int, alpha uint8) bool)) {
-		// Blend alpha values to pixmap
-		r.blendAlphaRunsFromIter(pixmap, y, iter, color)
-	})
+	if color, ok := solidColorFromPaint(paint); ok {
+		// Fast path: solid color
+		r.analyticFiller.Fill(p, paint.FillRule, func(y int, iter func(yield func(x int, alpha uint8) bool)) {
+			r.blendAlphaRunsFromIter(pixmap, y, iter, color)
+		})
+	} else {
+		// Pattern/gradient path: per-pixel color sampling
+		r.analyticFiller.Fill(p, paint.FillRule, func(y int, iter func(yield func(x int, alpha uint8) bool)) {
+			r.blendAlphaRunsFromIterPaint(pixmap, y, iter, paint)
+		})
+	}
 
 	return nil
 }
@@ -240,35 +243,104 @@ func (r *SoftwareRenderer) fillSupersampled(pixmap *Pixmap, p *Path, paint *Pain
 	pathEdges := path.CollectEdges(elements)
 	rasterEdges := convertEdges(pathEdges)
 
-	// Get color from paint
-	color := r.getColorFromPaint(paint)
-
 	// Convert fill rule
 	fillRule := raster.FillRuleNonZero
 	if paint.FillRule == FillRuleEvenOdd {
 		fillRule = raster.FillRuleEvenOdd
 	}
 
-	// Rasterize with anti-aliasing (4x supersampling)
-	adapter := &pixmapAdapter{pixmap: pixmap}
-	r.rasterizer.FillAAFromEdges(adapter, rasterEdges, fillRule, raster.RGBA{
-		R: color.R,
-		G: color.G,
-		B: color.B,
-		A: color.A,
-	})
+	if color, ok := solidColorFromPaint(paint); ok {
+		// Fast path: single color (existing behavior)
+		adapter := &pixmapAdapter{pixmap: pixmap}
+		r.rasterizer.FillAAFromEdges(adapter, rasterEdges, fillRule, raster.RGBA{
+			R: color.R,
+			G: color.G,
+			B: color.B,
+			A: color.A,
+		})
+	} else {
+		// Pattern/gradient path: per-pixel color sampling
+		adapter := &painterPixmapAdapter{pixmap: pixmap, paint: paint}
+		r.rasterizer.FillAAFromEdges(adapter, rasterEdges, fillRule, raster.RGBA{})
+	}
 
 	return nil
 }
 
-// getColorFromPaint extracts the solid color from the paint.
-// Returns Black if no solid pattern is found.
-func (r *SoftwareRenderer) getColorFromPaint(paint *Paint) RGBA {
-	solidPattern, ok := paint.Pattern.(*SolidPattern)
-	if !ok {
-		return Black
+// solidColorFromPaint returns the solid color if paint is solid.
+// Returns (color, true) for solid paints, (zero, false) for patterns/gradients.
+func solidColorFromPaint(paint *Paint) (RGBA, bool) {
+	// Check Brush first (takes precedence)
+	if paint.Brush != nil {
+		if sb, ok := paint.Brush.(SolidBrush); ok {
+			return sb.Color, true
+		}
+		return RGBA{}, false
 	}
-	return solidPattern.Color
+	// Fall back to Pattern
+	if sp, ok := paint.Pattern.(*SolidPattern); ok {
+		return sp.Color, true
+	}
+	return RGBA{}, false
+}
+
+// painterPixmapAdapter samples paint per-pixel during rasterization.
+// It implements raster.AAPixmap but NOT AAPixmapBatch, so SuperBlitter
+// falls back to the scalar path which calls BlendPixelAlpha per-pixel.
+// This is where we sample the pattern color at each pixel.
+type painterPixmapAdapter struct {
+	pixmap *Pixmap
+	paint  *Paint
+}
+
+func (p *painterPixmapAdapter) Width() int {
+	return p.pixmap.Width()
+}
+
+func (p *painterPixmapAdapter) Height() int {
+	return p.pixmap.Height()
+}
+
+func (p *painterPixmapAdapter) SetPixel(x, y int, _ raster.RGBA) {
+	// Sample color from paint at pixel center
+	color := p.paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+	p.pixmap.SetPixel(x, y, color)
+}
+
+// BlendPixelAlpha ignores the passed color and samples from paint instead.
+func (p *painterPixmapAdapter) BlendPixelAlpha(x, y int, _ raster.RGBA, alpha uint8) {
+	if alpha == 0 {
+		return
+	}
+
+	// Bounds check
+	if x < 0 || x >= p.pixmap.Width() || y < 0 || y >= p.pixmap.Height() {
+		return
+	}
+
+	// Sample color from paint at pixel center
+	color := p.paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+
+	if alpha == 255 && color.A >= 1.0 {
+		p.pixmap.SetPixel(x, y, color)
+		return
+	}
+
+	// Get existing pixel
+	existing := p.pixmap.GetPixel(x, y)
+
+	// Calculate blend factor
+	srcAlpha := color.A * float64(alpha) / 255.0
+	invSrcAlpha := 1.0 - srcAlpha
+
+	// Source-over compositing
+	outA := srcAlpha + existing.A*invSrcAlpha
+	if outA > 0 {
+		outR := (color.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
+		outG := (color.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
+		outB := (color.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
+		p.pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
+	}
 }
 
 // blendAlphaRunsFromIter blends alpha values to the pixmap for a given scanline.
@@ -313,6 +385,46 @@ func (r *SoftwareRenderer) blendAlphaRunsFromIter(pixmap *Pixmap, y int, iter fu
 	})
 }
 
+// blendAlphaRunsFromIterPaint is like blendAlphaRunsFromIter but samples
+// the paint color at each pixel instead of using a single constant color.
+func (r *SoftwareRenderer) blendAlphaRunsFromIterPaint(pixmap *Pixmap, y int, iter func(yield func(x int, alpha uint8) bool), paint *Paint) {
+	if y < 0 || y >= pixmap.Height() {
+		return
+	}
+
+	fy := float64(y) + 0.5
+
+	iter(func(x int, alpha uint8) bool {
+		if alpha == 0 {
+			return true
+		}
+		if x < 0 || x >= pixmap.Width() {
+			return true
+		}
+
+		// Sample color from paint at pixel center
+		color := paint.ColorAt(float64(x)+0.5, fy)
+
+		if alpha == 255 && color.A == 1.0 {
+			pixmap.SetPixel(x, y, color)
+			return true
+		}
+
+		existing := pixmap.GetPixel(x, y)
+		srcAlpha := color.A * float64(alpha) / 255.0
+		invSrcAlpha := 1.0 - srcAlpha
+
+		outA := srcAlpha + existing.A*invSrcAlpha
+		if outA > 0 {
+			outR := (color.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
+			outG := (color.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
+			outB := (color.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
+			pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
+		}
+		return true
+	})
+}
+
 // FillNoAA fills without anti-aliasing (faster but aliased).
 func (r *SoftwareRenderer) FillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Convert path to internal format and flatten
@@ -320,27 +432,25 @@ func (r *SoftwareRenderer) FillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 	flattenedPath := path.Flatten(elements)
 	rasterPoints := convertPoints(flattenedPath)
 
-	// Get color from paint
-	solidPattern, ok := paint.Pattern.(*SolidPattern)
-	if !ok {
-		return nil // Only solid patterns supported in v0.1
-	}
-	color := solidPattern.Color
-
 	// Convert fill rule
 	fillRule := raster.FillRuleNonZero
 	if paint.FillRule == FillRuleEvenOdd {
 		fillRule = raster.FillRuleEvenOdd
 	}
 
-	// Rasterize without AA
-	adapter := &pixmapAdapter{pixmap: pixmap}
-	r.rasterizer.Fill(adapter, rasterPoints, fillRule, raster.RGBA{
-		R: color.R,
-		G: color.G,
-		B: color.B,
-		A: color.A,
-	})
+	if color, ok := solidColorFromPaint(paint); ok {
+		// Fast path: solid color
+		adapter := &pixmapAdapter{pixmap: pixmap}
+		r.rasterizer.Fill(adapter, rasterPoints, fillRule, raster.RGBA{
+			R: color.R,
+			G: color.G,
+			B: color.B,
+			A: color.A,
+		})
+	} else {
+		// Pattern/gradient path: fall back to AA fill for correct per-pixel sampling
+		return r.fillSupersampled(pixmap, p, paint)
+	}
 
 	return nil
 }
@@ -406,6 +516,34 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	return r.Fill(pixmap, strokePath, paint)
 }
 
+// strokeExpanded renders a stroke by expanding to a fill path.
+// This is the fallback for non-solid hairline strokes where the hairline
+// blitter cannot sample per-pixel colors.
+func (r *SoftwareRenderer) strokeExpanded(pixmap *Pixmap, p *Path, paint *Paint) error {
+	transformScale := paint.TransformScale
+	if transformScale <= 0 {
+		transformScale = 1.0
+	}
+
+	strokeElements := convertPathToStrokeElements(p)
+	strokeStyle := stroke.Stroke{
+		Width:      math.Max(paint.EffectiveLineWidth()*transformScale, 1.0),
+		Cap:        convertLineCap(paint.EffectiveLineCap()),
+		Join:       convertLineJoin(paint.EffectiveLineJoin()),
+		MiterLimit: paint.EffectiveMiterLimit(),
+	}
+	if strokeStyle.MiterLimit <= 0 {
+		strokeStyle.MiterLimit = 4.0
+	}
+
+	expander := stroke.NewStrokeExpander(strokeStyle)
+	expander.SetTolerance(0.1)
+	expandedElements := expander.Expand(strokeElements)
+	strokePath := convertStrokeElementsToPath(expandedElements)
+
+	return r.Fill(pixmap, strokePath, paint)
+}
+
 // treatAsHairline determines if a stroke should use hairline rendering.
 // Returns (useHairline, coverageFactor) where coverageFactor is the
 // opacity multiplier for very thin lines.
@@ -458,30 +596,29 @@ func (r *SoftwareRenderer) strokeHairline(pixmap *Pixmap, p *Path, paint *Paint,
 		pathToDraw = dashPath(p, dash)
 	}
 
-	// Get color from paint
-	color := r.getColorFromPaint(paint)
+	// For non-solid paint, fall back to stroke expansion (which goes through Fill)
+	if color, ok := solidColorFromPaint(paint); ok {
+		// Fast path: solid color hairline
+		adapter := &pixmapAdapter{pixmap: pixmap}
+		blitter := raster.NewRGBAHairlineBlitter(adapter, raster.RGBA{
+			R: color.R,
+			G: color.G,
+			B: color.B,
+			A: color.A,
+		})
 
-	// Create hairline blitter
-	adapter := &pixmapAdapter{pixmap: pixmap}
-	blitter := raster.NewRGBAHairlineBlitter(adapter, raster.RGBA{
-		R: color.R,
-		G: color.G,
-		B: color.B,
-		A: color.A,
-	})
-
-	// Convert line cap
-	lineCap := convertToHairlineCap(paint.EffectiveLineCap())
-
-	// Convert path to subpaths and render each independently
-	subpaths := flattenPathToHairlineSubpaths(pathToDraw)
-	for _, subpath := range subpaths {
-		if len(subpath) >= 2 {
-			raster.StrokeHairlineAA(blitter, subpath, lineCap, coverage)
+		lineCap := convertToHairlineCap(paint.EffectiveLineCap())
+		subpaths := flattenPathToHairlineSubpaths(pathToDraw)
+		for _, subpath := range subpaths {
+			if len(subpath) >= 2 {
+				raster.StrokeHairlineAA(blitter, subpath, lineCap, coverage)
+			}
 		}
+		return nil
 	}
 
-	return nil
+	// Non-solid paint: fall back to stroke expansion → Fill (which handles patterns)
+	return r.strokeExpanded(pixmap, pathToDraw, paint)
 }
 
 // convertToHairlineCap converts gg.LineCap to raster.HairlineLineCap.
