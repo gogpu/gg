@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.24.1] - 2026-02-05
+
+### Fixed
+
+- **Examples:** fix hardcoded output paths in `clipping` and `images` examples ([#85](https://github.com/gogpu/gg/pull/85))
+  - Both used `examples/*/output.png` which only worked from repo root
+  - Now use `output.png` — `go run .` works from example directory
+- **gogpu_integration example:** update dependency versions to gg v0.24.0 / gogpu v0.15.4
+- **Cleanup:** remove stale `rect_debug/` directory (debug artifacts from rasterizer experiments)
+
 ## [0.24.0] - 2026-02-05
 
 ### Added
@@ -1452,7 +1462,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/gogpu/gg/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/gogpu/gg/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/gogpu/gg/compare/v0.22.3...v0.23.0
 [0.22.3]: https://github.com/gogpu/gg/compare/v0.22.2...v0.22.3
