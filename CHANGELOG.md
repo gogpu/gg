@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Examples:** update `gogpu_integration` dependencies to gg v0.24.1, gogpu v0.15.5
+
 ### Planned for v1.0.0
 - API Review and cleanup
 - Comprehensive documentation
