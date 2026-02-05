@@ -3,6 +3,7 @@ module github.com/gogpu/gg
 go 1.25
 
 require (
+	github.com/go-text/typesetting v0.3.3
 	github.com/go-webgpu/webgpu v0.2.1
 	github.com/gogpu/gpucontext v0.7.0
 	github.com/gogpu/gputypes v0.2.0

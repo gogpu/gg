@@ -28,7 +28,8 @@ Bidi/Script  Cache    Lines    ┌────┴────┐
 ### Pluggable Shaper (v0.10.0)
 - **Shaper interface** — Converts text to positioned glyphs
 - **BuiltinShaper** — Default using golang.org/x/image
-- **Custom shapers** — Plug in go-text/typesetting or HarfBuzz
+- **GoTextShaper** — HarfBuzz-level shaping via go-text/typesetting (opt-in)
+- **Custom shapers** — Plug in any implementation via SetShaper()
 
 ### Bidi/Script Segmentation (v0.10.0)
 - **25+ Unicode scripts** — Latin, Arabic, Hebrew, Han, Cyrillic, Thai, etc.
@@ -148,10 +149,24 @@ for _, r := range results {
 width := text.MeasureText("Hello World", face, 16)
 ```
 
+### GoTextShaper (HarfBuzz-level shaping)
+
+```go
+// Enable HarfBuzz-level shaping for ligatures, kerning, and complex scripts
+shaper := text.NewGoTextShaper()
+text.SetShaper(shaper)
+defer text.SetShaper(nil) // Reset to BuiltinShaper
+
+// Shape text — now uses go-text/typesetting HarfBuzz engine
+glyphs := text.Shape("Hello", face, 24)
+```
+
+GoTextShaper is safe for concurrent use and caches parsed font data internally.
+
 ### Custom Shaper
 
 ```go
-// Implement custom shaper (e.g., go-text/typesetting)
+// Implement custom shaper
 type MyShaper struct {
     // ...
 }
@@ -212,6 +227,7 @@ type Line struct {
 
 - `golang.org/x/image/font/opentype` — TTF/OTF parsing
 - `golang.org/x/text/unicode/bidi` — Unicode Bidirectional Algorithm
+- `github.com/go-text/typesetting` — HarfBuzz shaping engine (used by GoTextShaper)
 
 ## Subpackages
 

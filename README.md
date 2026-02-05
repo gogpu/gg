@@ -31,7 +31,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, GPU acceleration, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text |
+| **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
@@ -224,7 +224,7 @@ renderer.Render(target, scene)
 
 ### Text Rendering
 
-Full Unicode support with font fallback:
+Full Unicode support with font fallback and optional HarfBuzz-level shaping:
 
 ```go
 // Font composition
@@ -240,6 +240,11 @@ multiFace, _ := text.NewMultiFace(
 
 dc.SetFont(multiFace)
 dc.DrawString("Hello World! Nice day!", 50, 100)
+
+// Optional: enable HarfBuzz shaping for ligatures, kerning, complex scripts
+shaper := text.NewGoTextShaper()
+text.SetShaper(shaper)
+defer text.SetShaper(nil)
 
 // Text layout with wrapping
 opts := text.LayoutOptions{
