@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Alpha compositing: fix dark halos around anti-aliased shapes**
+  - Root cause: mixed alpha conventions — `FillSpanBlend` stored premultiplied, `BlendPixelAlpha` stored straight, causing double-premultiplication
+  - Standardized on **premultiplied alpha** (industry standard: tiny-skia, Ebitengine, vello, femtovg, Cairo, SDL)
+  - `Pixmap`: store premultiplied RGBA in `SetPixel`, `Clear`, `FillSpan`
+  - `Pixmap`: un-premultiply in `GetPixel` for public API
+  - `Pixmap.At()` returns `color.RGBA` (premultiplied), `ColorModel()` → `color.RGBAModel`
+  - Software renderer: fix all 4 `BlendPixelAlpha` locations to premultiplied source-over
+  - `FromColor()`: correctly un-premultiply Go's `color.Color.RGBA()` output
+  - `ColorMatrixFilter`: un-premultiply before matrix transform, re-premultiply after
+  - `ggcanvas`: mark textures as premultiplied via `SetPremultiplied(true)`
+  - Requires gogpu v0.15.5+ for correct GPU compositing with `BlendFactorOne`
 - **Examples:** fix hardcoded output paths in `clipping` and `images` examples ([#85](https://github.com/gogpu/gg/pull/85))
   - Both used `examples/*/output.png` which only worked from repo root
   - Now use `output.png` — `go run .` works from example directory
