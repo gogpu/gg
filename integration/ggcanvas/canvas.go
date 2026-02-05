@@ -26,12 +26,6 @@ var (
 	ErrTextureCreationFailed = errors.New("ggcanvas: texture creation failed")
 )
 
-// textureUpdater is the interface for updating texture data.
-// This matches the gogpu.Texture.UpdateData signature.
-type textureUpdater interface {
-	UpdateData(data []byte)
-}
-
 // textureDestroyer is the interface for destroying textures.
 // This matches the gogpu.Texture.Destroy signature.
 type textureDestroyer interface {
@@ -190,10 +184,14 @@ func (c *Canvas) Flush() (any, error) {
 	// Create texture if needed (lazy initialization)
 	if c.texture == nil {
 		c.texture = c.createTexture(data)
-	} else {
-		// Update existing texture
-		if updater, ok := c.texture.(textureUpdater); ok {
-			updater.UpdateData(data)
+		c.dirty = false
+		return c.texture, nil
+	}
+
+	// Update existing texture
+	if updater, ok := c.texture.(gpucontext.TextureUpdater); ok {
+		if err := updater.UpdateData(data); err != nil {
+			return nil, fmt.Errorf("ggcanvas: texture update failed: %w", err)
 		}
 	}
 

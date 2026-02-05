@@ -58,15 +58,19 @@ type mockTexture struct {
 func (m *mockTexture) Width() int  { return m.width }
 func (m *mockTexture) Height() int { return m.height }
 
-func (m *mockTexture) UpdateData(data []byte) {
+func (m *mockTexture) UpdateData(data []byte) error {
 	m.data = make([]byte, len(data))
 	copy(m.data, data)
 	m.updated++
+	return nil
 }
 
 func (m *mockTexture) Destroy() {
 	m.destroyed = true
 }
+
+// Compile-time check: mockTexture must implement TextureUpdater.
+var _ gpucontext.TextureUpdater = (*mockTexture)(nil)
 
 // mockRenderer implements gpucontext.TextureCreator for testing.
 type mockRenderer struct {

@@ -85,6 +85,9 @@ func (c *Canvas) RenderToEx(dc gpucontext.TextureDrawer, opts RenderOptions) err
 		return ErrCanvasClosed
 	}
 
+	// Auto-dirty: calling RenderTo implies intent to display current content
+	c.dirty = true
+
 	// Flush canvas to ensure pixmap is up-to-date
 	tex, err := c.Flush()
 	if err != nil {

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ggcanvas texture updates silently failing** ([#79](https://github.com/gogpu/gg/issues/79))
+  - Root cause: local `textureUpdater` interface expected `UpdateData(data []byte)` (no error return), but `gogpu.Texture.UpdateData` returns `error` — type assertion failed silently
+  - Fix: use shared `gpucontext.TextureUpdater` interface with proper error handling
+  - Added auto-dirty in `RenderToEx()` — calling `RenderTo` now always uploads current content
+  - Compile-time interface check for mock in tests
+
 ### Planned for v1.0.0
 - API Review and cleanup
 - Comprehensive documentation
