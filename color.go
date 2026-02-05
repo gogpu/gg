@@ -21,13 +21,17 @@ func (c RGBA) Color() color.Color {
 	}
 }
 
-// FromColor converts a standard color.Color to RGBA.
+// FromColor converts a standard color.Color to straight-alpha RGBA.
+// Go's color.Color.RGBA() returns premultiplied values; this un-premultiplies them.
 func FromColor(c color.Color) RGBA {
 	r, g, b, a := c.RGBA()
+	if a == 0 {
+		return RGBA{0, 0, 0, 0}
+	}
 	return RGBA{
-		R: float64(r) / 65535,
-		G: float64(g) / 65535,
-		B: float64(b) / 65535,
+		R: float64(r) / float64(a),
+		G: float64(g) / float64(a),
+		B: float64(b) / float64(a),
 		A: float64(a) / 65535,
 	}
 }

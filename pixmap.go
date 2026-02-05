@@ -23,7 +23,7 @@ var (
 type Pixmap struct {
 	width  int
 	height int
-	data   []uint8 // RGBA format, 4 bytes per pixel
+	data   []uint8 // Premultiplied RGBA format, 4 bytes per pixel
 }
 
 // NewPixmap creates a new pixmap with the given dimensions.
@@ -51,36 +51,70 @@ func (p *Pixmap) Data() []uint8 {
 }
 
 // SetPixel sets the color of a single pixel.
+// The color is stored in premultiplied alpha format internally.
 func (p *Pixmap) SetPixel(x, y int, c RGBA) {
 	if x < 0 || x >= p.width || y < 0 || y >= p.height {
 		return
 	}
 	i := (y*p.width + x) * 4
-	p.data[i+0] = uint8(clamp255(c.R * 255))
-	p.data[i+1] = uint8(clamp255(c.G * 255))
-	p.data[i+2] = uint8(clamp255(c.B * 255))
+	p.data[i+0] = uint8(clamp255(c.R * c.A * 255))
+	p.data[i+1] = uint8(clamp255(c.G * c.A * 255))
+	p.data[i+2] = uint8(clamp255(c.B * c.A * 255))
 	p.data[i+3] = uint8(clamp255(c.A * 255))
 }
 
-// GetPixel returns the color of a single pixel.
+// GetPixel returns the color of a single pixel as straight (non-premultiplied) RGBA.
+// Internally the pixel is stored as premultiplied alpha; this method un-premultiplies.
 func (p *Pixmap) GetPixel(x, y int) RGBA {
 	if x < 0 || x >= p.width || y < 0 || y >= p.height {
 		return Transparent
 	}
 	i := (y*p.width + x) * 4
+	a := float64(p.data[i+3]) / 255
+	if a <= 0 {
+		return RGBA{0, 0, 0, 0}
+	}
 	return RGBA{
-		R: float64(p.data[i+0]) / 255,
-		G: float64(p.data[i+1]) / 255,
-		B: float64(p.data[i+2]) / 255,
-		A: float64(p.data[i+3]) / 255,
+		R: float64(p.data[i+0]) / 255 / a,
+		G: float64(p.data[i+1]) / 255 / a,
+		B: float64(p.data[i+2]) / 255 / a,
+		A: a,
 	}
 }
 
+// getPremul returns the pixel as premultiplied RGBA values.
+// This reads raw bytes directly without un-premultiplying.
+// Used internally by compositing code that operates in premultiplied space.
+func (p *Pixmap) getPremul(x, y int) (r, g, b, a float64) {
+	if x < 0 || x >= p.width || y < 0 || y >= p.height {
+		return 0, 0, 0, 0
+	}
+	i := (y*p.width + x) * 4
+	return float64(p.data[i+0]) / 255,
+		float64(p.data[i+1]) / 255,
+		float64(p.data[i+2]) / 255,
+		float64(p.data[i+3]) / 255
+}
+
+// setPremul writes premultiplied RGBA values directly.
+// Used internally by compositing code that operates in premultiplied space.
+func (p *Pixmap) setPremul(x, y int, r, g, b, a float64) {
+	if x < 0 || x >= p.width || y < 0 || y >= p.height {
+		return
+	}
+	i := (y*p.width + x) * 4
+	p.data[i+0] = uint8(clamp255(r * 255))
+	p.data[i+1] = uint8(clamp255(g * 255))
+	p.data[i+2] = uint8(clamp255(b * 255))
+	p.data[i+3] = uint8(clamp255(a * 255))
+}
+
 // Clear fills the entire pixmap with a color.
+// The color is stored in premultiplied alpha format.
 func (p *Pixmap) Clear(c RGBA) {
-	r := uint8(clamp255(c.R * 255))
-	g := uint8(clamp255(c.G * 255))
-	b := uint8(clamp255(c.B * 255))
+	r := uint8(clamp255(c.R * c.A * 255))
+	g := uint8(clamp255(c.G * c.A * 255))
+	b := uint8(clamp255(c.B * c.A * 255))
 	a := uint8(clamp255(c.A * 255))
 
 	for i := 0; i < len(p.data); i += 4 {
@@ -130,8 +164,13 @@ func (p *Pixmap) SavePNG(path string) error {
 }
 
 // At implements the image.Image interface.
+// Returns premultiplied color.RGBA directly from the internal buffer.
 func (p *Pixmap) At(x, y int) color.Color {
-	return p.GetPixel(x, y).Color()
+	if x < 0 || x >= p.width || y < 0 || y >= p.height {
+		return color.Transparent
+	}
+	i := (y*p.width + x) * 4
+	return color.RGBA{R: p.data[i+0], G: p.data[i+1], B: p.data[i+2], A: p.data[i+3]}
 }
 
 // Set implements the draw.Image interface.
@@ -147,8 +186,9 @@ func (p *Pixmap) Bounds() image.Rectangle {
 }
 
 // ColorModel implements the image.Image interface.
+// Returns RGBAModel because the pixmap stores premultiplied alpha data.
 func (p *Pixmap) ColorModel() color.Model {
-	return color.NRGBAModel
+	return color.RGBAModel
 }
 
 // FillSpan fills a horizontal span of pixels with a solid color (no blending).
@@ -172,10 +212,10 @@ func (p *Pixmap) FillSpan(x1, x2, y int, c RGBA) {
 		return
 	}
 
-	// Convert color to bytes once
-	r := uint8(clamp255(c.R * 255))
-	g := uint8(clamp255(c.G * 255))
-	b := uint8(clamp255(c.B * 255))
+	// Convert color to premultiplied bytes once
+	r := uint8(clamp255(c.R * c.A * 255))
+	g := uint8(clamp255(c.G * c.A * 255))
+	b := uint8(clamp255(c.B * c.A * 255))
 	a := uint8(clamp255(c.A * 255))
 
 	// Calculate start position in data buffer
