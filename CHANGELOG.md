@@ -12,6 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 - Performance benchmarks
 
+## [0.24.1] - 2026-02-05
+
+### Fixed
+
+- **Alpha compositing: fix dark halos around anti-aliased shapes**
+  - Root cause: mixed alpha conventions — `FillSpanBlend` stored premultiplied, `BlendPixelAlpha` stored straight, causing double-premultiplication
+  - Standardized on **premultiplied alpha** (industry standard: tiny-skia, Ebitengine, vello, femtovg, Cairo, SDL)
+  - `Pixmap`: store premultiplied RGBA in `SetPixel`, `Clear`, `FillSpan`
+  - `Pixmap`: un-premultiply in `GetPixel` for public API
+  - `Pixmap.At()` returns `color.RGBA` (premultiplied), `ColorModel()` → `color.RGBAModel`
+  - Software renderer: fix all 4 `BlendPixelAlpha` locations to premultiplied source-over
+  - `FromColor()`: correctly un-premultiply Go's `color.Color.RGBA()` output
+  - `ColorMatrixFilter`: un-premultiply before matrix transform, re-premultiply after
+  - `ggcanvas`: mark textures as premultiplied via `SetPremultiplied(true)`
+  - Requires gogpu v0.15.5+ for correct GPU compositing with `BlendFactorOne`
+- **Examples:** fix hardcoded output paths in `clipping` and `images` examples ([#85](https://github.com/gogpu/gg/pull/85))
+  - Both used `examples/*/output.png` which only worked from repo root
+  - Now use `output.png` — `go run .` works from example directory
+- **gogpu_integration example:** update dependency versions to gg v0.24.0 / gogpu v0.15.4
+- **Cleanup:** remove stale `rect_debug/` directory (debug artifacts from rasterizer experiments)
+
 ## [0.24.0] - 2026-02-05
 
 ### Added
@@ -1452,7 +1473,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/gogpu/gg/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/gogpu/gg/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/gogpu/gg/compare/v0.22.3...v0.23.0
 [0.22.3]: https://github.com/gogpu/gg/compare/v0.22.2...v0.22.3

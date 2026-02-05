@@ -105,6 +105,13 @@ func (c *Canvas) RenderToEx(dc gpucontext.TextureDrawer, opts RenderOptions) err
 		if err != nil {
 			return err
 		}
+
+		// gg pixmap data is premultiplied alpha — mark texture accordingly
+		// so gogpu uses BlendFactorOne pipeline for correct compositing.
+		if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
+			pt.SetPremultiplied(true)
+		}
+
 		c.texture = realTex
 		tex = realTex
 	}

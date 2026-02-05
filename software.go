@@ -112,6 +112,7 @@ func (p *pixmapAdapter) SetPixel(x, y int, c raster.RGBA) {
 
 // BlendPixelAlpha blends a color with the existing pixel using given alpha.
 // This implements the raster.AAPixmap interface for anti-aliased rendering.
+// Uses premultiplied source-over compositing: Result = Src + Dst * (1 - SrcA).
 func (p *pixmapAdapter) BlendPixelAlpha(x, y int, c raster.RGBA, alpha uint8) {
 	if alpha == 0 {
 		return
@@ -127,21 +128,25 @@ func (p *pixmapAdapter) BlendPixelAlpha(x, y int, c raster.RGBA, alpha uint8) {
 		return
 	}
 
-	// Get existing pixel
-	existing := p.pixmap.GetPixel(x, y)
-
-	// Calculate blend factor
+	// Premultiplied source-over compositing
 	srcAlpha := c.A * float64(alpha) / 255.0
 	invSrcAlpha := 1.0 - srcAlpha
 
-	// Source-over compositing
-	outA := srcAlpha + existing.A*invSrcAlpha
-	if outA > 0 {
-		outR := (c.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
-		outG := (c.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
-		outB := (c.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
-		p.pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
-	}
+	// Premultiply source color
+	srcR := c.R * srcAlpha
+	srcG := c.G * srcAlpha
+	srcB := c.B * srcAlpha
+
+	// Read existing pixel (already premultiplied in buffer)
+	dstR, dstG, dstB, dstA := p.pixmap.getPremul(x, y)
+
+	// Source-over in premultiplied space: Result = Src + Dst * (1 - SrcA)
+	p.pixmap.setPremul(x, y,
+		srcR+dstR*invSrcAlpha,
+		srcG+dstG*invSrcAlpha,
+		srcB+dstB*invSrcAlpha,
+		srcAlpha+dstA*invSrcAlpha,
+	)
 }
 
 // convertPath converts gg.Path elements to path.PathElement for flattening.
@@ -308,6 +313,7 @@ func (p *painterPixmapAdapter) SetPixel(x, y int, _ raster.RGBA) {
 }
 
 // BlendPixelAlpha ignores the passed color and samples from paint instead.
+// Uses premultiplied source-over compositing.
 func (p *painterPixmapAdapter) BlendPixelAlpha(x, y int, _ raster.RGBA, alpha uint8) {
 	if alpha == 0 {
 		return
@@ -319,28 +325,29 @@ func (p *painterPixmapAdapter) BlendPixelAlpha(x, y int, _ raster.RGBA, alpha ui
 	}
 
 	// Sample color from paint at pixel center
-	color := p.paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+	col := p.paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
 
-	if alpha == 255 && color.A >= 1.0 {
-		p.pixmap.SetPixel(x, y, color)
+	if alpha == 255 && col.A >= 1.0 {
+		p.pixmap.SetPixel(x, y, col)
 		return
 	}
 
-	// Get existing pixel
-	existing := p.pixmap.GetPixel(x, y)
-
-	// Calculate blend factor
-	srcAlpha := color.A * float64(alpha) / 255.0
+	// Premultiplied source-over compositing
+	srcAlpha := col.A * float64(alpha) / 255.0
 	invSrcAlpha := 1.0 - srcAlpha
 
-	// Source-over compositing
-	outA := srcAlpha + existing.A*invSrcAlpha
-	if outA > 0 {
-		outR := (color.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
-		outG := (color.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
-		outB := (color.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
-		p.pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
-	}
+	srcR := col.R * srcAlpha
+	srcG := col.G * srcAlpha
+	srcB := col.B * srcAlpha
+
+	dstR, dstG, dstB, dstA := p.pixmap.getPremul(x, y)
+
+	p.pixmap.setPremul(x, y,
+		srcR+dstR*invSrcAlpha,
+		srcG+dstG*invSrcAlpha,
+		srcB+dstB*invSrcAlpha,
+		srcAlpha+dstA*invSrcAlpha,
+	)
 }
 
 // blendAlphaRunsFromIter blends alpha values to the pixmap for a given scanline.
@@ -366,21 +373,22 @@ func (r *SoftwareRenderer) blendAlphaRunsFromIter(pixmap *Pixmap, y int, iter fu
 			return true // continue
 		}
 
-		// Partial coverage - blend with existing pixel
-		existing := pixmap.GetPixel(x, y)
-
-		// Calculate effective source alpha (color alpha * coverage)
+		// Partial coverage - premultiplied source-over compositing
 		srcAlpha := color.A * float64(alpha) / 255.0
 		invSrcAlpha := 1.0 - srcAlpha
 
-		// Source-over compositing
-		outA := srcAlpha + existing.A*invSrcAlpha
-		if outA > 0 {
-			outR := (color.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
-			outG := (color.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
-			outB := (color.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
-			pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
-		}
+		srcR := color.R * srcAlpha
+		srcG := color.G * srcAlpha
+		srcB := color.B * srcAlpha
+
+		dstR, dstG, dstB, dstA := pixmap.getPremul(x, y)
+
+		pixmap.setPremul(x, y,
+			srcR+dstR*invSrcAlpha,
+			srcG+dstG*invSrcAlpha,
+			srcB+dstB*invSrcAlpha,
+			srcAlpha+dstA*invSrcAlpha,
+		)
 		return true // continue
 	})
 }
@@ -410,17 +418,21 @@ func (r *SoftwareRenderer) blendAlphaRunsFromIterPaint(pixmap *Pixmap, y int, it
 			return true
 		}
 
-		existing := pixmap.GetPixel(x, y)
 		srcAlpha := color.A * float64(alpha) / 255.0
 		invSrcAlpha := 1.0 - srcAlpha
 
-		outA := srcAlpha + existing.A*invSrcAlpha
-		if outA > 0 {
-			outR := (color.R*srcAlpha + existing.R*existing.A*invSrcAlpha) / outA
-			outG := (color.G*srcAlpha + existing.G*existing.A*invSrcAlpha) / outA
-			outB := (color.B*srcAlpha + existing.B*existing.A*invSrcAlpha) / outA
-			pixmap.SetPixel(x, y, RGBA{R: outR, G: outG, B: outB, A: outA})
-		}
+		srcR := color.R * srcAlpha
+		srcG := color.G * srcAlpha
+		srcB := color.B * srcAlpha
+
+		dstR, dstG, dstB, dstA := pixmap.getPremul(x, y)
+
+		pixmap.setPremul(x, y,
+			srcR+dstR*invSrcAlpha,
+			srcG+dstG*invSrcAlpha,
+			srcB+dstB*invSrcAlpha,
+			srcAlpha+dstA*invSrcAlpha,
+		)
 		return true
 	})
 }

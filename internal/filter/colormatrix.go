@@ -218,19 +218,38 @@ func (f *ColorMatrixFilter) Apply(src, dst *gg.Pixmap, bounds scene.Rect) {
 			srcIdx := (y*srcWidth + x) * 4
 			dstIdx := (y*dstWidth + x) * 4
 
-			// Get source RGBA (0-255)
-			r := float32(srcData[srcIdx+0])
-			g := float32(srcData[srcIdx+1])
-			b := float32(srcData[srcIdx+2])
+			// Read premultiplied RGBA bytes
+			pr := float32(srcData[srcIdx+0])
+			pg := float32(srcData[srcIdx+1])
+			pb := float32(srcData[srcIdx+2])
 			a := float32(srcData[srcIdx+3])
 
-			// Apply matrix transformation
+			// Un-premultiply RGB to straight-alpha [0-255] for matrix transform.
+			// The matrix coefficients assume straight-alpha color values.
+			var r, g, b float32
+			if a > 0 {
+				r = pr * 255 / a
+				g = pg * 255 / a
+				b = pb * 255 / a
+			}
+
+			// Apply matrix transformation (in straight-alpha space)
 			newR := m[0]*r + m[1]*g + m[2]*b + m[3]*a + m[4]
 			newG := m[5]*r + m[6]*g + m[7]*b + m[8]*a + m[9]
 			newB := m[10]*r + m[11]*g + m[12]*b + m[13]*a + m[14]
 			newA := m[15]*r + m[16]*g + m[17]*b + m[18]*a + m[19]
 
-			// Clamp and write to destination
+			// Re-premultiply for storage
+			if newA > 0 {
+				factor := newA / 255
+				newR *= factor
+				newG *= factor
+				newB *= factor
+			} else {
+				newR, newG, newB = 0, 0, 0
+			}
+
+			// Clamp and write premultiplied result to destination
 			dstData[dstIdx+0] = clampUint8(newR)
 			dstData[dstIdx+1] = clampUint8(newG)
 			dstData[dstIdx+2] = clampUint8(newB)
