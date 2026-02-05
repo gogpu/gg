@@ -416,6 +416,66 @@ func TestToStdImage_Gray16(t *testing.T) {
 	}
 }
 
+func readTestWebP(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile("testdata/test.webp")
+	if err != nil {
+		t.Fatalf("Failed to read testdata/test.webp: %v", err)
+	}
+	return data
+}
+
+func TestDecodeWebP(t *testing.T) {
+	data := readTestWebP(t)
+
+	decoded, err := DecodeWebP(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("DecodeWebP failed: %v", err)
+	}
+
+	if decoded.Width() != 75 || decoded.Height() != 100 {
+		t.Errorf("Dimensions = (%d, %d), want (75, 100)", decoded.Width(), decoded.Height())
+	}
+}
+
+func TestDecodeWebP_InvalidData(t *testing.T) {
+	_, err := DecodeWebP(bytes.NewReader([]byte("not a webp image")))
+	if err == nil {
+		t.Error("DecodeWebP should fail for invalid data")
+	}
+}
+
+func TestLoadWebP_NotFound(t *testing.T) {
+	_, err := LoadWebP("/nonexistent/path/image.webp")
+	if err == nil {
+		t.Error("LoadWebP should fail for non-existent file")
+	}
+}
+
+func TestLoadImage_WebP(t *testing.T) {
+	loaded, err := LoadImage("testdata/test.webp")
+	if err != nil {
+		t.Fatalf("LoadImage(.webp) failed: %v", err)
+	}
+
+	if loaded.Width() != 75 || loaded.Height() != 100 {
+		t.Errorf("Dimensions = (%d, %d), want (75, 100)", loaded.Width(), loaded.Height())
+	}
+}
+
+func TestWebPViaAutoDetect(t *testing.T) {
+	data := readTestWebP(t)
+
+	loaded, err := LoadImageFromBytes(data)
+	if err != nil {
+		t.Fatalf("LoadImageFromBytes(WebP) failed: %v", err)
+	}
+
+	if loaded.Width() != 75 || loaded.Height() != 100 {
+		t.Errorf("Dimensions = (%d, %d), want (75, 100)", loaded.Width(), loaded.Height())
+	}
+}
+
 func BenchmarkFromStdImage_RGBA(b *testing.B) {
 	rgba := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
 	b.ResetTimer()

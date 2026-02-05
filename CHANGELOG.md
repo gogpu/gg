@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **WebP image format support** ([#77](https://github.com/gogpu/gg/issues/77))
+  - `LoadWebP()`, `DecodeWebP()` for explicit WebP decoding
+  - `LoadImage()` and `LoadImageFromBytes()` auto-detect WebP via registered decoder
+  - Uses `golang.org/x/image/webp` (already in go.mod)
+
 ### Fixed
 
 - **Custom Pattern implementations always render black** ([#75](https://github.com/gogpu/gg/issues/75))

@@ -208,7 +208,7 @@ gg/
 │   └── filter/         # Blur, shadow, color matrix
 │
 ├── font/               # Font loading
-└── image/              # Image loading
+└── image/              # Image I/O (PNG, JPEG, WebP)
 ```
 
 ## Native Backend Architecture (v0.20.0)

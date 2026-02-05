@@ -310,9 +310,14 @@ func (c *Context) pixmapToImageBuf(pm *Pixmap) *ImageBuf {
 }
 
 // LoadImage loads an image from a file and returns an ImageBuf.
-// Supported formats: PNG, JPEG, GIF.
+// Supported formats: PNG, JPEG, WebP.
 func LoadImage(path string) (*ImageBuf, error) {
 	return intImage.LoadImage(path)
+}
+
+// LoadWebP loads a WebP image from the given file path.
+func LoadWebP(path string) (*ImageBuf, error) {
+	return intImage.LoadWebP(path)
 }
 
 // NewImageBuf creates a new image buffer with the given dimensions and format.

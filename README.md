@@ -33,7 +33,7 @@
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
-| **Images** | 7 pixel formats, PNG/JPEG I/O, mipmaps, affine transforms |
+| **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
 | **Performance** | Tile-based parallel rendering, LRU caching |
 
