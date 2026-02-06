@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend"
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/wgpu/core"
 )
@@ -406,27 +405,8 @@ func TestFullRenderPipeline(t *testing.T) {
 }
 
 // =============================================================================
-// Backend Registration Tests
+// Concurrent Scene Rendering Tests
 // =============================================================================
-
-// TestBackendRegistration verifies the backend is properly registered.
-func TestBackendRegistration(t *testing.T) {
-	// Check registration
-	if !backend.IsRegistered(backend.BackendNative) {
-		t.Error("wgpu backend should be registered")
-	}
-
-	// Get backend
-	b := backend.Get(backend.BackendNative)
-	if b == nil {
-		t.Fatal("backend.Get(BackendNative) returned nil")
-	}
-
-	// Verify name
-	if b.Name() != backend.BackendNative {
-		t.Errorf("Name() = %q, want %q", b.Name(), backend.BackendNative)
-	}
-}
 
 // TestBackendConcurrentSceneRendering tests concurrent scene rendering.
 func TestBackendConcurrentSceneRendering(t *testing.T) {

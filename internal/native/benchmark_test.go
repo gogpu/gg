@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend"
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/wgpu/core"
 )
@@ -356,16 +355,10 @@ func runBackendComparison(b *testing.B, width, height int, setup func(s *scene.S
 		}
 	})
 
-	// Software backend benchmark
+	// Software backend benchmark using scene.Renderer directly
 	b.Run("Software", func(b *testing.B) {
-		be := backend.Get(backend.BackendSoftware)
-		if be == nil {
-			b.Skip("Software backend not available")
-		}
-		if err := be.Init(); err != nil {
-			b.Fatalf("Software backend init failed: %v", err)
-		}
-		defer be.Close()
+		sr := scene.NewRenderer(width, height)
+		defer sr.Close()
 
 		pm := gg.NewPixmap(width, height)
 
@@ -375,7 +368,7 @@ func runBackendComparison(b *testing.B, width, height int, setup func(s *scene.S
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = be.RenderScene(pm, sceneData)
+			_ = sr.Render(pm, sceneData)
 		}
 	})
 }

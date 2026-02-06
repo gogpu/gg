@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gogpu/gg/backend/native"
+	"github.com/gogpu/gg/internal/native"
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )

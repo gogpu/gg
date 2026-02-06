@@ -7,21 +7,15 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend"
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
 )
 
-// init registers the native backend on package import.
-func init() {
-	backend.Register(backend.BackendNative, func() backend.RenderBackend {
-		return &NativeBackend{}
-	})
-}
+// BackendNative is the identifier for the native GPU backend.
+const BackendNative = "native"
 
 // NativeBackend is a GPU-accelerated rendering backend using gogpu/wgpu.
-// It implements the backend.RenderBackend interface.
 //
 // The backend manages GPU resources including instance, adapter, device,
 // and queue. It supports both immediate mode rendering (via NewRenderer)
@@ -50,7 +44,7 @@ func NewNativeBackend() *NativeBackend {
 
 // Name returns the backend identifier.
 func (b *NativeBackend) Name() string {
-	return backend.BackendNative
+	return BackendNative
 }
 
 // Init initializes the backend by creating GPU resources.

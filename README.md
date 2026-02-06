@@ -104,17 +104,21 @@ gg includes a built-in GPU backend using gogpu/wgpu:
 ```go
 import (
     "github.com/gogpu/gg"
-    "github.com/gogpu/gg/backend/native"
+    "github.com/gogpu/gg/internal/native"
 )
 
 func main() {
-    // Create GPU-accelerated context using native backend
-    device := native.NewDevice()
-    defer device.Destroy()
+    // Create GPU-accelerated backend
+    nb := native.NewNativeBackend()
+    if err := nb.Init(); err != nil {
+        log.Fatal(err)
+    }
+    defer nb.Close()
 
-    // Draw with GPU acceleration
-    device.DrawCircle(400, 300, 100)
-    device.Fill()
+    // Use with gg context
+    dc := gg.NewContext(800, 600)
+    dc.DrawCircle(400, 300, 100)
+    dc.Fill()
 }
 ```
 
@@ -147,16 +151,15 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
             ┌────────────────┼────────────────┐
             │                                 │
        Software                             GPU
-       (Default)                     (backend/native/)
+       (Default)                     (internal/native/)
 ```
 
-### Backend Structure
+### Rendering Structure
 
-| Backend | Package | Description |
-|---------|---------|-------------|
-| **Native** | `backend/native/` | Pure Go WebGPU via gogpu/wgpu |
-| **Rust** | `backend/rust/` | wgpu-native FFI via go-webgpu/webgpu |
-| **Software** | `backend/software/` | CPU-based default renderer |
+| Component | Package | Description |
+|-----------|---------|-------------|
+| **Native GPU** | `internal/native/` | Pure Go WebGPU via gogpu/wgpu |
+| **Software** | Core `gg` package | CPU-based default renderer |
 
 ---
 

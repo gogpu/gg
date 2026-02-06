@@ -1,14 +1,13 @@
 // Package main demonstrates the GPU backend for gogpu/gg.
 //
 // This example shows how to:
-//   - Explicitly request the GPU (wgpu) backend
-//   - Initialize and close the backend properly
+//   - Create and initialize the native GPU backend directly
 //   - Render a scene using GPU acceleration
 //   - Handle fallback to software rendering
 //
 // The GPU backend uses WebGPU (via gogpu/wgpu) for hardware-accelerated
 // 2D graphics rendering. When GPU is not available, it falls back to
-// software rendering.
+// software rendering via scene.Renderer.
 //
 // Note: The GPU rendering pipeline is implemented but GPU operations
 // currently run as stubs. When gogpu/wgpu implements texture readback
@@ -21,8 +20,7 @@ import (
 	"os"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend"
-	_ "github.com/gogpu/gg/backend/native" // Register GPU backend
+	"github.com/gogpu/gg/internal/native"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -31,13 +29,16 @@ func main() {
 	fmt.Println("===================")
 
 	// Try GPU backend first, fall back to software
-	be := selectBackend()
-	if be == nil {
-		log.Fatal("No backend available")
+	nb := native.NewNativeBackend()
+	if err := nb.Init(); err != nil {
+		fmt.Printf("GPU backend unavailable: %v\n", err)
+		fmt.Println("Falling back to software rendering...")
+		runSoftware()
+		return
 	}
-	defer be.Close()
+	defer nb.Close()
 
-	fmt.Printf("Using backend: %s\n\n", be.Name())
+	fmt.Printf("Using backend: %s\n\n", nb.Name())
 
 	// Create scene
 	s := buildScene()
@@ -49,7 +50,7 @@ func main() {
 
 	// Render scene
 	fmt.Println("Rendering scene...")
-	if err := be.RenderScene(pm, s); err != nil {
+	if err := nb.RenderScene(pm, s); err != nil {
 		// Note: Some errors are expected until full GPU support is implemented
 		fmt.Printf("RenderScene note: %v\n", err)
 	}
@@ -61,35 +62,37 @@ func main() {
 	}
 
 	fmt.Printf("\nSaved output to: %s\n", outputPath)
-
-	// Print backend information
-	printBackendInfo(be)
+	fmt.Println("\nBackend Information:")
+	fmt.Printf("  Name: %s\n", nb.Name())
+	fmt.Println("  Type: GPU (WebGPU via gogpu/wgpu)")
+	fmt.Println("  Status: Pipeline implemented, GPU ops as stubs")
 }
 
-// selectBackend attempts to initialize the GPU backend, falling back to software.
-func selectBackend() backend.RenderBackend {
-	// First, try GPU backend
-	gpuBackend := backend.Get(backend.BackendNative)
-	if gpuBackend != nil {
-		if err := gpuBackend.Init(); err != nil {
-			fmt.Printf("GPU backend unavailable: %v\n", err)
-			fmt.Println("Falling back to software backend...")
-		} else {
-			return gpuBackend
-		}
+// runSoftware demonstrates software rendering fallback.
+func runSoftware() {
+	s := buildScene()
+
+	const width, height = 800, 600
+	pm := gg.NewPixmap(width, height)
+	pm.Clear(gg.White)
+
+	sr := scene.NewRenderer(width, height)
+	defer sr.Close()
+
+	if err := sr.Render(pm, s); err != nil {
+		log.Fatalf("Software render failed: %v", err)
 	}
 
-	// Fall back to software backend
-	softBackend := backend.Get(backend.BackendSoftware)
-	if softBackend != nil {
-		if err := softBackend.Init(); err != nil {
-			fmt.Printf("Software backend init failed: %v\n", err)
-			return nil
-		}
-		return softBackend
+	outputPath := "gpu_output.png"
+	if err := pm.SavePNG(outputPath); err != nil {
+		log.Fatalf("Failed to save PNG: %v", err)
 	}
 
-	return nil
+	fmt.Printf("\nSaved output to: %s\n", outputPath)
+	fmt.Println("\nBackend Information:")
+	fmt.Println("  Name: software")
+	fmt.Println("  Type: CPU (Software rendering)")
+	fmt.Println("  Status: Fully functional")
 }
 
 // buildScene creates a demonstration scene with various shapes and layers.
@@ -208,25 +211,6 @@ func mod32(x, y float32) float32 {
 		x += y
 	}
 	return x
-}
-
-// printBackendInfo prints information about the backend.
-func printBackendInfo(be backend.RenderBackend) {
-	fmt.Println("\nBackend Information:")
-	fmt.Printf("  Name: %s\n", be.Name())
-
-	// Print available backends
-	available := backend.Available()
-	fmt.Printf("  Available backends: %v\n", available)
-
-	// If GPU backend, try to get additional info
-	if be.Name() == backend.BackendNative {
-		fmt.Println("  Type: GPU (WebGPU via gogpu/wgpu)")
-		fmt.Println("  Status: Pipeline implemented, GPU ops as stubs")
-	} else {
-		fmt.Println("  Type: CPU (Software rendering)")
-		fmt.Println("  Status: Fully functional")
-	}
 }
 
 func init() {

@@ -22,7 +22,7 @@ import (
 //
 // To regenerate golden files:
 //
-//	GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./backend/native/...
+//	GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./internal/native/...
 //
 // Golden files location: testdata/golden/vello/
 
@@ -273,7 +273,7 @@ func compareImages(img1, img2 *image.RGBA) (diffPercent float64, diffCount int) 
 }
 
 // TestGenerateGoldenFiles generates golden files using AnalyticFiller.
-// Run with: GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./backend/native/...
+// Run with: GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./internal/native/...
 func TestGenerateGoldenFiles(t *testing.T) {
 	if os.Getenv("GENERATE_GOLDEN") != "1" {
 		t.Skip("set GENERATE_GOLDEN=1 to regenerate golden files")

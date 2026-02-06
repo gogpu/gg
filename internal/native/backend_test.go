@@ -5,33 +5,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/backend"
 	"github.com/gogpu/gg/scene"
 )
-
-// TestNativeBackendImplementsInterface verifies that NativeBackend implements RenderBackend.
-func TestNativeBackendImplementsInterface(t *testing.T) {
-	var _ backend.RenderBackend = (*NativeBackend)(nil)
-}
-
-// TestNativeBackendRegistration verifies that the backend is registered.
-func TestNativeBackendRegistration(t *testing.T) {
-	if !backend.IsRegistered(backend.BackendNative) {
-		t.Error("native backend should be registered")
-	}
-}
-
-// TestNativeBackendGet verifies that the backend can be retrieved.
-func TestNativeBackendGet(t *testing.T) {
-	b := backend.Get(backend.BackendNative)
-	if b == nil {
-		t.Fatal("backend.Get(BackendNative) returned nil")
-	}
-
-	if b.Name() != backend.BackendNative {
-		t.Errorf("Name() = %q, want %q", b.Name(), backend.BackendNative)
-	}
-}
 
 // TestNativeBackendName verifies the backend name.
 func TestNativeBackendName(t *testing.T) {
@@ -387,26 +362,6 @@ func TestErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestBackendPriority verifies that wgpu backend has priority over software.
-func TestBackendPriority(t *testing.T) {
-	// Both backends should be registered
-	if !backend.IsRegistered(backend.BackendNative) {
-		t.Skip("wgpu backend not registered")
-	}
-	if !backend.IsRegistered(backend.BackendSoftware) {
-		t.Skip("software backend not registered")
-	}
-
-	// Default() should return the highest priority available backend
-	// In test environment without real GPU, it may still return software
-	b := backend.Default()
-	if b == nil {
-		t.Fatal("Default() returned nil")
-	}
-
-	t.Logf("Default backend: %s", b.Name())
 }
 
 // BenchmarkNativeBackendInit benchmarks backend initialization.
