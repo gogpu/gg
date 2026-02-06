@@ -14,9 +14,8 @@ type ContextOption func(*contextOptions)
 
 // contextOptions holds optional configuration for Context creation.
 type contextOptions struct {
-	renderer       Renderer
-	pixmap         *Pixmap
-	analyticFiller AnalyticFillerInterface
+	renderer Renderer
+	pixmap   *Pixmap
 }
 
 // defaultOptions returns the default context options.
@@ -36,7 +35,7 @@ func defaultOptions() contextOptions {
 //	customRenderer := mypackage.NewRenderer()
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
 //
-// For GPU-accelerated rendering, see gg's native backend (backend/native/)
+// For GPU-accelerated rendering, see gg's native backend (internal/native/)
 // which uses gogpu/wgpu directly.
 func WithRenderer(r Renderer) ContextOption {
 	return func(o *contextOptions) {
@@ -54,29 +53,5 @@ func WithRenderer(r Renderer) ContextOption {
 func WithPixmap(pm *Pixmap) ContextOption {
 	return func(o *contextOptions) {
 		o.pixmap = pm
-	}
-}
-
-// WithAnalyticAA enables analytic anti-aliasing for the Context.
-// This requires providing an AnalyticFillerInterface implementation,
-// typically from backend/native.NewAnalyticFillerAdapter().
-//
-// Analytic AA provides higher quality anti-aliasing than supersampling
-// by computing exact geometric coverage for each pixel.
-//
-// Example:
-//
-//	import "github.com/gogpu/gg/backend/native"
-//
-//	adapter := native.NewAnalyticFillerAdapter(800, 600)
-//	dc := gg.NewContext(800, 600, gg.WithAnalyticAA(adapter))
-//
-// Note: The adapter must be created with the same dimensions as the Context.
-func WithAnalyticAA(filler AnalyticFillerInterface) ContextOption {
-	return func(o *contextOptions) {
-		if o.renderer == nil {
-			// Will be set up in NewContext when renderer is created
-			o.analyticFiller = filler
-		}
 	}
 }

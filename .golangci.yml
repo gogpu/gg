@@ -136,14 +136,6 @@ linters:
           - dupl
           - gocognit
 
-      # Internal raster implementation
-      - path: internal/raster/.*\.go
-        linters:
-          - gocyclo      # Rasterization code can be complex
-          - funlen       # Drawing algorithms are verbose
-          - cyclop       # Complex branching in scanline
-          - gocognit     # Raster algorithms are inherently complex
-
       # Internal font handling
       - path: internal/fontkit/.*\.go
         linters:
@@ -214,7 +206,7 @@ linters:
 
       # GPU compute shaders - similar initialization patterns (Phase 6)
       # Each rasterizer has structurally similar but functionally different code
-      - path: backend/native/gpu_.*.go
+      - path: internal/native/gpu_.*.go
         linters:
           - dupl          # Fine, coarse, flatten have similar WebGPU init patterns
 

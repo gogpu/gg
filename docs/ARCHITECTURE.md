@@ -80,35 +80,27 @@ go build ./...
 go build -tags rust ./...
 ```
 
-## Backend Selection
+## Backend Usage
 
 ```go
-import "github.com/gogpu/gg/backend"
+import "github.com/gogpu/gg/internal/native"
 
-// Auto-select best available
-b := backend.Default()
+// Create and initialize GPU backend directly
+nb := native.NewNativeBackend()
+if err := nb.Init(); err != nil {
+    log.Fatal(err)
+}
+defer nb.Close()
 
-// Get specific backend by name
-b := backend.Get(backend.BackendNative)   // Pure Go GPU
-b := backend.Get(backend.BackendGo)       // Alias for Native
-b := backend.Get(backend.BackendRust)     // Rust FFI GPU
-b := backend.Get(backend.BackendSoftware) // CPU fallback
-
-// Initialize default backend
-b, err := backend.InitDefault()
+// For software rendering, use scene.Renderer or gg.NewContext() directly
 ```
 
-## Software Rendering: Two Levels
-
-There are **two different** software rendering options in the ecosystem:
+## Software Rendering
 
 | Component              | Level   | Purpose                              |
 |------------------------|---------|--------------------------------------|
 | `wgpu/hal/software`    | HAL     | Full WebGPU emulation on CPU         |
-| `gg/backend/software`  | Backend | Lightweight 2D rasterizer (no wgpu)  |
-
-- **wgpu/hal/software** — Used when Native backend needs CPU fallback
-- **gg/backend/software** — Direct 2D rendering without WebGPU overhead
+| Core `gg` package      | Default | Built-in 2D rasterizer (no wgpu)    |
 
 ## RenderBackend Interface
 
@@ -215,7 +207,7 @@ gg/
 
 ## Native Backend Architecture (v0.20.0)
 
-The `backend/native/` package provides enterprise-grade GPU rendering:
+The `internal/native/` package provides enterprise-grade GPU rendering:
 
 ### Command Encoder
 

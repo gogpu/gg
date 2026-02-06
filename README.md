@@ -85,40 +85,40 @@ func main() {
 
 ---
 
-## Renderer Dependency Injection
-
-gg supports pluggable renderers through the `Renderer` interface, enabling GPU acceleration via gogpu integration.
+## Rendering
 
 ### Software Rendering (Default)
 
 ```go
-// Default software renderer
+// Default software renderer — high-quality CPU rasterizer
 dc := gg.NewContext(800, 600)
 defer dc.Close()
 ```
 
-### GPU Rendering via Native Backend
+### GPU Acceleration (Optional)
 
-gg includes a built-in GPU backend using gogpu/wgpu:
+gg supports optional GPU acceleration through the `GPUAccelerator` interface.
+When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 
 ```go
 import (
     "github.com/gogpu/gg"
-    "github.com/gogpu/gg/backend/native"
+    _ "github.com/gogpu/gg/gpu" // opt-in GPU acceleration (planned)
 )
 
 func main() {
-    // Create GPU-accelerated context using native backend
-    device := native.NewDevice()
-    defer device.Destroy()
+    // GPU automatically used when available, falls back to CPU
+    dc := gg.NewContext(800, 600)
+    defer dc.Close()
 
-    // Draw with GPU acceleration
-    device.DrawCircle(400, 300, 100)
-    device.Fill()
+    dc.DrawCircle(400, 300, 100)
+    dc.Fill() // tries GPU first, falls back to CPU transparently
 }
 ```
 
-For integration with gogpu windowing, see the `examples/gpu/` directory.
+> **Note:** The `gg/gpu` package is planned for a future release.
+> Currently, all rendering uses the CPU path which includes a high-quality
+> Vello-based analytic anti-aliasing rasterizer.
 
 ### Custom Pixmap
 
@@ -142,21 +142,22 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
          │                   │                   │
          └───────────────────┼───────────────────┘
                              │
-                    Renderer Interface
-                             │
-            ┌────────────────┼────────────────┐
-            │                                 │
-       Software                             GPU
-       (Default)                     (backend/native/)
+              ┌──────────────┴──────────────┐
+              │                             │
+         CPU Raster                   GPUAccelerator
+      (always available)             (optional, planned)
+              │
+    internal/raster + internal/native
 ```
 
-### Backend Structure
+### Rendering Structure
 
-| Backend | Package | Description |
-|---------|---------|-------------|
-| **Native** | `backend/native/` | Pure Go WebGPU via gogpu/wgpu |
-| **Rust** | `backend/rust/` | wgpu-native FFI via go-webgpu/webgpu |
-| **Software** | `backend/software/` | CPU-based default renderer |
+| Component | Location | Description |
+|-----------|----------|-------------|
+| **CPU Raster** | `internal/raster` | Core analytic AA rasterizer (Vello-based) |
+| **Native Renderer** | `internal/native` | Full rendering pipeline, GPU simulation |
+| **GPU Accelerator** | `GPUAccelerator` interface | Optional GPU acceleration (planned) |
+| **Software** | Root `gg` package | Default CPU renderer |
 
 ---
 

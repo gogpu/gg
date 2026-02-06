@@ -128,57 +128,16 @@ func TestRendererInterface(t *testing.T) {
 	var _ Renderer = (*SoftwareRenderer)(nil)
 }
 
-// mockAnalyticFiller is a test analytic filler for testing WithAnalyticAA.
-type mockAnalyticFiller struct {
-	fillCalled  bool
-	resetCalled bool
-}
-
-func (m *mockAnalyticFiller) Fill(path *Path, fillRule FillRule, callback func(y int, iter func(yield func(x int, alpha uint8) bool))) {
-	m.fillCalled = true
-}
-
-func (m *mockAnalyticFiller) Reset() {
-	m.resetCalled = true
-}
-
-// TestNewContextWithAnalyticAA tests dependency injection of analytic filler.
-func TestNewContextWithAnalyticAA(t *testing.T) {
-	mock := &mockAnalyticFiller{}
-
-	dc := NewContext(100, 100, WithAnalyticAA(mock))
+// TestNewContextDefaultSoftwareRenderer verifies the default renderer type.
+func TestNewContextDefaultSoftwareRenderer(t *testing.T) {
+	dc := NewContext(100, 100)
 	if dc == nil {
 		t.Fatal("NewContext returned nil")
 	}
 
-	// Verify renderer is a SoftwareRenderer with analytic filler
-	sr, ok := dc.renderer.(*SoftwareRenderer)
+	// Verify renderer is a SoftwareRenderer
+	_, ok := dc.renderer.(*SoftwareRenderer)
 	if !ok {
 		t.Fatal("renderer is not SoftwareRenderer")
-	}
-
-	// Verify analytic mode is enabled
-	if sr.RenderMode() != RenderModeAnalytic {
-		t.Errorf("RenderMode() = %v, want RenderModeAnalytic", sr.RenderMode())
-	}
-}
-
-// TestWithAnalyticAAIgnoredWhenCustomRenderer tests that WithAnalyticAA
-// is ignored when a custom renderer is provided.
-func TestWithAnalyticAAIgnoredWhenCustomRenderer(t *testing.T) {
-	mockFiller := &mockAnalyticFiller{}
-	mockRend := &mockRenderer{}
-
-	dc := NewContext(100, 100,
-		WithRenderer(mockRend),
-		WithAnalyticAA(mockFiller),
-	)
-	if dc == nil {
-		t.Fatal("NewContext returned nil")
-	}
-
-	// Custom renderer should take precedence
-	if dc.renderer != mockRend {
-		t.Error("renderer is not the injected mock renderer")
 	}
 }

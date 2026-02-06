@@ -8,12 +8,12 @@ import (
 	"image/color"
 	"image/draw"
 
-	"github.com/gogpu/gg/core"
+	"github.com/gogpu/gg/internal/raster"
 )
 
 // ImageSurface is a CPU-based surface that renders to an *image.RGBA.
 //
-// It uses core.AnalyticFiller for high-quality anti-aliased rendering.
+// It uses raster.AnalyticFiller for high-quality anti-aliased rendering.
 // This is the default surface implementation for software rendering.
 //
 // Example:
@@ -33,10 +33,10 @@ type ImageSurface struct {
 	img    *image.RGBA
 
 	// filler provides analytic anti-aliasing
-	filler *core.AnalyticFiller
+	filler *raster.AnalyticFiller
 
 	// edgeBuilder converts paths to edges
-	edgeBuilder *core.EdgeBuilder
+	edgeBuilder *raster.EdgeBuilder
 
 	// closed tracks if Close has been called
 	closed bool
@@ -55,8 +55,8 @@ func NewImageSurface(width, height int) *ImageSurface {
 		width:       width,
 		height:      height,
 		img:         image.NewRGBA(image.Rect(0, 0, width, height)),
-		filler:      core.NewAnalyticFiller(width, height),
-		edgeBuilder: core.NewEdgeBuilder(2), // 4x AA quality
+		filler:      raster.NewAnalyticFiller(width, height),
+		edgeBuilder: raster.NewEdgeBuilder(2), // 4x AA quality
 	}
 }
 
@@ -71,8 +71,8 @@ func NewImageSurfaceFromImage(img *image.RGBA) *ImageSurface {
 		width:       width,
 		height:      height,
 		img:         img,
-		filler:      core.NewAnalyticFiller(width, height),
-		edgeBuilder: core.NewEdgeBuilder(2),
+		filler:      raster.NewAnalyticFiller(width, height),
+		edgeBuilder: raster.NewEdgeBuilder(2),
 	}
 }
 
@@ -114,18 +114,18 @@ func (s *ImageSurface) Fill(path *Path, style FillStyle) {
 	fillColor := s.resolveColor(style.Color, style.Pattern)
 
 	// Convert fill rule
-	var fillRule core.FillRule
+	var fillRule raster.FillRule
 	switch style.Rule {
 	case FillRuleEvenOdd:
-		fillRule = core.FillRuleEvenOdd
+		fillRule = raster.FillRuleEvenOdd
 	default:
-		fillRule = core.FillRuleNonZero
+		fillRule = raster.FillRuleNonZero
 	}
 
 	// Build edges from path
 	s.edgeBuilder.Reset()
 	s.edgeBuilder.SetFlattenCurves(true) // Use line approximation for reliability
-	s.edgeBuilder.BuildFromPath(path, core.IdentityTransform{})
+	s.edgeBuilder.BuildFromPath(path, raster.IdentityTransform{})
 
 	if s.edgeBuilder.IsEmpty() {
 		return
@@ -133,7 +133,7 @@ func (s *ImageSurface) Fill(path *Path, style FillStyle) {
 
 	// Reset filler and render
 	s.filler.Reset()
-	s.filler.Fill(s.edgeBuilder, fillRule, func(y int, runs *core.AlphaRuns) {
+	s.filler.Fill(s.edgeBuilder, fillRule, func(y int, runs *raster.AlphaRuns) {
 		if y < 0 || y >= s.height {
 			return
 		}
@@ -159,7 +159,7 @@ func (s *ImageSurface) Stroke(path *Path, style StrokeStyle) {
 	// Build edges from expanded stroke path
 	s.edgeBuilder.Reset()
 	s.edgeBuilder.SetFlattenCurves(true)
-	s.edgeBuilder.BuildFromPath(strokePath, core.IdentityTransform{})
+	s.edgeBuilder.BuildFromPath(strokePath, raster.IdentityTransform{})
 
 	if s.edgeBuilder.IsEmpty() {
 		return
@@ -167,7 +167,7 @@ func (s *ImageSurface) Stroke(path *Path, style StrokeStyle) {
 
 	// Render as filled shape (stroke expansion creates filled outline)
 	s.filler.Reset()
-	s.filler.Fill(s.edgeBuilder, core.FillRuleNonZero, func(y int, runs *core.AlphaRuns) {
+	s.filler.Fill(s.edgeBuilder, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		if y < 0 || y >= s.height {
 			return
 		}
@@ -282,7 +282,7 @@ func (s *ImageSurface) resolveColor(c color.Color, _ Pattern) color.RGBA {
 }
 
 // blendRow blends alpha runs onto a scanline.
-func (s *ImageSurface) blendRow(y int, runs *core.AlphaRuns, c color.RGBA) {
+func (s *ImageSurface) blendRow(y int, runs *raster.AlphaRuns, c color.RGBA) {
 	for x, alpha := range runs.Iter() {
 		if x < 0 || x >= s.width {
 			continue
@@ -384,13 +384,13 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 	pointIdx := 0
 	for _, verb := range path.verbs {
 		switch verb {
-		case core.VerbMoveTo:
+		case raster.VerbMoveTo:
 			startX = path.points[pointIdx]
 			startY = path.points[pointIdx+1]
 			curX, curY = startX, startY
 			pointIdx += 2
 
-		case core.VerbLineTo:
+		case raster.VerbLineTo:
 			x, y := path.points[pointIdx], path.points[pointIdx+1]
 			segments = append(segments, strokeSegment{
 				x0: curX, y0: curY,
@@ -399,7 +399,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 2
 
-		case core.VerbQuadTo:
+		case raster.VerbQuadTo:
 			// Flatten quad to lines for stroke
 			cx, cy := path.points[pointIdx], path.points[pointIdx+1]
 			x, y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -407,7 +407,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 4
 
-		case core.VerbCubicTo:
+		case raster.VerbCubicTo:
 			// Flatten cubic to lines for stroke
 			c1x, c1y := path.points[pointIdx], path.points[pointIdx+1]
 			c2x, c2y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -416,7 +416,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 6
 
-		case core.VerbClose:
+		case raster.VerbClose:
 			if curX != startX || curY != startY {
 				segments = append(segments, strokeSegment{
 					x0: curX, y0: curY,

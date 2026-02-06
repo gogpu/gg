@@ -349,38 +349,6 @@ func TestHairlineDashPattern(t *testing.T) {
 	}
 }
 
-// TestTreatAsHairline tests the hairline detection function.
-func TestTreatAsHairline(t *testing.T) {
-	tests := []struct {
-		name         string
-		width        float64
-		wantHairline bool
-		minCoverage  float64
-		maxCoverage  float64
-	}{
-		{"zero", 0.0, true, 1.0, 1.0},
-		{"half", 0.5, true, 0.5, 0.5},
-		{"one", 1.0, true, 0.5, 1.0},
-		{"just_over_one", 1.1, false, 0, 0},
-		{"two", 2.0, false, 0, 0},
-		{"quarter", 0.25, true, 0.5, 0.5}, // Should clamp to 0.5 minimum
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			useHairline, coverage := treatAsHairline(tt.width)
-
-			if useHairline != tt.wantHairline {
-				t.Errorf("treatAsHairline(%f) hairline = %v, want %v", tt.width, useHairline, tt.wantHairline)
-			}
-
-			if useHairline && (coverage < tt.minCoverage || coverage > tt.maxCoverage) {
-				t.Errorf("treatAsHairline(%f) coverage = %v, want [%v, %v]", tt.width, coverage, tt.minCoverage, tt.maxCoverage)
-			}
-		})
-	}
-}
-
 // TestHairlineWithColors tests hairline rendering with different colors.
 func TestHairlineWithColors(t *testing.T) {
 	colors := []struct {

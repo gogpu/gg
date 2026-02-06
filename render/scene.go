@@ -6,7 +6,7 @@ package render
 import (
 	"image/color"
 
-	"github.com/gogpu/gg/core"
+	"github.com/gogpu/gg/internal/raster"
 )
 
 // DirtyRect represents a region that needs redraw.
@@ -60,7 +60,7 @@ type Scene struct {
 	currentStrokeWidth float64
 
 	// currentFillRule is the fill rule for fill operations.
-	currentFillRule core.FillRule
+	currentFillRule raster.FillRule
 
 	// Damage tracking for efficient partial redraws
 	dirtyRects []DirtyRect
@@ -73,7 +73,7 @@ type drawCommand struct {
 	path     *pathBuilder // Snapshot of path at command time
 	color    color.Color
 	width    float64
-	fillRule core.FillRule
+	fillRule raster.FillRule
 }
 
 // drawOp is the type of drawing operation.
@@ -87,7 +87,7 @@ const (
 
 // pathBuilder accumulates path construction commands.
 type pathBuilder struct {
-	verbs  []core.PathVerb
+	verbs  []raster.PathVerb
 	points []float32
 }
 
@@ -98,7 +98,7 @@ func NewScene() *Scene {
 		currentFillColor:   color.Black,
 		currentStrokeColor: color.Black,
 		currentStrokeWidth: 1.0,
-		currentFillRule:    core.FillRuleNonZero,
+		currentFillRule:    raster.FillRuleNonZero,
 	}
 }
 
@@ -109,7 +109,7 @@ func (s *Scene) Reset() {
 	s.currentFillColor = color.Black
 	s.currentStrokeColor = color.Black
 	s.currentStrokeWidth = 1.0
-	s.currentFillRule = core.FillRuleNonZero
+	s.currentFillRule = raster.FillRuleNonZero
 	s.ClearDirty()
 }
 
@@ -189,25 +189,25 @@ func (s *Scene) SetStrokeWidth(width float64) {
 }
 
 // SetFillRule sets the fill rule for subsequent fill operations.
-func (s *Scene) SetFillRule(rule core.FillRule) {
+func (s *Scene) SetFillRule(rule raster.FillRule) {
 	s.currentFillRule = rule
 }
 
 // MoveTo starts a new subpath at the given point.
 func (s *Scene) MoveTo(x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, core.VerbMoveTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbMoveTo)
 	s.currentPath.points = append(s.currentPath.points, float32(x), float32(y))
 }
 
 // LineTo draws a line from the current point to the given point.
 func (s *Scene) LineTo(x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, core.VerbLineTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbLineTo)
 	s.currentPath.points = append(s.currentPath.points, float32(x), float32(y))
 }
 
 // QuadTo draws a quadratic Bezier curve.
 func (s *Scene) QuadTo(cx, cy, x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, core.VerbQuadTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbQuadTo)
 	s.currentPath.points = append(s.currentPath.points,
 		float32(cx), float32(cy),
 		float32(x), float32(y))
@@ -215,7 +215,7 @@ func (s *Scene) QuadTo(cx, cy, x, y float64) {
 
 // CubicTo draws a cubic Bezier curve.
 func (s *Scene) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, core.VerbCubicTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbCubicTo)
 	s.currentPath.points = append(s.currentPath.points,
 		float32(c1x), float32(c1y),
 		float32(c2x), float32(c2y),
@@ -224,7 +224,7 @@ func (s *Scene) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
 
 // ClosePath closes the current subpath.
 func (s *Scene) ClosePath() {
-	s.currentPath.verbs = append(s.currentPath.verbs, core.VerbClose)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbClose)
 }
 
 // Rectangle adds a rectangle to the current path.
@@ -305,7 +305,7 @@ func (s *Scene) snapshotPath() *pathBuilder {
 	}
 
 	path := &pathBuilder{
-		verbs:  make([]core.PathVerb, len(s.currentPath.verbs)),
+		verbs:  make([]raster.PathVerb, len(s.currentPath.verbs)),
 		points: make([]float32, len(s.currentPath.points)),
 	}
 	copy(path.verbs, s.currentPath.verbs)
@@ -329,12 +329,12 @@ func (s *Scene) drawCommands() []drawCommand {
 	return s.commands
 }
 
-// pathBuilder implements core.PathLike for use with EdgeBuilder.
+// pathBuilder implements raster.PathLike for use with EdgeBuilder.
 func (p *pathBuilder) IsEmpty() bool {
 	return len(p.verbs) == 0
 }
 
-func (p *pathBuilder) Verbs() []core.PathVerb {
+func (p *pathBuilder) Verbs() []raster.PathVerb {
 	return p.verbs
 }
 
@@ -342,5 +342,5 @@ func (p *pathBuilder) Points() []float32 {
 	return p.points
 }
 
-// Ensure pathBuilder implements core.PathLike.
-var _ core.PathLike = (*pathBuilder)(nil)
+// Ensure pathBuilder implements raster.PathLike.
+var _ raster.PathLike = (*pathBuilder)(nil)

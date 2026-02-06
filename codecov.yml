@@ -15,7 +15,6 @@ coverage:
 ignore:
   - "examples/**/*"
   - "cmd/**/*"
-  - "internal/raster/**/*"
 
 # Go-specific parser settings
 parsers:

@@ -9,7 +9,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/gogpu/gg/backend/native"
+	"github.com/gogpu/gg/internal/native"
+	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -21,18 +22,18 @@ import (
 // TestStress100Circles tests rendering 100 circles.
 func TestStress100Circles(t *testing.T) {
 	filler := native.NewAnalyticFiller(800, 600)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Create 100 circles
 	for i := 0; i < 100; i++ {
 		x := float32(50 + (i%10)*75)
 		y := float32(50 + (i/10)*55)
 		path := scene.NewPath().Circle(x, y, 25)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -46,7 +47,7 @@ func TestStress100Circles(t *testing.T) {
 // TestStress1000Edges tests a path with 1000 edges.
 func TestStress1000Edges(t *testing.T) {
 	filler := native.NewAnalyticFiller(1000, 1000)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Create path with 1000 line segments
 	path := scene.NewPath()
@@ -60,14 +61,14 @@ func TestStress1000Edges(t *testing.T) {
 	}
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	if eb.EdgeCount() < 100 {
 		t.Errorf("expected many edges, got %d", eb.EdgeCount())
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -81,7 +82,7 @@ func TestStress1000Edges(t *testing.T) {
 // TestStress100QuadraticCurves tests 100 quadratic Bezier curves.
 func TestStress100QuadraticCurves(t *testing.T) {
 	filler := native.NewAnalyticFiller(800, 600)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(50, 300)
@@ -96,14 +97,14 @@ func TestStress100QuadraticCurves(t *testing.T) {
 	path.LineTo(50, 500)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	if eb.QuadraticEdgeCount() < 50 {
 		t.Logf("Warning: expected many quadratic edges, got %d", eb.QuadraticEdgeCount())
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -114,7 +115,7 @@ func TestStress100QuadraticCurves(t *testing.T) {
 // TestStress100CubicCurves tests 100 cubic Bezier curves.
 func TestStress100CubicCurves(t *testing.T) {
 	filler := native.NewAnalyticFiller(1000, 600)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(50, 300)
@@ -131,14 +132,14 @@ func TestStress100CubicCurves(t *testing.T) {
 	path.LineTo(50, 550)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	if eb.CubicEdgeCount() < 50 {
 		t.Logf("Warning: expected many cubic edges, got %d", eb.CubicEdgeCount())
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -149,7 +150,7 @@ func TestStress100CubicCurves(t *testing.T) {
 // TestStress500Curves tests a path with 500 curves (reasonable for CI with race detector).
 func TestStress500Curves(t *testing.T) {
 	filler := native.NewAnalyticFiller(500, 500)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(250, 50)
@@ -180,7 +181,7 @@ func TestStress500Curves(t *testing.T) {
 
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	totalEdges := eb.EdgeCount()
 	if totalEdges < 100 {
@@ -188,7 +189,7 @@ func TestStress500Curves(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -204,14 +205,14 @@ func TestStress500Curves(t *testing.T) {
 // TestStressLargeCanvas tests rendering on a 1080p canvas.
 func TestStressLargeCanvas(t *testing.T) {
 	filler := native.NewAnalyticFiller(1920, 1080)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Large circle
 	path := scene.NewPath().Circle(960, 540, 400)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -225,7 +226,7 @@ func TestStressLargeCanvas(t *testing.T) {
 // TestStressNestedPaths tests deeply nested subpaths.
 func TestStressNestedPaths(t *testing.T) {
 	filler := native.NewAnalyticFiller(500, 500)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Create 50 nested rectangles
 	for i := 0; i < 50; i++ {
@@ -236,7 +237,7 @@ func TestStressNestedPaths(t *testing.T) {
 		path.LineTo(500-offset, 500-offset)
 		path.LineTo(offset, 500-offset)
 		path.Close()
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	if eb.EdgeCount() < 100 {
@@ -244,7 +245,7 @@ func TestStressNestedPaths(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -265,14 +266,14 @@ func TestStressConcurrentFill(t *testing.T) {
 			defer func() { done <- true }()
 
 			// Each goroutine has its own EdgeBuilder and Filler
-			eb := native.NewEdgeBuilder(2)
-			eb.BuildFromScenePath(path, scene.IdentityAffine())
+			eb := raster.NewEdgeBuilder(2)
+			native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 			filler := native.NewAnalyticFiller(200, 200)
 
 			for j := 0; j < 10; j++ {
 				filler.Reset()
-				filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
+				filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 			}
 		}()
 	}
@@ -286,7 +287,7 @@ func TestStressConcurrentFill(t *testing.T) {
 // TestStressResetReuse tests repeated reset and reuse.
 func TestStressResetReuse(t *testing.T) {
 	filler := native.NewAnalyticFiller(500, 500)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	paths := []*scene.Path{
 		scene.NewPath().Circle(250, 250, 100),
@@ -297,9 +298,9 @@ func TestStressResetReuse(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		path := paths[i%len(paths)]
 		eb.Reset()
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 		filler.Reset()
-		filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -316,12 +317,12 @@ func TestMemoryUsageAnalytic(t *testing.T) {
 
 	// Create filler and process path
 	filler := native.NewAnalyticFiller(1920, 1080)
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	path := scene.NewPath().Circle(960, 540, 400)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
-	filler.Fill(eb, native.FillRuleNonZero, func(_ int, _ *native.AlphaRuns) {})
+	filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 
 	runtime.GC()
 	var m2 runtime.MemStats
@@ -342,14 +343,14 @@ func TestMemoryUsageEdgeBuilder(t *testing.T) {
 	var m1 runtime.MemStats
 	runtime.ReadMemStats(&m1)
 
-	eb := native.NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Build 100 circles
 	for i := 0; i < 100; i++ {
 		x := float32(50 + (i%10)*100)
 		y := float32(50 + (i/10)*100)
 		path := scene.NewPath().Circle(x, y, 40)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		native.BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	runtime.GC()
@@ -373,7 +374,7 @@ func TestMemoryUsageAlphaRuns(t *testing.T) {
 	runtime.ReadMemStats(&m1)
 
 	// Create wide alpha runs (4K width)
-	ar := native.NewAlphaRuns(3840)
+	ar := raster.NewAlphaRuns(3840)
 
 	// Simulate heavy usage
 	for i := 0; i < 1000; i++ {
@@ -394,4 +395,59 @@ func TestMemoryUsageAlphaRuns(t *testing.T) {
 	if allocatedKB > 1024 {
 		t.Errorf("unexpected high memory usage for AlphaRuns: %d KB", allocatedKB)
 	}
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+// cosApprox provides a simple cosine approximation for test data generation.
+func cosApprox(angle float64) float64 {
+	// Taylor series approximation: cos(x) ~ 1 - x^2/2 + x^4/24
+	x := angle
+	for x > 3.14159265358979 {
+		x -= 6.28318530717959
+	}
+	for x < -3.14159265358979 {
+		x += 6.28318530717959
+	}
+	x2 := x * x
+	return 1 - x2/2 + x2*x2/24
+}
+
+// sinApprox provides a simple sine approximation for test data generation.
+func sinApprox(angle float64) float64 {
+	// Taylor series approximation: sin(x) ~ x - x^3/6 + x^5/120
+	x := angle
+	for x > 3.14159265358979 {
+		x -= 6.28318530717959
+	}
+	for x < -3.14159265358979 {
+		x += 6.28318530717959
+	}
+	x2 := x * x
+	return x * (1 - x2/6 + x2*x2/120)
+}
+
+// createRectanglePath creates a rectangle path for testing.
+func createRectanglePath(x1, y1, x2, y2 float32) *scene.Path {
+	path := scene.NewPath()
+	path.MoveTo(x1, y1)
+	path.LineTo(x2, y1)
+	path.LineTo(x2, y2)
+	path.LineTo(x1, y2)
+	path.Close()
+	return path
+}
+
+// createComplexCurvesPath creates a path with mixed curves for testing.
+func createComplexCurvesPath() *scene.Path {
+	path := scene.NewPath()
+	path.MoveTo(50, 250)
+	path.QuadTo(150, 100, 250, 250)
+	path.CubicTo(300, 350, 400, 150, 450, 250)
+	path.LineTo(450, 400)
+	path.LineTo(50, 400)
+	path.Close()
+	return path
 }
