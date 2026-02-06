@@ -5,7 +5,7 @@ package native
 
 import (
 	"fmt"
-	"github.com/gogpu/gg/raster"
+	"github.com/gogpu/gg/internal/raster"
 	"image"
 	"image/color"
 	"image/png"

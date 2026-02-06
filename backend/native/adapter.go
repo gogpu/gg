@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/gogpu/gg/gpucore"
+	"github.com/gogpu/gg/internal/gpucore"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 )

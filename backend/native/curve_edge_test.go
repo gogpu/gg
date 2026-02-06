@@ -4,7 +4,7 @@
 package native
 
 import (
-	"github.com/gogpu/gg/raster"
+	"github.com/gogpu/gg/internal/raster"
 	"testing"
 )
 

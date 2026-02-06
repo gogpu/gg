@@ -6,7 +6,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/backend/native"
-	"github.com/gogpu/gg/raster"
+	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )
 

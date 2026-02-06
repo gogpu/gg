@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"github.com/gogpu/gg/raster"
+	"github.com/gogpu/gg/internal/raster"
 	"testing"
 
 	"github.com/gogpu/gg/scene"

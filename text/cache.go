@@ -4,7 +4,7 @@ import "sync"
 
 // Cache is a generic thread-safe LRU cache with soft limit.
 //
-// Deprecated: For new code, use github.com/gogpu/gg/cache.Cache or
+// Deprecated: For new code, use github.com/gogpu/gg/internal/cache.Cache or
 // cache.ShardedCache which offer better performance and more features.
 // When the cache exceeds softLimit, oldest entries are evicted.
 //

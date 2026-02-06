@@ -7,7 +7,7 @@ import (
 	"errors"
 	"image/color"
 
-	"github.com/gogpu/gg/raster"
+	"github.com/gogpu/gg/internal/raster"
 )
 
 // SoftwareRenderer is a CPU-based renderer using the core/ package algorithms.

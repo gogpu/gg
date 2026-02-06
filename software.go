@@ -3,8 +3,8 @@ package gg
 import (
 	"math"
 
+	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/internal/stroke"
-	"github.com/gogpu/gg/raster"
 )
 
 // SoftwareRenderer is a CPU-based scanline rasterizer using analytic anti-aliasing.
