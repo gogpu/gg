@@ -1,7 +1,7 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-package core
+package raster
 
 // ScenePathAdapter adapts a scene-like path to the core.PathLike interface.
 // This allows EdgeBuilder to work with any path implementation without

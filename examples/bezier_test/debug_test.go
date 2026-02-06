@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/backend/native"
+	"github.com/gogpu/gg/raster"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -48,8 +49,8 @@ func TestAnalyticFillerDebug(t *testing.T) {
 	fmt.Printf("\nScene path verbs: %d, points: %d\n", len(scenePath.Verbs()), len(scenePath.Points()))
 
 	// Build edges
-	eb := native.NewEdgeBuilder(2)
-	eb.BuildFromScenePath(scenePath, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	native.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
 
 	fmt.Printf("\nEdgeBuilder stats:\n")
 	fmt.Printf("  IsEmpty: %v\n", eb.IsEmpty())
@@ -86,7 +87,7 @@ func TestAnalyticFillerDebug(t *testing.T) {
 	scanlineCount := 0
 	pixelCount := 0
 
-	filler.Fill(eb, native.FillRuleNonZero, func(y int, runs *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlineCount++
 		linePixels := 0
 		for x, alpha := range runs.Iter() {

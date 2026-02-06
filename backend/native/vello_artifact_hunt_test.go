@@ -5,6 +5,7 @@ package native
 
 import (
 	"fmt"
+	"github.com/gogpu/gg/raster"
 	"image"
 	"image/color"
 	"image/png"
@@ -24,7 +25,7 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 	radius := float32(80)
 	const k = 0.5522847498
 
-	buildCircle := func(eb *EdgeBuilder) {
+	buildCircle := func(eb *raster.EdgeBuilder) {
 		path := scene.NewPath()
 		path.MoveTo(cx+radius, cy)
 		path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
@@ -33,15 +34,15 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 		path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 		path.Close()
 		eb.SetFlattenCurves(true)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	// Render with AnalyticFiller (reference)
 	analyticAlpha := make(map[[2]int]uint8)
 	af := NewAnalyticFiller(width, height)
-	eb1 := NewEdgeBuilder(2)
+	eb1 := raster.NewEdgeBuilder(2)
 	buildCircle(eb1)
-	af.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb1, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
 				analyticAlpha[[2]int{x, y}] = alpha
@@ -52,9 +53,9 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 	// Render with Vello
 	velloAlpha := make(map[[2]int]uint8)
 	tr := NewTileRasterizer(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	buildCircle(eb2)
-	tr.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
 				velloAlpha[[2]int{x, y}] = alpha
@@ -64,7 +65,7 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 
 	// Get tile data
 	tr2 := NewTileRasterizer(width, height)
-	eb3 := NewEdgeBuilder(2)
+	eb3 := raster.NewEdgeBuilder(2)
 	buildCircle(eb3)
 	tr2.binSegments(eb3, 4.0)
 	tr2.computeBackdropPrefixSum() // Must match Fill() order!
@@ -249,7 +250,7 @@ func TestHuntArtifactPixels(t *testing.T) {
 	radius := float32(80)
 	const k = 0.5522847498
 
-	buildCircle := func(eb *EdgeBuilder) {
+	buildCircle := func(eb *raster.EdgeBuilder) {
 		path := scene.NewPath()
 		path.MoveTo(cx+radius, cy)
 		path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
@@ -258,15 +259,15 @@ func TestHuntArtifactPixels(t *testing.T) {
 		path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 		path.Close()
 		eb.SetFlattenCurves(true)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	// Render with AnalyticFiller (reference)
 	analyticAlpha := make(map[[2]int]uint8)
 	af := NewAnalyticFiller(width, height)
-	eb1 := NewEdgeBuilder(2)
+	eb1 := raster.NewEdgeBuilder(2)
 	buildCircle(eb1)
-	af.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb1, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
 				analyticAlpha[[2]int{x, y}] = alpha
@@ -277,9 +278,9 @@ func TestHuntArtifactPixels(t *testing.T) {
 	// Render with Vello
 	velloAlpha := make(map[[2]int]uint8)
 	tr := NewTileRasterizer(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	buildCircle(eb2)
-	tr.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 {
 				velloAlpha[[2]int{x, y}] = alpha
@@ -367,7 +368,7 @@ func TestHuntArtifactPixels(t *testing.T) {
 
 	// Re-bin segments to get tile data
 	tr2 := NewTileRasterizer(width, height)
-	eb3 := NewEdgeBuilder(2)
+	eb3 := raster.NewEdgeBuilder(2)
 	buildCircle(eb3)
 	tr2.binSegments(eb3, 4.0)
 

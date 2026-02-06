@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"math"
 	"testing"
 
@@ -14,45 +15,45 @@ import (
 func TestChopQuadAtYExtrema(t *testing.T) {
 	tests := []struct {
 		name      string
-		src       [3]GeomPoint
+		src       [3]raster.GeomPoint
 		wantChops int
 		checkMono bool // Whether to verify monotonicity
 	}{
 		{
 			name:      "already monotonic (going down)",
-			src:       [3]GeomPoint{{0, 0}, {50, 50}, {100, 100}},
+			src:       [3]raster.GeomPoint{{X: 0, Y: 0}, {X: 50, Y: 50}, {X: 100, Y: 100}},
 			wantChops: 0,
 			checkMono: true,
 		},
 		{
 			name:      "already monotonic (going up)",
-			src:       [3]GeomPoint{{0, 100}, {50, 50}, {100, 0}},
+			src:       [3]raster.GeomPoint{{X: 0, Y: 100}, {X: 50, Y: 50}, {X: 100, Y: 0}},
 			wantChops: 0,
 			checkMono: true,
 		},
 		{
 			name: "has Y extremum (arch up)",
-			src:  [3]GeomPoint{{0, 0}, {50, 100}, {100, 0}},
+			src:  [3]raster.GeomPoint{{X: 0, Y: 0}, {X: 50, Y: 100}, {X: 100, Y: 0}},
 			// Control point above both endpoints - has maximum
 			wantChops: 1,
 			checkMono: true,
 		},
 		{
 			name: "has Y extremum (arch down)",
-			src:  [3]GeomPoint{{0, 100}, {50, 0}, {100, 100}},
+			src:  [3]raster.GeomPoint{{X: 0, Y: 100}, {X: 50, Y: 0}, {X: 100, Y: 100}},
 			// Control point below both endpoints - has minimum
 			wantChops: 1,
 			checkMono: true,
 		},
 		{
 			name:      "horizontal line",
-			src:       [3]GeomPoint{{0, 50}, {50, 50}, {100, 50}},
+			src:       [3]raster.GeomPoint{{X: 0, Y: 50}, {X: 50, Y: 50}, {X: 100, Y: 50}},
 			wantChops: 0,
 			checkMono: false, // Horizontal curves are degenerate, skip monotonicity check
 		},
 		{
 			name:      "small deviation",
-			src:       [3]GeomPoint{{0, 0}, {50, 51}, {100, 100}},
+			src:       [3]raster.GeomPoint{{X: 0, Y: 0}, {X: 50, Y: 51}, {X: 100, Y: 100}},
 			wantChops: 0, // Nearly straight, should be monotonic
 			checkMono: true,
 		},
@@ -60,11 +61,11 @@ func TestChopQuadAtYExtrema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var dst [5]GeomPoint
-			numChops := ChopQuadAtYExtrema(tt.src, &dst)
+			var dst [5]raster.GeomPoint
+			numChops := raster.ChopQuadAtYExtrema(tt.src, &dst)
 
 			if numChops != tt.wantChops {
-				t.Errorf("ChopQuadAtYExtrema() = %d chops, want %d", numChops, tt.wantChops)
+				t.Errorf("raster.ChopQuadAtYExtrema() = %d chops, want %d", numChops, tt.wantChops)
 			}
 
 			if tt.checkMono {
@@ -74,7 +75,7 @@ func TestChopQuadAtYExtrema(t *testing.T) {
 					p1 := dst[i*2+1]
 					p2 := dst[i*2+2]
 
-					if !QuadIsYMonotonic(p0, p1, p2) {
+					if !raster.QuadIsYMonotonic(p0, p1, p2) {
 						t.Errorf("segment %d is not Y-monotonic: %v, %v, %v",
 							i, p0, p1, p2)
 					}
@@ -97,37 +98,37 @@ func TestChopQuadAtYExtrema(t *testing.T) {
 func TestChopCubicAtYExtrema(t *testing.T) {
 	tests := []struct {
 		name      string
-		src       [4]GeomPoint
+		src       [4]raster.GeomPoint
 		wantChops int
 		checkMono bool
 	}{
 		{
 			name:      "already monotonic (straight down)",
-			src:       [4]GeomPoint{{0, 0}, {33, 33}, {66, 66}, {100, 100}},
+			src:       [4]raster.GeomPoint{{X: 0, Y: 0}, {X: 33, Y: 33}, {X: 66, Y: 66}, {X: 100, Y: 100}},
 			wantChops: 0,
 			checkMono: true,
 		},
 		{
 			name:      "S-curve (two extrema)",
-			src:       [4]GeomPoint{{0, 50}, {100, 0}, {0, 100}, {100, 50}},
+			src:       [4]raster.GeomPoint{{X: 0, Y: 50}, {X: 100, Y: 0}, {X: 0, Y: 100}, {X: 100, Y: 50}},
 			wantChops: 2,
 			checkMono: true,
 		},
 		{
 			name:      "one extremum (arch)",
-			src:       [4]GeomPoint{{0, 0}, {50, 100}, {50, 100}, {100, 0}},
+			src:       [4]raster.GeomPoint{{X: 0, Y: 0}, {X: 50, Y: 100}, {X: 50, Y: 100}, {X: 100, Y: 0}},
 			wantChops: 1,
 			checkMono: true,
 		},
 		{
 			name:      "horizontal cubic",
-			src:       [4]GeomPoint{{0, 50}, {33, 50}, {66, 50}, {100, 50}},
+			src:       [4]raster.GeomPoint{{X: 0, Y: 50}, {X: 33, Y: 50}, {X: 66, Y: 50}, {X: 100, Y: 50}},
 			wantChops: 0,
 			checkMono: true,
 		},
 		{
 			name:      "real world curve (smooth)",
-			src:       [4]GeomPoint{{10, 20}, {67, 437}, {298, 213}, {401, 214}},
+			src:       [4]raster.GeomPoint{{X: 10, Y: 20}, {X: 67, Y: 437}, {X: 298, Y: 213}, {X: 401, Y: 214}},
 			wantChops: 2, // Has two Y extrema
 			checkMono: true,
 		},
@@ -135,11 +136,11 @@ func TestChopCubicAtYExtrema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var dst [10]GeomPoint
-			numChops := ChopCubicAtYExtrema(tt.src, &dst)
+			var dst [10]raster.GeomPoint
+			numChops := raster.ChopCubicAtYExtrema(tt.src, &dst)
 
 			if numChops != tt.wantChops {
-				t.Errorf("ChopCubicAtYExtrema() = %d chops, want %d", numChops, tt.wantChops)
+				t.Errorf("raster.ChopCubicAtYExtrema() = %d chops, want %d", numChops, tt.wantChops)
 			}
 
 			if tt.checkMono {
@@ -150,7 +151,7 @@ func TestChopCubicAtYExtrema(t *testing.T) {
 					p2 := dst[i*3+2]
 					p3 := dst[i*3+3]
 
-					if !CubicIsYMonotonic(p0, p1, p2, p3) {
+					if !raster.CubicIsYMonotonic(p0, p1, p2, p3) {
 						t.Errorf("segment %d is not Y-monotonic: %v, %v, %v, %v",
 							i, p0, p1, p2, p3)
 					}
@@ -163,99 +164,10 @@ func TestChopCubicAtYExtrema(t *testing.T) {
 	}
 }
 
-// TestIsNotMonotonic tests the monotonicity check.
-func TestIsNotMonotonic(t *testing.T) {
-	tests := []struct {
-		name    string
-		a, b, c float32
-		wantNot bool
-	}{
-		{"increasing", 0, 50, 100, false},
-		{"decreasing", 100, 50, 0, false},
-		{"constant", 50, 50, 50, true}, // ab==0 triggers not-monotonic
-		{"peak", 0, 100, 0, true},
-		{"valley", 100, 0, 100, true},
-		{"flat start", 0, 0, 100, true}, // ab==0
-		{"flat end", 0, 100, 100, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isNotMonotonic(tt.a, tt.b, tt.c)
-			if got != tt.wantNot {
-				t.Errorf("isNotMonotonic(%v, %v, %v) = %v, want %v",
-					tt.a, tt.b, tt.c, got, tt.wantNot)
-			}
-		})
-	}
-}
-
-// TestValidUnitDivide tests the unit divide function.
-func TestValidUnitDivide(t *testing.T) {
-	tests := []struct {
-		name   string
-		numer  float32
-		denom  float32
-		wantGT float32 // Want result > this
-		wantLT float32 // Want result < this
-		wantOK bool    // Whether we expect a valid result
-	}{
-		{"half", 1, 2, 0, 1, true},              // 0.5
-		{"third", 1, 3, 0, 1, true},             // 0.333...
-		{"zero denom", 1, 0, 0, 0, false},       // Division by zero
-		{"negative result", -1, 2, 0, 0, false}, // -0.5, outside (0,1)
-		{"greater than one", 3, 2, 0, 0, false}, // 1.5, outside (0,1)
-		{"exactly zero", 0, 2, 0, 0, false},     // 0, not in (0,1)
-		{"exactly one", 2, 2, 0, 0, false},      // 1, not in (0,1)
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := validUnitDivide(tt.numer, tt.denom)
-
-			if tt.wantOK {
-				if got <= tt.wantGT || got >= tt.wantLT {
-					t.Errorf("validUnitDivide(%v, %v) = %v, want in (%v, %v)",
-						tt.numer, tt.denom, got, tt.wantGT, tt.wantLT)
-				}
-			} else {
-				if got != 0 {
-					t.Errorf("validUnitDivide(%v, %v) = %v, want 0 (invalid)",
-						tt.numer, tt.denom, got)
-				}
-			}
-		})
-	}
-}
-
-// TestFindUnitQuadRoots tests quadratic root finding in (0,1).
-func TestFindUnitQuadRoots(t *testing.T) {
-	tests := []struct {
-		name      string
-		a, b, c   float32
-		wantCount int
-	}{
-		{"no roots (positive discriminant, outside)", 1, -3, 3, 0},
-		{"one root at 0.5", 1, -1, 0.25, 0}, // (t-0.5)^2 but double root
-		{"two roots", 1, -1.5, 0.5, 2},      // Roots at ~0.5 and ~1.0 (one valid)
-		{"no real roots", 1, 0, 1, 0},       // t^2 + 1 = 0
-		{"linear (a=0)", 0, 2, -1, 1},       // t = 0.5
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			roots := findUnitQuadRoots(tt.a, tt.b, tt.c)
-			// Just verify we get expected number of roots
-			// Exact values depend on numerical precision
-			t.Logf("findUnitQuadRoots(%v, %v, %v) = %v", tt.a, tt.b, tt.c, roots)
-		})
-	}
-}
-
 // TestEdgeBuilderBasic tests basic EdgeBuilder functionality.
 func TestEdgeBuilderBasic(t *testing.T) {
 	t.Run("new builder is empty", func(t *testing.T) {
-		eb := NewEdgeBuilder(0)
+		eb := raster.NewEdgeBuilder(0)
 		if !eb.IsEmpty() {
 			t.Error("new builder should be empty")
 		}
@@ -265,14 +177,14 @@ func TestEdgeBuilderBasic(t *testing.T) {
 	})
 
 	t.Run("reset clears edges", func(t *testing.T) {
-		eb := NewEdgeBuilder(0)
+		eb := raster.NewEdgeBuilder(0)
 
 		// Add some edges
 		path := scene.NewPath().
 			MoveTo(0, 0).
 			LineTo(100, 100).
 			Close()
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 		if eb.IsEmpty() {
 			t.Fatal("builder should not be empty after adding path")
@@ -288,7 +200,7 @@ func TestEdgeBuilderBasic(t *testing.T) {
 
 // TestEdgeBuilderLinePath tests building edges from a line-only path.
 func TestEdgeBuilderLinePath(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Simple triangle
 	path := scene.NewPath().
@@ -297,7 +209,7 @@ func TestEdgeBuilderLinePath(t *testing.T) {
 		LineTo(0, 100).
 		Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Should have at least 2 line edges (horizontal may be skipped, vertical may combine)
 	// The exact count depends on edge optimization (combining vertical edges)
@@ -324,7 +236,7 @@ func TestEdgeBuilderLinePath(t *testing.T) {
 
 // TestEdgeBuilderQuadPath tests building edges from a quadratic path.
 func TestEdgeBuilderQuadPath(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Path with quadratic curve that goes up then back down (arch)
 	// Start at (0,0), control at (50,100), end at (100,0)
@@ -335,7 +247,7 @@ func TestEdgeBuilderQuadPath(t *testing.T) {
 		QuadTo(50, 100, 100, 0).
 		Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// The quadratic has a Y extremum, so it should be chopped into 2 monotonic pieces
 	if eb.QuadraticEdgeCount() < 1 {
@@ -351,7 +263,7 @@ func TestEdgeBuilderQuadPath(t *testing.T) {
 
 // TestEdgeBuilderCubicPath tests building edges from a cubic path.
 func TestEdgeBuilderCubicPath(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// S-curve (has 2 Y extrema)
 	path := scene.NewPath().
@@ -359,7 +271,7 @@ func TestEdgeBuilderCubicPath(t *testing.T) {
 		CubicTo(100, 0, 0, 100, 100, 50).
 		Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// S-curve should produce multiple cubic edges
 	if eb.CubicEdgeCount() < 1 {
@@ -381,9 +293,9 @@ func TestEdgeBuilderTransform(t *testing.T) {
 		Close()
 
 	// Build with translation transform
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 	transform := scene.TranslateAffine(100, 200)
-	eb.BuildFromScenePath(path, transform)
+	BuildEdgesFromScenePath(eb, path, transform)
 
 	// Bounds should be translated
 	bounds := eb.Bounds()
@@ -395,7 +307,7 @@ func TestEdgeBuilderTransform(t *testing.T) {
 
 // TestEdgeBuilderAllEdgesOrder tests that AllEdges returns edges sorted by Y.
 func TestEdgeBuilderAllEdgesOrder(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Create path with edges at different Y levels
 	// Add lines in reverse Y order to test sorting
@@ -404,7 +316,7 @@ func TestEdgeBuilderAllEdgesOrder(t *testing.T) {
 		MoveTo(0, 40).LineTo(10, 60).  // Starts at Y=40
 		MoveTo(0, 0).LineTo(10, 20)    // Starts at Y=0
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Collect Y values from iterator
 	var topYs []int32
@@ -428,12 +340,12 @@ func TestEdgeBuilderAllEdgesOrder(t *testing.T) {
 
 // TestEdgeBuilderCircle tests building edges from a circle.
 func TestEdgeBuilderCircle(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Circle - 4 cubic curves
 	path := scene.NewPath().Circle(100, 100, 50)
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Circle uses cubics for arcs
 	if eb.CubicEdgeCount() < 4 {
@@ -454,12 +366,12 @@ func TestEdgeBuilderWithAA(t *testing.T) {
 		Close()
 
 	// Without AA
-	eb0 := NewEdgeBuilder(0)
-	eb0.BuildFromScenePath(path, scene.IdentityAffine())
+	eb0 := raster.NewEdgeBuilder(0)
+	BuildEdgesFromScenePath(eb0, path, scene.IdentityAffine())
 
 	// With 4x AA (shift=2)
-	eb2 := NewEdgeBuilder(2)
-	eb2.BuildFromScenePath(path, scene.IdentityAffine())
+	eb2 := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb2, path, scene.IdentityAffine())
 
 	if eb0.AAShift() != 0 {
 		t.Errorf("AAShift() = %d, want 0", eb0.AAShift())
@@ -478,7 +390,7 @@ func TestEdgeBuilderWithAA(t *testing.T) {
 
 // TestEdgeBuilderIterators tests the type-specific iterators.
 func TestEdgeBuilderIterators(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Mixed path
 	path := scene.NewPath().
@@ -488,7 +400,7 @@ func TestEdgeBuilderIterators(t *testing.T) {
 		CubicTo(100, 75, 50, 100, 50, 75).
 		Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Count edges via iterators
 	lineCount := 0
@@ -526,14 +438,14 @@ func TestEdgeBuilderIterators(t *testing.T) {
 
 // TestEdgeBuilderHorizontalLine tests that horizontal lines are skipped.
 func TestEdgeBuilderHorizontalLine(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Purely horizontal line
 	path := scene.NewPath().
 		MoveTo(0, 50).
 		LineTo(100, 50)
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Horizontal lines have no Y extent - should be skipped
 	if eb.LineEdgeCount() != 0 {
@@ -544,7 +456,7 @@ func TestEdgeBuilderHorizontalLine(t *testing.T) {
 
 // TestEdgeBuilderVerticalCombine tests vertical edge combining.
 func TestEdgeBuilderVerticalCombine(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Two adjacent vertical lines (should combine)
 	path := scene.NewPath().
@@ -553,7 +465,7 @@ func TestEdgeBuilderVerticalCombine(t *testing.T) {
 		MoveTo(50, 50).
 		LineTo(50, 100)
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// May be combined into one edge
 	// (Depends on implementation details)
@@ -564,20 +476,20 @@ func TestEdgeBuilderVerticalCombine(t *testing.T) {
 func TestQuadIsYMonotonic(t *testing.T) {
 	tests := []struct {
 		name       string
-		p0, p1, p2 GeomPoint
+		p0, p1, p2 raster.GeomPoint
 		want       bool
 	}{
-		{"going down", GeomPoint{0, 0}, GeomPoint{50, 50}, GeomPoint{100, 100}, true},
-		{"going up", GeomPoint{0, 100}, GeomPoint{50, 50}, GeomPoint{100, 0}, true},
-		{"arch", GeomPoint{0, 0}, GeomPoint{50, 100}, GeomPoint{100, 0}, false},
-		{"valley", GeomPoint{0, 100}, GeomPoint{50, 0}, GeomPoint{100, 100}, false},
+		{"going down", raster.GeomPoint{X: 0, Y: 0}, raster.GeomPoint{X: 50, Y: 50}, raster.GeomPoint{X: 100, Y: 100}, true},
+		{"going up", raster.GeomPoint{X: 0, Y: 100}, raster.GeomPoint{X: 50, Y: 50}, raster.GeomPoint{X: 100, Y: 0}, true},
+		{"arch", raster.GeomPoint{X: 0, Y: 0}, raster.GeomPoint{X: 50, Y: 100}, raster.GeomPoint{X: 100, Y: 0}, false},
+		{"valley", raster.GeomPoint{X: 0, Y: 100}, raster.GeomPoint{X: 50, Y: 0}, raster.GeomPoint{X: 100, Y: 100}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := QuadIsYMonotonic(tt.p0, tt.p1, tt.p2)
+			got := raster.QuadIsYMonotonic(tt.p0, tt.p1, tt.p2)
 			if got != tt.want {
-				t.Errorf("QuadIsYMonotonic() = %v, want %v", got, tt.want)
+				t.Errorf("raster.QuadIsYMonotonic() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -587,26 +499,26 @@ func TestQuadIsYMonotonic(t *testing.T) {
 func TestCubicIsYMonotonic(t *testing.T) {
 	tests := []struct {
 		name           string
-		p0, p1, p2, p3 GeomPoint
+		p0, p1, p2, p3 raster.GeomPoint
 		want           bool
 	}{
 		{
 			"straight down",
-			GeomPoint{0, 0}, GeomPoint{33, 33}, GeomPoint{66, 66}, GeomPoint{100, 100},
+			raster.GeomPoint{X: 0, Y: 0}, raster.GeomPoint{X: 33, Y: 33}, raster.GeomPoint{X: 66, Y: 66}, raster.GeomPoint{X: 100, Y: 100},
 			true,
 		},
 		{
 			"S-curve",
-			GeomPoint{0, 50}, GeomPoint{100, 0}, GeomPoint{0, 100}, GeomPoint{100, 50},
+			raster.GeomPoint{X: 0, Y: 50}, raster.GeomPoint{X: 100, Y: 0}, raster.GeomPoint{X: 0, Y: 100}, raster.GeomPoint{X: 100, Y: 50},
 			false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CubicIsYMonotonic(tt.p0, tt.p1, tt.p2, tt.p3)
+			got := raster.CubicIsYMonotonic(tt.p0, tt.p1, tt.p2, tt.p3)
 			if got != tt.want {
-				t.Errorf("CubicIsYMonotonic() = %v, want %v", got, tt.want)
+				t.Errorf("raster.CubicIsYMonotonic() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -622,13 +534,13 @@ func BenchmarkEdgeBuilderTriangle(b *testing.B) {
 		LineTo(0, 100).
 		Close()
 
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 	transform := scene.IdentityAffine()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eb.Reset()
-		eb.BuildFromScenePath(path, transform)
+		BuildEdgesFromScenePath(eb, path, transform)
 	}
 }
 
@@ -636,13 +548,13 @@ func BenchmarkEdgeBuilderTriangle(b *testing.B) {
 func BenchmarkEdgeBuilderCircle(b *testing.B) {
 	path := scene.NewPath().Circle(100, 100, 50)
 
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 	transform := scene.IdentityAffine()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eb.Reset()
-		eb.BuildFromScenePath(path, transform)
+		BuildEdgesFromScenePath(eb, path, transform)
 	}
 }
 
@@ -650,35 +562,35 @@ func BenchmarkEdgeBuilderCircle(b *testing.B) {
 func BenchmarkEdgeBuilderRoundedRect(b *testing.B) {
 	path := scene.NewPath().RoundedRectangle(0, 0, 200, 100, 10)
 
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 	transform := scene.IdentityAffine()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eb.Reset()
-		eb.BuildFromScenePath(path, transform)
+		BuildEdgesFromScenePath(eb, path, transform)
 	}
 }
 
 // BenchmarkChopQuadAtYExtrema benchmarks quadratic chopping.
 func BenchmarkChopQuadAtYExtrema(b *testing.B) {
-	src := [3]GeomPoint{{0, 0}, {50, 100}, {100, 0}}
-	var dst [5]GeomPoint
+	src := [3]raster.GeomPoint{{X: 0, Y: 0}, {X: 50, Y: 100}, {X: 100, Y: 0}}
+	var dst [5]raster.GeomPoint
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ChopQuadAtYExtrema(src, &dst)
+		raster.ChopQuadAtYExtrema(src, &dst)
 	}
 }
 
 // BenchmarkChopCubicAtYExtrema benchmarks cubic chopping.
 func BenchmarkChopCubicAtYExtrema(b *testing.B) {
-	src := [4]GeomPoint{{0, 50}, {100, 0}, {0, 100}, {100, 50}}
-	var dst [10]GeomPoint
+	src := [4]raster.GeomPoint{{X: 0, Y: 50}, {X: 100, Y: 0}, {X: 0, Y: 100}, {X: 100, Y: 50}}
+	var dst [10]raster.GeomPoint
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ChopCubicAtYExtrema(src, &dst)
+		raster.ChopCubicAtYExtrema(src, &dst)
 	}
 }
 
@@ -688,8 +600,8 @@ func BenchmarkAllEdgesIterator(b *testing.B) {
 		Circle(100, 100, 50).
 		RoundedRectangle(0, 0, 200, 200, 20)
 
-	eb := NewEdgeBuilder(0)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(0)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

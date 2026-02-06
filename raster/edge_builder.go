@@ -1,15 +1,80 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-package native
+package raster
 
 import (
 	"iter"
 	"math"
 	"slices"
-
-	"github.com/gogpu/gg/scene"
 )
+
+// PathVerb represents a path construction command.
+// Mirrors scene.PathVerb for core package independence.
+type PathVerb uint8
+
+// Path verb constants.
+const (
+	// VerbMoveTo moves the current point without drawing.
+	VerbMoveTo PathVerb = iota
+	// VerbLineTo draws a line to the specified point.
+	VerbLineTo
+	// VerbQuadTo draws a quadratic Bezier curve.
+	VerbQuadTo
+	// VerbCubicTo draws a cubic Bezier curve.
+	VerbCubicTo
+	// VerbClose closes the current subpath.
+	VerbClose
+)
+
+// PathLike is the interface for path-like objects that can be processed by EdgeBuilder.
+// This allows core package to work with any path implementation without importing scene.
+type PathLike interface {
+	// IsEmpty returns true if the path has no commands.
+	IsEmpty() bool
+
+	// Verbs returns the verb stream.
+	Verbs() []PathVerb
+
+	// Points returns the point data stream (pairs of float32 x,y coordinates).
+	Points() []float32
+}
+
+// Transform is the interface for affine transformations.
+// This allows core package to work with any transform implementation.
+type Transform interface {
+	// TransformPoint transforms a point (x, y) and returns the result.
+	TransformPoint(x, y float32) (float32, float32)
+}
+
+// IdentityTransform is a no-op transform that returns points unchanged.
+type IdentityTransform struct{}
+
+// TransformPoint returns the point unchanged.
+func (IdentityTransform) TransformPoint(x, y float32) (float32, float32) {
+	return x, y
+}
+
+// Rect represents a bounding rectangle.
+type Rect struct {
+	MinX, MinY float32
+	MaxX, MaxY float32
+}
+
+// EmptyRect returns an empty rectangle (inverted bounds for union operations).
+func EmptyRect() Rect {
+	return Rect{
+		MinX: math.MaxFloat32,
+		MinY: math.MaxFloat32,
+		MaxX: -math.MaxFloat32,
+		MaxY: -math.MaxFloat32,
+	}
+}
+
+// IsEmpty returns true if the rectangle has no area.
+func (r Rect) IsEmpty() bool {
+	return r.MinX >= r.MaxX || r.MinY >= r.MaxY
+}
 
 // EdgeBuilder converts paths to typed edges for analytic anti-aliasing.
 //
@@ -26,7 +91,7 @@ import (
 //
 //	eb := NewEdgeBuilder(2) // 4x AA quality
 //	eb.SetFlattenCurves(true) // Flatten curves to lines
-//	eb.BuildFromScenePath(path, scene.IdentityAffine())
+//	eb.BuildFromPath(path, IdentityTransform{})
 //
 //	for edge := range eb.AllEdges() {
 //	    // Process edges sorted by top Y
@@ -50,19 +115,19 @@ type EdgeBuilder struct {
 	bounds edgeBounds
 }
 
-// edgeBounds tracks the bounding rectangle during edge building.
-type edgeBounds struct {
-	minX, minY float32
-	maxX, maxY float32
-	empty      bool
-}
-
 // VelloLine stores a line segment with original float32 coordinates.
 // Used by Vello tile rasterizer to avoid fixed-point quantization loss.
 type VelloLine struct {
 	P0     [2]float32 // Start point (pixel coords, normalized: P0.y <= P1.y)
 	P1     [2]float32 // End point (pixel coords)
 	IsDown bool       // true if original direction was downward (y0 < y1)
+}
+
+// edgeBounds tracks the bounding rectangle during edge building.
+type edgeBounds struct {
+	minX, minY float32
+	maxX, maxY float32
+	empty      bool
 }
 
 // newEmptyBounds returns an empty bounds (ready for union operations).
@@ -125,7 +190,7 @@ func (eb *EdgeBuilder) Reset() {
 	eb.bounds = newEmptyBounds()
 }
 
-// BuildFromScenePath processes a scene.Path and creates typed edges.
+// BuildFromPath processes a PathLike and creates typed edges.
 //
 // This is the main entry point for path processing. It:
 //  1. Iterates through path verbs
@@ -134,9 +199,9 @@ func (eb *EdgeBuilder) Reset() {
 //  4. Creates appropriate edge types
 //
 // Parameters:
-//   - path: the path to process
-//   - transform: affine transformation to apply to all points
-func (eb *EdgeBuilder) BuildFromScenePath(path *scene.Path, transform scene.Affine) {
+//   - path: the path to process (implements PathLike interface)
+//   - transform: transformation to apply to all points
+func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 	if path == nil || path.IsEmpty() {
 		return
 	}
@@ -151,7 +216,7 @@ func (eb *EdgeBuilder) BuildFromScenePath(path *scene.Path, transform scene.Affi
 
 	for _, verb := range verbs {
 		switch verb {
-		case scene.VerbMoveTo:
+		case VerbMoveTo:
 			// Close previous subpath if not at start
 			if curX != startX || curY != startY {
 				eb.addLine(curX, curY, startX, startY)
@@ -163,14 +228,14 @@ func (eb *EdgeBuilder) BuildFromScenePath(path *scene.Path, transform scene.Affi
 			startX, startY = curX, curY
 			pointIdx += 2
 
-		case scene.VerbLineTo:
+		case VerbLineTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			nextX, nextY := transform.TransformPoint(x, y)
 			eb.addLine(curX, curY, nextX, nextY)
 			curX, curY = nextX, nextY
 			pointIdx += 2
 
-		case scene.VerbQuadTo:
+		case VerbQuadTo:
 			// Control point and end point
 			cx, cy := points[pointIdx], points[pointIdx+1]
 			x, y := points[pointIdx+2], points[pointIdx+3]
@@ -183,7 +248,7 @@ func (eb *EdgeBuilder) BuildFromScenePath(path *scene.Path, transform scene.Affi
 			curX, curY = tx, ty
 			pointIdx += 4
 
-		case scene.VerbCubicTo:
+		case VerbCubicTo:
 			// Two control points and end point
 			c1x, c1y := points[pointIdx], points[pointIdx+1]
 			c2x, c2y := points[pointIdx+2], points[pointIdx+3]
@@ -198,7 +263,7 @@ func (eb *EdgeBuilder) BuildFromScenePath(path *scene.Path, transform scene.Affi
 			curX, curY = tx, ty
 			pointIdx += 6
 
-		case scene.VerbClose:
+		case VerbClose:
 			// Close the subpath
 			if curX != startX || curY != startY {
 				eb.addLine(curX, curY, startX, startY)
@@ -421,8 +486,7 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 // flattenCubicToLines converts a cubic bezier to line segments.
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
-	// Flatness tolerance: max deviation from straight line.
-	// Lower values produce more segments but better accuracy at curve extrema.
+	// Flatness tolerance: max deviation from straight line
 	const tolerance = 0.25
 
 	eb.flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
@@ -558,11 +622,11 @@ func combineVertical(edge, last *LineEdge) combineResult {
 }
 
 // Bounds returns the bounding rectangle of all edges.
-func (eb *EdgeBuilder) Bounds() scene.Rect {
+func (eb *EdgeBuilder) Bounds() Rect {
 	if eb.bounds.empty {
-		return scene.EmptyRect()
+		return EmptyRect()
 	}
-	return scene.Rect{
+	return Rect{
 		MinX: eb.bounds.minX,
 		MinY: eb.bounds.minY,
 		MaxX: eb.bounds.maxX,

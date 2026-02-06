@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"image"
 	"image/color"
 	"image/png"
@@ -23,7 +24,7 @@ func TestVelloVisualCircle(t *testing.T) {
 
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
 	// Create a circle at center (100, 100) with radius 80
@@ -63,7 +64,7 @@ func TestVelloVisualCircle(t *testing.T) {
 	)
 
 	path.Close()
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Render using tile rasterizer
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -76,7 +77,7 @@ func TestVelloVisualCircle(t *testing.T) {
 	}
 
 	// Render the circle with proper alpha blending
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -117,7 +118,7 @@ func TestVelloVisualRectangle(t *testing.T) {
 
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
 	// Create a rectangle ALIGNED to tile boundaries (multiples of 16)
@@ -128,7 +129,7 @@ func TestVelloVisualRectangle(t *testing.T) {
 	path.LineTo(160, 160)
 	path.LineTo(32, 160)
 	path.Close()
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Render
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -141,7 +142,7 @@ func TestVelloVisualRectangle(t *testing.T) {
 	}
 
 	// Render the rectangle with proper alpha blending
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -182,7 +183,7 @@ func TestVelloVisualDiagonalLine(t *testing.T) {
 
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
 	// Create a thick diagonal line (as a polygon)
@@ -197,7 +198,7 @@ func TestVelloVisualDiagonalLine(t *testing.T) {
 	path.LineTo(190-thickness, 190)
 	path.LineTo(10, 10+thickness)
 	path.Close()
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Render
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -210,7 +211,7 @@ func TestVelloVisualDiagonalLine(t *testing.T) {
 	}
 
 	// Render the diagonal with proper alpha blending
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -257,7 +258,7 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	radius := float32(80)
 	const k = 0.5522847498
 
-	buildCircle := func(eb *EdgeBuilder) {
+	buildCircle := func(eb *raster.EdgeBuilder) {
 		path := scene.NewPath()
 		path.MoveTo(cx+radius, cy)
 		path.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
@@ -266,7 +267,7 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 		path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 		path.Close()
 		eb.SetFlattenCurves(true)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	// Render with Vello tile rasterizer
@@ -278,9 +279,9 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	}
 
 	tr := NewTileRasterizer(width, height)
-	eb1 := NewEdgeBuilder(2)
+	eb1 := raster.NewEdgeBuilder(2)
 	buildCircle(eb1)
-	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb1, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -303,9 +304,9 @@ func TestVelloCompareWithOriginal(t *testing.T) {
 	}
 
 	af := NewAnalyticFiller(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	buildCircle(eb2)
-	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -365,7 +366,7 @@ func TestVelloCompareSquare(t *testing.T) {
 	width, height := 20, 20
 
 	// Create a square path
-	buildSquare := func(eb *EdgeBuilder) {
+	buildSquare := func(eb *raster.EdgeBuilder) {
 		path := scene.NewPath()
 		path.MoveTo(7, 7)
 		path.LineTo(13, 7)
@@ -373,7 +374,7 @@ func TestVelloCompareSquare(t *testing.T) {
 		path.LineTo(7, 13)
 		path.Close()
 		eb.SetFlattenCurves(true)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	// Render with Vello tile rasterizer
@@ -385,9 +386,9 @@ func TestVelloCompareSquare(t *testing.T) {
 	}
 
 	tr := NewTileRasterizer(width, height)
-	eb1 := NewEdgeBuilder(2)
+	eb1 := raster.NewEdgeBuilder(2)
 	buildSquare(eb1)
-	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb1, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -410,9 +411,9 @@ func TestVelloCompareSquare(t *testing.T) {
 	}
 
 	af := NewAnalyticFiller(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	buildSquare(eb2)
-	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -511,7 +512,7 @@ func TestVelloGoldenComparison(t *testing.T) {
 func TestVelloSmokeSquare(t *testing.T) {
 	width, height := 20, 20
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
 	// Rect from center (10,10) size (6,6) = corners at (7,7) to (13,13)
@@ -521,7 +522,7 @@ func TestVelloSmokeSquare(t *testing.T) {
 	path.LineTo(13, 13)
 	path.LineTo(7, 13)
 	path.Close()
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	// White background
@@ -532,7 +533,7 @@ func TestVelloSmokeSquare(t *testing.T) {
 	}
 
 	// Blue fill (matching Vello's palette::css::BLUE = #0000FF)
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				// Alpha blend blue with white background
@@ -555,7 +556,7 @@ func TestVelloSmokeSquare(t *testing.T) {
 func TestVelloSmokeCircle(t *testing.T) {
 	width, height := 20, 20
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	eb.SetFlattenCurves(true)
 
 	// Circle at (10, 10) radius 7
@@ -570,7 +571,7 @@ func TestVelloSmokeCircle(t *testing.T) {
 	path.CubicTo(cx-radius, cy+radius*k, cx-radius*k, cy+radius, cx, cy+radius)
 	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path.Close()
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	// White background
@@ -581,7 +582,7 @@ func TestVelloSmokeCircle(t *testing.T) {
 	}
 
 	// Blue fill
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				// Alpha blend blue with white background
@@ -608,7 +609,7 @@ func TestVelloCompareDiagonal(t *testing.T) {
 
 	width, height := 200, 200
 
-	buildDiagonal := func(eb *EdgeBuilder) {
+	buildDiagonal := func(eb *raster.EdgeBuilder) {
 		thickness := float32(20)
 		path := scene.NewPath()
 		path.MoveTo(10, 10)
@@ -619,7 +620,7 @@ func TestVelloCompareDiagonal(t *testing.T) {
 		path.LineTo(10, 10+thickness)
 		path.Close()
 		eb.SetFlattenCurves(true)
-		eb.BuildFromScenePath(path, scene.IdentityAffine())
+		BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 	}
 
 	// Render with Vello tile rasterizer
@@ -631,9 +632,9 @@ func TestVelloCompareDiagonal(t *testing.T) {
 	}
 
 	tr := NewTileRasterizer(width, height)
-	eb1 := NewEdgeBuilder(2)
+	eb1 := raster.NewEdgeBuilder(2)
 	buildDiagonal(eb1)
-	tr.Fill(eb1, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb1, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				// Alpha blend red with white background
@@ -655,9 +656,9 @@ func TestVelloCompareDiagonal(t *testing.T) {
 	}
 
 	af := NewAnalyticFiller(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	buildDiagonal(eb2)
-	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				// Alpha blend red with white background
@@ -702,7 +703,7 @@ func TestVelloCompareDiagonal(t *testing.T) {
 
 // TestEdgeDebug shows what edges are created for the diagonal polygon
 func TestEdgeDebug(t *testing.T) {
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	thickness := float32(20)
 	path := scene.NewPath()
@@ -714,13 +715,13 @@ func TestEdgeDebug(t *testing.T) {
 	path.LineTo(10, 10+thickness)   // → (10, 30)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	t.Log("Edges in polygon:")
 	i := 0
 	for edge := range eb.AllEdges() {
 		line := edge.AsLine()
-		x0 := float32(line.X) / 65536.0 // FDot16 to float
+		x0 := float32(line.X) / 65536.0 // raster.FDot16 to float
 		dx := float32(line.DX) / 65536.0
 		y0 := float32(line.FirstY)
 		y1 := float32(line.LastY)
@@ -735,7 +736,7 @@ func TestEdgeDebug(t *testing.T) {
 func TestVelloTileDebugDiagonal(t *testing.T) {
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Same diagonal as comparison test
 	thickness := float32(20)
@@ -748,10 +749,10 @@ func TestVelloTileDebugDiagonal(t *testing.T) {
 	path.LineTo(10, 10+thickness)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Process tiles
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {})
 
 	// Show first 4x4 tiles
 	t.Logf("Tile structure (first 4x4 tiles):")
@@ -775,7 +776,7 @@ func TestVelloTileDebugDiagonal(t *testing.T) {
 func TestVelloCircleDebug(t *testing.T) {
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Same circle as comparison test
 	cx, cy := float32(100), float32(100)
@@ -790,10 +791,10 @@ func TestVelloCircleDebug(t *testing.T) {
 	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Process tiles
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {})
 
 	// Circle: center (100,100), radius 60
 	// Left edge at X=40, tiles around tx=2 (32-47)
@@ -829,7 +830,7 @@ func TestVelloCircleBottomDebug(t *testing.T) {
 
 	// Create Vello image
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	cx, cy := float32(100), float32(100)
 	radius := float32(60)
@@ -843,7 +844,7 @@ func TestVelloCircleBottomDebug(t *testing.T) {
 	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	velloImg := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
@@ -852,7 +853,7 @@ func TestVelloCircleBottomDebug(t *testing.T) {
 		}
 	}
 
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				a := float32(alpha) / 255.0
@@ -873,7 +874,7 @@ func TestVelloCircleBottomDebug(t *testing.T) {
 	}
 
 	af := NewAnalyticFiller(width, height)
-	eb2 := NewEdgeBuilder(2)
+	eb2 := raster.NewEdgeBuilder(2)
 	path2 := scene.NewPath()
 	path2.MoveTo(cx+radius, cy)
 	path2.CubicTo(cx+radius, cy-radius*k, cx+radius*k, cy-radius, cx, cy-radius)
@@ -882,9 +883,9 @@ func TestVelloCircleBottomDebug(t *testing.T) {
 	path2.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path2.Close()
 	eb2.SetFlattenCurves(true)
-	eb2.BuildFromScenePath(path2, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb2, path2, scene.IdentityAffine())
 
-	af.Fill(eb2, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb2, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha > 0 { //nolint:gocritic // nestingReduce: test rendering callback
 				a := float32(alpha) / 255.0

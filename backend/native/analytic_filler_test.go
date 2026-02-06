@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"math"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // =============================================================================
-// AlphaRuns Tests
+// raster.AlphaRuns Tests
 // =============================================================================
 
 func TestAlphaRuns_NewAndReset(t *testing.T) {
@@ -28,35 +29,35 @@ func TestAlphaRuns_NewAndReset(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ar := NewAlphaRuns(tt.width)
+			ar := raster.NewAlphaRuns(tt.width)
 
 			if ar == nil {
-				t.Fatal("NewAlphaRuns returned nil")
+				t.Fatal("raster.NewAlphaRuns returned nil")
 			}
 
 			// Should start empty
 			if !ar.IsEmpty() {
-				t.Error("new AlphaRuns should be empty")
+				t.Error("new raster.AlphaRuns should be empty")
 			}
 
 			// Reset should keep it empty
 			ar.Reset()
 			if !ar.IsEmpty() {
-				t.Error("reset AlphaRuns should be empty")
+				t.Error("reset raster.AlphaRuns should be empty")
 			}
 		})
 	}
 }
 
 func TestAlphaRuns_Add(t *testing.T) {
-	ar := NewAlphaRuns(100)
+	ar := raster.NewAlphaRuns(100)
 
 	// Add a run
 	ar.Add(10, 128, 20, 64)
 
 	// Should no longer be empty
 	if ar.IsEmpty() {
-		t.Error("AlphaRuns should not be empty after Add")
+		t.Error("raster.AlphaRuns should not be empty after Add")
 	}
 
 	// Check specific pixels
@@ -70,7 +71,7 @@ func TestAlphaRuns_Add(t *testing.T) {
 }
 
 func TestAlphaRuns_Accumulation(t *testing.T) {
-	ar := NewAlphaRuns(100)
+	ar := raster.NewAlphaRuns(100)
 
 	// Add overlapping runs - should accumulate
 	ar.Add(10, 100, 10, 0)
@@ -92,7 +93,7 @@ func TestAlphaRuns_Accumulation(t *testing.T) {
 }
 
 func TestAlphaRuns_Iter(t *testing.T) {
-	ar := NewAlphaRuns(100)
+	ar := raster.NewAlphaRuns(100)
 
 	// Add a run
 	ar.Add(10, 200, 5, 0)
@@ -120,13 +121,13 @@ func TestAlphaRuns_Iter(t *testing.T) {
 }
 
 func TestAlphaRuns_IterRuns(t *testing.T) {
-	ar := NewAlphaRuns(100)
+	ar := raster.NewAlphaRuns(100)
 
 	// Add a run
 	ar.Add(10, 200, 5, 0)
 
 	// Iterate runs
-	runs := make([]alphaRun, 0, 10)
+	runs := make([]raster.AlphaRun, 0, 10)
 	for run := range ar.IterRuns() {
 		runs = append(runs, run)
 	}
@@ -138,7 +139,7 @@ func TestAlphaRuns_IterRuns(t *testing.T) {
 }
 
 func TestAlphaRuns_CopyTo(t *testing.T) {
-	ar := NewAlphaRuns(20)
+	ar := raster.NewAlphaRuns(20)
 	ar.Add(5, 128, 5, 128)
 
 	dst := make([]uint8, 20)
@@ -155,32 +156,14 @@ func TestAlphaRuns_CopyTo(t *testing.T) {
 	}
 }
 
-func TestCatchOverflow(t *testing.T) {
-	tests := []struct {
-		input    uint16
-		expected uint8
-	}{
-		{0, 0},
-		{128, 128},
-		{255, 255},
-		{256, 255}, // Overflow case
-		{300, 255}, // Overflow case
-	}
-
-	for _, tt := range tests {
-		result := catchOverflow(tt.input)
-		if result != tt.expected {
-			t.Errorf("catchOverflow(%d) = %d, want %d", tt.input, result, tt.expected)
-		}
-	}
-}
+// TestCatchOverflow moved to raster/alpha_runs_test.go (tests unexported function)
 
 // =============================================================================
-// CurveAwareAET Tests
+// raster.CurveAwareAET Tests
 // =============================================================================
 
 func TestCurveAwareAET_Basic(t *testing.T) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	if !aet.IsEmpty() {
 		t.Error("new AET should be empty")
@@ -192,12 +175,12 @@ func TestCurveAwareAET_Basic(t *testing.T) {
 }
 
 func TestCurveAwareAET_InsertLine(t *testing.T) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Create a simple line edge
-	edge := NewLineEdgeVariant(
-		CurvePoint{X: 10, Y: 10},
-		CurvePoint{X: 10, Y: 20},
+	edge := raster.NewLineEdgeVariant(
+		raster.CurvePoint{X: 10, Y: 10},
+		raster.CurvePoint{X: 10, Y: 20},
 		0,
 	)
 
@@ -217,17 +200,17 @@ func TestCurveAwareAET_InsertLine(t *testing.T) {
 }
 
 func TestCurveAwareAET_RemoveExpired(t *testing.T) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Create edges at different Y ranges
-	edge1 := NewLineEdgeVariant(
-		CurvePoint{X: 10, Y: 10},
-		CurvePoint{X: 10, Y: 20},
+	edge1 := raster.NewLineEdgeVariant(
+		raster.CurvePoint{X: 10, Y: 10},
+		raster.CurvePoint{X: 10, Y: 20},
 		0,
 	)
-	edge2 := NewLineEdgeVariant(
-		CurvePoint{X: 20, Y: 10},
-		CurvePoint{X: 20, Y: 15},
+	edge2 := raster.NewLineEdgeVariant(
+		raster.CurvePoint{X: 20, Y: 10},
+		raster.CurvePoint{X: 20, Y: 15},
 		0,
 	)
 
@@ -249,17 +232,17 @@ func TestCurveAwareAET_RemoveExpired(t *testing.T) {
 }
 
 func TestCurveAwareAET_SortByX(t *testing.T) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Insert edges in reverse X order
-	edges := []CurvePoint{
+	edges := []raster.CurvePoint{
 		{X: 30, Y: 10}, {X: 30, Y: 20},
 		{X: 20, Y: 10}, {X: 20, Y: 20},
 		{X: 10, Y: 10}, {X: 10, Y: 20},
 	}
 
 	for i := 0; i < len(edges); i += 2 {
-		e := NewLineEdgeVariant(edges[i], edges[i+1], 0)
+		e := raster.NewLineEdgeVariant(edges[i], edges[i+1], 0)
 		if e != nil {
 			aet.Insert(*e)
 		}
@@ -269,10 +252,10 @@ func TestCurveAwareAET_SortByX(t *testing.T) {
 
 	// Verify edges are sorted
 	var prevX int32 = math.MinInt32
-	aet.ForEach(func(edge *CurveEdgeVariant) bool {
+	aet.ForEach(func(edge *raster.CurveEdgeVariant) bool {
 		line := edge.AsLine()
 		if line != nil {
-			currentX := FDot16FloorToInt(line.X)
+			currentX := raster.FDot16FloorToInt(line.X)
 			if currentX < prevX {
 				t.Errorf("edges not sorted: %d after %d", currentX, prevX)
 			}
@@ -283,12 +266,12 @@ func TestCurveAwareAET_SortByX(t *testing.T) {
 }
 
 func TestCurveAwareAET_Reset(t *testing.T) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Add some edges
-	edge := NewLineEdgeVariant(
-		CurvePoint{X: 10, Y: 10},
-		CurvePoint{X: 10, Y: 20},
+	edge := raster.NewLineEdgeVariant(
+		raster.CurvePoint{X: 10, Y: 10},
+		raster.CurvePoint{X: 10, Y: 20},
 		0,
 	)
 	if edge != nil {
@@ -307,23 +290,23 @@ func TestCurveAwareAET_Reset(t *testing.T) {
 }
 
 // =============================================================================
-// FillRule Tests
+// raster.FillRule Tests
 // =============================================================================
 
 func TestFillRule_String(t *testing.T) {
 	tests := []struct {
-		rule     FillRule
+		rule     raster.FillRule
 		expected string
 	}{
-		{FillRuleNonZero, "NonZero"},
-		{FillRuleEvenOdd, "EvenOdd"},
-		{FillRule(99), "Unknown"},
+		{raster.FillRuleNonZero, "NonZero"},
+		{raster.FillRuleEvenOdd, "EvenOdd"},
+		{raster.FillRule(99), "Unknown"},
 	}
 
 	for _, tt := range tests {
 		result := tt.rule.String()
 		if result != tt.expected {
-			t.Errorf("FillRule(%d).String() = %q, want %q", tt.rule, result, tt.expected)
+			t.Errorf("raster.FillRule(%d).String() = %q, want %q", tt.rule, result, tt.expected)
 		}
 	}
 }
@@ -360,10 +343,10 @@ func TestAnalyticFiller_Reset(t *testing.T) {
 
 func TestAnalyticFiller_EmptyPath(t *testing.T) {
 	filler := NewAnalyticFiller(100, 100)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	callbackCalled := false
-	filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		callbackCalled = true
 	})
 
@@ -374,7 +357,7 @@ func TestAnalyticFiller_EmptyPath(t *testing.T) {
 
 func TestAnalyticFiller_SimpleRectangle(t *testing.T) {
 	filler := NewAnalyticFiller(100, 100)
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Build a simple rectangle path
 	path := scene.NewPath()
@@ -384,15 +367,15 @@ func TestAnalyticFiller_SimpleRectangle(t *testing.T) {
 	path.LineTo(20, 40)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Verify edges were created
 	if eb.IsEmpty() {
-		t.Fatal("EdgeBuilder should not be empty after building path")
+		t.Fatal("raster.EdgeBuilder should not be empty after building path")
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -405,16 +388,16 @@ func TestAnalyticFiller_SimpleRectangle(t *testing.T) {
 func TestAnalyticFiller_FillRules(t *testing.T) {
 	tests := []struct {
 		name     string
-		fillRule FillRule
+		fillRule raster.FillRule
 	}{
-		{"NonZero", FillRuleNonZero},
-		{"EvenOdd", FillRuleEvenOdd},
+		{"NonZero", raster.FillRuleNonZero},
+		{"EvenOdd", raster.FillRuleEvenOdd},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filler := NewAnalyticFiller(100, 100)
-			eb := NewEdgeBuilder(0)
+			eb := raster.NewEdgeBuilder(0)
 
 			// Create a simple path
 			path := scene.NewPath()
@@ -424,10 +407,10 @@ func TestAnalyticFiller_FillRules(t *testing.T) {
 			path.LineTo(10, 50)
 			path.Close()
 
-			eb.BuildFromScenePath(path, scene.IdentityAffine())
+			BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 			// Should not panic with either fill rule
-			filler.Fill(eb, tt.fillRule, func(y int, runs *AlphaRuns) {
+			filler.Fill(eb, tt.fillRule, func(y int, runs *raster.AlphaRuns) {
 				// Just verify callback is called
 			})
 		})
@@ -436,7 +419,7 @@ func TestAnalyticFiller_FillRules(t *testing.T) {
 
 func TestAnalyticFiller_Triangle(t *testing.T) {
 	filler := NewAnalyticFiller(100, 100)
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	// Create a triangle
 	path := scene.NewPath()
@@ -445,14 +428,14 @@ func TestAnalyticFiller_Triangle(t *testing.T) {
 	path.LineTo(20, 80)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	if eb.IsEmpty() {
-		t.Fatal("EdgeBuilder should not be empty for triangle")
+		t.Fatal("raster.EdgeBuilder should not be empty for triangle")
 	}
 
 	scanlines := make(map[int]bool)
-	filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlines[y] = true
 	})
 
@@ -464,7 +447,7 @@ func TestAnalyticFiller_Triangle(t *testing.T) {
 
 func TestAnalyticFiller_QuadraticCurve(t *testing.T) {
 	filler := NewAnalyticFiller(100, 100)
-	eb := NewEdgeBuilder(2) // AA enabled
+	eb := raster.NewEdgeBuilder(2) // AA enabled
 
 	// Create a path with a quadratic curve
 	path := scene.NewPath()
@@ -474,7 +457,7 @@ func TestAnalyticFiller_QuadraticCurve(t *testing.T) {
 	path.LineTo(10, 90)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Should have quadratic edges
 	if eb.QuadraticEdgeCount() == 0 {
@@ -482,7 +465,7 @@ func TestAnalyticFiller_QuadraticCurve(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -493,7 +476,7 @@ func TestAnalyticFiller_QuadraticCurve(t *testing.T) {
 
 func TestAnalyticFiller_CubicCurve(t *testing.T) {
 	filler := NewAnalyticFiller(100, 100)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Create a path with a cubic curve
 	path := scene.NewPath()
@@ -503,7 +486,7 @@ func TestAnalyticFiller_CubicCurve(t *testing.T) {
 	path.LineTo(10, 90)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Should have cubic edges
 	if eb.CubicEdgeCount() == 0 {
@@ -511,7 +494,7 @@ func TestAnalyticFiller_CubicCurve(t *testing.T) {
 	}
 
 	scanlineCount := 0
-	filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlineCount++
 	})
 
@@ -585,7 +568,7 @@ func TestMax32f(t *testing.T) {
 // =============================================================================
 
 func TestFillPath(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	path := scene.NewPath()
 	path.MoveTo(10, 10)
@@ -594,10 +577,10 @@ func TestFillPath(t *testing.T) {
 	path.LineTo(10, 50)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	callbackCalled := false
-	FillPath(eb, 100, 100, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	FillPath(eb, 100, 100, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		callbackCalled = true
 	})
 
@@ -607,7 +590,7 @@ func TestFillPath(t *testing.T) {
 }
 
 func TestFillToBuffer(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	path := scene.NewPath()
 	path.MoveTo(10, 10)
@@ -616,10 +599,10 @@ func TestFillToBuffer(t *testing.T) {
 	path.LineTo(10, 50)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	buffer := make([]uint8, 100*100)
-	FillToBuffer(eb, 100, 100, FillRuleNonZero, buffer)
+	FillToBuffer(eb, 100, 100, raster.FillRuleNonZero, buffer)
 
 	// Check that some pixels inside the rectangle have coverage
 	centerIdx := 30*100 + 30 // y=30, x=30
@@ -629,7 +612,7 @@ func TestFillToBuffer(t *testing.T) {
 }
 
 func TestFillToBuffer_SmallBuffer(t *testing.T) {
-	eb := NewEdgeBuilder(0)
+	eb := raster.NewEdgeBuilder(0)
 
 	path := scene.NewPath()
 	path.MoveTo(10, 10)
@@ -638,11 +621,11 @@ func TestFillToBuffer_SmallBuffer(t *testing.T) {
 	path.LineTo(10, 50)
 	path.Close()
 
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Buffer too small - should not panic
 	buffer := make([]uint8, 10)
-	FillToBuffer(eb, 100, 100, FillRuleNonZero, buffer)
+	FillToBuffer(eb, 100, 100, raster.FillRuleNonZero, buffer)
 	// Just verify it doesn't panic
 }
 
@@ -651,7 +634,7 @@ func TestFillToBuffer_SmallBuffer(t *testing.T) {
 // =============================================================================
 
 func BenchmarkAlphaRuns_Add(b *testing.B) {
-	ar := NewAlphaRuns(1000)
+	ar := raster.NewAlphaRuns(1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -663,7 +646,7 @@ func BenchmarkAlphaRuns_Add(b *testing.B) {
 }
 
 func BenchmarkAlphaRuns_Iter(b *testing.B) {
-	ar := NewAlphaRuns(1000)
+	ar := raster.NewAlphaRuns(1000)
 	ar.Add(100, 255, 300, 0)
 
 	b.ResetTimer()
@@ -676,14 +659,14 @@ func BenchmarkAlphaRuns_Iter(b *testing.B) {
 }
 
 func BenchmarkCurveAwareAET_SortByX(b *testing.B) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Add 100 edges
 	for i := 0; i < 100; i++ {
 		x := float32(i * 10)
-		edge := NewLineEdgeVariant(
-			CurvePoint{X: x, Y: 0},
-			CurvePoint{X: x + 5, Y: 100},
+		edge := raster.NewLineEdgeVariant(
+			raster.CurvePoint{X: x, Y: 0},
+			raster.CurvePoint{X: x + 5, Y: 100},
 			0,
 		)
 		if edge != nil {
@@ -707,13 +690,13 @@ func BenchmarkAnalyticFiller_Rectangle(b *testing.B) {
 	path.LineTo(100, 400)
 	path.Close()
 
-	eb := NewEdgeBuilder(0)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(0)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 			// Empty callback for benchmarking core algorithm
 		})
 	}
@@ -728,13 +711,13 @@ func BenchmarkAnalyticFiller_QuadraticCurve(b *testing.B) {
 	path.QuadTo(250, 450, 50, 250)
 	path.Close()
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {})
 	}
 }
 
@@ -750,12 +733,12 @@ func BenchmarkAnalyticFiller_ComplexPath(b *testing.B) {
 	path.QuadTo(250, 450, 100, 400)
 	path.Close()
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {})
 	}
 }

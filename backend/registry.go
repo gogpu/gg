@@ -12,8 +12,8 @@ var (
 	registryMu sync.RWMutex
 	backends   = make(map[string]BackendFactory)
 	// Priority order for backend selection (first available wins).
-	// Rust > Native > Software (Rust is fastest, Software is fallback).
-	backendPriority = []string{BackendRust, BackendNative, BackendSoftware}
+	// Native > Software (Native uses GPU, Software is fallback).
+	backendPriority = []string{BackendNative, BackendSoftware}
 )
 
 // Register registers a backend factory with the given name.
@@ -67,7 +67,7 @@ func Get(name string) RenderBackend {
 }
 
 // Default returns the best available backend based on priority.
-// Priority order: wgpu > software
+// Priority order: native > software
 // Returns nil if no backends are registered.
 func Default() RenderBackend {
 	registryMu.RLock()

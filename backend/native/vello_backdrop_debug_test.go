@@ -2,6 +2,7 @@ package native
 
 import (
 	"fmt"
+	"github.com/gogpu/gg/raster"
 	"testing"
 
 	"github.com/gogpu/gg/scene"
@@ -17,7 +18,7 @@ func TestBackdropDebug(t *testing.T) {
 	const k = 0.5522847498
 
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	path := scene.NewPath()
 	path.MoveTo(cx+radius, cy)
@@ -27,7 +28,7 @@ func TestBackdropDebug(t *testing.T) {
 	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	aaShift := eb.AAShift()
 	aaScale := float32(int32(1) << uint(aaShift))

@@ -11,7 +11,11 @@
 
 package native
 
-import "math"
+import (
+	"math"
+
+	"github.com/gogpu/gg/raster"
+)
 
 // TileWidth and TileHeight match Vello's tile dimensions.
 // Using 16x16 tiles as in the original Vello implementation.
@@ -49,9 +53,9 @@ type TileRasterizer struct {
 	width, height  int
 	tilesX, tilesY int
 	tiles          []VelloTile
-	area           []float32  // Per-tile pixel area buffer (TileSize elements)
-	rowCoverage    []float32  // Full scanline coverage buffer
-	alphaRuns      *AlphaRuns // Output alpha runs
+	area           []float32         // Per-tile pixel area buffer (TileSize elements)
+	rowCoverage    []float32         // Full scanline coverage buffer
+	alphaRuns      *raster.AlphaRuns // Output alpha runs
 }
 
 // NewTileRasterizer creates a new Vello-style tile rasterizer.
@@ -67,7 +71,7 @@ func NewTileRasterizer(width, height int) *TileRasterizer {
 		tiles:       make([]VelloTile, tilesX*tilesY),
 		area:        make([]float32, VelloTileSize),
 		rowCoverage: make([]float32, width),
-		alphaRuns:   NewAlphaRuns(width),
+		alphaRuns:   raster.NewAlphaRuns(width),
 	}
 }
 
@@ -83,9 +87,9 @@ func (tr *TileRasterizer) Reset() {
 
 // Fill renders a path using Vello's tile-based algorithm.
 func (tr *TileRasterizer) Fill(
-	eb *EdgeBuilder,
-	fillRule FillRule,
-	callback func(y int, runs *AlphaRuns),
+	eb *raster.EdgeBuilder,
+	fillRule raster.FillRule,
+	callback func(y int, runs *raster.AlphaRuns),
 ) {
 	if eb.IsEmpty() {
 		return
@@ -248,7 +252,7 @@ func velloSpan(a, b float32) int {
 // Direct port of path_count.rs (backdrop) + path_tiling.rs (segments with y_edge).
 //
 //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // Direct port of Vello algorithm
-func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, _ float32) {
+func (tr *TileRasterizer) binSegments(eb *raster.EdgeBuilder, _ float32) {
 	const epsilon float32 = 1e-6
 	const noYEdge float32 = 1e9
 
@@ -710,7 +714,7 @@ func (tr *TileRasterizer) addSegmentToTile(
 // 4. Mirror result back: area[i] ↔ area[TileWidth-1-i]
 //
 //nolint:gocognit,gocyclo,cyclop,dupl,funlen // Direct port of Vello algorithm with mirroring
-func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, fillRule raster.FillRule) {
 	yf := float32(localY)
 
 	// Find Y range of ALL segments
@@ -838,7 +842,7 @@ func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, f
 	}
 
 	// Apply fill rule
-	if fillRule == FillRuleEvenOdd {
+	if fillRule == raster.FillRuleEvenOdd {
 		for i := 0; i < VelloTileWidth; i++ {
 			a := tr.area[i]
 			im := float32(int32(0.5*a + 0.5))
@@ -867,7 +871,7 @@ func (tr *TileRasterizer) fillProblemTileScanline(tile *VelloTile, localY int, f
 // fillTileScanlineStandard is the original Vello algorithm without problem tile handling.
 //
 //nolint:gocognit,dupl // Direct port of Vello algorithm
-func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, fillRule FillRule) {
+func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, fillRule raster.FillRule) {
 	backdropF := float32(tile.Backdrop)
 	for i := 0; i < VelloTileWidth; i++ {
 		tr.area[i] = backdropF
@@ -936,7 +940,7 @@ func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, 
 		}
 	}
 
-	if fillRule == FillRuleEvenOdd {
+	if fillRule == raster.FillRuleEvenOdd {
 		for i := 0; i < VelloTileWidth; i++ {
 			a := tr.area[i]
 			im := float32(int32(0.5*a + 0.5))
@@ -960,7 +964,7 @@ func (tr *TileRasterizer) fillTileScanlineStandard(tile *VelloTile, localY int, 
 // Direct port of fine.rs fill_path function for a single row.
 //
 //nolint:gocognit,gocyclo,cyclop,funlen // Direct port of Vello algorithm with problem row detection
-func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule FillRule) {
+func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule raster.FillRule) {
 	// FIX #19: For problem tiles (top-right), use mirror algorithm
 	if tile.IsProblemTile {
 		tr.fillProblemTileScanline(tile, localY, fillRule)
@@ -1096,7 +1100,7 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 	}
 
 	// Apply fill rule
-	if fillRule == FillRuleEvenOdd { //nolint:nestif // Direct port of Vello algorithm
+	if fillRule == raster.FillRuleEvenOdd { //nolint:nestif // Direct port of Vello algorithm
 		for i := 0; i < VelloTileWidth; i++ {
 			a := tr.area[i]
 			im := float32(int32(0.5*a + 0.5))
@@ -1124,7 +1128,7 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 }
 
 // emitScanline converts row coverage to alpha runs and calls callback.
-func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *AlphaRuns)) {
+func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *raster.AlphaRuns)) {
 	tr.alphaRuns.Reset()
 
 	var runStart int
@@ -1164,7 +1168,7 @@ func (tr *TileRasterizer) emitScanline(pixelY int, callback func(y int, runs *Al
 // fillPath is kept for compatibility with tests.
 //
 //nolint:gocognit // Direct port of Vello algorithm, complexity is inherent
-func (tr *TileRasterizer) fillPath(tile *VelloTile, fillRule FillRule) {
+func (tr *TileRasterizer) fillPath(tile *VelloTile, fillRule raster.FillRule) {
 	// Initialize full area buffer with backdrop
 	backdropF := float32(tile.Backdrop)
 	for i := range tr.area {
@@ -1226,7 +1230,7 @@ func (tr *TileRasterizer) fillPath(tile *VelloTile, fillRule FillRule) {
 	}
 
 	// Apply fill rule
-	if fillRule == FillRuleEvenOdd {
+	if fillRule == raster.FillRuleEvenOdd {
 		for i := range tr.area {
 			a := tr.area[i]
 			im := float32(int32(0.5*a + 0.5))

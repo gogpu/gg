@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"image"
 	"image/color"
 	"image/png"
@@ -30,7 +31,7 @@ type GoldenTestCase struct {
 	Name      string
 	Width     int
 	Height    int
-	BuildPath func(eb *EdgeBuilder)
+	BuildPath func(eb *raster.EdgeBuilder)
 	Threshold float64 // Acceptable difference percentage
 }
 
@@ -42,7 +43,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     20,
 			Height:    20,
 			Threshold: 0.0, // Squares must be exact
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Square at center (10,10), size 6x6 = corners (7,7) to (13,13)
 				path := scene.NewPath()
 				path.MoveTo(7, 7)
@@ -51,7 +52,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.LineTo(7, 13)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -59,7 +60,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     20,
 			Height:    20,
 			Threshold: 15.0, // VelloLine float coords produce different AA at curve edges
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Circle at (10, 10), radius 7
 				cx, cy := float32(10), float32(10)
 				radius := float32(7)
@@ -72,7 +73,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -80,7 +81,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     200,
 			Height:    200,
 			Threshold: 2.0, // VelloLine float coords produce different AA at curve edges
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Circle at (100, 100), radius 60
 				cx, cy := float32(100), float32(100)
 				radius := float32(60)
@@ -93,7 +94,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -101,7 +102,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     200,
 			Height:    200,
 			Threshold: 2.0, // VelloLine float coords produce different AA at curve edges
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Circle at (100, 100), radius 80 - matches TestVelloVisualCircle
 				cx, cy := float32(100), float32(100)
 				radius := float32(80)
@@ -114,7 +115,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -122,7 +123,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     200,
 			Height:    200,
 			Threshold: 2.0, // VelloLine float coords avoid fixed-point X quantization
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Diagonal stripe from (10,10) to (190,190), thickness 20
 				thickness := float32(20)
 				path := scene.NewPath()
@@ -134,7 +135,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.LineTo(10, 10+thickness)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -142,7 +143,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     64,
 			Height:    64,
 			Threshold: 15.0, // TODO: Investigate tile-boundary differences
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Rectangle aligned to tile boundaries (16x16 tiles)
 				// From (16,16) to (48,48) = 2x2 tiles
 				// NOTE: Vello and AnalyticFiller handle tile-aligned edges differently
@@ -153,7 +154,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.LineTo(16, 48)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
@@ -161,7 +162,7 @@ func StandardGoldenTests() []GoldenTestCase {
 			Width:     64,
 			Height:    64,
 			Threshold: 5.0, // TODO: Investigate tile-crossing differences
-			BuildPath: func(eb *EdgeBuilder) {
+			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Rectangle NOT aligned to tile boundaries
 				// From (10,10) to (54,54) - crosses tile boundaries
 				// NOTE: Different backdrop handling at tile crossings
@@ -172,7 +173,7 @@ func StandardGoldenTests() []GoldenTestCase {
 				path.LineTo(10, 54)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 	}
@@ -200,10 +201,10 @@ func renderWithAnalyticFiller(tc GoldenTestCase) *image.RGBA {
 	}
 
 	af := NewAnalyticFiller(tc.Width, tc.Height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	tc.BuildPath(eb)
 
-	af.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	af.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue
@@ -232,10 +233,10 @@ func renderWithVello(tc GoldenTestCase) *image.RGBA {
 	}
 
 	tr := NewTileRasterizer(tc.Width, tc.Height)
-	eb := NewEdgeBuilder(2) // 4x AA
+	eb := raster.NewEdgeBuilder(2) // 4x AA
 	tc.BuildPath(eb)
 
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		for x, alpha := range runs.Iter() {
 			if alpha <= 0 {
 				continue

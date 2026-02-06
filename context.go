@@ -51,15 +51,11 @@ var _ io.Closer = (*Context)(nil)
 // NewContext creates a new drawing context with the given dimensions.
 // Optional ContextOption arguments can be used for dependency injection:
 //
-//	// Default software rendering
+//	// Default software rendering (uses analytic anti-aliasing)
 //	dc := gg.NewContext(800, 600)
 //
 //	// Custom GPU renderer (dependency injection)
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
-//
-//	// Analytic anti-aliasing (higher quality)
-//	adapter := native.NewAnalyticFillerAdapter(800, 600)
-//	dc := gg.NewContext(800, 600, gg.WithAnalyticAA(adapter))
 func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Apply options
 	options := defaultOptions()
@@ -76,12 +72,7 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Use provided renderer or create software renderer
 	renderer := options.renderer
 	if renderer == nil {
-		sr := NewSoftwareRenderer(width, height)
-		// Apply analytic AA if configured
-		if options.analyticFiller != nil {
-			sr.SetAnalyticFiller(options.analyticFiller)
-		}
-		renderer = sr
+		renderer = NewSoftwareRenderer(width, height)
 	}
 
 	return &Context{
@@ -114,12 +105,7 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 	// Use provided renderer or create software renderer
 	renderer := options.renderer
 	if renderer == nil {
-		sr := NewSoftwareRenderer(width, height)
-		// Apply analytic AA if configured
-		if options.analyticFiller != nil {
-			sr.SetAnalyticFiller(options.analyticFiller)
-		}
-		renderer = sr
+		renderer = NewSoftwareRenderer(width, height)
 	}
 
 	return &Context{

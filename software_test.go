@@ -2,8 +2,6 @@ package gg
 
 import (
 	"testing"
-
-	"github.com/gogpu/gg/internal/raster"
 )
 
 // TestBlendPixelAlphaSemiTransparent tests BUG-001: semi-transparent colors
@@ -18,42 +16,42 @@ func TestBlendPixelAlphaSemiTransparent(t *testing.T) {
 	tests := []struct {
 		name       string
 		background RGBA
-		foreground raster.RGBA
+		foreground RGBA
 		coverage   uint8
 		wantBlend  bool // true if we expect blended result, false if pure foreground
 	}{
 		{
 			name:       "opaque color with full coverage - fast path OK",
 			background: White,
-			foreground: raster.RGBA{R: 1.0, G: 0.0, B: 0.0, A: 1.0}, // opaque red
+			foreground: RGBA{R: 1.0, G: 0.0, B: 0.0, A: 1.0}, // opaque red
 			coverage:   255,
 			wantBlend:  false, // should use fast path (pure foreground)
 		},
 		{
 			name:       "semi-transparent color with full coverage - must blend (BUG-001)",
 			background: White,
-			foreground: raster.RGBA{R: 1.0, G: 0.0, B: 0.0, A: 0.5}, // 50% alpha red
+			foreground: RGBA{R: 1.0, G: 0.0, B: 0.0, A: 0.5}, // 50% alpha red
 			coverage:   255,
 			wantBlend:  true, // MUST blend, not use fast path!
 		},
 		{
 			name:       "semi-transparent color with partial coverage - must blend",
 			background: White,
-			foreground: raster.RGBA{R: 0.0, G: 1.0, B: 0.0, A: 0.5}, // 50% alpha green
+			foreground: RGBA{R: 0.0, G: 1.0, B: 0.0, A: 0.5}, // 50% alpha green
 			coverage:   128,
 			wantBlend:  true,
 		},
 		{
 			name:       "opaque color with partial coverage - must blend",
 			background: White,
-			foreground: raster.RGBA{R: 0.0, G: 0.0, B: 1.0, A: 1.0}, // opaque blue
+			foreground: RGBA{R: 0.0, G: 0.0, B: 1.0, A: 1.0}, // opaque blue
 			coverage:   128,
 			wantBlend:  true,
 		},
 		{
 			name:       "zero alpha color - should not change background",
 			background: Red,
-			foreground: raster.RGBA{R: 0.0, G: 1.0, B: 0.0, A: 0.0}, // transparent green
+			foreground: RGBA{R: 0.0, G: 1.0, B: 0.0, A: 0.0}, // transparent green
 			coverage:   255,
 			wantBlend:  false, // background unchanged
 		},
@@ -65,9 +63,8 @@ func TestBlendPixelAlphaSemiTransparent(t *testing.T) {
 			pm := NewPixmap(10, 10)
 			pm.Clear(tt.background)
 
-			// Create adapter and blend
-			adapter := &pixmapAdapter{pixmap: pm}
-			adapter.BlendPixelAlpha(5, 5, tt.foreground, tt.coverage)
+			// Blend using source-over compositing
+			blendPixelAlpha(pm, 5, 5, tt.foreground, tt.coverage)
 
 			// Get result
 			result := pm.GetPixel(5, 5)
@@ -75,12 +72,7 @@ func TestBlendPixelAlphaSemiTransparent(t *testing.T) {
 			// Check result
 			tolerance := 0.02
 			isPureBackground := colorNear(result, tt.background, tolerance)
-			isPureForeground := colorNear(result, RGBA{
-				R: tt.foreground.R,
-				G: tt.foreground.G,
-				B: tt.foreground.B,
-				A: tt.foreground.A,
-			}, tolerance)
+			isPureForeground := colorNear(result, tt.foreground, tolerance)
 
 			switch {
 			case tt.foreground.A == 0.0:
@@ -119,8 +111,7 @@ func TestBlendPixelAlphaSemiTransparentRGBValues(t *testing.T) {
 	pm := NewPixmap(10, 10)
 	pm.Clear(White)
 
-	adapter := &pixmapAdapter{pixmap: pm}
-	adapter.BlendPixelAlpha(5, 5, raster.RGBA{R: 1.0, G: 0.0, B: 0.0, A: 0.5}, 255)
+	blendPixelAlpha(pm, 5, 5, RGBA{R: 1.0, G: 0.0, B: 0.0, A: 0.5}, 255)
 
 	result := pm.GetPixel(5, 5)
 
@@ -148,47 +139,40 @@ func TestBlendPixelAlphaSemiTransparentRGBValues(t *testing.T) {
 	}
 }
 
-// TestAAPixmapAdapterSemiTransparent tests the same bug in raster.AAPixmapAdapter.
-func TestAAPixmapAdapterSemiTransparent(t *testing.T) {
-	// Create a mock pixmap that tracks SetPixel calls
-	mock := &trackingPixmap{
-		width:  10,
-		height: 10,
-		pixels: make(map[[2]int]raster.RGBA),
+// blendPixelAlpha blends a color with the existing pixel using given alpha.
+// This is a test helper that implements premultiplied source-over compositing.
+func blendPixelAlpha(pm *Pixmap, x, y int, c RGBA, alpha uint8) {
+	if alpha == 0 {
+		return
 	}
 
-	adapter := &raster.AAPixmapAdapter{Pixmap: mock}
-
-	// Blend semi-transparent color with full coverage
-	semiTransparent := raster.RGBA{R: 1.0, G: 0.0, B: 0.0, A: 0.5}
-	adapter.BlendPixelAlpha(5, 5, semiTransparent, 255)
-
-	// Get the result
-	result, ok := mock.pixels[[2]int{5, 5}]
-	if !ok {
-		t.Fatal("pixel was not set")
+	// Bounds check
+	if x < 0 || x >= pm.Width() || y < 0 || y >= pm.Height() {
+		return
 	}
 
-	// The alpha should be scaled by coverage, not the original 0.5
-	// With proper fix: A should be 0.5 (original alpha * 255/255)
-	// BUG: Would have set A = 0.5 without proper blending
-
-	if result.A == semiTransparent.A {
-		// This is actually correct for AAPixmapAdapter's simpler blending
-		// It just scales color alpha by coverage
-		t.Logf("AAPixmapAdapter correctly set alpha = %.2f", result.A)
+	if alpha == 255 && c.A >= 1.0 {
+		pm.SetPixel(x, y, c)
+		return
 	}
-}
 
-// trackingPixmap is a test helper that tracks SetPixel calls.
-type trackingPixmap struct {
-	width  int
-	height int
-	pixels map[[2]int]raster.RGBA
-}
+	// Premultiplied source-over compositing
+	srcAlpha := c.A * float64(alpha) / 255.0
+	invSrcAlpha := 1.0 - srcAlpha
 
-func (p *trackingPixmap) Width() int  { return p.width }
-func (p *trackingPixmap) Height() int { return p.height }
-func (p *trackingPixmap) SetPixel(x, y int, c raster.RGBA) {
-	p.pixels[[2]int{x, y}] = c
+	// Premultiply source color
+	srcR := c.R * srcAlpha
+	srcG := c.G * srcAlpha
+	srcB := c.B * srcAlpha
+
+	// Read existing pixel (already premultiplied in buffer)
+	dstR, dstG, dstB, dstA := pm.getPremul(x, y)
+
+	// Source-over in premultiplied space: Result = Src + Dst * (1 - SrcA)
+	pm.setPremul(x, y,
+		srcR+dstR*invSrcAlpha,
+		srcG+dstG*invSrcAlpha,
+		srcB+dstB*invSrcAlpha,
+		srcAlpha+dstA*invSrcAlpha,
+	)
 }

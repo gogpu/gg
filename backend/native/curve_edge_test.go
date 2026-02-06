@@ -4,15 +4,16 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"testing"
 )
 
-// TestFDot6Conversion tests FDot6 conversion functions.
+// TestFDot6Conversion tests raster.FDot6 conversion functions.
 func TestFDot6Conversion(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   float32
-		want    FDot6
+		want    raster.FDot6
 		epsilon float32
 	}{
 		{"zero", 0.0, 0, 0.016},
@@ -25,26 +26,26 @@ func TestFDot6Conversion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FDot6FromFloat32(tt.input)
+			got := raster.FDot6FromFloat32(tt.input)
 			if got != tt.want {
-				t.Errorf("FDot6FromFloat32(%v) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("raster.FDot6FromFloat32(%v) = %v, want %v", tt.input, got, tt.want)
 			}
 
 			// Round-trip test
-			roundTrip := FDot6ToFloat32(got)
+			roundTrip := raster.FDot6ToFloat32(got)
 			if diff := absFloat32(roundTrip - tt.input); diff > tt.epsilon {
-				t.Errorf("round-trip: FDot6ToFloat32(FDot6FromFloat32(%v)) = %v, diff = %v",
+				t.Errorf("round-trip: raster.FDot6ToFloat32(raster.FDot6FromFloat32(%v)) = %v, diff = %v",
 					tt.input, roundTrip, diff)
 			}
 		})
 	}
 }
 
-// TestFDot6Rounding tests FDot6 floor/ceil/round operations.
+// TestFDot6Rounding tests raster.FDot6 floor/ceil/round operations.
 func TestFDot6Rounding(t *testing.T) {
 	tests := []struct {
 		name  string
-		input FDot6
+		input raster.FDot6
 		floor int32
 		ceil  int32
 		round int32
@@ -61,25 +62,25 @@ func TestFDot6Rounding(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := FDot6Floor(tt.input); got != tt.floor {
-				t.Errorf("FDot6Floor(%v) = %v, want %v", tt.input, got, tt.floor)
+			if got := raster.FDot6Floor(tt.input); got != tt.floor {
+				t.Errorf("raster.FDot6Floor(%v) = %v, want %v", tt.input, got, tt.floor)
 			}
-			if got := FDot6Ceil(tt.input); got != tt.ceil {
-				t.Errorf("FDot6Ceil(%v) = %v, want %v", tt.input, got, tt.ceil)
+			if got := raster.FDot6Ceil(tt.input); got != tt.ceil {
+				t.Errorf("raster.FDot6Ceil(%v) = %v, want %v", tt.input, got, tt.ceil)
 			}
-			if got := FDot6Round(tt.input); got != tt.round {
-				t.Errorf("FDot6Round(%v) = %v, want %v", tt.input, got, tt.round)
+			if got := raster.FDot6Round(tt.input); got != tt.round {
+				t.Errorf("raster.FDot6Round(%v) = %v, want %v", tt.input, got, tt.round)
 			}
 		})
 	}
 }
 
-// TestFDot16Conversion tests FDot16 conversion functions.
+// TestFDot16Conversion tests raster.FDot16 conversion functions.
 func TestFDot16Conversion(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   float32
-		want    FDot16
+		want    raster.FDot16
 		epsilon float32
 	}{
 		{"zero", 0.0, 0, 0.0001},
@@ -92,17 +93,17 @@ func TestFDot16Conversion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FDot16FromFloat32(tt.input)
+			got := raster.FDot16FromFloat32(tt.input)
 			diff := absInt32(got - tt.want)
 			// Allow 1 unit tolerance for rounding
 			if diff > 1 {
-				t.Errorf("FDot16FromFloat32(%v) = %v, want %v (diff=%v)", tt.input, got, tt.want, diff)
+				t.Errorf("raster.FDot16FromFloat32(%v) = %v, want %v (diff=%v)", tt.input, got, tt.want, diff)
 			}
 
 			// Round-trip test
-			roundTrip := FDot16ToFloat32(got)
+			roundTrip := raster.FDot16ToFloat32(got)
 			if diff := absFloat32(roundTrip - tt.input); diff > tt.epsilon {
-				t.Errorf("round-trip: FDot16ToFloat32(FDot16FromFloat32(%v)) = %v, diff = %v",
+				t.Errorf("round-trip: raster.FDot16ToFloat32(raster.FDot16FromFloat32(%v)) = %v, diff = %v",
 					tt.input, roundTrip, diff)
 			}
 		})
@@ -113,21 +114,21 @@ func TestFDot16Conversion(t *testing.T) {
 func TestFDot6ToFDot16(t *testing.T) {
 	tests := []struct {
 		name  string
-		input FDot6
-		want  FDot16
+		input raster.FDot6
+		want  raster.FDot16
 	}{
 		{"zero", 0, 0},
-		{"one", 64, 65536},     // 1.0 in FDot6 -> 1.0 in FDot16
-		{"half", 32, 32768},    // 0.5 in FDot6 -> 0.5 in FDot16
+		{"one", 64, 65536},     // 1.0 in raster.FDot6 -> 1.0 in raster.FDot16
+		{"half", 32, 32768},    // 0.5 in raster.FDot6 -> 0.5 in raster.FDot16
 		{"quarter", 16, 16384}, // 0.25 in both
 		{"negative", -64, -65536},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FDot6ToFDot16(tt.input)
+			got := raster.FDot6ToFDot16(tt.input)
 			if got != tt.want {
-				t.Errorf("FDot6ToFDot16(%v) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("raster.FDot6ToFDot16(%v) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -137,8 +138,8 @@ func TestFDot6ToFDot16(t *testing.T) {
 func TestFDot16Mul(t *testing.T) {
 	tests := []struct {
 		name string
-		a, b FDot16
-		want FDot16
+		a, b raster.FDot16
+		want raster.FDot16
 	}{
 		{"one times one", 65536, 65536, 65536},
 		{"half times half", 32768, 32768, 16384}, // 0.5 * 0.5 = 0.25
@@ -149,44 +150,44 @@ func TestFDot16Mul(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FDot16Mul(tt.a, tt.b)
+			got := raster.FDot16Mul(tt.a, tt.b)
 			// Allow 1 unit tolerance for rounding
 			if diff := absInt32(got - tt.want); diff > 1 {
-				t.Errorf("FDot16Mul(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+				t.Errorf("raster.FDot16Mul(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}
 }
 
 // TestFDot6Div tests fixed-point division.
-// FDot6Div divides two FDot6 values and returns an FDot16 slope.
+// raster.FDot6Div divides two raster.FDot6 values and returns an raster.FDot16 slope.
 // For edge scanline conversion: slope = (x1-x0) / (y1-y0)
-// The result is in FDot16 format (16.16 fixed-point).
+// The result is in raster.FDot16 format (16.16 fixed-point).
 func TestFDot6Div(t *testing.T) {
 	tests := []struct {
 		name     string
-		a, b     FDot6
-		wantNear FDot16 // Expected result in FDot16
+		a, b     raster.FDot6
+		wantNear raster.FDot16 // Expected result in raster.FDot16
 	}{
-		// 1.0 / 1.0 = 1.0 (FDot16)
-		{"one over one", 64, 64, FDot16One},
-		// 2.0 / 1.0 = 2.0 (FDot16)
-		{"two over one", 128, 64, 2 * FDot16One},
-		// 1.0 / 2.0 = 0.5 (FDot16)
-		{"one over two", 64, 128, FDot16Half},
-		// 100.0 / 1.0 = 100.0 (FDot16)
-		{"large numerator", 6400, 64, 100 * FDot16One},
+		// 1.0 / 1.0 = 1.0 (raster.FDot16)
+		{"one over one", 64, 64, raster.FDot16One},
+		// 2.0 / 1.0 = 2.0 (raster.FDot16)
+		{"two over one", 128, 64, 2 * raster.FDot16One},
+		// 1.0 / 2.0 = 0.5 (raster.FDot16)
+		{"one over two", 64, 128, raster.FDot16Half},
+		// 100.0 / 1.0 = 100.0 (raster.FDot16)
+		{"large numerator", 6400, 64, 100 * raster.FDot16One},
 		// 0 / 1.0 = 0
 		{"zero numerator", 0, 64, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FDot6Div(tt.a, tt.b)
+			got := raster.FDot6Div(tt.a, tt.b)
 			// Allow 1 unit tolerance for rounding
 			diff := absInt32(got - tt.wantNear)
 			if diff > 1 {
-				t.Errorf("FDot6Div(%v, %v) = %v, want %v (diff=%v)",
+				t.Errorf("raster.FDot6Div(%v, %v) = %v, want %v (diff=%v)",
 					tt.a, tt.b, got, tt.wantNear, diff)
 			}
 		})
@@ -194,111 +195,59 @@ func TestFDot6Div(t *testing.T) {
 
 	// Test division by zero separately
 	t.Run("zero denominator", func(t *testing.T) {
-		got := FDot6Div(64, 0)
+		got := raster.FDot6Div(64, 0)
 		if got != 0x7FFFFFFF && got != -0x7FFFFFFF {
-			t.Errorf("FDot6Div(64, 0) = %v, want max value", got)
+			t.Errorf("raster.FDot6Div(64, 0) = %v, want max value", got)
 		}
 	})
 }
 
-// TestDiffToShift tests the subdivision count calculation.
-// The algorithm heuristically determines how many subdivisions (1 << shift)
-// are needed to approximate a curve to within sub-pixel accuracy.
-func TestDiffToShift(t *testing.T) {
-	tests := []struct {
-		name    string
-		dx, dy  FDot6
-		shiftAA int
-		wantMin int
-		wantMax int
-	}{
-		{"flat curve", 0, 0, 0, 0, 0},
-		{"small deviation", 1, 1, 0, 0, 1},
-		{"medium deviation", 64, 64, 0, 2, 4},  // 1 pixel deviation
-		{"large deviation", 640, 640, 0, 2, 4}, // 10 pixel deviation (heuristic rounds down)
-		{"with AA", 64, 64, 2, 1, 3},           // AA reduces required shift
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := diffToShift(tt.dx, tt.dy, tt.shiftAA)
-			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("diffToShift(%v, %v, %v) = %v, want [%v, %v]",
-					tt.dx, tt.dy, tt.shiftAA, got, tt.wantMin, tt.wantMax)
-			}
-		})
-	}
-}
-
-// TestCheapDistance tests the distance approximation.
-func TestCheapDistance(t *testing.T) {
-	tests := []struct {
-		name    string
-		dx, dy  FDot6
-		wantMin FDot6
-		wantMax FDot6
-	}{
-		{"zero", 0, 0, 0, 0},
-		{"horizontal", 100, 0, 100, 100},
-		{"vertical", 0, 100, 100, 100},
-		{"diagonal", 100, 100, 140, 160},                // sqrt(2)*100 ≈ 141
-		{"3-4-5", 64 * 3, 64 * 4, 64*5 - 64, 64*5 + 64}, // ≈ 5
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := cheapDistance(tt.dx, tt.dy)
-			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("cheapDistance(%v, %v) = %v, want [%v, %v]",
-					tt.dx, tt.dy, got, tt.wantMin, tt.wantMax)
-			}
-		})
-	}
-}
+// Tests for diffToShift, cheapDistance, and cubicDeltaFromLine have been moved
+// to raster/curve_edge_test.go since they test unexported raster functions.
 
 // TestLineEdge tests basic line edge creation.
 func TestLineEdge(t *testing.T) {
 	tests := []struct {
 		name    string
-		p0, p1  CurvePoint
+		p0, p1  raster.CurvePoint
 		shift   int
 		wantNil bool
 		wantUp  bool // winding should be negative (upward)
 	}{
 		{
 			name:    "downward line",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{10, 10},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 10, Y: 10},
 			shift:   0,
 			wantNil: false,
 			wantUp:  false,
 		},
 		{
 			name:    "upward line",
-			p0:      CurvePoint{10, 10},
-			p1:      CurvePoint{0, 0},
+			p0:      raster.CurvePoint{X: 10, Y: 10},
+			p1:      raster.CurvePoint{X: 0, Y: 0},
 			shift:   0,
 			wantNil: false,
 			wantUp:  true,
 		},
 		{
 			name:    "horizontal line (should be nil)",
-			p0:      CurvePoint{0, 5},
-			p1:      CurvePoint{10, 5},
+			p0:      raster.CurvePoint{X: 0, Y: 5},
+			p1:      raster.CurvePoint{X: 10, Y: 5},
 			shift:   0,
 			wantNil: true,
 		},
 		{
 			name:    "vertical line",
-			p0:      CurvePoint{5, 0},
-			p1:      CurvePoint{5, 10},
+			p0:      raster.CurvePoint{X: 5, Y: 0},
+			p1:      raster.CurvePoint{X: 5, Y: 10},
 			shift:   0,
 			wantNil: false,
 		},
 		{
 			name:    "with AA shift",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{10, 10},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 10, Y: 10},
 			shift:   2,
 			wantNil: false,
 		},
@@ -306,10 +255,10 @@ func TestLineEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewLineEdge(tt.p0, tt.p1, tt.shift)
+			edge := raster.NewLineEdge(tt.p0, tt.p1, tt.shift)
 
 			if (edge == nil) != tt.wantNil {
-				t.Errorf("NewLineEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+				t.Errorf("raster.NewLineEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
 				return
 			}
 
@@ -336,47 +285,47 @@ func TestLineEdge(t *testing.T) {
 func TestQuadraticEdge(t *testing.T) {
 	tests := []struct {
 		name       string
-		p0, p1, p2 CurvePoint
+		p0, p1, p2 raster.CurvePoint
 		shift      int
 		wantNil    bool
 	}{
 		{
 			name:    "simple quadratic",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{50, 0}, // Control point above
-			p2:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 50, Y: 0}, // Control point above
+			p2:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   0,
 			wantNil: false,
 		},
 		{
 			name:    "flat quadratic (becomes line)",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{50, 50}, // On the chord
-			p2:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 50, Y: 50}, // On the chord
+			p2:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   0,
 			wantNil: false,
 		},
 		{
 			name:    "horizontal quadratic (should be nil)",
-			p0:      CurvePoint{0, 50},
-			p1:      CurvePoint{50, 50},
-			p2:      CurvePoint{100, 50},
+			p0:      raster.CurvePoint{X: 0, Y: 50},
+			p1:      raster.CurvePoint{X: 50, Y: 50},
+			p2:      raster.CurvePoint{X: 100, Y: 50},
 			shift:   0,
 			wantNil: true,
 		},
 		{
 			name:    "curved quadratic",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{25, 50}, // Significant curvature
-			p2:      CurvePoint{50, 0},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 25, Y: 50}, // Significant curvature
+			p2:      raster.CurvePoint{X: 50, Y: 0},
 			shift:   0,
 			wantNil: true, // Returns to same Y, so no vertical extent
 		},
 		{
 			name:    "with AA shift",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{50, 25},
-			p2:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 50, Y: 25},
+			p2:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   2,
 			wantNil: false,
 		},
@@ -384,10 +333,10 @@ func TestQuadraticEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
+			edge := raster.NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
 
 			if (edge == nil) != tt.wantNil {
-				t.Errorf("NewQuadraticEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+				t.Errorf("raster.NewQuadraticEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
 				return
 			}
 
@@ -417,11 +366,11 @@ func TestQuadraticEdge(t *testing.T) {
 // TestQuadraticEdgeForwardDifferencing verifies the forward differencing algorithm.
 func TestQuadraticEdgeForwardDifferencing(t *testing.T) {
 	// Create a quadratic with known control points
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{50, 50}
-	p2 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 50, Y: 50}
+	p2 := raster.CurvePoint{X: 100, Y: 100}
 
-	edge := NewQuadraticEdge(p0, p1, p2, 0)
+	edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
 	if edge == nil {
 		t.Fatal("expected non-nil edge")
 	}
@@ -435,14 +384,14 @@ func TestQuadraticEdgeForwardDifferencing(t *testing.T) {
 	line := edge.Line()
 	lines = append(lines, struct{ x0, y0, x1, y1 float32 }{
 		float32(line.FirstY), float32(line.LastY),
-		FDot16ToFloat32(line.X), FDot16ToFloat32(line.X + line.DX*(line.LastY-line.FirstY)),
+		raster.FDot16ToFloat32(line.X), raster.FDot16ToFloat32(line.X + line.DX*(line.LastY-line.FirstY)),
 	})
 
 	for edge.Update() {
 		line := edge.Line()
 		lines = append(lines, struct{ x0, y0, x1, y1 float32 }{
 			float32(line.FirstY), float32(line.LastY),
-			FDot16ToFloat32(line.X), FDot16ToFloat32(line.X + line.DX*(line.LastY-line.FirstY)),
+			raster.FDot16ToFloat32(line.X), raster.FDot16ToFloat32(line.X + line.DX*(line.LastY-line.FirstY)),
 		})
 	}
 
@@ -458,43 +407,43 @@ func TestQuadraticEdgeForwardDifferencing(t *testing.T) {
 func TestCubicEdge(t *testing.T) {
 	tests := []struct {
 		name           string
-		p0, p1, p2, p3 CurvePoint
+		p0, p1, p2, p3 raster.CurvePoint
 		shift          int
 		wantNil        bool
 	}{
 		{
 			name:    "simple cubic",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{33, 50},
-			p2:      CurvePoint{66, 50},
-			p3:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 33, Y: 50},
+			p2:      raster.CurvePoint{X: 66, Y: 50},
+			p3:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   0,
 			wantNil: false,
 		},
 		{
 			name:    "S-curve",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{100, 0},
-			p2:      CurvePoint{0, 100},
-			p3:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 100, Y: 0},
+			p2:      raster.CurvePoint{X: 0, Y: 100},
+			p3:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   0,
 			wantNil: false,
 		},
 		{
 			name:    "horizontal cubic (should be nil)",
-			p0:      CurvePoint{0, 50},
-			p1:      CurvePoint{33, 50},
-			p2:      CurvePoint{66, 50},
-			p3:      CurvePoint{100, 50},
+			p0:      raster.CurvePoint{X: 0, Y: 50},
+			p1:      raster.CurvePoint{X: 33, Y: 50},
+			p2:      raster.CurvePoint{X: 66, Y: 50},
+			p3:      raster.CurvePoint{X: 100, Y: 50},
 			shift:   0,
 			wantNil: true,
 		},
 		{
 			name:    "with AA shift",
-			p0:      CurvePoint{0, 0},
-			p1:      CurvePoint{33, 25},
-			p2:      CurvePoint{66, 75},
-			p3:      CurvePoint{100, 100},
+			p0:      raster.CurvePoint{X: 0, Y: 0},
+			p1:      raster.CurvePoint{X: 33, Y: 25},
+			p2:      raster.CurvePoint{X: 66, Y: 75},
+			p3:      raster.CurvePoint{X: 100, Y: 100},
 			shift:   2,
 			wantNil: false,
 		},
@@ -502,10 +451,10 @@ func TestCubicEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
+			edge := raster.NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
 
 			if (edge == nil) != tt.wantNil {
-				t.Errorf("NewCubicEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+				t.Errorf("raster.NewCubicEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
 				return
 			}
 
@@ -535,12 +484,12 @@ func TestCubicEdge(t *testing.T) {
 // TestCubicEdgeForwardDifferencing verifies cubic forward differencing algorithm.
 func TestCubicEdgeForwardDifferencing(t *testing.T) {
 	// Create a cubic with known control points
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{25, 50}
-	p2 := CurvePoint{75, 50}
-	p3 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 25, Y: 50}
+	p2 := raster.CurvePoint{X: 75, Y: 50}
+	p3 := raster.CurvePoint{X: 100, Y: 100}
 
-	edge := NewCubicEdge(p0, p1, p2, p3, 0)
+	edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
 	if edge == nil {
 		t.Fatal("expected non-nil edge")
 	}
@@ -568,12 +517,12 @@ func TestCubicEdgeForwardDifferencing(t *testing.T) {
 // TestEdgeVariant tests the polymorphic edge wrapper.
 func TestEdgeVariant(t *testing.T) {
 	t.Run("line variant", func(t *testing.T) {
-		v := NewLineEdgeVariant(CurvePoint{0, 0}, CurvePoint{100, 100}, 0)
+		v := raster.NewLineEdgeVariant(raster.CurvePoint{X: 0, Y: 0}, raster.CurvePoint{X: 100, Y: 100}, 0)
 		if v == nil {
 			t.Fatal("expected non-nil variant")
 		}
-		if v.Type != EdgeTypeLine {
-			t.Errorf("expected EdgeTypeLine, got %v", v.Type)
+		if v.Type != raster.EdgeTypeLine {
+			t.Errorf("expected raster.EdgeTypeLine, got %v", v.Type)
 		}
 		if v.AsLine() == nil {
 			t.Error("AsLine() returned nil")
@@ -584,17 +533,17 @@ func TestEdgeVariant(t *testing.T) {
 	})
 
 	t.Run("quadratic variant", func(t *testing.T) {
-		v := NewQuadraticEdgeVariant(
-			CurvePoint{0, 0},
-			CurvePoint{50, 25},
-			CurvePoint{100, 100},
+		v := raster.NewQuadraticEdgeVariant(
+			raster.CurvePoint{X: 0, Y: 0},
+			raster.CurvePoint{X: 50, Y: 25},
+			raster.CurvePoint{X: 100, Y: 100},
 			0,
 		)
 		if v == nil {
 			t.Fatal("expected non-nil variant")
 		}
-		if v.Type != EdgeTypeQuadratic {
-			t.Errorf("expected EdgeTypeQuadratic, got %v", v.Type)
+		if v.Type != raster.EdgeTypeQuadratic {
+			t.Errorf("expected raster.EdgeTypeQuadratic, got %v", v.Type)
 		}
 
 		count := 0
@@ -605,18 +554,18 @@ func TestEdgeVariant(t *testing.T) {
 	})
 
 	t.Run("cubic variant", func(t *testing.T) {
-		v := NewCubicEdgeVariant(
-			CurvePoint{0, 0},
-			CurvePoint{25, 50},
-			CurvePoint{75, 50},
-			CurvePoint{100, 100},
+		v := raster.NewCubicEdgeVariant(
+			raster.CurvePoint{X: 0, Y: 0},
+			raster.CurvePoint{X: 25, Y: 50},
+			raster.CurvePoint{X: 75, Y: 50},
+			raster.CurvePoint{X: 100, Y: 100},
 			0,
 		)
 		if v == nil {
 			t.Fatal("expected non-nil variant")
 		}
-		if v.Type != EdgeTypeCubic {
-			t.Errorf("expected EdgeTypeCubic, got %v", v.Type)
+		if v.Type != raster.EdgeTypeCubic {
+			t.Errorf("expected raster.EdgeTypeCubic, got %v", v.Type)
 		}
 
 		count := 0
@@ -627,54 +576,31 @@ func TestEdgeVariant(t *testing.T) {
 	})
 }
 
-// TestCubicDeltaFromLine tests the cubic deviation calculation.
-func TestCubicDeltaFromLine(t *testing.T) {
-	tests := []struct {
-		name       string
-		a, b, c, d FDot6
-		expectZero bool
-	}{
-		{"flat line", 0, 0, 0, 0, true},
-		{"collinear", 0, 100, 200, 300, true}, // All points on a line
-		{"curved", 0, 200, 100, 300, false},   // Control points off the chord
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := cubicDeltaFromLine(tt.a, tt.b, tt.c, tt.d)
-			if tt.expectZero && got != 0 {
-				t.Errorf("expected zero delta, got %v", got)
-			}
-			if !tt.expectZero && got == 0 {
-				t.Error("expected non-zero delta, got 0")
-			}
-		})
-	}
-}
+// TestCubicDeltaFromLine moved to raster/curve_edge_test.go.
 
 // Benchmark tests
 
 // BenchmarkQuadraticEdgeCreate benchmarks quadratic edge creation.
 func BenchmarkQuadraticEdgeCreate(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{50, 50}
-	p2 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 50, Y: 50}
+	p2 := raster.CurvePoint{X: 100, Y: 100}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = NewQuadraticEdge(p0, p1, p2, 0)
+		_ = raster.NewQuadraticEdge(p0, p1, p2, 0)
 	}
 }
 
 // BenchmarkQuadraticEdgeUpdate benchmarks forward differencing step.
 func BenchmarkQuadraticEdgeUpdate(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{50, 50}
-	p2 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 50, Y: 50}
+	p2 := raster.CurvePoint{X: 100, Y: 100}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := NewQuadraticEdge(p0, p1, p2, 0)
+		edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
 		if edge != nil {
 			for edge.Update() {
 				// O(1) per step - forward differencing
@@ -685,27 +611,27 @@ func BenchmarkQuadraticEdgeUpdate(b *testing.B) {
 
 // BenchmarkCubicEdgeCreate benchmarks cubic edge creation.
 func BenchmarkCubicEdgeCreate(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{33, 50}
-	p2 := CurvePoint{66, 50}
-	p3 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 33, Y: 50}
+	p2 := raster.CurvePoint{X: 66, Y: 50}
+	p3 := raster.CurvePoint{X: 100, Y: 100}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = NewCubicEdge(p0, p1, p2, p3, 0)
+		_ = raster.NewCubicEdge(p0, p1, p2, p3, 0)
 	}
 }
 
 // BenchmarkCubicEdgeUpdate benchmarks cubic forward differencing.
 func BenchmarkCubicEdgeUpdate(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{33, 50}
-	p2 := CurvePoint{66, 50}
-	p3 := CurvePoint{100, 100}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 33, Y: 50}
+	p2 := raster.CurvePoint{X: 66, Y: 50}
+	p3 := raster.CurvePoint{X: 100, Y: 100}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := NewCubicEdge(p0, p1, p2, p3, 0)
+		edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
 		if edge != nil {
 			for edge.Update() {
 				// O(1) per step - forward differencing
@@ -734,15 +660,17 @@ func BenchmarkNaiveQuadraticEval(b *testing.B) {
 	}
 }
 
-// BenchmarkDiffToShift benchmarks the subdivision calculation.
-func BenchmarkDiffToShift(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		diffToShift(FDot6(i%1000), FDot6((i*7)%1000), 2)
+// BenchmarkDiffToShift moved to raster/curve_edge_test.go.
+
+// absInt32 returns the absolute value of an int32 (test helper).
+func absInt32(v int32) int32 {
+	if v < 0 {
+		return -v
 	}
+	return v
 }
 
-// Helper function for tests
+// absFloat32 returns the absolute value of a float32 (test helper).
 func absFloat32(x float32) float32 {
 	if x < 0 {
 		return -x

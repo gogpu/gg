@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"math"
 )
 
@@ -25,17 +26,17 @@ import (
 // Usage:
 //
 //	filler := NewAnalyticFiller(width, height)
-//	filler.Fill(edgeBuilder, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+//	filler.Fill(edgeBuilder, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 //	    // Blend alpha runs to the destination row
 //	})
 type AnalyticFiller struct {
 	width, height int
 
 	// aet is the Active Edge Table for scanline processing.
-	aet *CurveAwareAET
+	aet *raster.CurveAwareAET
 
 	// alphaRuns stores RLE-encoded coverage for the current scanline.
-	alphaRuns *AlphaRuns
+	alphaRuns *raster.AlphaRuns
 
 	// coverage is the per-pixel coverage buffer for the current scanline.
 	// Values are in [0, 1] range representing the fraction of pixel covered.
@@ -53,8 +54,8 @@ func NewAnalyticFiller(width, height int) *AnalyticFiller {
 	return &AnalyticFiller{
 		width:     width,
 		height:    height,
-		aet:       NewCurveAwareAET(),
-		alphaRuns: NewAlphaRuns(width),
+		aet:       raster.NewCurveAwareAET(),
+		alphaRuns: raster.NewAlphaRuns(width),
 		coverage:  make([]float32, width),
 		winding:   make([]float32, width),
 	}
@@ -74,12 +75,12 @@ func (af *AnalyticFiller) Reset() {
 //   - fillRule: NonZero or EvenOdd fill rule
 //   - callback: called for each scanline with the alpha runs
 //
-// The callback receives the Y coordinate and AlphaRuns for that scanline.
+// The callback receives the Y coordinate and raster.AlphaRuns for that scanline.
 // The caller is responsible for blending the runs to the destination.
 func (af *AnalyticFiller) Fill(
-	eb *EdgeBuilder,
-	fillRule FillRule,
-	callback func(y int, runs *AlphaRuns),
+	eb *raster.EdgeBuilder,
+	fillRule raster.FillRule,
+	callback func(y int, runs *raster.AlphaRuns),
 ) {
 	if eb.IsEmpty() {
 		return
@@ -90,7 +91,7 @@ func (af *AnalyticFiller) Fill(
 	// Get AA scaling factor from edge builder.
 	// Edge coordinates are in sub-pixel space: pixel * (1 << aaShift)
 	aaShift := eb.AAShift()
-	//nolint:gosec // G115: aaShift is bounded by MaxCoeffShift (6), safe conversion
+	//nolint:gosec // G115: aaShift is bounded by raster.MaxCoeffShift (6), safe conversion
 	aaScale := int32(1) << uint(aaShift)
 
 	// Compute scanline range in pixel coordinates
@@ -109,7 +110,7 @@ func (af *AnalyticFiller) Fill(
 	af.edgeIdx = 0
 
 	// Collect all edges sorted by top Y (edges are sorted in sub-pixel space)
-	allEdges := make([]CurveEdgeVariant, 0, eb.EdgeCount())
+	allEdges := make([]raster.CurveEdgeVariant, 0, eb.EdgeCount())
 	for edge := range eb.AllEdges() {
 		allEdges = append(allEdges, edge)
 	}
@@ -134,9 +135,9 @@ func (af *AnalyticFiller) Fill(
 func (af *AnalyticFiller) processScanlineWithScale(
 	y int,
 	aaScale int32,
-	allEdges []CurveEdgeVariant,
-	fillRule FillRule,
-	callback func(y int, runs *AlphaRuns),
+	allEdges []raster.CurveEdgeVariant,
+	fillRule raster.FillRule,
+	callback func(y int, runs *raster.AlphaRuns),
 ) {
 	// Clear coverage buffer
 	for i := range af.coverage {
@@ -181,7 +182,7 @@ func (af *AnalyticFiller) processScanlineWithScale(
 
 	// Process each edge, accumulating coverage
 	// Pass sub-pixel Y range for accurate coverage calculation
-	af.aet.ForEach(func(edge *CurveEdgeVariant) bool {
+	af.aet.ForEach(func(edge *raster.CurveEdgeVariant) bool {
 		af.accumulateCoverageSubpixel(edge, ySubpixel, aaScale, fillRule)
 		return true
 	})
@@ -213,10 +214,10 @@ func (af *AnalyticFiller) processScanlineWithScale(
 //   - aaScale: sub-pixel scale factor (1 << aaShift)
 //   - fillRule: fill rule (unused, for interface compatibility)
 func (af *AnalyticFiller) accumulateCoverageSubpixel(
-	edge *CurveEdgeVariant,
+	edge *raster.CurveEdgeVariant,
 	ySubpixel int32,
 	aaScale int32,
-	_ FillRule,
+	_ raster.FillRule,
 ) {
 	aaScaleF := float32(aaScale)
 	ySubpixelEnd := ySubpixel + aaScale
@@ -270,13 +271,13 @@ func (af *AnalyticFiller) accumulateCoverageSubpixel(
 
 // stepCurveSegment advances a curve edge to its next segment.
 // Returns true if a new segment was produced.
-func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
+func (af *AnalyticFiller) stepCurveSegment(edge *raster.CurveEdgeVariant) bool {
 	switch edge.Type {
-	case EdgeTypeQuadratic:
+	case raster.EdgeTypeQuadratic:
 		if edge.Quadratic.CurveCount() > 0 {
 			return edge.Quadratic.Update()
 		}
-	case EdgeTypeCubic:
+	case raster.EdgeTypeCubic:
 		// Cubic uses negative count, increments toward 0
 		if edge.Cubic.CurveCount() < 0 {
 			return edge.Cubic.Update()
@@ -301,7 +302,7 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 //
 // This matches the algorithm in fine.go which processes all pixels in each tile row.
 func (af *AnalyticFiller) computeSegmentCoverage(
-	line *LineEdge,
+	line *raster.LineEdge,
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
 	yPixel, yPixelEnd, aaScaleF float32,
 ) {
@@ -329,10 +330,10 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	sign := float32(line.Winding)
 
 	// Compute X at firstY from the edge's stored X value
-	// line.X is the X coordinate at Y=firstY (in FDot16, scaled by aaScale)
-	xAtFirstY := FDot16ToFloat32(line.X) / aaScaleF
+	// line.X is the X coordinate at Y=firstY (in raster.FDot16, scaled by aaScale)
+	xAtFirstY := raster.FDot16ToFloat32(line.X) / aaScaleF
 	// dx is slope (dimensionless): dX_subpixel / dY_subpixel = dX_pixel / dY_pixel
-	dx := FDot16ToFloat32(line.DX)
+	dx := raster.FDot16ToFloat32(line.DX)
 
 	// Compute line X at any Y: x(y) = xAtFirstY + dx * (y - firstY)
 	lineTopY := yTop
@@ -405,9 +406,9 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 }
 
 // applyFillRule converts accumulated winding values to coverage.
-func (af *AnalyticFiller) applyFillRule(fillRule FillRule) {
+func (af *AnalyticFiller) applyFillRule(fillRule raster.FillRule) {
 	switch fillRule {
-	case FillRuleNonZero:
+	case raster.FillRuleNonZero:
 		// Non-zero: coverage = clamp(abs(winding), 0, 1)
 		for i, w := range af.winding {
 			if w < 0 {
@@ -416,7 +417,7 @@ func (af *AnalyticFiller) applyFillRule(fillRule FillRule) {
 			af.coverage[i] = clamp32(w, 0, 1)
 		}
 
-	case FillRuleEvenOdd:
+	case raster.FillRuleEvenOdd:
 		// Even-odd: coverage based on fractional part of winding
 		for i, w := range af.winding {
 			// Map winding to [0, 2] cycle, then to coverage
@@ -430,7 +431,7 @@ func (af *AnalyticFiller) applyFillRule(fillRule FillRule) {
 	}
 }
 
-// coverageToRuns converts the coverage buffer to AlphaRuns.
+// coverageToRuns converts the coverage buffer to raster.AlphaRuns.
 func (af *AnalyticFiller) coverageToRuns() {
 	af.alphaRuns.Reset()
 
@@ -482,7 +483,7 @@ func (af *AnalyticFiller) Coverage() []float32 {
 }
 
 // AlphaRuns returns the alpha runs for the last processed scanline.
-func (af *AnalyticFiller) AlphaRuns() *AlphaRuns {
+func (af *AnalyticFiller) AlphaRuns() *raster.AlphaRuns {
 	return af.alphaRuns
 }
 
@@ -518,10 +519,10 @@ func max32f(a, b float32) float32 {
 // FillPath is a convenience function that creates a filler and fills a path.
 // For repeated fills, create a filler once and reuse it.
 func FillPath(
-	eb *EdgeBuilder,
+	eb *raster.EdgeBuilder,
 	width, height int,
-	fillRule FillRule,
-	callback func(y int, runs *AlphaRuns),
+	fillRule raster.FillRule,
+	callback func(y int, runs *raster.AlphaRuns),
 ) {
 	filler := NewAnalyticFiller(width, height)
 	filler.Fill(eb, fillRule, callback)
@@ -531,9 +532,9 @@ func FillPath(
 // The buffer must have width * height elements.
 // Coverage values are written as 0-255 alpha values.
 func FillToBuffer(
-	eb *EdgeBuilder,
+	eb *raster.EdgeBuilder,
 	width, height int,
-	fillRule FillRule,
+	fillRule raster.FillRule,
 	buffer []uint8,
 ) {
 	if len(buffer) < width*height {
@@ -541,7 +542,7 @@ func FillToBuffer(
 	}
 
 	filler := NewAnalyticFiller(width, height)
-	filler.Fill(eb, fillRule, func(y int, runs *AlphaRuns) {
+	filler.Fill(eb, fillRule, func(y int, runs *raster.AlphaRuns) {
 		// Copy coverage to buffer row
 		offset := y * width
 		if offset+width > len(buffer) {

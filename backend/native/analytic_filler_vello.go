@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"math"
 )
 
@@ -14,7 +15,7 @@ import (
 // without supersampling.
 type AnalyticFillerVello struct {
 	width, height int
-	alphaRuns     *AlphaRuns
+	alphaRuns     *raster.AlphaRuns
 	area          []float32 // Per-pixel winding/area accumulator
 }
 
@@ -23,7 +24,7 @@ func NewAnalyticFillerVello(width, height int) *AnalyticFillerVello {
 	return &AnalyticFillerVello{
 		width:     width,
 		height:    height,
-		alphaRuns: NewAlphaRuns(width),
+		alphaRuns: raster.NewAlphaRuns(width),
 		area:      make([]float32, width),
 	}
 }
@@ -42,9 +43,9 @@ type lineSegment struct {
 
 // Fill renders a path using the Vello algorithm.
 func (af *AnalyticFillerVello) Fill(
-	eb *EdgeBuilder,
-	fillRule FillRule,
-	callback func(y int, runs *AlphaRuns),
+	eb *raster.EdgeBuilder,
+	fillRule raster.FillRule,
+	callback func(y int, runs *raster.AlphaRuns),
 ) {
 	if eb.IsEmpty() {
 		return
@@ -76,7 +77,7 @@ func (af *AnalyticFillerVello) Fill(
 
 // collectSegments extracts line segments from VelloLines.
 // Uses original float32 coordinates to avoid fixed-point quantization loss.
-func (af *AnalyticFillerVello) collectSegments(eb *EdgeBuilder, _ float32) []lineSegment {
+func (af *AnalyticFillerVello) collectSegments(eb *raster.EdgeBuilder, _ float32) []lineSegment {
 	velloLines := eb.VelloLines()
 	segments := make([]lineSegment, 0, len(velloLines))
 
@@ -111,7 +112,7 @@ func (af *AnalyticFillerVello) collectSegments(eb *EdgeBuilder, _ float32) []lin
 func (af *AnalyticFillerVello) processScanlineVello(
 	y int,
 	segments []lineSegment,
-	fillRule FillRule,
+	fillRule raster.FillRule,
 ) {
 	// Clear area buffer
 	for i := range af.area {
@@ -195,9 +196,9 @@ func (af *AnalyticFillerVello) processScanlineVello(
 		w := af.area[i]
 
 		switch fillRule {
-		case FillRuleNonZero:
+		case raster.FillRuleNonZero:
 			coverage = clamp32(velloAbsF32(w), 0, 1)
-		case FillRuleEvenOdd:
+		case raster.FillRuleEvenOdd:
 			// Even-odd: coverage based on fractional part
 			absW := velloAbsF32(w)
 			im1 := float32(int32(absW*0.5 + 0.5))

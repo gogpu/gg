@@ -7,7 +7,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/gogpu/gg/core"
+	"github.com/gogpu/gg/raster"
 )
 
 func TestNewScene(t *testing.T) {
@@ -66,7 +66,7 @@ func TestSceneFill(t *testing.T) {
 	scene := NewScene()
 
 	scene.SetFillColor(color.RGBA{255, 0, 0, 255})
-	scene.SetFillRule(core.FillRuleEvenOdd)
+	scene.SetFillRule(raster.FillRuleEvenOdd)
 
 	scene.MoveTo(0, 0)
 	scene.LineTo(100, 0)
@@ -89,7 +89,7 @@ func TestSceneFill(t *testing.T) {
 	if cmd.path == nil {
 		t.Error("Command path should not be nil")
 	}
-	if cmd.fillRule != core.FillRuleEvenOdd {
+	if cmd.fillRule != raster.FillRuleEvenOdd {
 		t.Errorf("fillRule = %v, want EvenOdd", cmd.fillRule)
 	}
 
@@ -138,12 +138,12 @@ func TestSceneRectangle(t *testing.T) {
 		t.Errorf("Rectangle verbs = %d, want 5", len(cmd.path.verbs))
 	}
 
-	expectedVerbs := []core.PathVerb{
-		core.VerbMoveTo,
-		core.VerbLineTo,
-		core.VerbLineTo,
-		core.VerbLineTo,
-		core.VerbClose,
+	expectedVerbs := []raster.PathVerb{
+		raster.VerbMoveTo,
+		raster.VerbLineTo,
+		raster.VerbLineTo,
+		raster.VerbLineTo,
+		raster.VerbClose,
 	}
 
 	for i, expected := range expectedVerbs {
@@ -169,12 +169,12 @@ func TestSceneCircle(t *testing.T) {
 		t.Errorf("Circle verbs = %d, want 5", len(cmd.path.verbs))
 	}
 
-	if cmd.path.verbs[0] != core.VerbMoveTo {
+	if cmd.path.verbs[0] != raster.VerbMoveTo {
 		t.Error("Circle should start with MoveTo")
 	}
 
 	for i := 1; i < 5; i++ {
-		if cmd.path.verbs[i] != core.VerbCubicTo {
+		if cmd.path.verbs[i] != raster.VerbCubicTo {
 			t.Errorf("verb[%d] = %v, want CubicTo", i, cmd.path.verbs[i])
 		}
 	}
@@ -196,7 +196,7 @@ func TestSceneQuadTo(t *testing.T) {
 		t.Errorf("verbs length = %d, want 2", len(cmd.path.verbs))
 	}
 
-	if cmd.path.verbs[1] != core.VerbQuadTo {
+	if cmd.path.verbs[1] != raster.VerbQuadTo {
 		t.Errorf("verb[1] = %v, want QuadTo", cmd.path.verbs[1])
 	}
 
@@ -219,7 +219,7 @@ func TestSceneCubicTo(t *testing.T) {
 		t.Fatal("Command path should not be nil")
 	}
 
-	if cmd.path.verbs[1] != core.VerbCubicTo {
+	if cmd.path.verbs[1] != raster.VerbCubicTo {
 		t.Errorf("verb[1] = %v, want CubicTo", cmd.path.verbs[1])
 	}
 
@@ -313,8 +313,8 @@ func TestPathBuilderImplementsPathLike(t *testing.T) {
 
 	cmd := scene.drawCommands()[0]
 
-	// Verify pathBuilder implements core.PathLike
-	var path core.PathLike = cmd.path
+	// Verify pathBuilder implements raster.PathLike
+	var path raster.PathLike = cmd.path
 
 	if path.IsEmpty() {
 		t.Error("path should not be empty")

@@ -11,8 +11,6 @@ const (
 	BackendSoftware = "software"
 	// BackendNative is the name of the Pure Go GPU backend (gogpu/wgpu).
 	BackendNative = "native"
-	// BackendRust is the name of the Rust GPU backend (go-webgpu/webgpu FFI).
-	BackendRust = "rust"
 	// BackendGo is an alias for BackendNative (user convenience).
 	BackendGo = BackendNative
 )

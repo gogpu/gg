@@ -6,12 +6,12 @@ package surface
 import (
 	"math"
 
-	"github.com/gogpu/gg/core"
+	"github.com/gogpu/gg/raster"
 )
 
 // Path represents a vector path for drawing operations.
 //
-// Path is the surface-level path type that wraps core.PathLike.
+// Path is the surface-level path type that wraps raster.PathLike.
 // It provides a convenient builder API for constructing paths.
 //
 // Example:
@@ -24,7 +24,7 @@ import (
 //
 //	surface.Fill(p, style)
 type Path struct {
-	verbs  []core.PathVerb
+	verbs  []raster.PathVerb
 	points []float32
 	startX float32
 	startY float32
@@ -35,14 +35,14 @@ type Path struct {
 // NewPath creates a new empty path.
 func NewPath() *Path {
 	return &Path{
-		verbs:  make([]core.PathVerb, 0, 16),
+		verbs:  make([]raster.PathVerb, 0, 16),
 		points: make([]float32, 0, 64),
 	}
 }
 
 // MoveTo starts a new subpath at the given point.
 func (p *Path) MoveTo(x, y float64) {
-	p.verbs = append(p.verbs, core.VerbMoveTo)
+	p.verbs = append(p.verbs, raster.VerbMoveTo)
 	p.points = append(p.points, float32(x), float32(y))
 	p.startX, p.startY = float32(x), float32(y)
 	p.curX, p.curY = float32(x), float32(y)
@@ -54,7 +54,7 @@ func (p *Path) LineTo(x, y float64) {
 		p.MoveTo(x, y)
 		return
 	}
-	p.verbs = append(p.verbs, core.VerbLineTo)
+	p.verbs = append(p.verbs, raster.VerbLineTo)
 	p.points = append(p.points, float32(x), float32(y))
 	p.curX, p.curY = float32(x), float32(y)
 }
@@ -65,7 +65,7 @@ func (p *Path) QuadTo(cx, cy, x, y float64) {
 	if len(p.verbs) == 0 {
 		p.MoveTo(cx, cy)
 	}
-	p.verbs = append(p.verbs, core.VerbQuadTo)
+	p.verbs = append(p.verbs, raster.VerbQuadTo)
 	p.points = append(p.points, float32(cx), float32(cy), float32(x), float32(y))
 	p.curX, p.curY = float32(x), float32(y)
 }
@@ -76,7 +76,7 @@ func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
 	if len(p.verbs) == 0 {
 		p.MoveTo(c1x, c1y)
 	}
-	p.verbs = append(p.verbs, core.VerbCubicTo)
+	p.verbs = append(p.verbs, raster.VerbCubicTo)
 	p.points = append(p.points,
 		float32(c1x), float32(c1y),
 		float32(c2x), float32(c2y),
@@ -89,7 +89,7 @@ func (p *Path) Close() {
 	if len(p.verbs) == 0 {
 		return
 	}
-	p.verbs = append(p.verbs, core.VerbClose)
+	p.verbs = append(p.verbs, raster.VerbClose)
 	p.curX, p.curY = p.startX, p.startY
 }
 
@@ -106,23 +106,23 @@ func (p *Path) IsEmpty() bool {
 	return len(p.verbs) == 0
 }
 
-// Verbs returns the verb slice for core.PathLike interface.
-func (p *Path) Verbs() []core.PathVerb {
+// Verbs returns the verb slice for raster.PathLike interface.
+func (p *Path) Verbs() []raster.PathVerb {
 	return p.verbs
 }
 
-// Points returns the points slice for core.PathLike interface.
+// Points returns the points slice for raster.PathLike interface.
 func (p *Path) Points() []float32 {
 	return p.points
 }
 
-// Verify Path implements core.PathLike.
-var _ core.PathLike = (*Path)(nil)
+// Verify Path implements raster.PathLike.
+var _ raster.PathLike = (*Path)(nil)
 
 // Clone creates a deep copy of the path.
 func (p *Path) Clone() *Path {
 	clone := &Path{
-		verbs:  make([]core.PathVerb, len(p.verbs)),
+		verbs:  make([]raster.PathVerb, len(p.verbs)),
 		points: make([]float32, len(p.points)),
 		startX: p.startX,
 		startY: p.startY,

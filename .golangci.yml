@@ -136,14 +136,6 @@ linters:
           - dupl
           - gocognit
 
-      # Internal raster implementation
-      - path: internal/raster/.*\.go
-        linters:
-          - gocyclo      # Rasterization code can be complex
-          - funlen       # Drawing algorithms are verbose
-          - cyclop       # Complex branching in scanline
-          - gocognit     # Raster algorithms are inherently complex
-
       # Internal font handling
       - path: internal/fontkit/.*\.go
         linters:

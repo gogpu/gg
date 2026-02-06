@@ -159,7 +159,7 @@ func (g *TileGrid) SetFillRule(rule scene.FillStyle) {
 	g.fillRule = rule
 }
 
-// FillRule returns the current fill rule.
+// raster.FillRule returns the current fill rule.
 func (g *TileGrid) FillRule() scene.FillStyle {
 	return g.fillRule
 }

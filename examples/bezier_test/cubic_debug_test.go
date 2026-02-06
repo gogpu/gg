@@ -6,6 +6,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/backend/native"
+	"github.com/gogpu/gg/raster"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -14,8 +15,8 @@ func TestCubicLeafDebug(t *testing.T) {
 	// This shape uses two cubic curves that are NOT Y-monotonic
 	path := gg.NewPath()
 	path.MoveTo(450, 300)
-	path.CubicTo(550, 220, 650, 220, 700, 300) // Y: 300→220→220→300 (non-monotonic!)
-	path.CubicTo(650, 380, 550, 380, 450, 300) // Y: 300→380→380→300 (non-monotonic!)
+	path.CubicTo(550, 220, 650, 220, 700, 300) // Y: 300->220->220->300 (non-monotonic!)
+	path.CubicTo(650, 380, 550, 380, 450, 300) // Y: 300->380->380->300 (non-monotonic!)
 	path.Close()
 
 	fmt.Printf("=== CUBIC LEAF SHAPE (Purple) ===\n")
@@ -47,8 +48,8 @@ func TestCubicLeafDebug(t *testing.T) {
 	fmt.Printf("\nScene path verbs: %d, points: %d\n", len(scenePath.Verbs()), len(scenePath.Points()))
 
 	// Build edges with aaShift=2 (4x quality)
-	eb := native.NewEdgeBuilder(2)
-	eb.BuildFromScenePath(scenePath, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	native.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
 
 	fmt.Printf("\n=== EdgeBuilder Stats ===\n")
 	fmt.Printf("  IsEmpty: %v\n", eb.IsEmpty())
@@ -60,7 +61,7 @@ func TestCubicLeafDebug(t *testing.T) {
 
 	// Check if cubics were chopped at Y extrema
 	fmt.Printf("\n=== Cubic Edge Analysis ===\n")
-	fmt.Printf("  Expected: 4 cubic edges (2 original cubics × 2 chops each)\n")
+	fmt.Printf("  Expected: 4 cubic edges (2 original cubics x 2 chops each)\n")
 	fmt.Printf("  Actual: %d cubic edges\n", eb.CubicEdgeCount())
 
 	// Print cubic edge details
@@ -76,11 +77,11 @@ func TestCubicLeafDebug(t *testing.T) {
 
 		typeStr := "Unknown"
 		switch edge.Type {
-		case native.EdgeTypeLine:
+		case raster.EdgeTypeLine:
 			typeStr = "Line"
-		case native.EdgeTypeQuadratic:
+		case raster.EdgeTypeQuadratic:
 			typeStr = "Quad"
-		case native.EdgeTypeCubic:
+		case raster.EdgeTypeCubic:
 			typeStr = "Cubic"
 		}
 
@@ -96,7 +97,7 @@ func TestCubicLeafDebug(t *testing.T) {
 				line.Winding)
 
 			// For cubic edges, print curve count
-			if edge.Type == native.EdgeTypeCubic && edge.Cubic != nil {
+			if edge.Type == raster.EdgeTypeCubic && edge.Cubic != nil {
 				fmt.Printf("       CurveCount=%d (negative=more segments)\n", edge.Cubic.CurveCount())
 			}
 		} else {
@@ -111,7 +112,7 @@ func TestCubicLeafDebug(t *testing.T) {
 	pixelCount := 0
 	yMinSeen, yMaxSeen := 600, 0
 
-	filler.Fill(eb, native.FillRuleNonZero, func(y int, runs *native.AlphaRuns) {
+	filler.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlineCount++
 		linePixels := 0
 		for x, alpha := range runs.Iter() {
@@ -140,7 +141,7 @@ func TestCubicLeafDebug(t *testing.T) {
 	// The purple leaf should span approximately:
 	// - X: 450 to 700 (250 pixels wide)
 	// - Y: 220 to 380 (160 pixels tall)
-	// - Area ≈ π * (125 * 80) ≈ 31,400 pixels (rough ellipse approximation)
+	// - Area ~ pi * (125 * 80) ~ 31,400 pixels (rough ellipse approximation)
 
 	// Note: The analytic filler currently has issues with non-monotonic cubics.
 	// The actual Y range may be smaller than expected due to edge chopping issues.

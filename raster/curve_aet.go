@@ -1,16 +1,16 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-package native
+package raster
 
 import (
 	"slices"
 )
 
-// CurveAwareAET is an Active Edge Table that handles all edge gputypes.
+// CurveAwareAET is an Active Edge Table that handles all edge types.
 //
 // Unlike a simple line-based AET, this table can hold LineEdge, QuadraticEdge,
-// and CubicEdge gputypes. Curve edges are stepped through their segments during
+// and CubicEdge types. Curve edges are stepped through their segments during
 // scanline traversal using forward differencing.
 //
 // The AET maintains edges sorted by their current X position, which is

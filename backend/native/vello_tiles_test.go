@@ -5,6 +5,7 @@ package native
 
 import (
 	"fmt"
+	"github.com/gogpu/gg/raster"
 	"image/png"
 	"math"
 	"os"
@@ -94,10 +95,10 @@ func TestPathSegmentYEdgeSentinel(t *testing.T) {
 
 func TestTileRasterizerFillEmpty(t *testing.T) {
 	tr := NewTileRasterizer(100, 100)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	callCount := 0
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		callCount++
 	})
 
@@ -109,17 +110,20 @@ func TestTileRasterizerFillEmpty(t *testing.T) {
 
 func TestTileRasterizerFillSimpleRect(t *testing.T) {
 	tr := NewTileRasterizer(32, 32)
-	eb := NewEdgeBuilder(0) // No AA for simpler testing
+	eb := raster.NewEdgeBuilder(0) // No AA for simpler testing
 
-	// Create a simple 16x16 rectangle at (8, 8)
-	// Rectangle edges: top, right, bottom, left
-	eb.addLine(8, 8, 24, 8)   // top (left to right)
-	eb.addLine(24, 8, 24, 24) // right (top to bottom)
-	eb.addLine(24, 24, 8, 24) // bottom (right to left)
-	eb.addLine(8, 24, 8, 8)   // left (bottom to top)
+	// Create a simple 16x16 rectangle at (8, 8) via scene.Path
+	path := scene.NewPath()
+	path.MoveTo(8, 8)
+	path.LineTo(24, 8)
+	path.LineTo(24, 24)
+	path.LineTo(8, 24)
+	path.Close()
+
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	scanlines := make(map[int]bool)
-	tr.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+	tr.Fill(eb, raster.FillRuleNonZero, func(y int, runs *raster.AlphaRuns) {
 		scanlines[y] = true
 	})
 
@@ -136,7 +140,7 @@ func TestFillPathWithBackdrop(t *testing.T) {
 	tr.tiles[0].Backdrop = 1
 
 	// Fill the tile (no segments, just backdrop)
-	tr.fillPath(&tr.tiles[0], FillRuleNonZero)
+	tr.fillPath(&tr.tiles[0], raster.FillRuleNonZero)
 
 	// All pixels should have coverage = 1.0 (alpha = 255)
 	for i := 0; i < VelloTileSize; i++ {
@@ -277,14 +281,18 @@ func BenchmarkTileRasterizerReset(b *testing.B) {
 func TestDebugBackdrop(t *testing.T) {
 	// Small 64x64 image = 4x4 tiles
 	tr := NewTileRasterizer(64, 64)
-	eb := NewEdgeBuilder(0) // No AA for clarity
+	eb := raster.NewEdgeBuilder(0) // No AA for clarity
 
 	// Simple rectangle from (16,16) to (48,48) - should cover tiles (1,1), (1,2), (2,1), (2,2)
-	// Rectangle: clockwise winding
-	eb.addLine(16, 16, 48, 16) // top: left to right
-	eb.addLine(48, 16, 48, 48) // right: top to bottom (winding +1)
-	eb.addLine(48, 48, 16, 48) // bottom: right to left
-	eb.addLine(16, 48, 16, 16) // left: bottom to top (winding -1)
+	// Rectangle: clockwise winding via scene.Path
+	path := scene.NewPath()
+	path.MoveTo(16, 16)
+	path.LineTo(48, 16)
+	path.LineTo(48, 48)
+	path.LineTo(16, 48)
+	path.Close()
+
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Manually call binSegments and prefix sum to see backdrops
 	tr.binSegments(eb, 1.0)
@@ -316,7 +324,7 @@ func TestDebugCircleArtifact(t *testing.T) {
 	// Same dimensions as visual test
 	width, height := 200, 200
 	tr := NewTileRasterizer(width, height)
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	// Build circle (same as TestVelloCompareWithOriginal)
 	cx, cy := float32(100), float32(100)
@@ -331,7 +339,7 @@ func TestDebugCircleArtifact(t *testing.T) {
 	path.CubicTo(cx+radius*k, cy+radius, cx+radius, cy+radius*k, cx+radius, cy)
 	path.Close()
 	eb.SetFlattenCurves(true)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Bin segments
 	aaShift := eb.AAShift()
@@ -436,7 +444,7 @@ func BenchmarkFillPath(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tr.fillPath(tile, FillRuleNonZero)
+		tr.fillPath(tile, raster.FillRuleNonZero)
 	}
 }
 
@@ -448,13 +456,13 @@ type normalizedLine struct {
 	isDown bool
 }
 
-// reconstituteLine converts a LineEdge back to float coordinates using
+// reconstituteLine converts a raster.LineEdge back to float coordinates using
 // the same math as binSegments.
-func reconstituteLine(line *LineEdge, aaScale float32) normalizedLine {
-	px0 := FDot16ToFloat32(line.X) / aaScale
+func reconstituteLine(line *raster.LineEdge, aaScale float32) normalizedLine {
+	px0 := raster.FDot16ToFloat32(line.X) / aaScale
 	py0 := float32(line.FirstY) / aaScale
 	py1 := float32(line.LastY+1) / aaScale
-	dxPerY := FDot16ToFloat32(line.DX)
+	dxPerY := raster.FDot16ToFloat32(line.DX)
 	px1 := px0 + dxPerY*(py1-py0)
 	isDown := line.Winding > 0
 	return normalizedLine{
@@ -464,9 +472,9 @@ func reconstituteLine(line *LineEdge, aaScale float32) normalizedLine {
 	}
 }
 
-// velloToNormalized converts a VelloLine to normalizedLine.
+// velloToNormalized converts a raster.VelloLine to normalizedLine.
 // VelloLine is already normalized (P0.y <= P1.y).
-func velloToNormalized(vl VelloLine) normalizedLine {
+func velloToNormalized(vl raster.VelloLine) normalizedLine {
 	return normalizedLine{
 		x0: vl.P0[0], y0: vl.P0[1],
 		x1: vl.P1[0], y1: vl.P1[1],
@@ -492,14 +500,14 @@ func sortNormalized(lines []normalizedLine) {
 	})
 }
 
-// TestVelloLineCoordinateValidation validates that VelloLine and LineEdge
+// TestVelloLineCoordinateValidation validates that VelloLine and raster.LineEdge
 // produce identical coordinates for integer-coordinate shapes.
 //
-// VelloLine stores original float32 coords; LineEdge quantizes through
-// fixed-point (FDot6/FDot16). For axis-aligned edges at integer pixel
+// VelloLine stores original float32 coords; raster.LineEdge quantizes through
+// fixed-point (raster.FDot6/raster.FDot16). For axis-aligned edges at integer pixel
 // coordinates the round-trip is lossless. For diagonal edges, the
-// fixed-point quantization in NewLineEdge introduces a small X offset
-// (typically 0.125 = 1/(aaScale*2)) due to FDot6Round and computeDY
+// fixed-point quantization in raster.NewLineEdge introduces a small X offset
+// (typically 0.125 = 1/(aaScale*2)) due to raster.FDot6Round and computeDY
 // adjustments. This quantization error is exactly why VelloLine exists:
 // to preserve the original float coordinates for the Vello pipeline.
 //
@@ -515,14 +523,14 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 	type testCase struct {
 		name      string
 		exactX    bool // true if X coords should match exactly (axis-aligned)
-		buildPath func(eb *EdgeBuilder)
+		buildPath func(eb *raster.EdgeBuilder)
 	}
 
 	tests := []testCase{
 		{
 			name:   "square 10,10 to 30,30",
 			exactX: true,
-			buildPath: func(eb *EdgeBuilder) {
+			buildPath: func(eb *raster.EdgeBuilder) {
 				path := scene.NewPath()
 				path.MoveTo(10, 10)
 				path.LineTo(30, 10)
@@ -530,13 +538,13 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 				path.LineTo(10, 30)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 		{
 			name:   "diagonal polygon",
 			exactX: false, // Diagonal lines have fixed-point X quantization
-			buildPath: func(eb *EdgeBuilder) {
+			buildPath: func(eb *raster.EdgeBuilder) {
 				thickness := float32(20)
 				path := scene.NewPath()
 				path.MoveTo(10, 10)
@@ -547,19 +555,19 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 				path.LineTo(10, 10+thickness)
 				path.Close()
 				eb.SetFlattenCurves(true)
-				eb.BuildFromScenePath(path, scene.IdentityAffine())
+				BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			eb := NewEdgeBuilder(aaShift)
+			eb := raster.NewEdgeBuilder(aaShift)
 			tc.buildPath(eb)
 
 			velloLines := eb.VelloLines()
 			t.Logf("VelloLine count: %d", len(velloLines))
-			t.Logf("LineEdge count:  %d", eb.LineEdgeCount())
+			t.Logf("raster.LineEdge count:  %d", eb.LineEdgeCount())
 
 			// Convert VelloLines to normalized form.
 			velloNorm := make([]normalizedLine, len(velloLines))
@@ -585,11 +593,11 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 					i, le.x0, le.y0, le.x1, le.y1, le.isDown)
 			}
 
-			// Vertical combining may reduce LineEdge count compared to
+			// Vertical combining may reduce raster.LineEdge count compared to
 			// VelloLine count. We match what we can.
 			if len(lineNorm) > len(velloNorm) {
-				t.Errorf("LineEdge count (%d) > VelloLine count (%d); "+
-					"expected VelloLine >= LineEdge due to vertical combining",
+				t.Errorf("raster.LineEdge count (%d) > VelloLine count (%d); "+
+					"expected VelloLine >= raster.LineEdge due to vertical combining",
 					len(lineNorm), len(velloNorm))
 				return
 			}
@@ -598,7 +606,7 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 			//   - Y always matches exactly for integer coords (tolerance 1e-4)
 			//   - X matches exactly for axis-aligned edges
 			//   - X has up to 0.25 offset for diagonal edges due to
-			//     FDot6Round + computeDY in NewLineEdge
+			//     raster.FDot6Round + computeDY in raster.NewLineEdge
 			const yTol = 1e-4
 			xTol := 1e-4
 			if !tc.exactX {
@@ -639,7 +647,7 @@ func TestVelloLineCoordinateValidation(t *testing.T) {
 				if !found {
 					mismatches++
 					if mismatches <= 10 {
-						t.Errorf("LineEdge[%d] (%.4f,%.4f)-(%.4f,%.4f) down=%v "+
+						t.Errorf("raster.LineEdge[%d] (%.4f,%.4f)-(%.4f,%.4f) down=%v "+
 							"has no matching VelloLine (yTol=%.4f, xTol=%.4f)",
 							li, le.x0, le.y0, le.x1, le.y1, le.isDown, yTol, xTol)
 					}

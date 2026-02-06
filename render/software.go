@@ -7,7 +7,7 @@ import (
 	"errors"
 	"image/color"
 
-	"github.com/gogpu/gg/core"
+	"github.com/gogpu/gg/raster"
 )
 
 // SoftwareRenderer is a CPU-based renderer using the core/ package algorithms.
@@ -34,10 +34,10 @@ import (
 //	img := target.Image()
 type SoftwareRenderer struct {
 	// edgeBuilder is reused for path-to-edge conversion.
-	edgeBuilder *core.EdgeBuilder
+	edgeBuilder *raster.EdgeBuilder
 
 	// filler is reused for analytic anti-aliasing.
-	filler *core.AnalyticFiller
+	filler *raster.AnalyticFiller
 
 	// lastWidth and lastHeight track the filler dimensions.
 	lastWidth, lastHeight int
@@ -46,7 +46,7 @@ type SoftwareRenderer struct {
 // NewSoftwareRenderer creates a new CPU-based software renderer.
 func NewSoftwareRenderer() *SoftwareRenderer {
 	return &SoftwareRenderer{
-		edgeBuilder: core.NewEdgeBuilder(2), // 4x AA quality
+		edgeBuilder: raster.NewEdgeBuilder(2), // 4x AA quality
 	}
 }
 
@@ -119,7 +119,7 @@ func (r *SoftwareRenderer) Capabilities() RendererCapabilities {
 // ensureFiller ensures the filler is sized for the target dimensions.
 func (r *SoftwareRenderer) ensureFiller(width, height int) {
 	if r.filler == nil || r.lastWidth != width || r.lastHeight != height {
-		r.filler = core.NewAnalyticFiller(width, height)
+		r.filler = raster.NewAnalyticFiller(width, height)
 		r.lastWidth = width
 		r.lastHeight = height
 	}
@@ -151,7 +151,7 @@ func (r *SoftwareRenderer) renderClear(pixels []byte, width, height, stride int,
 }
 
 // renderFill fills a path with a solid color.
-func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, path *pathBuilder, c color.Color, fillRule core.FillRule) {
+func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, path *pathBuilder, c color.Color, fillRule raster.FillRule) {
 	// Convert color to RGBA (mask ensures value fits in uint8)
 	cr, cg, cb, ca := c.RGBA()
 	//nolint:gosec // G115: mask ensures no overflow
@@ -166,7 +166,7 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 	// Build edges from path
 	r.edgeBuilder.Reset()
 	r.edgeBuilder.SetFlattenCurves(true) // Use line segments for reliable rendering
-	r.edgeBuilder.BuildFromPath(path, core.IdentityTransform{})
+	r.edgeBuilder.BuildFromPath(path, raster.IdentityTransform{})
 
 	if r.edgeBuilder.IsEmpty() {
 		return
@@ -176,7 +176,7 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 	r.filler.Reset()
 
 	// Fill using analytic anti-aliasing
-	r.filler.Fill(r.edgeBuilder, fillRule, func(y int, runs *core.AlphaRuns) {
+	r.filler.Fill(r.edgeBuilder, fillRule, func(y int, runs *raster.AlphaRuns) {
 		if y < 0 || y >= height {
 			return
 		}
@@ -261,7 +261,7 @@ func (r *SoftwareRenderer) renderStroke(pixels []byte, width, height, stride int
 	}
 
 	// Render as filled path
-	r.renderFill(pixels, width, height, stride, expandedPath, c, core.FillRuleNonZero)
+	r.renderFill(pixels, width, height, stride, expandedPath, c, raster.FillRuleNonZero)
 }
 
 // expandStroke creates a filled path from a stroked path.
@@ -273,7 +273,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 
 	halfWidth := width / 2.0
 	expanded := &pathBuilder{
-		verbs:  make([]core.PathVerb, 0, len(path.verbs)*8),
+		verbs:  make([]raster.PathVerb, 0, len(path.verbs)*8),
 		points: make([]float32, 0, len(path.points)*8),
 	}
 
@@ -283,14 +283,14 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 
 	for _, verb := range path.verbs {
 		switch verb {
-		case core.VerbMoveTo:
+		case raster.VerbMoveTo:
 			curX = path.points[pointIdx]
 			curY = path.points[pointIdx+1]
 			startX = curX
 			startY = curY
 			pointIdx += 2
 
-		case core.VerbLineTo:
+		case raster.VerbLineTo:
 			x := path.points[pointIdx]
 			y := path.points[pointIdx+1]
 			r.addLineStroke(expanded, curX, curY, x, y, float32(halfWidth))
@@ -298,7 +298,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 2
 
-		case core.VerbQuadTo:
+		case raster.VerbQuadTo:
 			// Simplify: treat as line to endpoint
 			x := path.points[pointIdx+2]
 			y := path.points[pointIdx+3]
@@ -307,7 +307,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 4
 
-		case core.VerbCubicTo:
+		case raster.VerbCubicTo:
 			// Simplify: treat as line to endpoint
 			x := path.points[pointIdx+4]
 			y := path.points[pointIdx+5]
@@ -316,7 +316,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 6
 
-		case core.VerbClose:
+		case raster.VerbClose:
 			if curX != startX || curY != startY {
 				r.addLineStroke(expanded, curX, curY, startX, startY, float32(halfWidth))
 			}
@@ -347,11 +347,11 @@ func (r *SoftwareRenderer) addLineStroke(path *pathBuilder, x0, y0, x1, y1, half
 	// Four corners of the stroke rectangle
 	// CCW winding for correct fill
 	path.verbs = append(path.verbs,
-		core.VerbMoveTo,
-		core.VerbLineTo,
-		core.VerbLineTo,
-		core.VerbLineTo,
-		core.VerbClose,
+		raster.VerbMoveTo,
+		raster.VerbLineTo,
+		raster.VerbLineTo,
+		raster.VerbLineTo,
+		raster.VerbClose,
 	)
 	path.points = append(path.points,
 		x0+px, y0+py, // Top-left

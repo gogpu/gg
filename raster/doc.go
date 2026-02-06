@@ -1,7 +1,7 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package core provides CPU-based rendering primitives for gg.
+// Package raster provides CPU-based rasterization primitives for gg.
 //
 // This package contains the core algorithms for scanline conversion,
 // edge processing, and anti-aliased filling. It is independent of any
@@ -9,7 +9,7 @@
 //
 // # Architecture
 //
-// The core package follows the Skia/tiny-skia design where CPU rendering
+// The raster package follows the Skia/tiny-skia design where CPU rendering
 // code is separated from GPU code. This allows:
 //
 //   - Clear separation of concerns (CPU vs GPU)
@@ -38,4 +38,4 @@
 //
 //   - Skia: https://skia.googlesource.com/skia/+/main/src/core/
 //   - tiny-skia: https://github.com/AhornGraphics/tiny-skia
-package core
+package raster

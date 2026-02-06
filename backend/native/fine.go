@@ -1,6 +1,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -47,7 +48,7 @@ func (fr *FineRasterizer) SetFillRule(rule scene.FillStyle) {
 	fr.grid.SetFillRule(rule)
 }
 
-// FillRule returns the current fill rule.
+// raster.FillRule returns the current fill rule.
 func (fr *FineRasterizer) FillRule() scene.FillStyle {
 	return fr.fillRule
 }
@@ -328,7 +329,7 @@ func (fr *FineRasterizer) RasterizeCurves(curveBins map[uint64]*CurveTileBin) {
 // This is the core of curve-aware fine rasterization.
 func (fr *FineRasterizer) processTileWithCurves(
 	tileX, tileY uint16,
-	edges []CurveEdgeVariant,
+	edges []raster.CurveEdgeVariant,
 	backdrop int32,
 ) {
 	if len(edges) == 0 {
@@ -364,23 +365,23 @@ func (fr *FineRasterizer) processTileWithCurves(
 
 // processEdgeForTile processes a single edge (line or curve) for a tile.
 func (fr *FineRasterizer) processEdgeForTile(
-	edge *CurveEdgeVariant,
+	edge *raster.CurveEdgeVariant,
 	tileX, tileY uint16,
 	tileWinding *[TileSize][TileSize]float32,
 	accumulatedWinding *[TileSize]float32,
 ) {
 	switch edge.Type {
-	case EdgeTypeLine:
+	case raster.EdgeTypeLine:
 		if edge.Line != nil {
 			fr.processLineEdgeForTile(edge.Line, tileX, tileY, tileWinding, accumulatedWinding)
 		}
 
-	case EdgeTypeQuadratic:
+	case raster.EdgeTypeQuadratic:
 		if edge.Quadratic != nil {
 			fr.processQuadraticEdgeForTile(edge.Quadratic, tileX, tileY, tileWinding, accumulatedWinding)
 		}
 
-	case EdgeTypeCubic:
+	case raster.EdgeTypeCubic:
 		if edge.Cubic != nil {
 			fr.processCubicEdgeForTile(edge.Cubic, tileX, tileY, tileWinding, accumulatedWinding)
 		}
@@ -389,12 +390,12 @@ func (fr *FineRasterizer) processEdgeForTile(
 
 // processLineEdgeForTile processes a simple line edge for a tile.
 func (fr *FineRasterizer) processLineEdgeForTile(
-	line *LineEdge,
+	line *raster.LineEdge,
 	tileX, tileY uint16,
 	tileWinding *[TileSize][TileSize]float32,
 	accumulatedWinding *[TileSize]float32,
 ) {
-	// Convert LineEdge to LineSegment for existing processSegment logic
+	// Convert raster.LineEdge to LineSegment for existing processSegment logic
 	segment := fr.lineEdgeToSegment(line, tileX, tileY)
 	if segment.Y0 != segment.Y1 { // Skip horizontal segments
 		fr.processSegment(segment, tileX, tileY, tileWinding, accumulatedWinding)
@@ -404,7 +405,7 @@ func (fr *FineRasterizer) processLineEdgeForTile(
 // processQuadraticEdgeForTile processes a quadratic curve edge for a tile.
 // It steps through the curve segments using forward differencing.
 func (fr *FineRasterizer) processQuadraticEdgeForTile(
-	quad *QuadraticEdge,
+	quad *raster.QuadraticEdge,
 	tileX, tileY uint16,
 	tileWinding *[TileSize][TileSize]float32,
 	accumulatedWinding *[TileSize]float32,
@@ -435,7 +436,7 @@ func (fr *FineRasterizer) processQuadraticEdgeForTile(
 // processCubicEdgeForTile processes a cubic curve edge for a tile.
 // It steps through the curve segments using forward differencing.
 func (fr *FineRasterizer) processCubicEdgeForTile(
-	cubic *CubicEdge,
+	cubic *raster.CubicEdge,
 	tileX, tileY uint16,
 	tileWinding *[TileSize][TileSize]float32,
 	accumulatedWinding *[TileSize]float32,
@@ -463,16 +464,16 @@ func (fr *FineRasterizer) processCubicEdgeForTile(
 	}
 }
 
-// lineEdgeToSegment converts a LineEdge to a LineSegment for processSegment.
-func (fr *FineRasterizer) lineEdgeToSegment(line *LineEdge, _, _ uint16) LineSegment {
-	// Convert FDot16 coordinates to float32 pixel coordinates
-	x0 := FDot16ToFloat32(line.X)
+// lineEdgeToSegment converts a raster.LineEdge to a LineSegment for processSegment.
+func (fr *FineRasterizer) lineEdgeToSegment(line *raster.LineEdge, _, _ uint16) LineSegment {
+	// Convert raster.FDot16 coordinates to float32 pixel coordinates
+	x0 := raster.FDot16ToFloat32(line.X)
 	y0 := float32(line.FirstY)
 	y1 := float32(line.LastY + 1)
 
 	// Calculate X at the end using slope
 	dy := y1 - y0
-	dx := FDot16ToFloat32(line.DX)
+	dx := raster.FDot16ToFloat32(line.DX)
 	x1 := x0 + dx*dy
 
 	return LineSegment{

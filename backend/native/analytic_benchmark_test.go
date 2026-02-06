@@ -4,6 +4,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"testing"
 
 	"github.com/gogpu/gg/scene"
@@ -106,15 +107,15 @@ func createSCurvePath() *scene.Path {
 func BenchmarkAnalyticFillerSimpleRect(b *testing.B) {
 	path := createRectanglePath(100, 100, 200, 150)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -122,15 +123,15 @@ func BenchmarkAnalyticFillerSimpleRect(b *testing.B) {
 func BenchmarkAnalyticFillerCircle(b *testing.B) {
 	path := createCirclePath(200, 200, 100)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -138,15 +139,15 @@ func BenchmarkAnalyticFillerCircle(b *testing.B) {
 func BenchmarkAnalyticFillerComplexCurves(b *testing.B) {
 	path := createComplexCurvesPath()
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -154,15 +155,15 @@ func BenchmarkAnalyticFillerComplexCurves(b *testing.B) {
 func BenchmarkAnalyticFillerStar(b *testing.B) {
 	path := createStarPath(250, 250, 200, 80, 12)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -170,15 +171,15 @@ func BenchmarkAnalyticFillerStar(b *testing.B) {
 func BenchmarkAnalyticFillerSCurve(b *testing.B) {
 	path := createSCurvePath()
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(800, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -196,13 +197,13 @@ func BenchmarkEdgeBuilderCircle100(b *testing.B) {
 		paths[i] = createCirclePath(x, y, 20)
 	}
 
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eb.Reset()
 		for _, p := range paths {
-			eb.BuildFromScenePath(p, scene.IdentityAffine())
+			BuildEdgesFromScenePath(eb, p, scene.IdentityAffine())
 		}
 	}
 }
@@ -217,13 +218,13 @@ func BenchmarkEdgeBuilderMixedShapes(b *testing.B) {
 		createSCurvePath(),
 	}
 
-	eb := NewEdgeBuilder(2)
+	eb := raster.NewEdgeBuilder(2)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		eb.Reset()
 		for _, p := range paths {
-			eb.BuildFromScenePath(p, scene.IdentityAffine())
+			BuildEdgesFromScenePath(eb, p, scene.IdentityAffine())
 		}
 	}
 }
@@ -236,15 +237,15 @@ func BenchmarkEdgeBuilderMixedShapes(b *testing.B) {
 func BenchmarkFillRuleNonZero(b *testing.B) {
 	path := createStarPath(250, 250, 200, 80, 6)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -252,15 +253,15 @@ func BenchmarkFillRuleNonZero(b *testing.B) {
 func BenchmarkFillRuleEvenOdd(b *testing.B) {
 	path := createStarPath(250, 250, 200, 80, 6)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleEvenOdd, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleEvenOdd, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -272,15 +273,15 @@ func BenchmarkFillRuleEvenOdd(b *testing.B) {
 func BenchmarkAAShift0(b *testing.B) {
 	path := createCirclePath(200, 200, 100)
 
-	eb := NewEdgeBuilder(0) // No AA
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(0) // No AA
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -288,15 +289,15 @@ func BenchmarkAAShift0(b *testing.B) {
 func BenchmarkAAShift2(b *testing.B) {
 	path := createCirclePath(200, 200, 100)
 
-	eb := NewEdgeBuilder(2) // 4x AA
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2) // 4x AA
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(500, 500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -308,15 +309,15 @@ func BenchmarkAAShift2(b *testing.B) {
 func BenchmarkResolution256(b *testing.B) {
 	path := createCirclePath(128, 128, 100)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(256, 256)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -324,15 +325,15 @@ func BenchmarkResolution256(b *testing.B) {
 func BenchmarkResolution512(b *testing.B) {
 	path := createCirclePath(256, 256, 200)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(512, 512)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -340,15 +341,15 @@ func BenchmarkResolution512(b *testing.B) {
 func BenchmarkResolution1024(b *testing.B) {
 	path := createCirclePath(512, 512, 400)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(1024, 1024)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
@@ -356,25 +357,25 @@ func BenchmarkResolution1024(b *testing.B) {
 func BenchmarkResolution1080p(b *testing.B) {
 	path := createCirclePath(960, 540, 400)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	filler := NewAnalyticFiller(1920, 1080)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		filler.Reset()
-		filler.Fill(eb, FillRuleNonZero, func(_ int, _ *AlphaRuns) {})
+		filler.Fill(eb, raster.FillRuleNonZero, func(_ int, _ *raster.AlphaRuns) {})
 	}
 }
 
 // =============================================================================
-// Benchmark: AlphaRuns Operations
+// Benchmark: raster.AlphaRuns Operations
 // =============================================================================
 
 // BenchmarkAlphaRunsAdd benchmarks adding runs.
 func BenchmarkAlphaRunsAdd(b *testing.B) {
-	ar := NewAlphaRuns(1000)
+	ar := raster.NewAlphaRuns(1000)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -390,7 +391,7 @@ func BenchmarkAlphaRunsAdd(b *testing.B) {
 
 // BenchmarkAlphaRunsIter benchmarks iterating runs.
 func BenchmarkAlphaRunsIter(b *testing.B) {
-	ar := NewAlphaRuns(1000)
+	ar := raster.NewAlphaRuns(1000)
 	ar.Add(50, 128, 300, 128)
 
 	b.ResetTimer()
@@ -404,7 +405,7 @@ func BenchmarkAlphaRunsIter(b *testing.B) {
 
 // BenchmarkAlphaRunsCopyTo benchmarks copying to buffer.
 func BenchmarkAlphaRunsCopyTo(b *testing.B) {
-	ar := NewAlphaRuns(1000)
+	ar := raster.NewAlphaRuns(1000)
 	ar.Add(50, 128, 300, 128)
 
 	dst := make([]uint8, 1000)
@@ -416,20 +417,20 @@ func BenchmarkAlphaRunsCopyTo(b *testing.B) {
 }
 
 // =============================================================================
-// Benchmark: CurveAwareAET Operations
+// Benchmark: raster.CurveAwareAET Operations
 // =============================================================================
 
 // BenchmarkAETInsert100 benchmarks inserting 100 edges.
 func BenchmarkAETInsert100(b *testing.B) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Pre-create edges
-	edges := make([]CurveEdgeVariant, 100)
+	edges := make([]raster.CurveEdgeVariant, 100)
 	for i := range 100 {
 		x := float32(i * 10)
-		e := NewLineEdgeVariant(
-			CurvePoint{X: x, Y: 0},
-			CurvePoint{X: x + 5, Y: 100},
+		e := raster.NewLineEdgeVariant(
+			raster.CurvePoint{X: x, Y: 0},
+			raster.CurvePoint{X: x + 5, Y: 100},
 			0,
 		)
 		if e != nil {
@@ -448,14 +449,14 @@ func BenchmarkAETInsert100(b *testing.B) {
 
 // BenchmarkAETSortByX100 benchmarks sorting 100 edges.
 func BenchmarkAETSortByX100(b *testing.B) {
-	aet := NewCurveAwareAET()
+	aet := raster.NewCurveAwareAET()
 
 	// Insert edges in reverse order
 	for i := 99; i >= 0; i-- {
 		x := float32(i * 10)
-		e := NewLineEdgeVariant(
-			CurvePoint{X: x, Y: 0},
-			CurvePoint{X: x + 5, Y: 100},
+		e := raster.NewLineEdgeVariant(
+			raster.CurvePoint{X: x, Y: 0},
+			raster.CurvePoint{X: x + 5, Y: 100},
 			0,
 		)
 		if e != nil {
@@ -477,14 +478,14 @@ func BenchmarkAETSortByX100(b *testing.B) {
 func BenchmarkFillToBufferCircle(b *testing.B) {
 	path := createCirclePath(128, 128, 100)
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	buffer := make([]uint8, 256*256)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FillToBuffer(eb, 256, 256, FillRuleNonZero, buffer)
+		FillToBuffer(eb, 256, 256, raster.FillRuleNonZero, buffer)
 	}
 }
 
@@ -492,14 +493,14 @@ func BenchmarkFillToBufferCircle(b *testing.B) {
 func BenchmarkFillToBufferComplex(b *testing.B) {
 	path := createComplexCurvesPath()
 
-	eb := NewEdgeBuilder(2)
-	eb.BuildFromScenePath(path, scene.IdentityAffine())
+	eb := raster.NewEdgeBuilder(2)
+	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	buffer := make([]uint8, 500*500)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FillToBuffer(eb, 500, 500, FillRuleNonZero, buffer)
+		FillToBuffer(eb, 500, 500, raster.FillRuleNonZero, buffer)
 	}
 }
 
@@ -509,13 +510,13 @@ func BenchmarkFillToBufferComplex(b *testing.B) {
 
 // BenchmarkForwardDiffQuadratic benchmarks forward differencing for quadratics.
 func BenchmarkForwardDiffQuadratic(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{50, 100}
-	p2 := CurvePoint{100, 0}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 50, Y: 100}
+	p2 := raster.CurvePoint{X: 100, Y: 0}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := NewQuadraticEdge(p0, p1, p2, 0)
+		edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
 		if edge != nil {
 			for edge.Update() {
 				// O(1) per step
@@ -526,14 +527,14 @@ func BenchmarkForwardDiffQuadratic(b *testing.B) {
 
 // BenchmarkForwardDiffCubic benchmarks forward differencing for cubics.
 func BenchmarkForwardDiffCubic(b *testing.B) {
-	p0 := CurvePoint{0, 0}
-	p1 := CurvePoint{33, 100}
-	p2 := CurvePoint{66, 100}
-	p3 := CurvePoint{100, 0}
+	p0 := raster.CurvePoint{X: 0, Y: 0}
+	p1 := raster.CurvePoint{X: 33, Y: 100}
+	p2 := raster.CurvePoint{X: 66, Y: 100}
+	p3 := raster.CurvePoint{X: 100, Y: 0}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := NewCubicEdge(p0, p1, p2, p3, 0)
+		edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
 		if edge != nil {
 			for edge.Update() {
 				// O(1) per step

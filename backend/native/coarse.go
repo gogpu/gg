@@ -1,6 +1,7 @@
 package native
 
 import (
+	"github.com/gogpu/gg/raster"
 	"sort"
 )
 
@@ -450,7 +451,7 @@ func (cr *CoarseRasterizer) EntriesAtLocation(x, y uint16) []CoarseTileEntry {
 
 // CurveTileBin holds curve edges binned to a specific tile.
 type CurveTileBin struct {
-	Edges    []CurveEdgeVariant
+	Edges    []raster.CurveEdgeVariant
 	Backdrop int32
 }
 
@@ -459,7 +460,7 @@ type CurveTileBin struct {
 //
 // Returns a map from tile coordinates (as uint64 key) to the edges that intersect each tile.
 // This is used by FineRasterizer.RasterizeCurves for retained mode rendering.
-func (cr *CoarseRasterizer) BinCurveEdges(eb *EdgeBuilder) map[uint64]*CurveTileBin {
+func (cr *CoarseRasterizer) BinCurveEdges(eb *raster.EdgeBuilder) map[uint64]*CurveTileBin {
 	if eb == nil || eb.IsEmpty() {
 		return nil
 	}
@@ -478,7 +479,7 @@ func (cr *CoarseRasterizer) BinCurveEdges(eb *EdgeBuilder) map[uint64]*CurveTile
 }
 
 // binSingleCurveEdge bins a single curve edge to all tiles it intersects.
-func (cr *CoarseRasterizer) binSingleCurveEdge(edge CurveEdgeVariant, bins map[uint64]*CurveTileBin) {
+func (cr *CoarseRasterizer) binSingleCurveEdge(edge raster.CurveEdgeVariant, bins map[uint64]*CurveTileBin) {
 	line := edge.AsLine()
 	if line == nil {
 		return
@@ -519,7 +520,7 @@ func (cr *CoarseRasterizer) binSingleCurveEdge(edge CurveEdgeVariant, bins map[u
 			bin := bins[key]
 			if bin == nil {
 				bin = &CurveTileBin{
-					Edges: make([]CurveEdgeVariant, 0, 4),
+					Edges: make([]raster.CurveEdgeVariant, 0, 4),
 				}
 				bins[key] = bin
 			}
@@ -530,19 +531,19 @@ func (cr *CoarseRasterizer) binSingleCurveEdge(edge CurveEdgeVariant, bins map[u
 }
 
 // getCurveXBounds returns conservative X bounds for a curve edge in pixels.
-func (cr *CoarseRasterizer) getCurveXBounds(edge CurveEdgeVariant) (xMin, xMax int32) {
+func (cr *CoarseRasterizer) getCurveXBounds(edge raster.CurveEdgeVariant) (xMin, xMax int32) {
 	line := edge.AsLine()
 	if line == nil {
 		return 0, 0
 	}
 
-	// Convert FDot16 X to pixel coordinates
-	xStart := FDot16FloorToInt(line.X)
+	// Convert raster.FDot16 X to pixel coordinates
+	xStart := raster.FDot16FloorToInt(line.X)
 
 	// For curves, estimate the X range based on edge type
 	// The DX gives us slope, so we can estimate X at the end
 	dy := line.LastY - line.FirstY + 1
-	xAtEnd := FDot16FloorToInt(line.X + line.DX*dy)
+	xAtEnd := raster.FDot16FloorToInt(line.X + line.DX*dy)
 
 	if xAtEnd < xStart {
 		xMin = xAtEnd
@@ -554,7 +555,7 @@ func (cr *CoarseRasterizer) getCurveXBounds(edge CurveEdgeVariant) (xMin, xMax i
 
 	// Add margin for curve deviation
 	switch edge.Type {
-	case EdgeTypeQuadratic, EdgeTypeCubic:
+	case raster.EdgeTypeQuadratic, raster.EdgeTypeCubic:
 		// Curves can deviate from the line segment
 		// Add conservative margin based on bounding box
 		margin := int32(2 * TileSize)
@@ -566,29 +567,29 @@ func (cr *CoarseRasterizer) getCurveXBounds(edge CurveEdgeVariant) (xMin, xMax i
 }
 
 // cloneCurveEdge creates a copy of a curve edge for independent processing.
-func (cr *CoarseRasterizer) cloneCurveEdge(edge CurveEdgeVariant) CurveEdgeVariant {
+func (cr *CoarseRasterizer) cloneCurveEdge(edge raster.CurveEdgeVariant) raster.CurveEdgeVariant {
 	switch edge.Type {
-	case EdgeTypeLine:
+	case raster.EdgeTypeLine:
 		if edge.Line != nil {
 			lineCopy := *edge.Line
-			return CurveEdgeVariant{
-				Type: EdgeTypeLine,
+			return raster.CurveEdgeVariant{
+				Type: raster.EdgeTypeLine,
 				Line: &lineCopy,
 			}
 		}
-	case EdgeTypeQuadratic:
+	case raster.EdgeTypeQuadratic:
 		if edge.Quadratic != nil {
 			quadCopy := *edge.Quadratic
-			return CurveEdgeVariant{
-				Type:      EdgeTypeQuadratic,
+			return raster.CurveEdgeVariant{
+				Type:      raster.EdgeTypeQuadratic,
 				Quadratic: &quadCopy,
 			}
 		}
-	case EdgeTypeCubic:
+	case raster.EdgeTypeCubic:
 		if edge.Cubic != nil {
 			cubicCopy := *edge.Cubic
-			return CurveEdgeVariant{
-				Type:  EdgeTypeCubic,
+			return raster.CurveEdgeVariant{
+				Type:  raster.EdgeTypeCubic,
 				Cubic: &cubicCopy,
 			}
 		}
@@ -628,7 +629,7 @@ func (cr *CoarseRasterizer) calculateCurveBackdrops(bins map[uint64]*CurveTileBi
 					if line != nil {
 						// Count edges that contribute winding at this tile's left edge
 						tileLeftX := tx << TileShift
-						edgeX := FDot16FloorToInt(line.X)
+						edgeX := raster.FDot16FloorToInt(line.X)
 						if edgeX <= tileLeftX {
 							rowWinding += int32(line.Winding)
 						}
