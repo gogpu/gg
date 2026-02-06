@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-02-06
+
+### Added
+
+- **GPUAccelerator interface** — optional GPU acceleration with transparent CPU fallback
+  - `RegisterAccelerator()` for opt-in GPU via blank import pattern
+  - `ErrFallbackToCPU` sentinel error for graceful degradation
+  - `AcceleratedOp` bitfield for capability checking
+  - Zero overhead (~17ns) when no GPU registered
+
+### Changed
+
+- **Architecture: CPU raster is core, GPU is optional accelerator**
+  - CPU rasterization types extracted to `internal/raster` package
+  - Native rendering pipeline moved to `internal/native` package
+  - `SoftwareRenderer` uses `internal/raster` directly (no backend abstraction)
+  - `cache`, `gpucore` packages moved to `internal/` (implementation details)
+
+### Removed
+
+- **`backend/` package** — RenderBackend interface, registry pattern, SoftwareBackend wrapper
+- **`backend/rust/`** — dead Rust FFI backend code (5 files)
+- **`internal/raster/` (legacy)** — old supersampled AA rasterizer (14 files, replaced by analytic AA)
+- **`go-webgpu/webgpu`** dependency — no longer needed
+- **`go-webgpu/goffi`** dependency — no longer needed
+
 ## [0.25.0] - 2026-02-06
 
 ### Added
@@ -1492,7 +1518,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/gogpu/gg/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/gogpu/gg/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/gogpu/gg/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/gogpu/gg/compare/v0.23.0...v0.24.0

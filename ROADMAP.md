@@ -19,14 +19,14 @@
 
 ---
 
-## Current State: v0.24.1
+## Current State: v0.26.0
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
-- Anti-aliased rendering (4x supersampling + Vello analytic AA)
-- GPU backend (sparse strips, compute shaders)
-- Enterprise architecture for UI integration
-- **Recording System** for vector export (PDF, SVG)
+- Analytic anti-aliasing (Vello tile-based AA)
+- GPUAccelerator interface for optional GPU acceleration
+- Internal architecture: CPU raster core + optional GPU
+- Recording System for vector export (PDF, SVG)
 - GGCanvas integration with gpucontext.TextureDrawer interface
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
@@ -35,12 +35,22 @@
 
 ## Upcoming
 
-### v0.25.0 — Rendering Quality
-- [x] Vello tile-based analytic AA rasterizer (port of vello_shaders fine.rs)
+### v0.25.0 — Rendering Quality ✅ Released
+- [x] Vello tile-based analytic AA rasterizer
 - [x] VelloLine float pipeline (bypass fixed-point quantization)
-- [ ] Native curve evaluation in tiles (eliminate flattening artifacts)
+
+### v0.26.0 — Architecture Refactor ✅ Released
+- [x] Extract internal/raster core package
+- [x] GPUAccelerator interface with transparent fallback
+- [x] Remove backend/ abstraction layer
+- [x] Move implementation details to internal/
+- [x] Clean go.mod dependencies
+
+### v0.27.0 — GPU Acceleration (Planned)
+- [ ] gg/gpu package with wgpu-based GPUAccelerator
+- [ ] GPU-accelerated fill and stroke operations
+- [ ] Native curve evaluation in tiles
 - [ ] Performance optimizations
-- [ ] API cleanup before v1.0
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee
@@ -64,24 +74,21 @@
 ## Architecture
 
 ```
-                       gg (Public API)
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-  Immediate Mode       Retained Mode        Resources
-  (Context API)        (Scene Graph)     (Images, Fonts)
-        │                   │                   │
-        └───────────────────┼───────────────────┘
-                            │
-                   RenderBackend Interface
-                            │
-           ┌────────────────┼────────────────┐
-           │                │                │
-      Software            SIMD              GPU
-           │                │                │
-           └────────────────┴────────────────┘
-                            │
-                 gogpu/wgpu (Pure Go WebGPU)
+                        gg (Public API)
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+   Immediate Mode       Retained Mode        Resources
+   (Context API)        (Scene Graph)     (Images, Fonts)
+         │                   │                   │
+         └───────────────────┼───────────────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+         CPU Raster                   GPUAccelerator
+      (always available)             (optional, planned)
+              │
+    internal/raster + internal/native
 ```
 
 ---
@@ -90,7 +97,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.24.x** | 2026-02 | Premultiplied alpha, HarfBuzz shaping, WebP, gogpu_integration |
+| **v0.26.0** | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
+| v0.25.0 | 2026-02 | Vello tile-based analytic AA rasterizer, VelloLine float pipeline |
+| v0.24.x | 2026-02 | Premultiplied alpha, HarfBuzz shaping, WebP, gogpu_integration |
 | v0.23.0 | 2026-02 | Recording System for vector export (PDF, SVG backends) |
 | v0.22.x | 2026-01/02 | gpucontext.TextureDrawer integration, naga v0.10.0, wgpu v0.13.0 |
 | v0.21.x | 2026-01 | Enterprise architecture, stroke quality fixes |
