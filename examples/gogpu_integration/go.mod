@@ -3,8 +3,8 @@ module github.com/gogpu/gg/examples/gogpu_integration
 go 1.25
 
 require (
-	github.com/gogpu/gg v0.24.1
-	github.com/gogpu/gogpu v0.15.5
+	github.com/gogpu/gg v0.26.0
+	github.com/gogpu/gogpu v0.15.6
 )
 
 require (
@@ -14,7 +14,7 @@ require (
 	github.com/gogpu/gpucontext v0.7.0 // indirect
 	github.com/gogpu/gputypes v0.2.0 // indirect
 	github.com/gogpu/naga v0.10.0 // indirect
-	github.com/gogpu/wgpu v0.13.0 // indirect
+	github.com/gogpu/wgpu v0.13.1 // indirect
 	golang.org/x/image v0.35.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
