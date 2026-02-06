@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-02-06
+
+### Added
+
+- **Vello tile-based analytic anti-aliasing rasterizer**
+  - Port of vello_shaders CPU fine rasterizer (`fine.rs`) to Go
+  - 16x16 tile binning with DDA-based segment distribution
+  - Analytic trapezoidal area coverage per pixel (no supersampling)
+  - yEdge mechanism for correct winding number propagation via backdrop prefix sum
+  - VelloLine float pipeline: bypasses fixed-point quantization (FDot6/FDot16) for improved accuracy
+  - Bottom-of-circle artifact improved from alpha=191 to alpha=248
+  - NonZero and EvenOdd fill rules
+  - Golden test infrastructure with 7 test shapes and reference image comparison
+  - Research documentation with detailed algorithm analysis
+
 ### Changed
 
 - **Examples:** update `gogpu_integration` dependencies to gg v0.24.1, gogpu v0.15.5
@@ -1477,7 +1492,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.24.1...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/gogpu/gg/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/gogpu/gg/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/gogpu/gg/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/gogpu/gg/compare/v0.22.3...v0.23.0
