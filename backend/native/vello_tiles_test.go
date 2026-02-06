@@ -6,7 +6,9 @@ package native
 import (
 	"fmt"
 	"image/png"
+	"math"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/gogpu/gg/scene"
@@ -435,5 +437,245 @@ func BenchmarkFillPath(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tr.fillPath(tile, FillRuleNonZero)
+	}
+}
+
+// normalizedLine holds a line segment normalized for comparison.
+// P0.y <= P1.y, with isDown indicating original direction.
+type normalizedLine struct {
+	x0, y0 float32
+	x1, y1 float32
+	isDown bool
+}
+
+// reconstituteLine converts a LineEdge back to float coordinates using
+// the same math as binSegments.
+func reconstituteLine(line *LineEdge, aaScale float32) normalizedLine {
+	px0 := FDot16ToFloat32(line.X) / aaScale
+	py0 := float32(line.FirstY) / aaScale
+	py1 := float32(line.LastY+1) / aaScale
+	dxPerY := FDot16ToFloat32(line.DX)
+	px1 := px0 + dxPerY*(py1-py0)
+	isDown := line.Winding > 0
+	return normalizedLine{
+		x0: px0, y0: py0,
+		x1: px1, y1: py1,
+		isDown: isDown,
+	}
+}
+
+// velloToNormalized converts a VelloLine to normalizedLine.
+// VelloLine is already normalized (P0.y <= P1.y).
+func velloToNormalized(vl VelloLine) normalizedLine {
+	return normalizedLine{
+		x0: vl.P0[0], y0: vl.P0[1],
+		x1: vl.P1[0], y1: vl.P1[1],
+		isDown: vl.IsDown,
+	}
+}
+
+// sortNormalized sorts a slice of normalizedLine by (y0, x0, y1, x1) for
+// deterministic comparison.
+func sortNormalized(lines []normalizedLine) {
+	sort.Slice(lines, func(i, j int) bool {
+		a, b := lines[i], lines[j]
+		if a.y0 != b.y0 {
+			return a.y0 < b.y0
+		}
+		if a.x0 != b.x0 {
+			return a.x0 < b.x0
+		}
+		if a.y1 != b.y1 {
+			return a.y1 < b.y1
+		}
+		return a.x1 < b.x1
+	})
+}
+
+// TestVelloLineCoordinateValidation validates that VelloLine and LineEdge
+// produce identical coordinates for integer-coordinate shapes.
+//
+// VelloLine stores original float32 coords; LineEdge quantizes through
+// fixed-point (FDot6/FDot16). For axis-aligned edges at integer pixel
+// coordinates the round-trip is lossless. For diagonal edges, the
+// fixed-point quantization in NewLineEdge introduces a small X offset
+// (typically 0.125 = 1/(aaScale*2)) due to FDot6Round and computeDY
+// adjustments. This quantization error is exactly why VelloLine exists:
+// to preserve the original float coordinates for the Vello pipeline.
+//
+// The test validates:
+//  1. Axis-aligned shapes: exact coordinate match (tolerance 1e-4)
+//  2. Diagonal shapes: Y coordinates match exactly, X offset is bounded
+//  3. Direction (IsDown/Winding) is consistent between representations
+//  4. Both representations are properly normalized (P0.y <= P1.y)
+func TestVelloLineCoordinateValidation(t *testing.T) {
+	const aaShift = 2
+	aaScale := float32(int32(1) << uint(aaShift)) // 4.0
+
+	type testCase struct {
+		name      string
+		exactX    bool // true if X coords should match exactly (axis-aligned)
+		buildPath func(eb *EdgeBuilder)
+	}
+
+	tests := []testCase{
+		{
+			name:   "square 10,10 to 30,30",
+			exactX: true,
+			buildPath: func(eb *EdgeBuilder) {
+				path := scene.NewPath()
+				path.MoveTo(10, 10)
+				path.LineTo(30, 10)
+				path.LineTo(30, 30)
+				path.LineTo(10, 30)
+				path.Close()
+				eb.SetFlattenCurves(true)
+				eb.BuildFromScenePath(path, scene.IdentityAffine())
+			},
+		},
+		{
+			name:   "diagonal polygon",
+			exactX: false, // Diagonal lines have fixed-point X quantization
+			buildPath: func(eb *EdgeBuilder) {
+				thickness := float32(20)
+				path := scene.NewPath()
+				path.MoveTo(10, 10)
+				path.LineTo(10+thickness, 10)
+				path.LineTo(190, 190-thickness)
+				path.LineTo(190, 190)
+				path.LineTo(190-thickness, 190)
+				path.LineTo(10, 10+thickness)
+				path.Close()
+				eb.SetFlattenCurves(true)
+				eb.BuildFromScenePath(path, scene.IdentityAffine())
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eb := NewEdgeBuilder(aaShift)
+			tc.buildPath(eb)
+
+			velloLines := eb.VelloLines()
+			t.Logf("VelloLine count: %d", len(velloLines))
+			t.Logf("LineEdge count:  %d", eb.LineEdgeCount())
+
+			// Convert VelloLines to normalized form.
+			velloNorm := make([]normalizedLine, len(velloLines))
+			for i, vl := range velloLines {
+				velloNorm[i] = velloToNormalized(vl)
+			}
+			sortNormalized(velloNorm)
+
+			// Reconstitute LineEdges to normalized form.
+			lineNorm := make([]normalizedLine, 0, eb.LineEdgeCount())
+			for le := range eb.LineEdges() {
+				lineNorm = append(lineNorm, reconstituteLine(le, aaScale))
+			}
+			sortNormalized(lineNorm)
+
+			// Log all entries for debug visibility.
+			for i, v := range velloNorm {
+				t.Logf("  vello[%d]: (%.4f,%.4f)-(%.4f,%.4f) down=%v",
+					i, v.x0, v.y0, v.x1, v.y1, v.isDown)
+			}
+			for i, le := range lineNorm {
+				t.Logf("  line[%d]:  (%.4f,%.4f)-(%.4f,%.4f) down=%v",
+					i, le.x0, le.y0, le.x1, le.y1, le.isDown)
+			}
+
+			// Vertical combining may reduce LineEdge count compared to
+			// VelloLine count. We match what we can.
+			if len(lineNorm) > len(velloNorm) {
+				t.Errorf("LineEdge count (%d) > VelloLine count (%d); "+
+					"expected VelloLine >= LineEdge due to vertical combining",
+					len(lineNorm), len(velloNorm))
+				return
+			}
+
+			// Tolerances:
+			//   - Y always matches exactly for integer coords (tolerance 1e-4)
+			//   - X matches exactly for axis-aligned edges
+			//   - X has up to 0.25 offset for diagonal edges due to
+			//     FDot6Round + computeDY in NewLineEdge
+			const yTol = 1e-4
+			xTol := 1e-4
+			if !tc.exactX {
+				xTol = 0.25 // Allow fixed-point quantization offset
+			}
+
+			matched := make([]bool, len(velloNorm))
+			mismatches := 0
+			var maxDX0, maxDX1 float64 // Track max X deviations
+
+			for li, le := range lineNorm {
+				found := false
+				for vi, v := range velloNorm {
+					if matched[vi] {
+						continue
+					}
+					if v.isDown != le.isDown {
+						continue
+					}
+
+					dy0 := math.Abs(float64(v.y0 - le.y0))
+					dy1 := math.Abs(float64(v.y1 - le.y1))
+					dx0 := math.Abs(float64(v.x0 - le.x0))
+					dx1 := math.Abs(float64(v.x1 - le.x1))
+
+					if dy0 < yTol && dy1 < yTol && dx0 < xTol && dx1 < xTol {
+						matched[vi] = true
+						found = true
+						if dx0 > maxDX0 {
+							maxDX0 = dx0
+						}
+						if dx1 > maxDX1 {
+							maxDX1 = dx1
+						}
+						break
+					}
+				}
+				if !found {
+					mismatches++
+					if mismatches <= 10 {
+						t.Errorf("LineEdge[%d] (%.4f,%.4f)-(%.4f,%.4f) down=%v "+
+							"has no matching VelloLine (yTol=%.4f, xTol=%.4f)",
+							li, le.x0, le.y0, le.x1, le.y1, le.isDown, yTol, xTol)
+					}
+				}
+			}
+
+			if mismatches > 10 {
+				t.Errorf("... and %d more unmatched LineEdges", mismatches-10)
+			}
+
+			if mismatches == 0 {
+				t.Logf("All %d LineEdges matched VelloLines (yTol=%.4f, xTol=%.4f)",
+					len(lineNorm), yTol, xTol)
+			}
+			t.Logf("Max X deviation: x0=%.6f, x1=%.6f", maxDX0, maxDX1)
+
+			// For axis-aligned shapes, verify zero X deviation.
+			if tc.exactX && (maxDX0 > 1e-4 || maxDX1 > 1e-4) {
+				t.Errorf("axis-aligned shape has unexpected X deviation: "+
+					"x0=%.6f, x1=%.6f (expected < 1e-4)", maxDX0, maxDX1)
+			}
+
+			// Verify direction consistency: both representations must be
+			// normalized with P0.y <= P1.y.
+			for i, v := range velloNorm {
+				if v.y0 > v.y1 {
+					t.Errorf("velloNorm[%d] not normalized: y0=%.4f > y1=%.4f",
+						i, v.y0, v.y1)
+				}
+			}
+			for i, le := range lineNorm {
+				if le.y0 > le.y1 {
+					t.Errorf("lineNorm[%d] not normalized: y0=%.4f > y1=%.4f",
+						i, le.y0, le.y1)
+				}
+			}
+		})
 	}
 }

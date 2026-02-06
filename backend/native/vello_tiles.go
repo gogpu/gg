@@ -247,7 +247,7 @@ func velloSpan(a, b float32) int {
 // Direct port of path_count.rs (backdrop) + path_tiling.rs (segments with y_edge).
 //
 //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // Direct port of Vello algorithm
-func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
+func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, _ float32) {
 	const epsilon float32 = 1e-6
 	const noYEdge float32 = 1e9
 
@@ -272,28 +272,18 @@ func (tr *TileRasterizer) binSegments(eb *EdgeBuilder, aaScale float32) {
 		pathBboxMaxY = tr.tilesY
 	}
 
-	for edge := range eb.AllEdges() {
-		line := edge.AsLine()
-		if line == nil {
-			continue
-		}
+	for _, vl := range eb.VelloLines() {
+		// VelloLine stores original float32 coordinates in pixel space,
+		// normalized so P0.y <= P1.y. No fixed-point quantization loss.
+		x0, y0 := vl.P0[0], vl.P0[1]
+		x1, y1 := vl.P1[0], vl.P1[1]
 
-		// Convert to pixel coordinates
-		px0 := FDot16ToFloat32(line.X) / aaScale
-		py0 := float32(line.FirstY) / aaScale
-		py1 := float32(line.LastY+1) / aaScale
-		dxPerY := FDot16ToFloat32(line.DX)
-		px1 := px0 + dxPerY*(py1-py0)
-
-		// Winding > 0 means segment originally went DOWN
-		isDown := line.Winding > 0
+		// IsDown = original direction was downward (y increased)
+		isDown := vl.IsDown
 		delta := 1
 		if isDown {
 			delta = -1
 		}
-
-		// Normalize so y0 <= y1 (already done by EdgeBuilder, but use local vars)
-		x0, y0, x1, y1 := px0, py0, px1, py1
 
 		// Scale to tile coordinates
 		s0x := x0 * velloTileScale
@@ -552,7 +542,7 @@ func (tr *TileRasterizer) addSegmentToTile(
 	tileX, tileY int,
 	isDown bool,
 	i, imin, imax int,
-	a, b, tileY0f, sign float32,
+	a, b, _, sign float32,
 	isPositiveSlope bool,
 	epsilon, noYEdge float32,
 ) {
@@ -1202,12 +1192,11 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 		}
 
 		if dy != 0 {
-			// Segment crosses this row - compute coverage
+			// Segment crosses this row - compute trapezoidal coverage
 			vecYRecip := 1.0 / delta[1]
 			t0 := (y0 - y) * vecYRecip
 			t1 := (y1 - y) * vecYRecip
 
-			// X positions at intersection points
 			startX := seg.Point0[0]
 			segX0 := startX + t0*delta[0]
 			segX1 := startX + t1*delta[0]
@@ -1215,11 +1204,9 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 			xmin0 := min32f(segX0, segX1)
 			xmax0 := max32f(segX0, segX1)
 
-			// Process each pixel in row
 			for i := 0; i < VelloTileWidth; i++ {
 				iF := float32(i)
 
-				// Coverage formula from Vello
 				xmin := min32f(xmin0-iF, 1.0) - 1.0e-6
 				xmax := xmax0 - iF
 
@@ -1227,30 +1214,22 @@ func (tr *TileRasterizer) fillTileScanline(tile *VelloTile, localY int, fillRule
 				c := max32f(b, 0.0)
 				d := max32f(xmin, 0.0)
 
-				// Trapezoidal area calculation
 				denom := xmax - xmin
 				var a float32
 				if denom != 0 {
 					a = (b + 0.5*(d*d-c*c) - xmin) / denom
 				}
 
-				// KEY: y_edge is added together with a*dy
-				// FIX (2026-02-01): Only apply yEdge for rows at or below seg.YEdge
-				effectiveYEdge := yEdge
-				if yf < float32(int(seg.YEdge)) {
-					effectiveYEdge = 0
-				}
-				tr.area[i] += effectiveYEdge + a*dy
+				// a*dy ONLY (no yEdge here — matches Vello WGSL fine.wgsl:938)
+				tr.area[i] += a * dy
 			}
-		} else if yEdge != 0 {
-			// No Y delta but segment crosses left edge - add y_edge.
-			//
-			// FIX (2026-02-01): Only apply yEdge when current row is at or below
-			// the segment's YEdge position.
-			if yf >= float32(int(seg.YEdge)) {
-				for i := 0; i < VelloTileWidth; i++ {
-					tr.area[i] += yEdge
-				}
+		}
+
+		// yEdge applied UNCONDITIONALLY for every segment, every row
+		// (matches Vello WGSL fine.wgsl:941-944)
+		if yEdge != 0 {
+			for i := 0; i < VelloTileWidth; i++ {
+				tr.area[i] += yEdge
 			}
 		}
 	}

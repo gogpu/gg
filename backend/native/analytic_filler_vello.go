@@ -74,30 +74,22 @@ func (af *AnalyticFillerVello) Fill(
 	}
 }
 
-// collectSegments extracts line segments from all edges.
-func (af *AnalyticFillerVello) collectSegments(eb *EdgeBuilder, aaScale float32) []lineSegment {
-	segments := make([]lineSegment, 0, eb.EdgeCount()*4)
+// collectSegments extracts line segments from VelloLines.
+// Uses original float32 coordinates to avoid fixed-point quantization loss.
+func (af *AnalyticFillerVello) collectSegments(eb *EdgeBuilder, _ float32) []lineSegment {
+	velloLines := eb.VelloLines()
+	segments := make([]lineSegment, 0, len(velloLines))
 
-	for edge := range eb.AllEdges() {
-		line := edge.AsLine()
-		if line == nil {
-			continue
-		}
+	for i := range velloLines {
+		vl := &velloLines[i]
+		// VelloLine stores pixel-space coords, normalized (P0.y <= P1.y)
+		x0, y0 := vl.P0[0], vl.P0[1]
+		x1, y1 := vl.P1[0], vl.P1[1]
 
-		// Convert from sub-pixel to pixel coordinates
-		x0 := FDot16ToFloat32(line.X) / aaScale
-		y0 := float32(line.FirstY) / aaScale
-		y1 := float32(line.LastY+1) / aaScale
-		dx := FDot16ToFloat32(line.DX)
-
-		// Calculate x1 at the end of the segment
-		x1 := x0 + dx*(y1-y0)
-
-		// yEdge is the Y coordinate where winding contribution applies
-		// For downward edges (winding > 0), yEdge = FirstY
-		// For upward edges (winding < 0), yEdge = LastY
+		// yEdge: for downward edges (IsDown=true), yEdge = y0 (top)
+		// for upward edges (IsDown=false), yEdge = y1 (bottom)
 		var yEdge float32
-		if line.Winding > 0 {
+		if vl.IsDown {
 			yEdge = y0
 		} else {
 			yEdge = y1
