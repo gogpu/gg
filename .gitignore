@@ -15,6 +15,9 @@
 *.jpeg
 *.out
 
+# Exception: golden test files (must be tracked)
+!testdata/golden/**/*.png
+
 # Go workspace
 go.work
 go.work.sum
@@ -45,5 +48,6 @@ BENCHMARK_RESULTS*.md
 
 # Private developer docs
 docs/dev/
+docs/research/
 
 tmp/

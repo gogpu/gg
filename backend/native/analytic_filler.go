@@ -192,8 +192,8 @@ func (af *AnalyticFiller) processScanlineWithScale(
 	// Convert coverage to alpha runs
 	af.coverageToRuns()
 
-	// Advance edges for next scanline
-	af.aet.AdvanceX()
+	// NOTE: AdvanceX removed - X is now computed directly in computeSegmentCoverage
+	// based on firstY and current yPixel, avoiding accumulation errors
 
 	// Callback with the alpha runs (in pixel coordinates)
 	callback(y, af.alphaRuns)
@@ -305,12 +305,6 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
 	yPixel, yPixelEnd, aaScaleF float32,
 ) {
-	// Convert fixed-point coordinates to float
-	// Line.X is in FDot16 (16.16 fixed-point) and scaled by aaScale
-	// Line.DX is the slope (dimensionless ratio), NOT scaled
-	x := FDot16ToFloat32(line.X) / aaScaleF // Convert X to pixel space
-	dx := FDot16ToFloat32(line.DX)          // Slope is dimensionless, don't divide!
-
 	// Edge's Y range is in sub-pixel coordinates, convert to pixel
 	firstY := float32(line.FirstY) / aaScaleF
 	lastY := float32(line.LastY+1) / aaScaleF // LastY is inclusive
@@ -334,12 +328,17 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	// Winding direction
 	sign := float32(line.Winding)
 
-	// Compute line parameters relative to this scanline
-	// Line equation: lineX(y) = x + dx * (y - firstY)
+	// Compute X at firstY from the edge's stored X value
+	// line.X is the X coordinate at Y=firstY (in FDot16, scaled by aaScale)
+	xAtFirstY := FDot16ToFloat32(line.X) / aaScaleF
+	// dx is slope (dimensionless): dX_subpixel / dY_subpixel = dX_pixel / dY_pixel
+	dx := FDot16ToFloat32(line.DX)
+
+	// Compute line X at any Y: x(y) = xAtFirstY + dx * (y - firstY)
 	lineTopY := yTop
 	lineBottomY := yBot
-	lineTopX := x + dx*(lineTopY-firstY)
-	lineBottomX := x + dx*(lineBottomY-firstY)
+	lineTopX := xAtFirstY + dx*(lineTopY-firstY)
+	lineBottomX := xAtFirstY + dx*(lineBottomY-firstY)
 
 	// Calculate slopes for pixel-row intersection
 	lineDX := lineBottomX - lineTopX

@@ -19,22 +19,26 @@
 
 ---
 
-## Current State: v0.23.0
+## Current State: v0.24.1
 
 ✅ **Production-ready** for CPU rendering with full feature set:
 - Canvas API, Text, Images, Clipping, Layers
-- Anti-aliased rendering (4x supersampling)
+- Anti-aliased rendering (4x supersampling + Vello analytic AA)
 - GPU backend (sparse strips, compute shaders)
 - Enterprise architecture for UI integration
 - **Recording System** for vector export (PDF, SVG)
 - GGCanvas integration with gpucontext.TextureDrawer interface
+- Premultiplied alpha pipeline for correct compositing
+- HarfBuzz-level text shaping via GoTextShaper
 
 ---
 
 ## Upcoming
 
-### v0.24.0 — Polish & Performance
-- [ ] Vello-style AA improvements
+### v0.25.0 — Rendering Quality
+- [x] Vello tile-based analytic AA rasterizer (port of vello_shaders fine.rs)
+- [x] VelloLine float pipeline (bypass fixed-point quantization)
+- [ ] Native curve evaluation in tiles (eliminate flattening artifacts)
 - [ ] Performance optimizations
 - [ ] API cleanup before v1.0
 
@@ -86,7 +90,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.23.0** | 2026-02 | Recording System for vector export (PDF, SVG backends) |
+| **v0.24.x** | 2026-02 | Premultiplied alpha, HarfBuzz shaping, WebP, gogpu_integration |
+| v0.23.0 | 2026-02 | Recording System for vector export (PDF, SVG backends) |
 | v0.22.x | 2026-01/02 | gpucontext.TextureDrawer integration, naga v0.10.0, wgpu v0.13.0 |
 | v0.21.x | 2026-01 | Enterprise architecture, stroke quality fixes |
 | v0.20.x | 2026-01 | GPU backend completion |

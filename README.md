@@ -29,7 +29,7 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, GPU acceleration, CPU fallback |
+| **Rendering** | Immediate and retained mode, GPU acceleration, Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |

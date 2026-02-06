@@ -38,6 +38,7 @@ type EdgeBuilder struct {
 	lineEdges      []LineEdge
 	quadraticEdges []*QuadraticEdge
 	cubicEdges     []*CubicEdge
+	velloLines     []VelloLine
 
 	// aaShift controls AA quality (0=none, 2=4x equivalent)
 	aaShift int
@@ -54,6 +55,14 @@ type edgeBounds struct {
 	minX, minY float32
 	maxX, maxY float32
 	empty      bool
+}
+
+// VelloLine stores a line segment with original float32 coordinates.
+// Used by Vello tile rasterizer to avoid fixed-point quantization loss.
+type VelloLine struct {
+	P0     [2]float32 // Start point (pixel coords, normalized: P0.y <= P1.y)
+	P1     [2]float32 // End point (pixel coords)
+	IsDown bool       // true if original direction was downward (y0 < y1)
 }
 
 // newEmptyBounds returns an empty bounds (ready for union operations).
@@ -101,6 +110,7 @@ func NewEdgeBuilder(aaShift int) *EdgeBuilder {
 		lineEdges:      make([]LineEdge, 0, 64),
 		quadraticEdges: make([]*QuadraticEdge, 0, 16),
 		cubicEdges:     make([]*CubicEdge, 0, 16),
+		velloLines:     make([]VelloLine, 0, 64),
 		aaShift:        aaShift,
 		bounds:         newEmptyBounds(),
 	}
@@ -111,6 +121,7 @@ func (eb *EdgeBuilder) Reset() {
 	eb.lineEdges = eb.lineEdges[:0]
 	eb.quadraticEdges = eb.quadraticEdges[:0]
 	eb.cubicEdges = eb.cubicEdges[:0]
+	eb.velloLines = eb.velloLines[:0]
 	eb.bounds = newEmptyBounds()
 }
 
@@ -208,6 +219,20 @@ func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
 	eb.bounds.unionPoint(x0, y0)
 	eb.bounds.unionPoint(x1, y1)
 
+	// Store original float coordinates for Vello pipeline
+	// (before fixed-point quantization in NewLineEdge)
+	if eb.flattenCurves && y0 != y1 {
+		isDown := y0 < y1
+		p0 := [2]float32{x0, y0}
+		p1 := [2]float32{x1, y1}
+		if !isDown {
+			p0, p1 = p1, p0
+		}
+		eb.velloLines = append(eb.velloLines, VelloLine{
+			P0: p0, P1: p1, IsDown: isDown,
+		})
+	}
+
 	// Create line edge
 	p0 := CurvePoint{X: x0, Y: y0}
 	p1 := CurvePoint{X: x1, Y: y1}
@@ -247,6 +272,12 @@ func (eb *EdgeBuilder) SetFlattenCurves(flatten bool) {
 // FlattenCurves returns whether curve flattening is enabled.
 func (eb *EdgeBuilder) FlattenCurves() bool {
 	return eb.flattenCurves
+}
+
+// VelloLines returns the stored float-coordinate lines.
+// Only populated when flattenCurves is true.
+func (eb *EdgeBuilder) VelloLines() []VelloLine {
+	return eb.velloLines
 }
 
 // addQuad adds quadratic curve edges, chopping at Y extrema if needed.
@@ -390,7 +421,8 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 // flattenCubicToLines converts a cubic bezier to line segments.
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
-	// Flatness tolerance: max deviation from straight line
+	// Flatness tolerance: max deviation from straight line.
+	// Lower values produce more segments but better accuracy at curve extrema.
 	const tolerance = 0.25
 
 	eb.flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
@@ -542,7 +574,8 @@ func (eb *EdgeBuilder) Bounds() scene.Rect {
 func (eb *EdgeBuilder) IsEmpty() bool {
 	return len(eb.lineEdges) == 0 &&
 		len(eb.quadraticEdges) == 0 &&
-		len(eb.cubicEdges) == 0
+		len(eb.cubicEdges) == 0 &&
+		len(eb.velloLines) == 0
 }
 
 // EdgeCount returns the total number of edges.
