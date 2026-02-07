@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-02-07
+
+### Changed
+
+- **naga** dependency updated v0.10.0 → v0.11.0 — fixes SPIR-V `if/else` GPU hang, adds 55 new WGSL built-in functions
+- **wgpu** dependency updated v0.13.1 → v0.13.2
+- **gogpu_integration example** — updated minimum gogpu version to v0.15.7+
+
 ## [0.26.0] - 2026-02-06
 
 ### Added
@@ -1518,7 +1526,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/gogpu/gg/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/gogpu/gg/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/gogpu/gg/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/gogpu/gg/compare/v0.24.0...v0.24.1
