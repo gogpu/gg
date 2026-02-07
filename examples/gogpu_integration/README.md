@@ -31,4 +31,4 @@ Resize the window to see automatic canvas reallocation.
 |------------|-----------------|
 | Go | 1.25+ |
 | gogpu | v0.15.7+ |
-| gg | v0.26.0+ |
+| gg | v0.26.1+ |
