@@ -30,7 +30,22 @@ const (
 
 	// AccelGradient represents gradient rendering.
 	AccelGradient
+
+	// AccelCircleSDF represents SDF-based circle rendering.
+	AccelCircleSDF
+
+	// AccelRRectSDF represents SDF-based rounded rectangle rendering.
+	AccelRRectSDF
 )
+
+// GPURenderTarget provides pixel buffer access for GPU output.
+// The Data slice must be in premultiplied RGBA format, 4 bytes per pixel,
+// laid out row by row with the given Stride.
+type GPURenderTarget struct {
+	Data          []uint8
+	Width, Height int
+	Stride        int // bytes per row
+}
 
 // GPUAccelerator is an optional GPU acceleration provider.
 //
@@ -55,6 +70,23 @@ type GPUAccelerator interface {
 	// CanAccelerate reports whether the accelerator supports the given operation.
 	// This is a fast check used to skip GPU entirely for unsupported operations.
 	CanAccelerate(op AcceleratedOp) bool
+
+	// FillPath renders a filled path to the target.
+	// Returns ErrFallbackToCPU if the path cannot be GPU-accelerated.
+	FillPath(target GPURenderTarget, path *Path, paint *Paint) error
+
+	// StrokePath renders a stroked path to the target.
+	// Returns ErrFallbackToCPU if the path cannot be GPU-accelerated.
+	StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
+
+	// FillShape renders a detected shape using SDF.
+	// This is the fast path for circles and rounded rectangles.
+	// Returns ErrFallbackToCPU if the shape is not supported.
+	FillShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+
+	// StrokeShape renders a detected shape outline using SDF.
+	// Returns ErrFallbackToCPU if the shape is not supported.
+	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
 }
 
 var (
