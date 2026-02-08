@@ -24,6 +24,12 @@ var stripShaderSource string
 //go:embed shaders/composite.wgsl
 var compositeShaderSource string
 
+//go:embed shaders/sdf_circle.wgsl
+var sdfCircleShaderSource string
+
+//go:embed shaders/sdf_rrect.wgsl
+var sdfRRectShaderSource string
+
 // ShaderModuleID represents a compiled shader module handle.
 // This is a placeholder type that will be replaced with the actual
 // wgpu core.ShaderModuleID once shader compilation is implemented.
@@ -252,4 +258,38 @@ type LayerDescriptor struct {
 	BlendMode  uint32  // Blend mode for this layer
 	Alpha      float32 // Layer opacity
 	Padding    float32 // Alignment padding
+}
+
+// SDFCircleParams matches the Params struct in sdf_circle.wgsl.
+type SDFCircleParams struct {
+	CenterX         float32
+	CenterY         float32
+	RadiusX         float32
+	RadiusY         float32
+	HalfStrokeWidth float32
+	IsStroked       uint32
+	ColorR          float32
+	ColorG          float32
+	ColorB          float32
+	ColorA          float32
+	TargetWidth     uint32
+	TargetHeight    uint32
+}
+
+// SDFRRectParams matches the Params struct in sdf_rrect.wgsl.
+type SDFRRectParams struct {
+	CenterX         float32
+	CenterY         float32
+	HalfWidth       float32
+	HalfHeight      float32
+	CornerRadius    float32
+	HalfStrokeWidth float32
+	IsStroked       uint32
+	ColorR          float32
+	ColorG          float32
+	ColorB          float32
+	ColorA          float32
+	TargetWidth     uint32
+	TargetHeight    uint32
+	Padding         uint32 // align to 16 bytes
 }

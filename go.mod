@@ -12,4 +12,7 @@ require (
 	golang.org/x/text v0.33.0
 )
 
-require golang.org/x/sys v0.40.0 // indirect
+require (
+	github.com/go-webgpu/goffi v0.3.8 // indirect
+	golang.org/x/sys v0.40.0 // indirect
+)
