@@ -367,34 +367,56 @@ func (c *Context) NewSubPath() {
 }
 
 // Fill fills the current path and clears it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) Fill() error {
+	if err := c.tryGPUFill(); err == nil {
+		c.path.Clear()
+		return nil
+	}
 	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
 }
 
 // Stroke strokes the current path and clears it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
 	// Set transform scale for renderer to determine effective stroke width
 	c.paint.TransformScale = c.matrix.ScaleFactor()
+	if err := c.tryGPUStroke(); err == nil {
+		c.path.Clear()
+		return nil
+	}
 	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
 }
 
 // FillPreserve fills the current path without clearing it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) FillPreserve() error {
+	if err := c.tryGPUFill(); err == nil {
+		return nil
+	}
 	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
 // StrokePreserve strokes the current path without clearing it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) StrokePreserve() error {
 	// Set transform scale for renderer to determine effective stroke width
 	c.paint.TransformScale = c.matrix.ScaleFactor()
+	if err := c.tryGPUStroke(); err == nil {
+		return nil
+	}
 	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
@@ -703,4 +725,90 @@ func (c *Context) Resize(width, height int) error {
 // direct access to the target buffer during resize operations.
 func (c *Context) ResizeTarget() *Pixmap {
 	return c.pixmap
+}
+
+// tryGPUFill attempts to fill the current path using the GPU accelerator.
+// Returns nil on success, or an error if the accelerator cannot handle the operation.
+func (c *Context) tryGPUFill() error {
+	a := Accelerator()
+	if a == nil {
+		return ErrFallbackToCPU
+	}
+
+	target := GPURenderTarget{
+		Data:   c.pixmap.Data(),
+		Width:  c.pixmap.Width(),
+		Height: c.pixmap.Height(),
+		Stride: c.pixmap.Width() * 4,
+	}
+
+	// Try shape-specific SDF first for higher quality output.
+	shape := DetectShape(c.path)
+	if shape.Kind != ShapeUnknown {
+		if shape.Kind == ShapeCircle && a.CanAccelerate(AccelCircleSDF) {
+			if err := a.FillShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+		if (shape.Kind == ShapeRRect || shape.Kind == ShapeRect) && a.CanAccelerate(AccelRRectSDF) {
+			if err := a.FillShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+		if shape.Kind == ShapeEllipse && a.CanAccelerate(AccelCircleSDF) {
+			if err := a.FillShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+	}
+
+	// Try general GPU fill.
+	if a.CanAccelerate(AccelFill) {
+		return a.FillPath(target, c.path, c.paint)
+	}
+
+	return ErrFallbackToCPU
+}
+
+// tryGPUStroke attempts to stroke the current path using the GPU accelerator.
+// Returns nil on success, or an error if the accelerator cannot handle the operation.
+func (c *Context) tryGPUStroke() error {
+	a := Accelerator()
+	if a == nil {
+		return ErrFallbackToCPU
+	}
+
+	target := GPURenderTarget{
+		Data:   c.pixmap.Data(),
+		Width:  c.pixmap.Width(),
+		Height: c.pixmap.Height(),
+		Stride: c.pixmap.Width() * 4,
+	}
+
+	// Try shape-specific SDF first for higher quality output.
+	shape := DetectShape(c.path)
+	if shape.Kind != ShapeUnknown {
+		if shape.Kind == ShapeCircle && a.CanAccelerate(AccelCircleSDF) {
+			if err := a.StrokeShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+		if (shape.Kind == ShapeRRect || shape.Kind == ShapeRect) && a.CanAccelerate(AccelRRectSDF) {
+			if err := a.StrokeShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+		if shape.Kind == ShapeEllipse && a.CanAccelerate(AccelCircleSDF) {
+			if err := a.StrokeShape(target, shape, c.paint); err == nil {
+				return nil
+			}
+		}
+	}
+
+	// Try general GPU stroke.
+	if a.CanAccelerate(AccelStroke) {
+		return a.StrokePath(target, c.path, c.paint)
+	}
+
+	return ErrFallbackToCPU
 }
