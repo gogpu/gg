@@ -314,8 +314,12 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 	dot := ab.Dot(cd)
 	hypot := math.Hypot(cross, dot)
 
-	// Skip join if angle change is insignificant
+	// Skip join if angle change is insignificant, but still connect paths
+	// to maintain continuity. Without the lineTo calls, the forward/backward
+	// paths have a gap at circle cardinal points where tangents are identical.
 	if dot > 0.0 && math.Abs(cross) < hypot*e.joinThresh {
+		e.forward.lineTo(p0.Add(norm.Neg()))
+		e.backward.lineTo(p0.Add(norm))
 		return
 	}
 

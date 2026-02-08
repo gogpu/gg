@@ -23,8 +23,7 @@ type SoftwareRenderer struct {
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
 func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
-	eb := raster.NewEdgeBuilder(2) // 4x AA quality
-	eb.SetFlattenCurves(true)
+	eb := raster.NewEdgeBuilder(4) // 16x AA quality
 	return &SoftwareRenderer{
 		edgeBuilder:    eb,
 		analyticFiller: raster.NewAnalyticFiller(width, height),
@@ -38,8 +37,8 @@ func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
 func (r *SoftwareRenderer) Resize(width, height int) {
 	r.width = width
 	r.height = height
-	r.edgeBuilder = raster.NewEdgeBuilder(2)
-	r.edgeBuilder.SetFlattenCurves(true)
+	eb := raster.NewEdgeBuilder(4)
+	r.edgeBuilder = eb
 	r.analyticFiller = raster.NewAnalyticFiller(width, height)
 }
 
@@ -256,9 +255,11 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 		strokeStyle.MiterLimit = 4.0 // Default
 	}
 
-	// Create stroke expander with sub-pixel tolerance for smooth curves
+	// Create stroke expander with tight tolerance for smooth curves.
+	// 0.025 px produces ~128 segments per circle — eliminates visible
+	// polygon faceting on small UI circles (radio buttons, checkboxes).
 	expander := stroke.NewStrokeExpander(strokeStyle)
-	expander.SetTolerance(0.1) // Balance between smoothness and performance
+	expander.SetTolerance(0.1)
 
 	// Expand stroke to fill path
 	expandedElements := expander.Expand(strokeElements)
