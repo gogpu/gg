@@ -27,3 +27,16 @@ func init() {
 		log.Printf("gpu: GPU accelerator not available: %v", err)
 	}
 }
+
+// SetDeviceProvider configures the GPU accelerator to use a shared GPU device
+// from an external provider (e.g., gogpu). This avoids creating a separate
+// GPU instance and enables efficient device sharing.
+//
+// The provider should be a gpucontext.DeviceProvider that also implements
+// gpucontext.HalProvider for direct HAL access.
+//
+// Call this before drawing operations, typically from ggcanvas.New() or
+// manually after registering the accelerator.
+func SetDeviceProvider(provider any) error {
+	return gg.SetAcceleratorDeviceProvider(provider)
+}

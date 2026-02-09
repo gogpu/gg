@@ -89,6 +89,14 @@ type GPUAccelerator interface {
 	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
 }
 
+// DeviceProviderAware is an optional interface for accelerators that can share
+// GPU resources with an external provider (e.g., gogpu window).
+// When SetDeviceProvider is called, the accelerator reuses the provided GPU
+// device instead of creating its own.
+type DeviceProviderAware interface {
+	SetDeviceProvider(provider any) error
+}
+
 var (
 	accelMu sync.RWMutex
 	accel   GPUAccelerator
@@ -128,4 +136,21 @@ func Accelerator() GPUAccelerator {
 	a := accel
 	accelMu.RUnlock()
 	return a
+}
+
+// SetAcceleratorDeviceProvider passes a device provider to the registered
+// accelerator, enabling GPU device sharing. If no accelerator is registered
+// or it doesn't support device sharing, this is a no-op.
+//
+// The provider should implement HalDevice() any and HalQueue() any methods
+// that return wgpu/hal types.
+func SetAcceleratorDeviceProvider(provider any) error {
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	if dpa, ok := a.(DeviceProviderAware); ok {
+		return dpa.SetDeviceProvider(provider)
+	}
+	return nil
 }

@@ -62,6 +62,11 @@ func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error)
 		return nil, fmt.Errorf("%w: width=%d, height=%d", ErrInvalidDimensions, width, height)
 	}
 
+	// Share GPU device with accelerator if registered.
+	// Error is non-fatal: accelerator may not support device sharing or
+	// provider may not implement HalProvider. GPU will initialize its own device.
+	_ = gg.SetAcceleratorDeviceProvider(provider)
+
 	return &Canvas{
 		ctx:      gg.NewContext(width, height),
 		provider: provider,

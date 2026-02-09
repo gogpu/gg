@@ -17,6 +17,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gg"
+	_ "github.com/gogpu/gg/gpu" // enable GPU SDF acceleration
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"

@@ -37,8 +37,9 @@ type SDFAccelerator struct {
 	rrectPipeLayout hal.PipelineLayout
 	rrectPipeline   hal.ComputePipeline
 
-	cpuFallback gg.SDFAccelerator
-	gpuReady    bool
+	cpuFallback    gg.SDFAccelerator
+	gpuReady       bool
+	externalDevice bool // true when using shared device (don't destroy on Close)
 }
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
@@ -62,16 +63,72 @@ func (a *SDFAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.destroyPipelines()
-	if a.device != nil {
-		a.device.Destroy()
+	if !a.externalDevice {
+		if a.device != nil {
+			a.device.Destroy()
+			a.device = nil
+		}
+		if a.instance != nil {
+			a.instance.Destroy()
+			a.instance = nil
+		}
+	} else {
+		// Don't destroy shared resources — we don't own them
 		a.device = nil
+		a.instance = nil
+	}
+	a.queue = nil
+	a.gpuReady = false
+	a.externalDevice = false
+}
+
+// SetDeviceProvider switches the accelerator to use a shared GPU device
+// from an external provider (e.g., gogpu). The provider must implement
+// HalDevice() any and HalQueue() any returning hal.Device and hal.Queue.
+func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
+	type halProvider interface {
+		HalDevice() any
+		HalQueue() any
+	}
+	hp, ok := provider.(halProvider)
+	if !ok {
+		return fmt.Errorf("gpu-sdf: provider does not expose HAL types")
+	}
+	device, ok := hp.HalDevice().(hal.Device)
+	if !ok || device == nil {
+		return fmt.Errorf("gpu-sdf: provider HalDevice is not hal.Device")
+	}
+	queue, ok := hp.HalQueue().(hal.Queue)
+	if !ok || queue == nil {
+		return fmt.Errorf("gpu-sdf: provider HalQueue is not hal.Queue")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Destroy own resources if we created them
+	a.destroyPipelines()
+	if !a.externalDevice && a.device != nil {
+		a.device.Destroy()
 	}
 	if a.instance != nil {
 		a.instance.Destroy()
 		a.instance = nil
 	}
-	a.queue = nil
-	a.gpuReady = false
+
+	// Use provided resources
+	a.device = device
+	a.queue = queue
+	a.externalDevice = true
+
+	// Recreate pipelines with shared device
+	if err := a.createPipelines(); err != nil {
+		a.gpuReady = false
+		return fmt.Errorf("gpu-sdf: create pipelines with shared device: %w", err)
+	}
+	a.gpuReady = true
+	log.Printf("gpu-sdf: switched to shared GPU device")
+	return nil
 }
 
 func (a *SDFAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {

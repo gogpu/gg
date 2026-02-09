@@ -364,16 +364,6 @@ func TestErrors(t *testing.T) {
 	}
 }
 
-// BenchmarkBackendInit benchmarks backend initialization.
-func BenchmarkBackendInit(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		wb := NewBackend()
-		if err := wb.Init(); err != nil {
-			b.Skipf("Init() failed: %v", err)
-		}
-		wb.Close()
-	}
-}
 
 // BenchmarkNewRenderer benchmarks renderer creation.
 func BenchmarkNewRenderer(b *testing.B) {
