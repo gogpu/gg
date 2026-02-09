@@ -87,6 +87,12 @@ type GPUAccelerator interface {
 	// StrokeShape renders a detected shape outline using SDF.
 	// Returns ErrFallbackToCPU if the shape is not supported.
 	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+
+	// Flush dispatches any pending GPU operations to the target pixel buffer.
+	// Batch-capable accelerators accumulate shapes during FillShape/StrokeShape
+	// and dispatch them all in a single GPU pass on Flush.
+	// Immediate-mode accelerators (e.g., CPU SDF) return nil.
+	Flush(target GPURenderTarget) error
 }
 
 // DeviceProviderAware is an optional interface for accelerators that can share

@@ -57,6 +57,9 @@ func (a *SDFAccelerator) FillShape(target GPURenderTarget, shape DetectedShape, 
 	}
 }
 
+// Flush is a no-op for the CPU SDF accelerator (renders immediately).
+func (a *SDFAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
 // StrokeShape renders a stroked shape using SDF.
 func (a *SDFAccelerator) StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	switch shape.Kind {

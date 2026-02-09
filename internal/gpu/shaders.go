@@ -27,8 +27,8 @@ var compositeShaderSource string
 //go:embed shaders/sdf_circle.wgsl
 var sdfCircleShaderSource string
 
-//go:embed shaders/sdf_rrect.wgsl
-var sdfRRectShaderSource string
+//go:embed shaders/sdf_batch.wgsl
+var sdfBatchShaderSource string
 
 //go:embed shaders/sdf_test_const.wgsl
 var sdfTestConstShaderSource string
@@ -295,4 +295,29 @@ type SDFRRectParams struct {
 	TargetWidth     uint32
 	TargetHeight    uint32
 	Padding         uint32 // align to 16 bytes
+}
+
+// SDFBatchFrameParams matches FrameParams in sdf_batch.wgsl.
+type SDFBatchFrameParams struct {
+	TargetWidth  uint32
+	TargetHeight uint32
+	ShapeCount   uint32
+	Padding      uint32
+}
+
+// SDFBatchShape matches Shape in sdf_batch.wgsl.
+// Size: 48 bytes (12 x float32/uint32).
+type SDFBatchShape struct {
+	Kind       uint32 // 0=circle/ellipse, 1=rrect
+	CenterX    float32
+	CenterY    float32
+	Param1     float32 // radius_x (circle) or half_width (rrect)
+	Param2     float32 // radius_y (circle) or half_height (rrect)
+	Param3     float32 // corner_radius (rrect only, 0 for circle)
+	HalfStroke float32
+	IsStroked  uint32
+	ColorR     float32
+	ColorG     float32
+	ColorB     float32
+	ColorA     float32
 }

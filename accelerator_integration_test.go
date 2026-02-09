@@ -58,6 +58,8 @@ func (a *trackingAccelerator) StrokeShape(target GPURenderTarget, shape Detected
 	return sdf.StrokeShape(target, shape, paint)
 }
 
+func (a *trackingAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
 func TestContextWithSDFAcceleratorFillCircle(t *testing.T) {
 	resetAccelerator()
 	defer resetAccelerator()

@@ -54,6 +54,9 @@ func TestSDFPipelineCircle(t *testing.T) {
 	if err := accel.FillShape(target, shape, paint); err != nil {
 		t.Fatalf("FillShape: %v", err)
 	}
+	if err := accel.Flush(target); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
 
 	nonWhite := 0
 	for i := 0; i < len(img.Pix); i += 4 {
@@ -102,6 +105,9 @@ func TestSDFPipelineLargeCanvas(t *testing.T) {
 		if err := accel.FillShape(target, shape, paint); err != nil {
 			t.Fatalf("FillShape %dx%d: %v", w, h, err)
 		}
+		if err := accel.Flush(target); err != nil {
+			t.Fatalf("Flush %dx%d: %v", w, h, err)
+		}
 		nonWhite := 0
 		for i := 0; i < len(img.Pix); i += 4 {
 			if img.Pix[i] != 255 || img.Pix[i+1] != 255 || img.Pix[i+2] != 255 {
@@ -146,6 +152,9 @@ func TestSDFPipelineZeroInput(t *testing.T) {
 	if err := accel.FillShape(target1, shape, paint); err != nil {
 		t.Fatalf("FillShape (pattern): %v", err)
 	}
+	if err := accel.Flush(target1); err != nil {
+		t.Fatalf("Flush (pattern): %v", err)
+	}
 	patternAA := 0
 	patternZero := 0
 	patternOther := 0
@@ -167,6 +176,9 @@ func TestSDFPipelineZeroInput(t *testing.T) {
 	if err := accel.FillShape(target2, shape, paint); err != nil {
 		t.Fatalf("FillShape (zero): %v", err)
 	}
+	if err := accel.Flush(target2); err != nil {
+		t.Fatalf("Flush (zero): %v", err)
+	}
 	zeroNonZero := 0
 	for i := 0; i < len(zeroData); i++ {
 		if zeroData[i] != 0 {
@@ -183,6 +195,9 @@ func TestSDFPipelineZeroInput(t *testing.T) {
 	target3 := gg.GPURenderTarget{Width: w, Height: h, Data: whiteData}
 	if err := accel.FillShape(target3, shape, paint); err != nil {
 		t.Fatalf("FillShape (white): %v", err)
+	}
+	if err := accel.Flush(target3); err != nil {
+		t.Fatalf("Flush (white): %v", err)
 	}
 	whiteNonFF := 0
 	for i := 0; i < len(whiteData); i++ {
@@ -459,15 +474,16 @@ func TestSDFConstantWrite(t *testing.T) {
 	}
 
 	// Verdict
-	if deadbeefCount == int(pixelCount) {
+	switch {
+	case deadbeefCount == int(pixelCount):
 		t.Log("VERDICT: OpStore WORKS. Bug is in expression computation (bitwise OR, shifts, u32 conversion).")
-	} else if zeroCount == int(pixelCount) {
+	case zeroCount == int(pixelCount):
 		t.Log("VERDICT: All zeros. OpStore is BROKEN or shader did not run.")
-	} else if aaCount == int(pixelCount) {
+	case aaCount == int(pixelCount):
 		t.Log("VERDICT: All 0xAA. Shader did NOT execute at all. Dispatch or pipeline issue.")
-	} else if deadbeefCount > 0 {
+	case deadbeefCount > 0:
 		t.Logf("VERDICT: Partial success. %d pixels have 0xDEADBEEF, %d zeros, %d unchanged. Possible dispatch size mismatch.", deadbeefCount, zeroCount, aaCount)
-	} else {
+	default:
 		t.Logf("VERDICT: Unexpected mix. Investigate: deadbeef=%d zero=%d aa=%d other=%d", deadbeefCount, zeroCount, aaCount, otherCount)
 	}
 
@@ -968,11 +984,12 @@ func TestSDFFullShaderStandalone(t *testing.T) {
 	}
 	t.Logf("Non-0xAA pixels: %d / %d", nonPattern, len(result))
 
-	if centerVal == 0x00000000 {
+	switch centerVal {
+	case 0x00000000:
 		t.Error("FAIL: center pixel is 0 — shader writes zeros even in standalone pipeline")
-	} else if centerVal == 0xAAAAAAAA {
+	case 0xAAAAAAAA:
 		t.Error("FAIL: center pixel unchanged (0xAA) — shader didn't execute for center")
-	} else {
+	default:
 		t.Logf("PASS: center pixel = 0x%08X (expected ~0xFF0000FF for red)", centerVal)
 	}
 }
@@ -1057,11 +1074,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	centerInline := resultInline[centerIdx]
 	t.Logf("WITHOUT function:  center(100,100) = 0x%08X", centerInline)
 
-	if centerFn == 0 && centerInline != 0 {
+	switch {
+	case centerFn == 0 && centerInline != 0:
 		t.Log(">>> BUG CONFIRMED: fn call breaks shader. naga function call codegen is broken!")
-	} else if centerFn == 0 && centerInline == 0 {
+	case centerFn == 0 && centerInline == 0:
 		t.Log(">>> Both zero — bug is NOT in function call, look for other differences")
-	} else {
+	default:
 		t.Log(">>> Both work — unexpected")
 	}
 }
@@ -1325,6 +1343,9 @@ func TestSDFPipelineDualInstance(t *testing.T) {
 
 	if err := accel.FillShape(target, shape, paint); err != nil {
 		t.Fatalf("FillShape: %v", err)
+	}
+	if err := accel.Flush(target); err != nil {
+		t.Fatalf("Flush: %v", err)
 	}
 
 	nonWhite := 0

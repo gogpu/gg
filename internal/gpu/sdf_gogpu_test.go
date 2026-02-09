@@ -85,7 +85,7 @@ func TestSDFViaGGContext(t *testing.T) {
 	}
 	defer func() {
 		// Deregister by registering a no-op
-		gg.RegisterAccelerator(nil) //nolint
+		_ = gg.RegisterAccelerator(nil)
 	}()
 
 	// Create gg context (same as ggcanvas)

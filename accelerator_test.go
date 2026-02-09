@@ -51,6 +51,8 @@ func (m *mockAccelerator) StrokeShape(_ GPURenderTarget, _ DetectedShape, _ *Pai
 	return ErrFallbackToCPU
 }
 
+func (m *mockAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
 // resetAccelerator clears the global accelerator state between tests.
 func resetAccelerator() {
 	accelMu.Lock()

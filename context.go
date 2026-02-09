@@ -375,6 +375,8 @@ func (c *Context) Fill() error {
 		c.path.Clear()
 		return nil
 	}
+	// Flush pending GPU shapes before CPU fallback.
+	c.flushGPUAccelerator()
 	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
@@ -391,6 +393,8 @@ func (c *Context) Stroke() error {
 		c.path.Clear()
 		return nil
 	}
+	// Flush pending GPU shapes before CPU fallback.
+	c.flushGPUAccelerator()
 	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
@@ -404,6 +408,7 @@ func (c *Context) FillPreserve() error {
 	if err := c.tryGPUFill(); err == nil {
 		return nil
 	}
+	c.flushGPUAccelerator()
 	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
@@ -417,6 +422,7 @@ func (c *Context) StrokePreserve() error {
 	if err := c.tryGPUStroke(); err == nil {
 		return nil
 	}
+	c.flushGPUAccelerator()
 	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
@@ -725,6 +731,38 @@ func (c *Context) Resize(width, height int) error {
 // direct access to the target buffer during resize operations.
 func (c *Context) ResizeTarget() *Pixmap {
 	return c.pixmap
+}
+
+// FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
+// Call this before reading pixel data (e.g., SavePNG, Image) when using a
+// batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+func (c *Context) FlushGPU() error {
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	target := GPURenderTarget{
+		Data:   c.pixmap.Data(),
+		Width:  c.pixmap.Width(),
+		Height: c.pixmap.Height(),
+		Stride: c.pixmap.Width() * 4,
+	}
+	return a.Flush(target)
+}
+
+// flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
+func (c *Context) flushGPUAccelerator() {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	target := GPURenderTarget{
+		Data:   c.pixmap.Data(),
+		Width:  c.pixmap.Width(),
+		Height: c.pixmap.Height(),
+		Stride: c.pixmap.Width() * 4,
+	}
+	_ = a.Flush(target)
 }
 
 // tryGPUFill attempts to fill the current path using the GPU accelerator.
