@@ -182,6 +182,9 @@ func (c *Canvas) Flush() (any, error) {
 		return c.texture, nil
 	}
 
+	// Flush pending GPU shapes to pixel buffer before reading pixel data.
+	_ = c.ctx.FlushGPU()
+
 	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()
 	data := pixmap.Data()

@@ -160,6 +160,7 @@ func (c *Context) Image() image.Image {
 
 // SavePNG saves the context to a PNG file.
 func (c *Context) SavePNG(path string) error {
+	_ = c.FlushGPU() // Flush pending GPU shapes before reading pixels.
 	return c.pixmap.SavePNG(path)
 }
 
