@@ -145,14 +145,19 @@ func (a *SDFAccelerator) FillShape(target gg.GPURenderTarget, shape gg.DetectedS
 	if !a.gpuReady {
 		return a.cpuFallback.FillShape(target, shape, paint)
 	}
+	var err error
 	switch shape.Kind {
 	case gg.ShapeCircle, gg.ShapeEllipse:
-		return a.dispatchCircleSDF(target, shape, paint, false)
+		err = a.dispatchCircleSDF(target, shape, paint, false)
 	case gg.ShapeRect, gg.ShapeRRect:
-		return a.dispatchRRectSDF(target, shape, paint, false)
+		err = a.dispatchRRectSDF(target, shape, paint, false)
 	default:
 		return gg.ErrFallbackToCPU
 	}
+	if err != nil {
+		log.Printf("gpu-sdf: FillShape dispatch error: %v (shape=%d, external=%v)", err, shape.Kind, a.externalDevice)
+	}
+	return err
 }
 
 func (a *SDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
@@ -422,6 +427,7 @@ func (a *SDFAccelerator) dispatchCompute(
 	if err := encoder.BeginEncoding("sdf_compute"); err != nil {
 		return fmt.Errorf("begin encoding: %w", err)
 	}
+
 	computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "sdf_pass"})
 	computePass.SetPipeline(pipeline)
 	computePass.SetBindGroup(0, bindGroup, nil)
@@ -429,6 +435,8 @@ func (a *SDFAccelerator) dispatchCompute(
 	wgY := (h + 7) / 8
 	computePass.Dispatch(wgX, wgY, 1)
 	computePass.End()
+
+	// Copy compute output to readback staging buffer
 	encoder.CopyBufferToBuffer(storageBuf, stagingBuf, []hal.BufferCopy{
 		{SrcOffset: 0, DstOffset: 0, Size: pixelBufSize},
 	})

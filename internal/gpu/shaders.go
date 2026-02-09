@@ -30,6 +30,9 @@ var sdfCircleShaderSource string
 //go:embed shaders/sdf_rrect.wgsl
 var sdfRRectShaderSource string
 
+//go:embed shaders/sdf_test_const.wgsl
+var sdfTestConstShaderSource string
+
 // ShaderModuleID represents a compiled shader module handle.
 // This is a placeholder type that will be replaced with the actual
 // wgpu core.ShaderModuleID once shader compilation is implemented.
