@@ -439,7 +439,7 @@ func TestNewTextRenderer(t *testing.T) {
 	})
 
 	t.Run("with valid backend", func(t *testing.T) {
-		backend := NewNativeBackend()
+		backend := NewBackend()
 		_ = backend.Init()
 		defer backend.Close()
 
@@ -461,7 +461,7 @@ func TestNewTextRenderer(t *testing.T) {
 
 // TestTextRendererInit tests renderer initialization.
 func TestTextRendererInit(t *testing.T) {
-	backend := NewNativeBackend()
+	backend := NewBackend()
 	_ = backend.Init()
 	defer backend.Close()
 
@@ -485,7 +485,7 @@ func TestTextRendererInit(t *testing.T) {
 
 // TestTextRendererSyncAtlases tests atlas synchronization.
 func TestTextRendererSyncAtlases(t *testing.T) {
-	backend := NewNativeBackend()
+	backend := NewBackend()
 	_ = backend.Init()
 	defer backend.Close()
 

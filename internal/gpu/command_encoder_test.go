@@ -15,26 +15,26 @@ import (
 func TestCoreCommandEncoder_CreateFromBackend(t *testing.T) {
 	tests := []struct {
 		name          string
-		backend       *NativeBackend
+		backend       *Backend
 		label         string
 		wantErr       bool
 		wantErrTarget error
 	}{
 		{
 			name:    "success with label",
-			backend: &NativeBackend{initialized: true},
+			backend: &Backend{initialized: true},
 			label:   "test-encoder",
 			wantErr: false,
 		},
 		{
 			name:    "success without label",
-			backend: &NativeBackend{initialized: true},
+			backend: &Backend{initialized: true},
 			label:   "",
 			wantErr: false,
 		},
 		{
 			name:          "fail when not initialized",
-			backend:       &NativeBackend{initialized: false},
+			backend:       &Backend{initialized: false},
 			label:         "test",
 			wantErr:       true,
 			wantErrTarget: ErrNotInitialized,
@@ -908,7 +908,7 @@ func TestCommandEncoderErrors(t *testing.T) {
 // =============================================================================
 
 func TestCoreCommandEncoder_RenderWorkflow(t *testing.T) {
-	backend := &NativeBackend{initialized: true}
+	backend := &Backend{initialized: true}
 
 	// Create encoder
 	encoder, err := NewCoreCommandEncoder(backend, "render-workflow")
@@ -972,7 +972,7 @@ func TestCoreCommandEncoder_RenderWorkflow(t *testing.T) {
 }
 
 func TestCoreCommandEncoder_ComputeWorkflow(t *testing.T) {
-	backend := &NativeBackend{initialized: true}
+	backend := &Backend{initialized: true}
 
 	// Create encoder
 	encoder, err := NewCoreCommandEncoder(backend, "compute-workflow")

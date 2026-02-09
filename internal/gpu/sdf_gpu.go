@@ -18,9 +18,9 @@ import (
 	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// NativeSDFAccelerator provides GPU-accelerated SDF rendering using wgpu/hal
+// SDFAccelerator provides GPU-accelerated SDF rendering using wgpu/hal
 // compute shaders. It implements the gg.GPUAccelerator interface.
-type NativeSDFAccelerator struct {
+type SDFAccelerator struct {
 	mu sync.Mutex
 
 	instance hal.Instance
@@ -41,15 +41,15 @@ type NativeSDFAccelerator struct {
 	gpuReady    bool
 }
 
-var _ gg.GPUAccelerator = (*NativeSDFAccelerator)(nil)
+var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 
-func (a *NativeSDFAccelerator) Name() string { return "sdf-gpu-gpu" }
+func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 
-func (a *NativeSDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
+func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF) != 0
 }
 
-func (a *NativeSDFAccelerator) Init() error {
+func (a *SDFAccelerator) Init() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := a.initGPU(); err != nil {
@@ -58,7 +58,7 @@ func (a *NativeSDFAccelerator) Init() error {
 	return nil
 }
 
-func (a *NativeSDFAccelerator) Close() {
+func (a *SDFAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.destroyPipelines()
@@ -74,15 +74,15 @@ func (a *NativeSDFAccelerator) Close() {
 	a.gpuReady = false
 }
 
-func (a *NativeSDFAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
+func (a *SDFAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
 	return gg.ErrFallbackToCPU
 }
 
-func (a *NativeSDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
+func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
 	return gg.ErrFallbackToCPU
 }
 
-func (a *NativeSDFAccelerator) FillShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
+func (a *SDFAccelerator) FillShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.gpuReady {
@@ -98,7 +98,7 @@ func (a *NativeSDFAccelerator) FillShape(target gg.GPURenderTarget, shape gg.Det
 	}
 }
 
-func (a *NativeSDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
+func (a *SDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !a.gpuReady {
@@ -114,7 +114,7 @@ func (a *NativeSDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.D
 	}
 }
 
-func (a *NativeSDFAccelerator) initGPU() error {
+func (a *SDFAccelerator) initGPU() error {
 	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
 	if !ok {
 		return fmt.Errorf("vulkan backend not available")
@@ -156,7 +156,7 @@ func (a *NativeSDFAccelerator) initGPU() error {
 	return nil
 }
 
-func (a *NativeSDFAccelerator) createPipelines() error {
+func (a *SDFAccelerator) createPipelines() error {
 	circleShader, err := a.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label:  "sdf_circle",
 		Source: hal.ShaderSource{WGSL: sdfCircleShaderSource},
@@ -236,7 +236,7 @@ func (a *NativeSDFAccelerator) createPipelines() error {
 	return nil
 }
 
-func (a *NativeSDFAccelerator) destroyPipelines() {
+func (a *SDFAccelerator) destroyPipelines() {
 	if a.device == nil {
 		return
 	}
@@ -266,8 +266,8 @@ func (a *NativeSDFAccelerator) destroyPipelines() {
 	}
 }
 
-func (a *NativeSDFAccelerator) dispatchCircleSDF(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
-	color := getColorFromPaintNative(paint)
+func (a *SDFAccelerator) dispatchCircleSDF(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
+	color := getColorFromPaint(paint)
 	var halfStroke float32
 	var isStroked uint32
 	if stroked {
@@ -286,8 +286,8 @@ func (a *NativeSDFAccelerator) dispatchCircleSDF(target gg.GPURenderTarget, shap
 		structToBytes(unsafe.Pointer(&params), unsafe.Sizeof(params)), target)
 }
 
-func (a *NativeSDFAccelerator) dispatchRRectSDF(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
-	color := getColorFromPaintNative(paint)
+func (a *SDFAccelerator) dispatchRRectSDF(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
+	color := getColorFromPaint(paint)
 	var halfStroke float32
 	var isStroked uint32
 	if stroked {
@@ -307,7 +307,7 @@ func (a *NativeSDFAccelerator) dispatchRRectSDF(target gg.GPURenderTarget, shape
 		structToBytes(unsafe.Pointer(&params), unsafe.Sizeof(params)), target)
 }
 
-func (a *NativeSDFAccelerator) dispatchCompute(
+func (a *SDFAccelerator) dispatchCompute(
 	pipeline hal.ComputePipeline, bindLayout hal.BindGroupLayout,
 	paramsBytes []byte, target gg.GPURenderTarget,
 ) error {
@@ -402,7 +402,7 @@ func (a *NativeSDFAccelerator) dispatchCompute(
 	return nil
 }
 
-func getColorFromPaintNative(paint *gg.Paint) gg.RGBA {
+func getColorFromPaint(paint *gg.Paint) gg.RGBA {
 	if paint.Brush != nil {
 		if sb, isSolid := paint.Brush.(gg.SolidBrush); isSolid {
 			return sb.Color

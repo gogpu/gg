@@ -34,7 +34,7 @@ type GPUSceneRenderer struct {
 	mu sync.Mutex
 
 	// Backend reference
-	backend *NativeBackend
+	backend *Backend
 
 	// Render target dimensions
 	width  int
@@ -89,7 +89,7 @@ type GPUSceneRendererConfig struct {
 // The renderer is configured for the specified dimensions.
 //
 // Returns an error if the backend is not initialized or configuration is invalid.
-func NewGPUSceneRenderer(backend *NativeBackend, config GPUSceneRendererConfig) (*GPUSceneRenderer, error) {
+func NewGPUSceneRenderer(backend *Backend, config GPUSceneRendererConfig) (*GPUSceneRenderer, error) {
 	if backend == nil {
 		return nil, ErrNotInitialized
 	}

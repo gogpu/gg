@@ -8,17 +8,17 @@ import (
 	"github.com/gogpu/gg/scene"
 )
 
-// TestNativeBackendName verifies the backend name.
-func TestNativeBackendName(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendName verifies the backend name.
+func TestBackendName(t *testing.T) {
+	b := NewBackend()
 	if b.Name() != "gpu" {
 		t.Errorf("Name() = %q, want %q", b.Name(), "gpu")
 	}
 }
 
-// TestNativeBackendInit tests initialization.
-func TestNativeBackendInit(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendInit tests initialization.
+func TestBackendInit(t *testing.T) {
+	b := NewBackend()
 
 	// Should not be initialized initially
 	if b.IsInitialized() {
@@ -70,9 +70,9 @@ func TestNativeBackendInit(t *testing.T) {
 	}
 }
 
-// TestNativeBackendClose tests resource cleanup.
-func TestNativeBackendClose(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendClose tests resource cleanup.
+func TestBackendClose(t *testing.T) {
+	b := NewBackend()
 
 	// Close on uninitialized backend should be safe
 	b.Close()
@@ -105,9 +105,9 @@ func TestNativeBackendClose(t *testing.T) {
 	}
 }
 
-// TestNativeBackendNewRenderer tests renderer creation.
-func TestNativeBackendNewRenderer(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendNewRenderer tests renderer creation.
+func TestBackendNewRenderer(t *testing.T) {
+	b := NewBackend()
 
 	// NewRenderer on uninitialized backend should return nil
 	r := b.NewRenderer(800, 600)
@@ -144,9 +144,9 @@ func TestNativeBackendNewRenderer(t *testing.T) {
 	gpuR.Close()
 }
 
-// TestNativeBackendNewRendererInvalidDimensions tests invalid dimension handling.
-func TestNativeBackendNewRendererInvalidDimensions(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendNewRendererInvalidDimensions tests invalid dimension handling.
+func TestBackendNewRendererInvalidDimensions(t *testing.T) {
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Logf("Init() returned error (expected in test environment): %v", err)
@@ -177,9 +177,9 @@ func TestNativeBackendNewRendererInvalidDimensions(t *testing.T) {
 	}
 }
 
-// TestNativeBackendRenderScene tests scene rendering.
-func TestNativeBackendRenderScene(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendRenderScene tests scene rendering.
+func TestBackendRenderScene(t *testing.T) {
+	b := NewBackend()
 
 	// RenderScene on uninitialized backend should return error
 	err := b.RenderScene(nil, nil)
@@ -230,7 +230,7 @@ func TestNativeBackendRenderScene(t *testing.T) {
 
 // TestGPURendererFillStroke tests that Fill and Stroke methods work correctly.
 func TestGPURendererFillStroke(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Logf("Init() returned error (expected in test environment): %v", err)
@@ -291,9 +291,9 @@ func TestGPURendererFillStroke(t *testing.T) {
 	gpuR.Close()
 }
 
-// TestNativeBackendConcurrency tests concurrent access to the backend.
-func TestNativeBackendConcurrency(t *testing.T) {
-	b := NewNativeBackend()
+// TestBackendConcurrency tests concurrent access to the backend.
+func TestBackendConcurrency(t *testing.T) {
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Logf("Init() returned error (expected in test environment): %v", err)
@@ -364,10 +364,10 @@ func TestErrors(t *testing.T) {
 	}
 }
 
-// BenchmarkNativeBackendInit benchmarks backend initialization.
-func BenchmarkNativeBackendInit(b *testing.B) {
+// BenchmarkBackendInit benchmarks backend initialization.
+func BenchmarkBackendInit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		wb := NewNativeBackend()
+		wb := NewBackend()
 		if err := wb.Init(); err != nil {
 			b.Skipf("Init() failed: %v", err)
 		}
@@ -377,7 +377,7 @@ func BenchmarkNativeBackendInit(b *testing.B) {
 
 // BenchmarkNewRenderer benchmarks renderer creation.
 func BenchmarkNewRenderer(b *testing.B) {
-	wb := NewNativeBackend()
+	wb := NewBackend()
 	if err := wb.Init(); err != nil {
 		b.Skipf("Init() failed: %v", err)
 	}

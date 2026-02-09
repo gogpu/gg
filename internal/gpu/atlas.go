@@ -297,7 +297,7 @@ type TextureAtlasConfig struct {
 }
 
 // NewTextureAtlas creates a new texture atlas with the given configuration.
-func NewTextureAtlas(backend *NativeBackend, config TextureAtlasConfig) (*TextureAtlas, error) {
+func NewTextureAtlas(backend *Backend, config TextureAtlasConfig) (*TextureAtlas, error) {
 	width := config.Width
 	if width < MinAtlasSize {
 		width = DefaultAtlasSize

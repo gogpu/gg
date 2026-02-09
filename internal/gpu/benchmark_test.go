@@ -191,7 +191,7 @@ func BenchmarkSceneCreation(b *testing.B) {
 // BenchmarkBackendInit benchmarks backend initialization.
 func BenchmarkBackendInit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		be := NewNativeBackend()
+		be := NewBackend()
 		if err := be.Init(); err != nil {
 			b.Skipf("GPU not available: %v", err)
 		}
@@ -336,7 +336,7 @@ func BenchmarkBlendModes(b *testing.B) {
 func runBackendComparison(b *testing.B, width, height int, setup func(s *scene.Scene)) {
 	// GPU backend benchmark
 	b.Run("GPU", func(b *testing.B) {
-		be := NewNativeBackend()
+		be := NewBackend()
 		if err := be.Init(); err != nil {
 			b.Skipf("GPU not available: %v", err)
 		}

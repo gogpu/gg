@@ -13,7 +13,7 @@
 //
 // Key components:
 //
-//   - NativeBackend: Main entry point for GPU rendering
+//   - Backend: Main entry point for GPU rendering
 //   - GPUSceneRenderer: Scene-to-GPU pipeline with HybridPipeline rasterization
 //   - HybridPipeline: 3-stage path rasterization (Flatten, Coarse, Fine)
 //   - MemoryManager: GPU texture memory with LRU eviction (configurable budget)
@@ -57,7 +57,7 @@
 //
 // Create and initialize the gpu backend directly:
 //
-//	b := gpu.NewNativeBackend()
+//	b := gpu.NewBackend()
 //	if err := b.Init(); err != nil {
 //	    log.Fatal(err)
 //	}
@@ -98,7 +98,7 @@
 //
 // # Thread Safety
 //
-// NativeBackend and GPUSceneRenderer are safe for concurrent use from multiple
+// Backend and GPUSceneRenderer are safe for concurrent use from multiple
 // goroutines. Internal synchronization is handled via mutexes.
 //
 // # Error Handling

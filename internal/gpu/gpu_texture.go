@@ -134,7 +134,7 @@ const DefaultTextureUsage = gputypes.TextureUsageCopySrc | gputypes.TextureUsage
 //
 // Note: This is a stub implementation. The actual GPU texture creation
 // will be implemented when wgpu texture support is complete.
-func CreateTexture(backend *NativeBackend, config TextureConfig) (*GPUTexture, error) {
+func CreateTexture(backend *Backend, config TextureConfig) (*GPUTexture, error) {
 	if config.Width <= 0 || config.Height <= 0 {
 		return nil, ErrInvalidDimensions
 	}
@@ -185,7 +185,7 @@ func CreateTexture(backend *NativeBackend, config TextureConfig) (*GPUTexture, e
 
 // CreateTextureFromPixmap creates a GPU texture from a pixmap, uploading
 // the pixel data immediately.
-func CreateTextureFromPixmap(backend *NativeBackend, pixmap *gg.Pixmap, label string) (*GPUTexture, error) {
+func CreateTextureFromPixmap(backend *Backend, pixmap *gg.Pixmap, label string) (*GPUTexture, error) {
 	if pixmap == nil {
 		return nil, ErrNilPixmap
 	}

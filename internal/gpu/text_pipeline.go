@@ -520,7 +520,7 @@ type TextRenderer struct {
 	mu sync.RWMutex
 
 	// GPU resources
-	backend  *NativeBackend
+	backend  *Backend
 	pipeline *TextPipeline
 
 	// Atlas management
@@ -551,7 +551,7 @@ func DefaultTextRendererConfig() TextRendererConfig {
 }
 
 // NewTextRenderer creates a new text renderer.
-func NewTextRenderer(backend *NativeBackend, config TextRendererConfig) (*TextRenderer, error) {
+func NewTextRenderer(backend *Backend, config TextRendererConfig) (*TextRenderer, error) {
 	if backend == nil {
 		return nil, ErrNilBackend
 	}

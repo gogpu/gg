@@ -14,7 +14,7 @@ import (
 
 // TestBackendIntegration tests the full rendering pipeline from backend to scene.
 func TestBackendIntegration(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v (expected in CI/test environments)", err)
@@ -40,7 +40,7 @@ func TestBackendIntegration(t *testing.T) {
 
 // TestBackendWithComplexScene tests rendering a more complex scene.
 func TestBackendWithComplexScene(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v", err)
@@ -72,7 +72,7 @@ func TestBackendWithComplexScene(t *testing.T) {
 
 // TestBackendWithLayers tests layer push/pop operations.
 func TestBackendWithLayers(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v", err)
@@ -106,7 +106,7 @@ func TestBackendWithLayers(t *testing.T) {
 
 // TestBackendWithNestedLayers tests nested layer operations.
 func TestBackendWithNestedLayers(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v", err)
@@ -334,7 +334,7 @@ func (d *DeviceID) Zero() core.DeviceID {
 
 // TestFullRenderPipeline tests the complete render pipeline data flow.
 func TestFullRenderPipeline(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v", err)
@@ -410,7 +410,7 @@ func TestFullRenderPipeline(t *testing.T) {
 
 // TestBackendConcurrentSceneRendering tests concurrent scene rendering.
 func TestBackendConcurrentSceneRendering(t *testing.T) {
-	b := NewNativeBackend()
+	b := NewBackend()
 
 	if err := b.Init(); err != nil {
 		t.Skipf("GPU not available: %v", err)

@@ -29,7 +29,7 @@ func main() {
 	fmt.Println("===================")
 
 	// Try GPU backend first, fall back to software
-	nb := gpu.NewNativeBackend()
+	nb := gpu.NewBackend()
 	if err := nb.Init(); err != nil {
 		fmt.Printf("GPU backend unavailable: %v\n", err)
 		fmt.Println("Falling back to software rendering...")

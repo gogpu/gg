@@ -81,7 +81,7 @@ type CoreCommandEncoder struct {
 	coreEncoder *core.CoreCommandEncoder
 
 	// device is the parent gpu backend device reference.
-	device *NativeBackend
+	device *Backend
 
 	// label is the debug label for this encoder.
 	label string
@@ -103,7 +103,7 @@ type CoreCommandEncoder struct {
 //
 // Returns the encoder and nil on success.
 // Returns nil and an error if the backend is not initialized.
-func NewCoreCommandEncoder(backend *NativeBackend, label string) (*CoreCommandEncoder, error) {
+func NewCoreCommandEncoder(backend *Backend, label string) (*CoreCommandEncoder, error) {
 	if backend == nil {
 		return nil, ErrNilDevice
 	}

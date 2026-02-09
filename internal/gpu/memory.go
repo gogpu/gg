@@ -79,7 +79,7 @@ type MemoryManager struct {
 	mu sync.RWMutex
 
 	// Backend reference for creating textures
-	backend *NativeBackend
+	backend *Backend
 
 	// Memory tracking
 	budgetBytes uint64 // Total budget in bytes
@@ -114,7 +114,7 @@ type MemoryManagerConfig struct {
 
 // NewMemoryManager creates a new memory manager for GPU memory tracking.
 // The backend parameter is used for texture creation operations.
-func NewMemoryManager(backend *NativeBackend, config MemoryManagerConfig) *MemoryManager {
+func NewMemoryManager(backend *Backend, config MemoryManagerConfig) *MemoryManager {
 	maxMB := config.MaxMemoryMB
 	if maxMB < MinMemoryMB {
 		maxMB = DefaultMaxMemoryMB

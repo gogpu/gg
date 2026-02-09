@@ -12,15 +12,15 @@ import (
 	"github.com/gogpu/wgpu/core"
 )
 
-// BackendNative is the identifier for the gpu GPU backend.
-const BackendNative = "gpu"
+// BackendGPU is the identifier for the GPU backend.
+const BackendGPU = "gpu"
 
-// NativeBackend is a GPU-accelerated rendering backend using gogpu/wgpu.
+// Backend is a GPU-accelerated rendering backend using gogpu/wgpu.
 //
 // The backend manages GPU resources including instance, adapter, device,
 // and queue. It supports both immediate mode rendering (via NewRenderer)
 // and retained mode rendering (via RenderScene).
-type NativeBackend struct {
+type Backend struct {
 	mu sync.RWMutex
 
 	// GPU resources
@@ -36,15 +36,15 @@ type NativeBackend struct {
 	initialized bool
 }
 
-// NewNativeBackend creates a new Pure Go GPU rendering backend.
+// NewBackend creates a new Pure Go GPU rendering backend.
 // The backend must be initialized with Init() before use.
-func NewNativeBackend() *NativeBackend {
-	return &NativeBackend{}
+func NewBackend() *Backend {
+	return &Backend{}
 }
 
 // Name returns the backend identifier.
-func (b *NativeBackend) Name() string {
-	return BackendNative
+func (b *Backend) Name() string {
+	return BackendGPU
 }
 
 // Init initializes the backend by creating GPU resources.
@@ -52,7 +52,7 @@ func (b *NativeBackend) Name() string {
 // creating a device, and getting the command queue.
 //
 // Returns an error if GPU initialization fails.
-func (b *NativeBackend) Init() error {
+func (b *Backend) Init() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -106,7 +106,7 @@ func (b *NativeBackend) Init() error {
 
 // Close releases all backend resources.
 // The backend should not be used after Close is called.
-func (b *NativeBackend) Close() {
+func (b *Backend) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -145,7 +145,7 @@ func (b *NativeBackend) Close() {
 //
 // Note: This is a stub implementation that returns a GPURenderer.
 // The actual GPU rendering will be implemented in TASK-110.
-func (b *NativeBackend) NewRenderer(width, height int) gg.Renderer {
+func (b *Backend) NewRenderer(width, height int) gg.Renderer {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -169,7 +169,7 @@ func (b *NativeBackend) NewRenderer(width, height int) gg.Renderer {
 // rasterization, and layer compositing on the GPU. When wgpu texture
 // readback is fully implemented, results will be downloaded to the target
 // pixmap. Currently, data flows through the GPU pipeline as stubs.
-func (b *NativeBackend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
+func (b *Backend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
 	b.mu.RLock()
 	initialized := b.initialized
 	b.mu.RUnlock()
@@ -212,7 +212,7 @@ func (b *NativeBackend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
 }
 
 // IsInitialized returns true if the backend has been initialized.
-func (b *NativeBackend) IsInitialized() bool {
+func (b *Backend) IsInitialized() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.initialized
@@ -220,7 +220,7 @@ func (b *NativeBackend) IsInitialized() bool {
 
 // GPUInfo returns information about the selected GPU.
 // Returns nil if the backend is not initialized.
-func (b *NativeBackend) GPUInfo() *GPUInfo {
+func (b *Backend) GPUInfo() *GPUInfo {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.gpuInfo
@@ -228,7 +228,7 @@ func (b *NativeBackend) GPUInfo() *GPUInfo {
 
 // Device returns the GPU device ID.
 // Returns a zero ID if the backend is not initialized.
-func (b *NativeBackend) Device() core.DeviceID {
+func (b *Backend) Device() core.DeviceID {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.device
@@ -236,7 +236,7 @@ func (b *NativeBackend) Device() core.DeviceID {
 
 // Queue returns the GPU queue ID.
 // Returns a zero ID if the backend is not initialized.
-func (b *NativeBackend) Queue() core.QueueID {
+func (b *Backend) Queue() core.QueueID {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.queue
@@ -248,14 +248,14 @@ func (b *NativeBackend) Queue() core.QueueID {
 // Note: This is a stub implementation. The actual GPU rendering
 // will be implemented in TASK-110.
 type GPURenderer struct {
-	backend          *NativeBackend
+	backend          *Backend
 	width            int
 	height           int
 	softwareRenderer *gg.SoftwareRenderer
 }
 
 // newGPURenderer creates a new GPU renderer.
-func newGPURenderer(b *NativeBackend, width, height int) *GPURenderer {
+func newGPURenderer(b *Backend, width, height int) *GPURenderer {
 	return &GPURenderer{
 		backend:          b,
 		width:            width,
@@ -283,7 +283,7 @@ func (r *GPURenderer) Fill(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) er
 	}
 
 	// TODO Phase 2: Upload pixmap to GPU texture for compositing
-	// TODO Phase 3: Native GPU path tessellation
+	// TODO Phase 3: GPU path tessellation
 
 	return nil
 }
@@ -307,7 +307,7 @@ func (r *GPURenderer) Stroke(pixmap *gg.Pixmap, path *gg.Path, paint *gg.Paint) 
 	}
 
 	// TODO Phase 2: Upload pixmap to GPU texture for compositing
-	// TODO Phase 3: Native GPU stroke expansion and tessellation
+	// TODO Phase 3: GPU stroke expansion and tessellation
 
 	return nil
 }
