@@ -301,7 +301,7 @@ type SDFRRectParams struct {
 type SDFBatchFrameParams struct {
 	TargetWidth  uint32
 	TargetHeight uint32
-	ShapeCount   uint32
+	ShapeIndex   uint32
 	Padding      uint32
 }
 

@@ -1360,3 +1360,103 @@ func TestSDFPipelineDualInstance(t *testing.T) {
 		t.Fatal("GPU SDF FAILED with dual Vulkan instances!")
 	}
 }
+
+// TestSDFBatchMultiShape verifies that batch dispatch renders ALL shapes,
+// not just the first one. This catches shader loop bugs in naga's SPIR-V output.
+func TestSDFBatchMultiShape(t *testing.T) {
+	log.SetFlags(log.Ltime | log.Lmicroseconds)
+
+	w, h := 300, 100
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 255
+		img.Pix[i+1] = 255
+		img.Pix[i+2] = 255
+		img.Pix[i+3] = 255
+	}
+
+	accel := &SDFAccelerator{}
+	if err := accel.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer accel.Close()
+
+	target := gg.GPURenderTarget{Width: w, Height: h, Data: img.Pix}
+
+	// 3 well-separated circles: red at (50,50), green at (150,50), blue at (250,50)
+	type circleSpec struct {
+		cx, cy, r float64
+		c         gg.RGBA
+	}
+	circles := []circleSpec{
+		{50, 50, 30, gg.RGBA{R: 1, G: 0, B: 0, A: 1}},
+		{150, 50, 30, gg.RGBA{R: 0, G: 1, B: 0, A: 1}},
+		{250, 50, 30, gg.RGBA{R: 0, G: 0, B: 1, A: 1}},
+	}
+
+	for _, c := range circles {
+		shape := gg.DetectedShape{
+			Kind: gg.ShapeCircle, CenterX: c.cx, CenterY: c.cy,
+			RadiusX: c.r, RadiusY: c.r,
+		}
+		paint := &gg.Paint{Brush: gg.SolidBrush{Color: c.c}}
+		if err := accel.FillShape(target, shape, paint); err != nil {
+			t.Fatalf("FillShape: %v", err)
+		}
+	}
+
+	// Verify all 3 shapes are pending (not flushed individually).
+	if n := accel.PendingCount(); n != 3 {
+		t.Fatalf("expected 3 pending shapes, got %d", n)
+	}
+
+	t.Logf("Dispatching batch with %d shapes", accel.PendingCount())
+
+	if err := accel.Flush(target); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	// Check each circle region for colored pixels.
+	checkRegion := func(_ string, cx, cy, radius int) int {
+		count := 0
+		for y := cy - radius; y <= cy+radius; y++ {
+			for x := cx - radius; x <= cx+radius; x++ {
+				if x < 0 || x >= w || y < 0 || y >= h {
+					continue
+				}
+				idx := (y*w + x) * 4
+				if img.Pix[idx] != 255 || img.Pix[idx+1] != 255 || img.Pix[idx+2] != 255 {
+					count++
+				}
+			}
+		}
+		return count
+	}
+
+	redCount := checkRegion("Red", 50, 50, 35)
+	greenCount := checkRegion("Green", 150, 50, 35)
+	blueCount := checkRegion("Blue", 250, 50, 35)
+
+	t.Logf("Red (shape 0): %d pixels, Green (shape 1): %d pixels, Blue (shape 2): %d pixels",
+		redCount, greenCount, blueCount)
+
+	// Also print center pixel of each circle for diagnosis.
+	for _, c := range []struct {
+		name string
+		x, y int
+	}{{"Red", 50, 50}, {"Green", 150, 50}, {"Blue", 250, 50}} {
+		idx := (c.y*w + c.x) * 4
+		t.Logf("  %s center (%d,%d): RGBA=[%d,%d,%d,%d]",
+			c.name, c.x, c.y, img.Pix[idx], img.Pix[idx+1], img.Pix[idx+2], img.Pix[idx+3])
+	}
+
+	if redCount == 0 {
+		t.Error("Red circle (shape 0) missing")
+	}
+	if greenCount == 0 {
+		t.Error("Green circle (shape 1) missing — batch loop does not iterate past first shape")
+	}
+	if blueCount == 0 {
+		t.Error("Blue circle (shape 2) missing — batch loop does not iterate past second shape")
+	}
+}

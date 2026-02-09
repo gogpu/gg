@@ -243,26 +243,32 @@ func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
 		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
 }
 
-// packBatchData serializes frame params and shapes into byte slices for GPU upload.
-func (a *SDFAccelerator) packBatchData(w, h uint32) (paramsBytes, shapesBytes []byte) {
-	params := SDFBatchFrameParams{
-		TargetWidth: w, TargetHeight: h,
-		ShapeCount: uint32(len(a.pendingShapes)), //nolint:gosec // shape count always fits uint32
-	}
-	paramsBytes = structToBytes(unsafe.Pointer(&params), unsafe.Sizeof(params)) //nolint:gosec // safe struct access
-
+// packShapesData serializes all pending shapes into a byte slice for GPU upload.
+func (a *SDFAccelerator) packShapesData() []byte {
 	shapeSize := int(unsafe.Sizeof(SDFBatchShape{}))
-	shapesBytes = make([]byte, shapeSize*len(a.pendingShapes))
+	shapesBytes := make([]byte, shapeSize*len(a.pendingShapes))
 	for i := range a.pendingShapes {
 		src := structToBytes(unsafe.Pointer(&a.pendingShapes[i]), unsafe.Sizeof(a.pendingShapes[i])) //nolint:gosec // safe struct access
 		copy(shapesBytes[i*shapeSize:], src)
 	}
-	return paramsBytes, shapesBytes
+	return shapesBytes
 }
 
-// submitAndReadback encodes a compute pass, submits it, waits, and reads back pixels.
-func (a *SDFAccelerator) submitAndReadback(
-	bindGroup hal.BindGroup, storageBuf, stagingBuf hal.Buffer,
+// makeFrameParams returns a 16-byte FrameParams for a single shape index.
+func makeFrameParams(w, h, shapeIndex uint32) []byte {
+	params := SDFBatchFrameParams{
+		TargetWidth: w, TargetHeight: h,
+		ShapeIndex: shapeIndex,
+	}
+	return structToBytes(unsafe.Pointer(&params), unsafe.Sizeof(params)) //nolint:gosec // safe struct access
+}
+
+// encodeMultiPass creates N compute passes (one per shape) in a single command
+// encoder. Each pass processes one shape, with implicit storage buffer barriers
+// between passes ensuring correct compositing order.
+// This avoids naga SPIR-V bug #5 (loops only execute first iteration).
+func (a *SDFAccelerator) encodeMultiPass(
+	bindGroups []hal.BindGroup, storageBuf, stagingBuf hal.Buffer,
 	w, h uint32, pixelBufSize uint64, target gg.GPURenderTarget,
 ) error {
 	encoder, err := a.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "sdf_batch_encoder"})
@@ -273,11 +279,15 @@ func (a *SDFAccelerator) submitAndReadback(
 		return fmt.Errorf("begin encoding: %w", err)
 	}
 
-	computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "sdf_batch_pass"})
-	computePass.SetPipeline(a.batchPipeline)
-	computePass.SetBindGroup(0, bindGroup, nil)
-	computePass.Dispatch((w+7)/8, (h+7)/8, 1)
-	computePass.End()
+	// One compute pass per shape — same pipeline, different uniform (shape_index).
+	for i, bg := range bindGroups {
+		_ = i
+		computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "sdf_pass"})
+		computePass.SetPipeline(a.batchPipeline)
+		computePass.SetBindGroup(0, bg, nil)
+		computePass.Dispatch((w+7)/8, (h+7)/8, 1)
+		computePass.End()
+	}
 
 	encoder.CopyBufferToBuffer(storageBuf, stagingBuf, []hal.BufferCopy{
 		{SrcOffset: 0, DstOffset: 0, Size: pixelBufSize},
@@ -309,24 +319,20 @@ func (a *SDFAccelerator) submitAndReadback(
 	return nil
 }
 
-// dispatchBatch sends all pending shapes to the GPU in a single compute pass.
+// dispatchBatch sends all pending shapes to the GPU using multi-pass dispatch.
+// Each shape gets its own compute pass in a single command encoder, avoiding
+// naga SPIR-V bug #5 (loops only execute the first iteration).
+// One submit + one fence wait for the entire batch.
 func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
 	pixelBufSize := uint64(w * h * 4)
-	paramsBytes, shapesBytes := a.packBatchData(w, h)
+	shapesBytes := a.packShapesData()
 	packedPixels := packPixelsForGPU(target.Data, int(w*h))
+	n := len(a.pendingShapes)
 
-	uniformBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_batch_params", Size: uint64(len(paramsBytes)),
-		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("create uniform buffer: %w", err)
-	}
-	defer a.device.DestroyBuffer(uniformBuf)
-
+	// Create shared buffers: shapes (all shapes) + pixels (storage) + staging (readback).
 	shapesBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_batch_shapes", Size: uint64(len(shapesBytes)),
+		Label: "sdf_shapes", Size: uint64(len(shapesBytes)),
 		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -335,7 +341,7 @@ func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
 	defer a.device.DestroyBuffer(shapesBuf)
 
 	storageBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_batch_pixels", Size: pixelBufSize,
+		Label: "sdf_pixels", Size: pixelBufSize,
 		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -344,7 +350,7 @@ func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
 	defer a.device.DestroyBuffer(storageBuf)
 
 	stagingBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_batch_staging", Size: pixelBufSize,
+		Label: "sdf_staging", Size: pixelBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -352,24 +358,73 @@ func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
 	}
 	defer a.device.DestroyBuffer(stagingBuf)
 
-	a.queue.WriteBuffer(uniformBuf, 0, paramsBytes)
 	a.queue.WriteBuffer(shapesBuf, 0, shapesBytes)
 	a.queue.WriteBuffer(storageBuf, 0, packedPixels)
 
-	bindGroup, err := a.device.CreateBindGroup(&hal.BindGroupDescriptor{
-		Label: "sdf_batch_bind_group", Layout: a.batchBindLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{Buffer: uniformBuf.NativeHandle(), Offset: 0, Size: uint64(len(paramsBytes))}},
-			{Binding: 1, Resource: gputypes.BufferBinding{Buffer: shapesBuf.NativeHandle(), Offset: 0, Size: uint64(len(shapesBytes))}},
-			{Binding: 2, Resource: gputypes.BufferBinding{Buffer: storageBuf.NativeHandle(), Offset: 0, Size: pixelBufSize}},
-		},
-	})
+	// Create per-shape uniform buffers and bind groups.
+	uniformBufs, bindGroups, err := a.createPerShapeBindings(n, w, h, shapesBuf, shapesBytes, storageBuf, pixelBufSize)
 	if err != nil {
-		return fmt.Errorf("create bind group: %w", err)
+		a.cleanupBindings(uniformBufs, bindGroups)
+		return err
 	}
-	defer a.device.DestroyBindGroup(bindGroup)
+	defer a.cleanupBindings(uniformBufs, bindGroups)
 
-	return a.submitAndReadback(bindGroup, storageBuf, stagingBuf, w, h, pixelBufSize, target)
+	return a.encodeMultiPass(bindGroups, storageBuf, stagingBuf, w, h, pixelBufSize, target)
+}
+
+// createPerShapeBindings creates N uniform buffers (one per shape with shape_index)
+// and N bind groups. Each bind group shares the same shapes and pixels buffers.
+func (a *SDFAccelerator) createPerShapeBindings(
+	n int, w, h uint32,
+	shapesBuf hal.Buffer, shapesBytes []byte,
+	storageBuf hal.Buffer, pixelBufSize uint64,
+) ([]hal.Buffer, []hal.BindGroup, error) {
+	paramSize := uint64(unsafe.Sizeof(SDFBatchFrameParams{}))
+	uniformBufs := make([]hal.Buffer, 0, n)
+	bindGroups := make([]hal.BindGroup, 0, n)
+
+	for i := 0; i < n; i++ {
+		paramsBytes := makeFrameParams(w, h, uint32(i)) //nolint:gosec // shape index fits uint32
+
+		ub, err := a.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "sdf_params", Size: paramSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return uniformBufs, bindGroups, fmt.Errorf("create uniform buffer %d: %w", i, err)
+		}
+		uniformBufs = append(uniformBufs, ub)
+		a.queue.WriteBuffer(ub, 0, paramsBytes)
+
+		bg, err := a.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			Label: "sdf_bind", Layout: a.batchBindLayout,
+			Entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{Buffer: ub.NativeHandle(), Offset: 0, Size: paramSize}},
+				{Binding: 1, Resource: gputypes.BufferBinding{Buffer: shapesBuf.NativeHandle(), Offset: 0, Size: uint64(len(shapesBytes))}},
+				{Binding: 2, Resource: gputypes.BufferBinding{Buffer: storageBuf.NativeHandle(), Offset: 0, Size: pixelBufSize}},
+			},
+		})
+		if err != nil {
+			return uniformBufs, bindGroups, fmt.Errorf("create bind group %d: %w", i, err)
+		}
+		bindGroups = append(bindGroups, bg)
+	}
+
+	return uniformBufs, bindGroups, nil
+}
+
+// cleanupBindings destroys uniform buffers and bind groups.
+func (a *SDFAccelerator) cleanupBindings(uniformBufs []hal.Buffer, bindGroups []hal.BindGroup) {
+	for _, bg := range bindGroups {
+		if bg != nil {
+			a.device.DestroyBindGroup(bg)
+		}
+	}
+	for _, ub := range uniformBufs {
+		if ub != nil {
+			a.device.DestroyBuffer(ub)
+		}
+	}
 }
 
 func (a *SDFAccelerator) initGPU() error {
