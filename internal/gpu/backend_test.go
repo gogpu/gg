@@ -364,7 +364,6 @@ func TestErrors(t *testing.T) {
 	}
 }
 
-
 // BenchmarkNewRenderer benchmarks renderer creation.
 func BenchmarkNewRenderer(b *testing.B) {
 	wb := NewBackend()
