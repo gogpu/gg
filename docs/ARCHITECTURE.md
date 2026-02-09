@@ -55,7 +55,7 @@ type GPUAccelerator interface {
 }
 
 // Register via blank import pattern
-import _ "github.com/gogpu/gg/internal/native"
+import _ "github.com/gogpu/gg/internal/gpu"
 ```
 
 Key design:

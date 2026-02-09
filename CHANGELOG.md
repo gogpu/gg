@@ -583,9 +583,9 @@ dc := gg.NewContext(800, 600)
 customRenderer := NewCustomRenderer(800, 600)
 dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
 
-// Use gg's native GPU backend directly
-import "github.com/gogpu/gg/backend/native"
-// See backend/native/ for GPU-accelerated rendering
+// Use gg's gpu GPU backend directly
+import "github.com/gogpu/gg/backend/gpu"
+// See backend/gpu/ for GPU-accelerated rendering
 ```
 
 ## [0.17.1] - 2026-01-10

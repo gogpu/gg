@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/internal/native"
+	"github.com/gogpu/gg/internal/gpu"
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )
@@ -50,7 +50,7 @@ func TestAnalyticFillerDebug(t *testing.T) {
 
 	// Build edges
 	eb := raster.NewEdgeBuilder(2)
-	native.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
+	gpu.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
 
 	fmt.Printf("\nEdgeBuilder stats:\n")
 	fmt.Printf("  IsEmpty: %v\n", eb.IsEmpty())
@@ -83,7 +83,7 @@ func TestAnalyticFillerDebug(t *testing.T) {
 	}
 
 	// Fill - match bezier_test dimensions (800x600)
-	filler := native.NewAnalyticFiller(800, 600)
+	filler := gpu.NewAnalyticFiller(800, 600)
 	scanlineCount := 0
 	pixelCount := 0
 
