@@ -57,11 +57,12 @@ jobs:
       run: go build ./cmd/ggdemo
 
   # Unit tests - Cross-platform
+  # Tests use CGO_ENABLED=1 with -tags nogpu to enable the standard race detector.
+  # GPU code (which requires goffi/CGO_ENABLED=0) is excluded via build tag;
+  # compilation is verified by the build job above.
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    env:
-      CGO_ENABLED: 0
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -82,14 +83,13 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
+      env:
+        CGO_ENABLED: 0
       run: go vet ./...
-
-    - name: Install pure Go race detector
-      run: go install github.com/kolkov/racedetector/cmd/racedetector@latest
 
     - name: Run tests with race detector
       shell: bash
-      run: racedetector test -v -coverprofile=coverage.txt -covermode=atomic ./...
+      run: go test -v -race -tags nogpu -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
