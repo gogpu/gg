@@ -18,6 +18,9 @@ on:
     branches:
       - main
 
+env:
+  CGO_ENABLED: 0
+
 jobs:
   # Build verification - Cross-platform
   build:
