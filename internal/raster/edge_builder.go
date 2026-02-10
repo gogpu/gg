@@ -388,8 +388,11 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 // flattenQuadToLines converts a quadratic bezier to line segments.
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenQuadToLines(x0, y0, cx, cy, x1, y1 float32) {
-	// Flatness tolerance: max deviation from straight line
-	const tolerance = 0.25
+	// Flatness tolerance: max deviation from straight line.
+	// 0.1 px produces smooth curves even at small radii (r=9 → ~32 segments).
+	// Tighter than Skia's default (~0.25) to avoid visible polygon faceting
+	// in UI elements like radio buttons and checkboxes.
+	const tolerance = 0.1
 
 	eb.flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance, 0)
 }
@@ -486,8 +489,11 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 // flattenCubicToLines converts a cubic bezier to line segments.
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
-	// Flatness tolerance: max deviation from straight line
-	const tolerance = 0.25
+	// Flatness tolerance: max deviation from straight line.
+	// 0.1 px produces smooth curves even at small radii (r=9 → ~32 segments).
+	// Tighter than Skia's default (~0.25) to avoid visible polygon faceting
+	// in UI elements like radio buttons and checkboxes.
+	const tolerance = 0.1
 
 	eb.flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
 }

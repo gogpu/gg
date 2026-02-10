@@ -35,7 +35,7 @@ func defaultOptions() contextOptions {
 //	customRenderer := mypackage.NewRenderer()
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(customRenderer))
 //
-// For GPU-accelerated rendering, see gg's native backend (internal/native/)
+// For GPU-accelerated rendering, see gg's gpu backend (internal/gpu/)
 // which uses gogpu/wgpu directly.
 func WithRenderer(r Renderer) ContextOption {
 	return func(o *contextOptions) {

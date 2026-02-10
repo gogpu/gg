@@ -62,6 +62,11 @@ func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error)
 		return nil, fmt.Errorf("%w: width=%d, height=%d", ErrInvalidDimensions, width, height)
 	}
 
+	// Share GPU device with accelerator if registered.
+	// Error is non-fatal: accelerator may not support device sharing or
+	// provider may not implement HalProvider. GPU will initialize its own device.
+	_ = gg.SetAcceleratorDeviceProvider(provider)
+
 	return &Canvas{
 		ctx:      gg.NewContext(width, height),
 		provider: provider,
@@ -176,6 +181,9 @@ func (c *Canvas) Flush() (any, error) {
 	if !c.dirty && c.texture != nil {
 		return c.texture, nil
 	}
+
+	// Flush pending GPU shapes to pixel buffer before reading pixel data.
+	_ = c.ctx.FlushGPU()
 
 	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()

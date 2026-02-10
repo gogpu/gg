@@ -4,18 +4,18 @@ go 1.25
 
 require (
 	github.com/gogpu/gg v0.26.1
-	github.com/gogpu/gogpu v0.15.7
+	github.com/gogpu/gogpu v0.17.0
 )
 
 require (
 	github.com/go-text/typesetting v0.3.3 // indirect
 	github.com/go-webgpu/goffi v0.3.8 // indirect
-	github.com/go-webgpu/webgpu v0.2.1 // indirect
-	github.com/gogpu/gpucontext v0.7.0 // indirect
+	github.com/go-webgpu/webgpu v0.3.0 // indirect
+	github.com/gogpu/gpucontext v0.9.0 // indirect
 	github.com/gogpu/gputypes v0.2.0 // indirect
-	github.com/gogpu/naga v0.11.0 // indirect
-	github.com/gogpu/wgpu v0.13.2 // indirect
+	github.com/gogpu/naga v0.12.0 // indirect
+	github.com/gogpu/wgpu v0.15.0 // indirect
 	golang.org/x/image v0.35.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )

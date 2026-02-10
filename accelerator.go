@@ -30,7 +30,22 @@ const (
 
 	// AccelGradient represents gradient rendering.
 	AccelGradient
+
+	// AccelCircleSDF represents SDF-based circle rendering.
+	AccelCircleSDF
+
+	// AccelRRectSDF represents SDF-based rounded rectangle rendering.
+	AccelRRectSDF
 )
+
+// GPURenderTarget provides pixel buffer access for GPU output.
+// The Data slice must be in premultiplied RGBA format, 4 bytes per pixel,
+// laid out row by row with the given Stride.
+type GPURenderTarget struct {
+	Data          []uint8
+	Width, Height int
+	Stride        int // bytes per row
+}
 
 // GPUAccelerator is an optional GPU acceleration provider.
 //
@@ -55,6 +70,37 @@ type GPUAccelerator interface {
 	// CanAccelerate reports whether the accelerator supports the given operation.
 	// This is a fast check used to skip GPU entirely for unsupported operations.
 	CanAccelerate(op AcceleratedOp) bool
+
+	// FillPath renders a filled path to the target.
+	// Returns ErrFallbackToCPU if the path cannot be GPU-accelerated.
+	FillPath(target GPURenderTarget, path *Path, paint *Paint) error
+
+	// StrokePath renders a stroked path to the target.
+	// Returns ErrFallbackToCPU if the path cannot be GPU-accelerated.
+	StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
+
+	// FillShape renders a detected shape using SDF.
+	// This is the fast path for circles and rounded rectangles.
+	// Returns ErrFallbackToCPU if the shape is not supported.
+	FillShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+
+	// StrokeShape renders a detected shape outline using SDF.
+	// Returns ErrFallbackToCPU if the shape is not supported.
+	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+
+	// Flush dispatches any pending GPU operations to the target pixel buffer.
+	// Batch-capable accelerators accumulate shapes during FillShape/StrokeShape
+	// and dispatch them all in a single GPU pass on Flush.
+	// Immediate-mode accelerators (e.g., CPU SDF) return nil.
+	Flush(target GPURenderTarget) error
+}
+
+// DeviceProviderAware is an optional interface for accelerators that can share
+// GPU resources with an external provider (e.g., gogpu window).
+// When SetDeviceProvider is called, the accelerator reuses the provided GPU
+// device instead of creating its own.
+type DeviceProviderAware interface {
+	SetDeviceProvider(provider any) error
 }
 
 var (
@@ -96,4 +142,21 @@ func Accelerator() GPUAccelerator {
 	a := accel
 	accelMu.RUnlock()
 	return a
+}
+
+// SetAcceleratorDeviceProvider passes a device provider to the registered
+// accelerator, enabling GPU device sharing. If no accelerator is registered
+// or it doesn't support device sharing, this is a no-op.
+//
+// The provider should implement HalDevice() any and HalQueue() any methods
+// that return wgpu/hal types.
+func SetAcceleratorDeviceProvider(provider any) error {
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	if dpa, ok := a.(DeviceProviderAware); ok {
+		return dpa.SetDeviceProvider(provider)
+	}
+	return nil
 }

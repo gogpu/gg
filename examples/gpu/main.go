@@ -1,7 +1,9 @@
+//go:build !nogpu
+
 // Package main demonstrates the GPU backend for gogpu/gg.
 //
 // This example shows how to:
-//   - Create and initialize the native GPU backend directly
+//   - Create and initialize the gpu GPU backend directly
 //   - Render a scene using GPU acceleration
 //   - Handle fallback to software rendering
 //
@@ -20,7 +22,7 @@ import (
 	"os"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/internal/native"
+	"github.com/gogpu/gg/internal/gpu"
 	"github.com/gogpu/gg/scene"
 )
 
@@ -29,7 +31,7 @@ func main() {
 	fmt.Println("===================")
 
 	// Try GPU backend first, fall back to software
-	nb := native.NewNativeBackend()
+	nb := gpu.NewBackend()
 	if err := nb.Init(); err != nil {
 		fmt.Printf("GPU backend unavailable: %v\n", err)
 		fmt.Println("Falling back to software rendering...")

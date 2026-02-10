@@ -25,14 +25,14 @@ these files to detect regressions.
 
 ```bash
 cd gg
-GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./internal/native/...
+GENERATE_GOLDEN=1 go test -v -run TestGenerateGoldenFiles ./internal/gpu/...
 ```
 
 ## Running Comparison Tests
 
 ```bash
 cd gg
-go test -v -run TestVelloAgainstGolden ./internal/native/...
+go test -v -run TestVelloAgainstGolden ./internal/gpu/...
 ```
 
 ## Test Results Summary (2026-02-01)

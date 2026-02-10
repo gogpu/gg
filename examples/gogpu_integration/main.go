@@ -8,8 +8,8 @@
 //	gg.Context (draw) → ggcanvas.Canvas → gogpu.Context (GPU) → Window
 //
 // Requirements:
-//   - gogpu v0.15.7+
-//   - gg v0.26.1+
+//   - gogpu v0.17.0+
+//   - gg v0.27.0+
 package main
 
 import (
@@ -17,6 +17,7 @@ import (
 	"math"
 
 	"github.com/gogpu/gg"
+	_ "github.com/gogpu/gg/gpu" // enable GPU SDF acceleration
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"

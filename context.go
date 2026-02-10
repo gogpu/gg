@@ -160,6 +160,7 @@ func (c *Context) Image() image.Image {
 
 // SavePNG saves the context to a PNG file.
 func (c *Context) SavePNG(path string) error {
+	_ = c.FlushGPU() // Flush pending GPU shapes before reading pixels.
 	return c.pixmap.SavePNG(path)
 }
 
@@ -367,34 +368,62 @@ func (c *Context) NewSubPath() {
 }
 
 // Fill fills the current path and clears it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) Fill() error {
+	if err := c.tryGPUFill(); err == nil {
+		c.path.Clear()
+		return nil
+	}
+	// Flush pending GPU shapes before CPU fallback.
+	c.flushGPUAccelerator()
 	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
 }
 
 // Stroke strokes the current path and clears it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
 	// Set transform scale for renderer to determine effective stroke width
 	c.paint.TransformScale = c.matrix.ScaleFactor()
+	if err := c.tryGPUStroke(); err == nil {
+		c.path.Clear()
+		return nil
+	}
+	// Flush pending GPU shapes before CPU fallback.
+	c.flushGPUAccelerator()
 	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
 	c.path.Clear()
 	return err
 }
 
 // FillPreserve fills the current path without clearing it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) FillPreserve() error {
+	if err := c.tryGPUFill(); err == nil {
+		return nil
+	}
+	c.flushGPUAccelerator()
 	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
 // StrokePreserve strokes the current path without clearing it.
+// If a GPU accelerator is registered and supports the path, it is used first.
+// Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) StrokePreserve() error {
 	// Set transform scale for renderer to determine effective stroke width
 	c.paint.TransformScale = c.matrix.ScaleFactor()
+	if err := c.tryGPUStroke(); err == nil {
+		return nil
+	}
+	c.flushGPUAccelerator()
 	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
 }
 
@@ -703,4 +732,89 @@ func (c *Context) Resize(width, height int) error {
 // direct access to the target buffer during resize operations.
 func (c *Context) ResizeTarget() *Pixmap {
 	return c.pixmap
+}
+
+// FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
+// Call this before reading pixel data (e.g., SavePNG, Image) when using a
+// batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+func (c *Context) FlushGPU() error {
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	return a.Flush(c.gpuRenderTarget())
+}
+
+// gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
+func (c *Context) gpuRenderTarget() GPURenderTarget {
+	return GPURenderTarget{
+		Data:   c.pixmap.Data(),
+		Width:  c.pixmap.Width(),
+		Height: c.pixmap.Height(),
+		Stride: c.pixmap.Width() * 4,
+	}
+}
+
+// flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
+func (c *Context) flushGPUAccelerator() {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	_ = a.Flush(c.gpuRenderTarget())
+}
+
+// tryGPUFill attempts to fill the current path using the GPU accelerator.
+func (c *Context) tryGPUFill() error {
+	a := Accelerator()
+	if a == nil {
+		return ErrFallbackToCPU
+	}
+	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
+}
+
+// tryGPUStroke attempts to stroke the current path using the GPU accelerator.
+func (c *Context) tryGPUStroke() error {
+	a := Accelerator()
+	if a == nil {
+		return ErrFallbackToCPU
+	}
+	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
+}
+
+// tryGPUOp attempts GPU rendering using shape-specific SDF first, then general path.
+func (c *Context) tryGPUOp(
+	a GPUAccelerator,
+	shapeFn func(GPURenderTarget, DetectedShape, *Paint) error,
+	pathFn func(GPURenderTarget, *Path, *Paint) error,
+	pathAccel AcceleratedOp,
+) error {
+	target := c.gpuRenderTarget()
+
+	// Try shape-specific SDF first for higher quality output.
+	shape := DetectShape(c.path)
+	if accel := sdfAccelForShape(shape.Kind); accel != 0 && a.CanAccelerate(accel) {
+		if err := shapeFn(target, shape, c.paint); err == nil {
+			return nil
+		}
+	}
+
+	// Try general GPU path operation.
+	if a.CanAccelerate(pathAccel) {
+		return pathFn(target, c.path, c.paint)
+	}
+
+	return ErrFallbackToCPU
+}
+
+// sdfAccelForShape maps a shape kind to its SDF acceleration capability.
+func sdfAccelForShape(kind ShapeKind) AcceleratedOp {
+	switch kind {
+	case ShapeCircle, ShapeEllipse:
+		return AccelCircleSDF
+	case ShapeRect, ShapeRRect:
+		return AccelRRectSDF
+	default:
+		return 0
+	}
 }

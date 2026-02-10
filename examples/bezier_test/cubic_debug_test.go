@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 package main
 
 import (
@@ -5,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/internal/native"
+	"github.com/gogpu/gg/internal/gpu"
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )
@@ -49,7 +51,7 @@ func TestCubicLeafDebug(t *testing.T) {
 
 	// Build edges with aaShift=2 (4x quality)
 	eb := raster.NewEdgeBuilder(2)
-	native.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
+	gpu.BuildEdgesFromScenePath(eb, scenePath, scene.IdentityAffine())
 
 	fmt.Printf("\n=== EdgeBuilder Stats ===\n")
 	fmt.Printf("  IsEmpty: %v\n", eb.IsEmpty())
@@ -107,7 +109,7 @@ func TestCubicLeafDebug(t *testing.T) {
 	}
 
 	// Fill and count pixels
-	filler := native.NewAnalyticFiller(800, 600)
+	filler := gpu.NewAnalyticFiller(800, 600)
 	scanlineCount := 0
 	pixelCount := 0
 	yMinSeen, yMaxSeen := 600, 0

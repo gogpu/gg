@@ -206,7 +206,7 @@ linters:
 
       # GPU compute shaders - similar initialization patterns (Phase 6)
       # Each rasterizer has structurally similar but functionally different code
-      - path: internal/native/gpu_.*.go
+      - path: internal/gpu/gpu_.*.go
         linters:
           - dupl          # Fine, coarse, flatten have similar WebGPU init patterns
 

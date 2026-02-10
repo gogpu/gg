@@ -35,6 +35,24 @@ func (m *mockAccelerator) CanAccelerate(op AcceleratedOp) bool {
 	return m.canAccel&op != 0
 }
 
+func (m *mockAccelerator) FillPath(_ GPURenderTarget, _ *Path, _ *Paint) error {
+	return ErrFallbackToCPU
+}
+
+func (m *mockAccelerator) StrokePath(_ GPURenderTarget, _ *Path, _ *Paint) error {
+	return ErrFallbackToCPU
+}
+
+func (m *mockAccelerator) FillShape(_ GPURenderTarget, _ DetectedShape, _ *Paint) error {
+	return ErrFallbackToCPU
+}
+
+func (m *mockAccelerator) StrokeShape(_ GPURenderTarget, _ DetectedShape, _ *Paint) error {
+	return ErrFallbackToCPU
+}
+
+func (m *mockAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
 // resetAccelerator clears the global accelerator state between tests.
 func resetAccelerator() {
 	accelMu.Lock()
@@ -152,7 +170,9 @@ func TestAcceleratedOpBitfield(t *testing.T) {
 		{"stroke in fill|stroke", AccelFill | AccelStroke, AccelStroke, true},
 		{"scene not in fill|stroke", AccelFill | AccelStroke, AccelScene, false},
 		{"text not in fill", AccelFill, AccelText, false},
-		{"all ops combined", AccelFill | AccelStroke | AccelScene | AccelText | AccelImage | AccelGradient, AccelGradient, true},
+		{"all ops combined", AccelFill | AccelStroke | AccelScene | AccelText | AccelImage | AccelGradient | AccelCircleSDF | AccelRRectSDF, AccelGradient, true},
+		{"circle sdf in sdf ops", AccelCircleSDF | AccelRRectSDF, AccelCircleSDF, true},
+		{"rrect sdf in sdf ops", AccelCircleSDF | AccelRRectSDF, AccelRRectSDF, true},
 		{"empty has nothing", 0, AccelFill, false},
 	}
 	for _, tt := range tests {
@@ -219,7 +239,7 @@ func TestErrFallbackToCPU(t *testing.T) {
 
 func TestAcceleratedOpValues(t *testing.T) {
 	// Verify each op has a unique power-of-two value.
-	ops := []AcceleratedOp{AccelFill, AccelStroke, AccelScene, AccelText, AccelImage, AccelGradient}
+	ops := []AcceleratedOp{AccelFill, AccelStroke, AccelScene, AccelText, AccelImage, AccelGradient, AccelCircleSDF, AccelRRectSDF}
 	seen := make(map[AcceleratedOp]bool)
 	for _, op := range ops {
 		if op == 0 {
