@@ -31,6 +31,8 @@ func (c *Context) DrawString(s string, x, y float64) {
 	if c.face == nil {
 		return
 	}
+	// Flush pending GPU shapes so they don't overwrite text.
+	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
 }
 
@@ -54,7 +56,8 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	x -= w * ax
 	y += h * ay // Note: y is baseline, so we adjust upward for top alignment
 
-	// Draw the text
+	// Flush pending GPU shapes so they don't overwrite text.
+	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
 }
 
