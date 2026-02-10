@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-02-10
+
+### Fixed
+
+- **Text rendering over GPU shapes** — `DrawString` and `DrawStringAnchored` now flush pending GPU accelerator batch before drawing text, preventing GPU-rendered shapes (e.g., rounded rect backgrounds) from overwriting previously drawn text
+
 ## [0.27.0] - 2026-02-10
 
 ### Added
