@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-02-10
+
+### Added
+
+- **SDF Accelerator** — Signed Distance Field rendering for smooth shapes
+  - `SDFAccelerator` — CPU SDF for circles, ellipses, rectangles, rounded rectangles
+  - `DetectShape(path)` — auto-detects circle (4 cubics with kappa), rect, rrect from path elements
+  - `Context.Fill()/Stroke()` tries accelerator first, falls back to `SoftwareRenderer`
+  - Register via `gg.RegisterAccelerator(&gg.SDFAccelerator{})`
+  - ~30% smoother edges compared to area-based rasterizer
+- **GPU SDF compute pipeline** — GPU-accelerated SDF via wgpu HAL
+  - `NativeSDFAccelerator` with DeviceProvider integration for GPU device sharing
+  - WGSL compute shaders (`sdf_batch.wgsl`) for batch SDF rendering
+  - Multi-pass dispatch workaround for naga loop iteration bug
+  - GPU → CPU buffer readback via `hal.Queue.ReadBuffer`
+- **GPUAccelerator interface** extended with `FillPath`, `StrokePath` rendering methods and `CanAccelerate` shape detection
+- **`gpu/` public registration package** (ADR-009) — opt-in GPU acceleration via `import _ "github.com/gogpu/gg/gpu"`
+- **SDF example** (`examples/sdf/`) — demonstrates SDF accelerator with filled and stroked shapes
+
+### Changed
+
+- **Architecture:** `internal/native` renamed to `internal/gpu` for clarity
+- **Dependencies updated:**
+  - gpucontext v0.8.0 → v0.9.0
+  - naga v0.11.0 → v0.12.0
+  - wgpu v0.13.2 → v0.15.0
+  - golang.org/x/image v0.35.0 → v0.36.0
+  - golang.org/x/text v0.33.0 → v0.34.0
+- **Examples:** gogpu_integration updated to gogpu v0.17.0+, gg v0.27.0+
+
+### Fixed
+
+- Curve flattening tolerance and stroke join continuity improvements
+- WGSL SDF shaders rewritten to work around naga SPIR-V codegen bugs (5 bugs documented)
+- Flush pending GPU shapes before pixel readback
+
 ## [0.26.1] - 2026-02-07
 
 ### Changed
@@ -1526,7 +1562,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/gogpu/gg/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/gogpu/gg/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/gogpu/gg/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/gogpu/gg/compare/v0.24.1...v0.25.0

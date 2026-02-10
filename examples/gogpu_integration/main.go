@@ -8,8 +8,8 @@
 //	gg.Context (draw) → ggcanvas.Canvas → gogpu.Context (GPU) → Window
 //
 // Requirements:
-//   - gogpu v0.15.7+
-//   - gg v0.26.1+
+//   - gogpu v0.17.0+
+//   - gg v0.27.0+
 package main
 
 import (

@@ -742,13 +742,17 @@ func (c *Context) FlushGPU() error {
 	if a == nil {
 		return nil
 	}
-	target := GPURenderTarget{
+	return a.Flush(c.gpuRenderTarget())
+}
+
+// gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
+func (c *Context) gpuRenderTarget() GPURenderTarget {
+	return GPURenderTarget{
 		Data:   c.pixmap.Data(),
 		Width:  c.pixmap.Width(),
 		Height: c.pixmap.Height(),
 		Stride: c.pixmap.Width() * 4,
 	}
-	return a.Flush(target)
 }
 
 // flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
@@ -757,97 +761,60 @@ func (c *Context) flushGPUAccelerator() {
 	if a == nil {
 		return
 	}
-	target := GPURenderTarget{
-		Data:   c.pixmap.Data(),
-		Width:  c.pixmap.Width(),
-		Height: c.pixmap.Height(),
-		Stride: c.pixmap.Width() * 4,
-	}
-	_ = a.Flush(target)
+	_ = a.Flush(c.gpuRenderTarget())
 }
 
 // tryGPUFill attempts to fill the current path using the GPU accelerator.
-// Returns nil on success, or an error if the accelerator cannot handle the operation.
 func (c *Context) tryGPUFill() error {
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
 	}
-
-	target := GPURenderTarget{
-		Data:   c.pixmap.Data(),
-		Width:  c.pixmap.Width(),
-		Height: c.pixmap.Height(),
-		Stride: c.pixmap.Width() * 4,
-	}
-
-	// Try shape-specific SDF first for higher quality output.
-	shape := DetectShape(c.path)
-	if shape.Kind != ShapeUnknown {
-		if shape.Kind == ShapeCircle && a.CanAccelerate(AccelCircleSDF) {
-			if err := a.FillShape(target, shape, c.paint); err == nil {
-				return nil
-			}
-		}
-		if (shape.Kind == ShapeRRect || shape.Kind == ShapeRect) && a.CanAccelerate(AccelRRectSDF) {
-			if err := a.FillShape(target, shape, c.paint); err == nil {
-				return nil
-			}
-		}
-		if shape.Kind == ShapeEllipse && a.CanAccelerate(AccelCircleSDF) {
-			if err := a.FillShape(target, shape, c.paint); err == nil {
-				return nil
-			}
-		}
-	}
-
-	// Try general GPU fill.
-	if a.CanAccelerate(AccelFill) {
-		return a.FillPath(target, c.path, c.paint)
-	}
-
-	return ErrFallbackToCPU
+	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
 
 // tryGPUStroke attempts to stroke the current path using the GPU accelerator.
-// Returns nil on success, or an error if the accelerator cannot handle the operation.
 func (c *Context) tryGPUStroke() error {
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
+}
 
-	target := GPURenderTarget{
-		Data:   c.pixmap.Data(),
-		Width:  c.pixmap.Width(),
-		Height: c.pixmap.Height(),
-		Stride: c.pixmap.Width() * 4,
-	}
+// tryGPUOp attempts GPU rendering using shape-specific SDF first, then general path.
+func (c *Context) tryGPUOp(
+	a GPUAccelerator,
+	shapeFn func(GPURenderTarget, DetectedShape, *Paint) error,
+	pathFn func(GPURenderTarget, *Path, *Paint) error,
+	pathAccel AcceleratedOp,
+) error {
+	target := c.gpuRenderTarget()
 
 	// Try shape-specific SDF first for higher quality output.
 	shape := DetectShape(c.path)
-	if shape.Kind != ShapeUnknown {
-		if shape.Kind == ShapeCircle && a.CanAccelerate(AccelCircleSDF) {
-			if err := a.StrokeShape(target, shape, c.paint); err == nil {
-				return nil
-			}
-		}
-		if (shape.Kind == ShapeRRect || shape.Kind == ShapeRect) && a.CanAccelerate(AccelRRectSDF) {
-			if err := a.StrokeShape(target, shape, c.paint); err == nil {
-				return nil
-			}
-		}
-		if shape.Kind == ShapeEllipse && a.CanAccelerate(AccelCircleSDF) {
-			if err := a.StrokeShape(target, shape, c.paint); err == nil {
-				return nil
-			}
+	if accel := sdfAccelForShape(shape.Kind); accel != 0 && a.CanAccelerate(accel) {
+		if err := shapeFn(target, shape, c.paint); err == nil {
+			return nil
 		}
 	}
 
-	// Try general GPU stroke.
-	if a.CanAccelerate(AccelStroke) {
-		return a.StrokePath(target, c.path, c.paint)
+	// Try general GPU path operation.
+	if a.CanAccelerate(pathAccel) {
+		return pathFn(target, c.path, c.paint)
 	}
 
 	return ErrFallbackToCPU
+}
+
+// sdfAccelForShape maps a shape kind to its SDF acceleration capability.
+func sdfAccelForShape(kind ShapeKind) AcceleratedOp {
+	switch kind {
+	case ShapeCircle, ShapeEllipse:
+		return AccelCircleSDF
+	case ShapeRect, ShapeRRect:
+		return AccelRRectSDF
+	default:
+		return 0
+	}
 }
