@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 // Package gpu provides a Pure Go GPU-accelerated rendering backend.
 //
 // This is an internal package used by the gg library for GPU rendering.

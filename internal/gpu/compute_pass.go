@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 // Package gpu provides a GPU-accelerated rendering backend using gogpu/wgpu.
 package gpu
 

@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 package main
 
 import (

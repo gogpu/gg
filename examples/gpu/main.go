@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 // Package main demonstrates the GPU backend for gogpu/gg.
 //
 // This example shows how to:

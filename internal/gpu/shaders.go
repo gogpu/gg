@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 // Package wgpu provides GPU-accelerated rendering backend using WebGPU.
 package gpu
 
