@@ -15,6 +15,7 @@ package main
 import (
 	"log"
 	"math"
+	"time"
 
 	"github.com/gogpu/gg"
 	_ "github.com/gogpu/gg/gpu" // enable GPU SDF acceleration
@@ -28,12 +29,14 @@ func main() {
 
 	// Create gogpu application
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("GoGPU + gg Integration via ggcanvas").
-		WithSize(width, height))
+		WithTitle("GoGPU + gg Integration via ggcanvas (DX12)").
+		WithSize(width, height).
+		WithGraphicsAPI(gogpu.GraphicsAPIDX12))
 
 	// Canvas for 2D rendering (created lazily)
 	var canvas *ggcanvas.Canvas
 	var frame int
+	startTime := time.Now()
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		// Print backend on first frame
@@ -65,22 +68,25 @@ func main() {
 			log.Printf("Canvas created: %dx%d", w, h)
 		}
 
-		// Draw 2D graphics using gg API
+		// Draw 2D graphics using gg API (time-based animation)
 		cc := canvas.Context()
 		cw, ch := canvas.Size()
-		renderFrame(cc, frame, cw, ch)
+		elapsed := time.Since(startTime).Seconds()
+		renderFrame(cc, elapsed, cw, ch)
 
 		// Debug: save first frame to PNG (in tmp/ to avoid polluting repo)
 		if frame == 0 {
 			_ = cc.SavePNG("tmp/debug_canvas.png")
 			log.Printf("Saved tmp/debug_canvas.png (%dx%d)", cw, ch)
 		}
-		frame++
 
 		// Render canvas to gogpu window (handles texture upload automatically)
 		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
 			log.Printf("RenderTo error: %v", err)
+		} else if frame == 0 {
+			log.Printf("RenderTo OK (frame 0)")
 		}
+		frame++
 	})
 
 	// Handle window resize
@@ -103,14 +109,15 @@ func main() {
 	}
 }
 
-// renderFrame draws animated 2D graphics using gg
-func renderFrame(cc *gg.Context, frame int, width, height int) {
+// renderFrame draws animated 2D graphics using gg.
+// elapsed is time in seconds since start (time-based animation, independent of FPS).
+func renderFrame(cc *gg.Context, elapsed float64, width, height int) {
 	// Clear with transparent background
 	cc.SetRGBA(0, 0, 0, 0)
 	cc.Clear()
 
-	// Animation parameters
-	t := float64(frame) * 0.02
+	// Animation parameters (time-based: ~1 full rotation per 5 seconds)
+	t := elapsed * 1.2
 	centerX, centerY := float64(width)/2, float64(height)/2
 
 	// Draw animated circles
