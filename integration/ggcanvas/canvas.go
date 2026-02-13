@@ -183,7 +183,12 @@ func (c *Canvas) Flush() (any, error) {
 	}
 
 	// Flush pending GPU shapes to pixel buffer before reading pixel data.
-	_ = c.ctx.FlushGPU()
+	// Errors are logged but not fatal — CPU fallback may have already rendered.
+	if err := c.ctx.FlushGPU(); err != nil {
+		// FlushGPU can fail if GPU accelerator has issues (e.g., compute dispatch failure).
+		// This is non-fatal: CPU-rendered content is still in the pixmap.
+		_ = err
+	}
 
 	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gogpu/gg"
-	_ "github.com/gogpu/gg/gpu" // enable GPU SDF acceleration
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"
@@ -68,34 +67,28 @@ func main() {
 			log.Printf("Canvas created: %dx%d", w, h)
 		}
 
-		// Draw 2D graphics using gg API (time-based animation)
-		cc := canvas.Context()
+		// Sync canvas size with window (handles resize without timing issues)
 		cw, ch := canvas.Size()
-		elapsed := time.Since(startTime).Seconds()
-		renderFrame(cc, elapsed, cw, ch)
-
-		// Debug: save first frame to PNG (in tmp/ to avoid polluting repo)
-		if frame == 0 {
-			_ = cc.SavePNG("tmp/debug_canvas.png")
-			log.Printf("Saved tmp/debug_canvas.png (%dx%d)", cw, ch)
-		}
-
-		// Render canvas to gogpu window (handles texture upload automatically)
-		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
-			log.Printf("RenderTo error: %v", err)
-		} else if frame == 0 {
-			log.Printf("RenderTo OK (frame 0)")
-		}
-		frame++
-	})
-
-	// Handle window resize
-	app.EventSource().OnResize(func(w, h int) {
-		if canvas != nil {
+		if cw != w || ch != h {
+			log.Printf("Resize canvas %dx%d → %dx%d", cw, ch, w, h)
 			if err := canvas.Resize(w, h); err != nil {
 				log.Printf("Resize error: %v", err)
 			}
+			cw, ch = w, h
 		}
+
+		// Draw 2D graphics using gg API (time-based animation)
+		cc := canvas.Context()
+		elapsed := time.Since(startTime).Seconds()
+		renderFrame(cc, elapsed, cw, ch)
+
+		// Render canvas to gogpu window (handles texture upload automatically)
+		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
+			log.Printf("RenderTo error (frame %d, %dx%d): %v", frame, cw, ch, err)
+		} else if frame < 3 || (frame%300 == 0) {
+			log.Printf("RenderTo OK (frame %d, %dx%d)", frame, cw, ch)
+		}
+		frame++
 	})
 
 	// Run application
