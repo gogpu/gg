@@ -15,14 +15,17 @@ import (
 	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// SDFAccelerator provides GPU-accelerated SDF rendering using wgpu/hal
-// render pipelines. It implements the gg.GPUAccelerator interface.
+// SDFAccelerator provides GPU-accelerated rendering using wgpu/hal render
+// pipelines. It implements the gg.GPUAccelerator interface.
 //
-// Shapes submitted via FillShape/StrokeShape are accumulated and rendered
-// in a single render pass on Flush() via the SDFRenderPipeline.
+// The accelerator uses a unified GPURenderSession to render all draw commands
+// (SDF shapes + stencil-then-cover paths) in a single render pass. Shapes
+// submitted via FillShape/StrokeShape and paths via FillPath are accumulated
+// and rendered together on Flush().
 //
-// For general path fills (non-SDF shapes), the accelerator delegates to
-// a StencilRenderer that implements the stencil-then-cover algorithm.
+// This unified approach matches enterprise 2D engines (Skia Ganesh/Graphite,
+// Flutter Impeller, Gio): one render pass with pipeline switching, shared
+// MSAA + stencil textures, single submit + fence wait, single readback.
 type SDFAccelerator struct {
 	mu sync.Mutex
 
@@ -30,15 +33,24 @@ type SDFAccelerator struct {
 	device   hal.Device
 	queue    hal.Queue
 
-	// SDF render pipeline (vertex+fragment).
+	// Unified render session managing shared textures and frame encoding.
+	session *GPURenderSession
+
+	// SDF render pipeline (vertex+fragment) -- owned by the accelerator,
+	// shared with the session.
 	sdfRenderPipeline *SDFRenderPipeline
 
-	// Stencil-then-cover renderer for general path fills.
+	// Stencil-then-cover renderer -- owned by the accelerator,
+	// shared with the session.
 	stencilRenderer *StencilRenderer
 
-	// Pending shapes for render pipeline dispatch.
+	// Pending SDF shapes for batch dispatch.
 	pendingShapes []SDFRenderShape
-	pendingTarget *gg.GPURenderTarget // nil if no pending shapes
+
+	// Pending stencil paths for unified dispatch.
+	pendingStencilPaths []StencilPathCommand
+
+	pendingTarget *gg.GPURenderTarget // nil if no pending commands
 
 	cpuFallback    gg.SDFAccelerator
 	gpuReady       bool
@@ -71,7 +83,12 @@ func (a *SDFAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pendingShapes = nil
+	a.pendingStencilPaths = nil
 	a.pendingTarget = nil
+	if a.session != nil {
+		a.session.Destroy()
+		a.session = nil
+	}
 	if a.sdfRenderPipeline != nil {
 		a.sdfRenderPipeline.Destroy()
 		a.sdfRenderPipeline = nil
@@ -124,9 +141,17 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	defer a.mu.Unlock()
 
 	// Destroy own resources if we created them.
+	if a.session != nil {
+		a.session.Destroy()
+		a.session = nil
+	}
 	if a.sdfRenderPipeline != nil {
 		a.sdfRenderPipeline.Destroy()
 		a.sdfRenderPipeline = nil
+	}
+	if a.stencilRenderer != nil {
+		a.stencilRenderer.Destroy()
+		a.stencilRenderer = nil
 	}
 	if !a.externalDevice && a.device != nil {
 		a.device.Destroy()
@@ -141,16 +166,21 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	a.queue = queue
 	a.externalDevice = true
 
-	// Create render pipeline with shared device.
+	// Create pipelines and session with shared device.
 	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	a.session = NewGPURenderSession(a.device, a.queue)
+	a.session.SetSDFPipeline(a.sdfRenderPipeline)
+	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
 	log.Printf("gpu-sdf: switched to shared GPU device")
 	return nil
 }
 
-// FillPath renders a filled path using the stencil-then-cover algorithm.
-// It first flushes any pending SDF shapes, then delegates to StencilRenderer.
+// FillPath queues a filled path for stencil-then-cover rendering.
+// The path is tessellated immediately but rendering is deferred until Flush()
+// so it can be combined with SDF shapes in a single render pass.
 // Returns ErrFallbackToCPU if the GPU is not ready.
 func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	a.mu.Lock()
@@ -159,19 +189,40 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 		return gg.ErrFallbackToCPU
 	}
 
-	// Flush any pending SDF shapes before the render pass.
-	if err := a.flushLocked(target); err != nil {
-		return err
+	// If target changed, flush previous batch first.
+	if a.pendingTarget != nil && !sameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
 	}
 
-	// Ensure stencil renderer exists.
-	if a.stencilRenderer == nil {
-		a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	// Tessellate path into fan triangles.
+	tess := NewFanTessellator()
+	tess.TessellatePath(path.Elements())
+	fanVerts := tess.Vertices()
+	if len(fanVerts) == 0 {
+		return nil // empty path, nothing to render
 	}
 
 	color := getColorFromPaint(paint)
-	elements := path.Elements()
-	return a.stencilRenderer.RenderPath(target, elements, color, paint.FillRule)
+	// Premultiply alpha for GPU blending.
+	premulR := float32(color.R * color.A)
+	premulG := float32(color.G * color.A)
+	premulB := float32(color.B * color.A)
+	premulA := float32(color.A)
+
+	cmd := StencilPathCommand{
+		Vertices:  make([]float32, len(fanVerts)),
+		CoverQuad: tess.CoverQuad(),
+		Color:     [4]float32{premulR, premulG, premulB, premulA},
+		FillRule:  paint.FillRule,
+	}
+	copy(cmd.Vertices, fanVerts)
+	a.pendingStencilPaths = append(a.pendingStencilPaths, cmd)
+
+	targetCopy := target
+	a.pendingTarget = &targetCopy
+	return nil
 }
 
 // StrokePath is not yet GPU-accelerated; it falls back to CPU rendering.
@@ -201,8 +252,9 @@ func (a *SDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.Detecte
 	return a.queueShape(target, shape, paint, true)
 }
 
-// Flush dispatches all pending shapes via the render pipeline.
-// Returns nil if there are no pending shapes.
+// Flush dispatches all pending commands (SDF shapes + stencil paths) via the
+// unified render session. All commands are rendered in a single render pass.
+// Returns nil if there are no pending commands.
 func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -213,24 +265,41 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 func (a *SDFAccelerator) PendingCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.pendingShapes)
+	return len(a.pendingShapes) + len(a.pendingStencilPaths)
 }
 
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
-	if len(a.pendingShapes) == 0 {
+	if len(a.pendingShapes) == 0 && len(a.pendingStencilPaths) == 0 {
 		return nil
 	}
-	if a.sdfRenderPipeline == nil {
-		a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+
+	// Ensure session exists.
+	if a.session == nil {
+		a.session = NewGPURenderSession(a.device, a.queue)
+		if a.sdfRenderPipeline == nil {
+			a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+		}
+		if a.stencilRenderer == nil {
+			a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+		}
+		a.session.SetSDFPipeline(a.sdfRenderPipeline)
+		a.session.SetStencilRenderer(a.stencilRenderer)
 	}
+
+	// Take ownership of pending data.
 	shapes := make([]SDFRenderShape, len(a.pendingShapes))
 	copy(shapes, a.pendingShapes)
 	a.pendingShapes = a.pendingShapes[:0]
+
+	paths := make([]StencilPathCommand, len(a.pendingStencilPaths))
+	copy(paths, a.pendingStencilPaths)
+	a.pendingStencilPaths = a.pendingStencilPaths[:0]
 	a.pendingTarget = nil
 
-	err := a.sdfRenderPipeline.RenderShapes(target, shapes)
+	err := a.session.RenderFrame(target, shapes, paths)
 	if err != nil {
-		log.Printf("gpu-sdf: render pipeline error (%d shapes): %v", len(shapes), err)
+		log.Printf("gpu-sdf: render session error (%d shapes, %d paths): %v",
+			len(shapes), len(paths), err)
 	}
 	return err
 }
@@ -291,8 +360,12 @@ func (a *SDFAccelerator) initGPU() error {
 	a.device = openDev.Device
 	a.queue = openDev.Queue
 
-	// Create SDF render pipeline.
+	// Create pipelines and session.
 	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	a.session = NewGPURenderSession(a.device, a.queue)
+	a.session.SetSDFPipeline(a.sdfRenderPipeline)
+	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
 	log.Printf("gpu-sdf: GPU accelerator initialized (%s)", selected.Info.Name)

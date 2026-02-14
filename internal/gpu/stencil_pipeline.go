@@ -41,7 +41,7 @@ const vertexStride = 8
 // The cover pipeline reads the stencil buffer with NotEqual(0) and resets
 // stencil values to zero via PassOp=Zero after writing the fill color.
 // It is shared by both fill rules.
-func (sr *StencilRenderer) createPipelines() error {
+func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipeline descriptors are inherently verbose
 	// Compile shaders.
 	stencilShader, err := sr.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
 		Label:  "stencil_fill_shader",
@@ -130,7 +130,7 @@ func (sr *StencilRenderer) createPipelines() error {
 	// Color writes are suppressed (WriteMask=None) since this pass only
 	// updates the stencil buffer. A dummy fragment shader is included for
 	// backend compatibility.
-	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{ //nolint:dupl // NonZero vs EvenOdd differ only in stencil ops
 		Label:  "stencil_fill_pipeline",
 		Layout: sr.stencilPipeLayout,
 		Vertex: hal.VertexState{
@@ -180,7 +180,7 @@ func (sr *StencilRenderer) createPipelines() error {
 	// Even-odd fill rule: both front and back faces invert the stencil value.
 	// A pixel with odd winding count has stencil != 0 (inside), even count
 	// wraps back to 0 (outside). Same shader and layout as the non-zero variant.
-	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{ //nolint:dupl // EvenOdd vs NonZero differ only in stencil ops
 		Label:  "stencil_fill_even_odd_pipeline",
 		Layout: sr.stencilPipeLayout,
 		Vertex: hal.VertexState{

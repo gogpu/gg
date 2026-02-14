@@ -1,0 +1,391 @@
+//go:build !nogpu
+
+package gpu
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/gogpu/gg"
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/hal"
+)
+
+// StencilPathCommand holds a path and paint for stencil-then-cover rendering
+// within a unified render session. The vertices are pre-tessellated fan
+// triangles from FanTessellator.
+type StencilPathCommand struct {
+	// Vertices holds fan-tessellated triangle vertices as x,y float32 pairs.
+	// Every 6 consecutive floats form one triangle (3 vertices x 2 coords).
+	Vertices []float32
+
+	// CoverQuad holds 6 vertices (12 floats) forming the path's bounding
+	// rectangle for the cover pass.
+	CoverQuad [12]float32
+
+	// Color is the premultiplied RGBA fill color.
+	Color [4]float32
+
+	// FillRule determines inside/outside testing (NonZero or EvenOdd).
+	FillRule gg.FillRule
+}
+
+// GPURenderSession manages a single frame's GPU rendering across all tiers.
+// It owns shared MSAA color, stencil, and resolve textures, and executes
+// all draw commands in a single render pass with pipeline switching.
+//
+// This is the central abstraction that unifies SDF shape rendering (Tier 1)
+// and stencil-then-cover path rendering (Tier 2b) into one GPU submission.
+// Enterprise 2D engines (Skia Ganesh/Graphite, Flutter Impeller, Gio) use
+// the same pattern: one render pass, multiple pipeline switches.
+//
+// Architecture:
+//
+//	GPURenderSession
+//	  +-- Manages shared MSAA + stencil + resolve textures (via textureSet)
+//	  +-- Holds references to SDFRenderPipeline and StencilRenderer (pipeline owners)
+//	  +-- Encodes single render pass with pipeline switching
+//	  +-- Single submit + fence wait
+//	  +-- Single readback (offscreen) or resolve to surface (direct)
+type GPURenderSession struct {
+	device hal.Device
+	queue  hal.Queue
+
+	// Shared textures (MSAA 4x color + depth/stencil + 1x resolve).
+	textures textureSet
+
+	// Pipeline owners (lazily created). The session does not own these
+	// pipelines -- it holds references and delegates draw recording to them.
+	sdfPipeline     *SDFRenderPipeline
+	stencilRenderer *StencilRenderer
+}
+
+// NewGPURenderSession creates a new render session with the given device and
+// queue. Textures and pipelines are not allocated until RenderFrame is called.
+func NewGPURenderSession(device hal.Device, queue hal.Queue) *GPURenderSession {
+	return &GPURenderSession{
+		device: device,
+		queue:  queue,
+	}
+}
+
+// EnsureTextures creates or recreates the shared MSAA color, depth/stencil,
+// and resolve textures if the requested dimensions differ from the current
+// size. If dimensions match and textures exist, this is a no-op.
+func (s *GPURenderSession) EnsureTextures(w, h uint32) error {
+	return s.textures.ensureTextures(s.device, w, h, "session")
+}
+
+// RenderFrame renders all draw commands (SDF shapes + stencil paths) in a
+// single render pass. This is the main entry point for unified rendering.
+//
+// The render pass uses the shared textures with:
+//   - MSAA color cleared to transparent black
+//   - Stencil cleared to 0
+//   - MSAA resolve to single-sample target
+//   - Copy resolve to staging buffer for CPU readback
+//
+// Returns nil if both shape and path slices are empty. Pipelines are lazily
+// created on first use.
+func (s *GPURenderSession) RenderFrame(
+	target gg.GPURenderTarget,
+	sdfShapes []SDFRenderShape,
+	stencilPaths []StencilPathCommand,
+) error {
+	if len(sdfShapes) == 0 && len(stencilPaths) == 0 {
+		return nil
+	}
+
+	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
+	if err := s.EnsureTextures(w, h); err != nil {
+		return fmt.Errorf("ensure textures: %w", err)
+	}
+
+	// Ensure pipelines exist.
+	if err := s.ensurePipelines(); err != nil {
+		return fmt.Errorf("ensure pipelines: %w", err)
+	}
+
+	// Build per-frame GPU resources for SDF shapes.
+	var sdfResources *sdfFrameResources
+	if len(sdfShapes) > 0 {
+		var err error
+		sdfResources, err = s.buildSDFResources(sdfShapes, w, h)
+		if err != nil {
+			return fmt.Errorf("build SDF resources: %w", err)
+		}
+		defer sdfResources.destroy(s.device)
+	}
+
+	// Build per-frame GPU resources for stencil paths.
+	var stencilResources []*stencilCoverBuffers
+	if len(stencilPaths) > 0 {
+		for i := range stencilPaths {
+			bufs, err := s.buildStencilResources(&stencilPaths[i], w, h)
+			if err != nil {
+				// Clean up already-created buffers.
+				for _, b := range stencilResources {
+					b.destroy(s.device)
+				}
+				return fmt.Errorf("build stencil resources for path %d: %w", i, err)
+			}
+			stencilResources = append(stencilResources, bufs)
+		}
+		defer func() {
+			for _, b := range stencilResources {
+				b.destroy(s.device)
+			}
+		}()
+	}
+
+	// Encode, submit, and read back.
+	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, stencilResources, stencilPaths, target)
+}
+
+// Size returns the current shared texture dimensions.
+func (s *GPURenderSession) Size() (uint32, uint32) {
+	return s.textures.width, s.textures.height
+}
+
+// Destroy releases all GPU resources held by the session. Safe to call
+// multiple times or on a session with no allocated resources.
+func (s *GPURenderSession) Destroy() {
+	s.textures.destroyTextures(s.device)
+	// Do not destroy pipelines -- they are owned by the caller.
+}
+
+// sdfFrameResources holds per-frame GPU resources for SDF rendering.
+type sdfFrameResources struct {
+	vertBuf    hal.Buffer
+	uniformBuf hal.Buffer
+	bindGroup  hal.BindGroup
+	vertCount  uint32
+}
+
+func (r *sdfFrameResources) destroy(device hal.Device) {
+	if r.bindGroup != nil {
+		device.DestroyBindGroup(r.bindGroup)
+	}
+	if r.uniformBuf != nil {
+		device.DestroyBuffer(r.uniformBuf)
+	}
+	if r.vertBuf != nil {
+		device.DestroyBuffer(r.vertBuf)
+	}
+}
+
+// ensurePipelines creates SDF and stencil pipelines if they don't exist yet.
+func (s *GPURenderSession) ensurePipelines() error {
+	if s.sdfPipeline == nil {
+		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue)
+	}
+	if err := s.sdfPipeline.ensurePipelineWithStencil(); err != nil {
+		return fmt.Errorf("SDF pipeline: %w", err)
+	}
+
+	if s.stencilRenderer == nil {
+		s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
+	}
+	if s.stencilRenderer.nonZeroStencilPipeline == nil {
+		if err := s.stencilRenderer.createPipelines(); err != nil {
+			return fmt.Errorf("stencil pipelines: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// buildSDFResources creates per-frame vertex buffer, uniform buffer, and bind
+// group for rendering SDF shapes.
+func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint32) (*sdfFrameResources, error) {
+	vertexData := buildSDFRenderVertices(shapes, w, h)
+	vertexCount := uint32(len(shapes) * 6) //nolint:gosec // shape count fits uint32
+
+	vertBuf, err := s.createAndUploadBuffer("session_sdf_verts", vertexData,
+		gputypes.BufferUsageVertex|gputypes.BufferUsageCopyDst)
+	if err != nil {
+		return nil, fmt.Errorf("create vertex buffer: %w", err)
+	}
+
+	uniformData := makeSDFRenderUniform(w, h)
+	uniformBuf, err := s.createAndUploadBuffer("session_sdf_uniform", uniformData,
+		gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst)
+	if err != nil {
+		s.device.DestroyBuffer(vertBuf)
+		return nil, fmt.Errorf("create uniform buffer: %w", err)
+	}
+
+	bindGroup, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label:  "session_sdf_bind",
+		Layout: s.sdfPipeline.uniformLayout,
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{
+				Buffer: uniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
+			}},
+		},
+	})
+	if err != nil {
+		s.device.DestroyBuffer(uniformBuf)
+		s.device.DestroyBuffer(vertBuf)
+		return nil, fmt.Errorf("create bind group: %w", err)
+	}
+
+	return &sdfFrameResources{
+		vertBuf:    vertBuf,
+		uniformBuf: uniformBuf,
+		bindGroup:  bindGroup,
+		vertCount:  vertexCount,
+	}, nil
+}
+
+// buildStencilResources creates per-frame GPU buffers for a single stencil
+// path command.
+func (s *GPURenderSession) buildStencilResources(cmd *StencilPathCommand, w, h uint32) (*stencilCoverBuffers, error) {
+	color := gg.RGBA{
+		R: float64(cmd.Color[0]),
+		G: float64(cmd.Color[1]),
+		B: float64(cmd.Color[2]),
+		A: float64(cmd.Color[3]),
+	}
+	return s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, color)
+}
+
+// encodeSubmitReadback encodes the unified render pass, copies the resolve
+// texture to a staging buffer, submits, waits, and reads back pixels.
+func (s *GPURenderSession) encodeSubmitReadback(
+	w, h uint32,
+	sdfRes *sdfFrameResources,
+	sdfShapes []SDFRenderShape,
+	stencilRes []*stencilCoverBuffers,
+	stencilPaths []StencilPathCommand,
+	target gg.GPURenderTarget,
+) error {
+	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "session_encoder",
+	})
+	if err != nil {
+		return fmt.Errorf("create command encoder: %w", err)
+	}
+	if err := encoder.BeginEncoding("session_frame"); err != nil {
+		return fmt.Errorf("begin encoding: %w", err)
+	}
+
+	// Unified render pass descriptor with MSAA color + stencil + resolve.
+	rpDesc := &hal.RenderPassDescriptor{
+		Label: "session_unified_pass",
+		ColorAttachments: []hal.RenderPassColorAttachment{{
+			View:          s.textures.msaaView,
+			ResolveTarget: s.textures.resolveView,
+			LoadOp:        gputypes.LoadOpClear,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       gputypes.LoadOpClear,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     gputypes.LoadOpClear,
+			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilClearValue: 0,
+		},
+	}
+
+	rp := encoder.BeginRenderPass(rpDesc)
+
+	// Tier 1: SDF shapes (no stencil interaction).
+	if sdfRes != nil && len(sdfShapes) > 0 {
+		s.sdfPipeline.RecordDraws(rp, sdfRes)
+	}
+
+	// Tier 2b: Stencil-then-cover paths.
+	for i, bufs := range stencilRes {
+		s.stencilRenderer.RecordPath(rp, bufs, stencilPaths[i].FillRule)
+	}
+
+	rp.End()
+
+	// Copy resolve texture to staging buffer for CPU readback.
+	pixelBufSize := uint64(w) * uint64(h) * 4
+	stagingBuf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		Label: "session_staging",
+		Size:  pixelBufSize,
+		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		encoder.DiscardEncoding()
+		return fmt.Errorf("create staging buffer: %w", err)
+	}
+	defer s.device.DestroyBuffer(stagingBuf)
+
+	encoder.CopyTextureToBuffer(s.textures.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
+		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		TextureBase:  hal.ImageCopyTexture{Texture: s.textures.resolveTex, MipLevel: 0},
+		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+	}})
+
+	cmdBuf, err := encoder.EndEncoding()
+	if err != nil {
+		return fmt.Errorf("end encoding: %w", err)
+	}
+	defer s.device.FreeCommandBuffer(cmdBuf)
+
+	// Submit and wait.
+	fence, err := s.device.CreateFence()
+	if err != nil {
+		return fmt.Errorf("create fence: %w", err)
+	}
+	defer s.device.DestroyFence(fence)
+
+	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+		return fmt.Errorf("submit: %w", err)
+	}
+	fenceOK, err := s.device.Wait(fence, 1, 5*time.Second)
+	if err != nil || !fenceOK {
+		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
+	}
+
+	readback := make([]byte, pixelBufSize)
+	if err := s.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
+		return fmt.Errorf("readback: %w", err)
+	}
+
+	convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+	return nil
+}
+
+// createAndUploadBuffer creates a GPU buffer and uploads data.
+func (s *GPURenderSession) createAndUploadBuffer(label string, data []byte, usage gputypes.BufferUsage) (hal.Buffer, error) {
+	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		Label: label,
+		Size:  uint64(len(data)),
+		Usage: usage,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", label, err)
+	}
+	s.queue.WriteBuffer(buf, 0, data)
+	return buf, nil
+}
+
+// SDFPipeline returns the SDF render pipeline.
+func (s *GPURenderSession) SDFPipeline() *SDFRenderPipeline {
+	return s.sdfPipeline
+}
+
+// StencilRendererRef returns the stencil renderer.
+func (s *GPURenderSession) StencilRendererRef() *StencilRenderer {
+	return s.stencilRenderer
+}
+
+// SetSDFPipeline sets an external SDF pipeline for the session to use.
+// The session does not own the pipeline and will not destroy it.
+func (s *GPURenderSession) SetSDFPipeline(p *SDFRenderPipeline) {
+	s.sdfPipeline = p
+}
+
+// SetStencilRenderer sets an external stencil renderer for the session to use.
+// The session does not own the renderer and will not destroy it.
+func (s *GPURenderSession) SetStencilRenderer(r *StencilRenderer) {
+	s.stencilRenderer = r
+}

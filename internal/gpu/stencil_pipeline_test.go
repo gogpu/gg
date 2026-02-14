@@ -139,13 +139,13 @@ func TestStencilPipelineFullDestroy(t *testing.T) {
 	if sr.nonZeroCoverPipeline != nil {
 		t.Error("expected nil nonZeroCoverPipeline after Destroy")
 	}
-	if sr.msaaTex != nil {
+	if sr.textures.msaaTex != nil {
 		t.Error("expected nil msaaTex after Destroy")
 	}
-	if sr.stencilTex != nil {
+	if sr.textures.stencilTex != nil {
 		t.Error("expected nil stencilTex after Destroy")
 	}
-	if sr.resolveTex != nil {
+	if sr.textures.resolveTex != nil {
 		t.Error("expected nil resolveTex after Destroy")
 	}
 }

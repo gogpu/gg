@@ -54,6 +54,8 @@ const sdfRenderAAMargin = 1.5
 //   - Works around naga compute shader bugs
 //
 // The pipeline uses the same MSAA+resolve texture pattern as StencilRenderer.
+// For unified rendering via GPURenderSession, pipelineWithStencil is used
+// when the render pass includes a depth/stencil attachment.
 type SDFRenderPipeline struct {
 	device hal.Device
 	queue  hal.Queue
@@ -64,7 +66,14 @@ type SDFRenderPipeline struct {
 	pipeLayout    hal.PipelineLayout
 	pipeline      hal.RenderPipeline
 
-	// MSAA and resolve textures for offscreen rendering.
+	// Session-compatible pipeline variant with depth/stencil state.
+	// This is used when the SDF pipeline participates in a unified render
+	// pass that includes a stencil attachment (for stencil-then-cover paths).
+	// The stencil test is Always/Keep (SDF shapes don't interact with stencil).
+	pipelineWithStencil hal.RenderPipeline
+
+	// MSAA and resolve textures for offscreen rendering (standalone mode).
+	// When used via GPURenderSession, these are nil -- the session owns textures.
 	msaaTex     hal.Texture
 	msaaView    hal.TextureView
 	resolveTex  hal.Texture
@@ -324,10 +333,102 @@ func (p *SDFRenderPipeline) createPipeline() error {
 	return nil
 }
 
+// ensurePipelineWithStencil creates the session-compatible pipeline variant
+// that includes a depth/stencil state. This pipeline is used when the SDF
+// shapes are rendered in a unified render pass alongside stencil-then-cover
+// paths. The SDF pipeline ignores the stencil buffer (Compare=Always, all
+// ops=Keep, write mask=0).
+//
+// The base pipeline (shader, layout, bind group layout) is created first
+// if it doesn't exist.
+func (p *SDFRenderPipeline) ensurePipelineWithStencil() error {
+	// Ensure base resources exist (shader, layouts).
+	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
+		if err := p.createPipeline(); err != nil {
+			return err
+		}
+	}
+	if p.pipelineWithStencil != nil {
+		return nil
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label:  "sdf_render_pipeline_with_stencil",
+		Layout: p.pipeLayout,
+		Vertex: hal.VertexState{
+			Module:     p.shader,
+			EntryPoint: "vs_main",
+			Buffers:    sdfRenderVertexLayout(),
+		},
+		Fragment: &hal.FragmentState{
+			Module:     p.shader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{
+				Compare:     gputypes.CompareFunctionAlways,
+				FailOp:      hal.StencilOperationKeep,
+				DepthFailOp: hal.StencilOperationKeep,
+				PassOp:      hal.StencilOperationKeep,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare:     gputypes.CompareFunctionAlways,
+				FailOp:      hal.StencilOperationKeep,
+				DepthFailOp: hal.StencilOperationKeep,
+				PassOp:      hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0x00,
+			StencilWriteMask: 0x00,
+		},
+		Primitive: gputypes.PrimitiveState{
+			Topology: gputypes.PrimitiveTopologyTriangleList,
+			CullMode: gputypes.CullModeNone,
+		},
+		Multisample: gputypes.MultisampleState{
+			Count: sampleCount,
+			Mask:  0xFFFFFFFF,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create SDF pipeline with stencil: %w", err)
+	}
+	p.pipelineWithStencil = pipeline
+	return nil
+}
+
+// RecordDraws records SDF shape draws into an existing render pass.
+// The render pass is owned by GPURenderSession. This method uses the
+// pipelineWithStencil variant because the session's render pass includes
+// a depth/stencil attachment.
+//
+// The resources parameter holds pre-built vertex buffer, uniform buffer,
+// and bind group for the current frame.
+func (p *SDFRenderPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *sdfFrameResources) {
+	rp.SetPipeline(p.pipelineWithStencil)
+	rp.SetBindGroup(0, resources.bindGroup, nil)
+	rp.SetVertexBuffer(0, resources.vertBuf, 0)
+	rp.Draw(resources.vertCount, 1, 0, 0)
+}
+
 // destroyPipeline releases all pipeline resources in reverse creation order.
 func (p *SDFRenderPipeline) destroyPipeline() {
 	if p.device == nil {
 		return
+	}
+	if p.pipelineWithStencil != nil {
+		p.device.DestroyRenderPipeline(p.pipelineWithStencil)
+		p.pipelineWithStencil = nil
 	}
 	if p.pipeline != nil {
 		p.device.DestroyRenderPipeline(p.pipeline)
@@ -537,16 +638,11 @@ func buildSDFRenderVertices(shapes []SDFRenderShape, _ uint32, _ uint32) []byte 
 		s := &shapes[i]
 
 		// Compute bounding box half-extents.
-		var halfW, halfH float32
-		if s.Kind == 0 {
-			// Circle/ellipse: bounding box is radii.
-			halfW = s.Param1
-			halfH = s.Param2
-		} else {
-			// RRect: bounding box is half dimensions.
-			halfW = s.Param1
-			halfH = s.Param2
-		}
+		// For circles/ellipses, Param1/2 are radii.
+		// For rrects, Param1/2 are half dimensions.
+		// Both produce the same bounding box calculation.
+		halfW := s.Param1
+		halfH := s.Param2
 		// Expand for stroke + AA margin.
 		halfW += s.HalfStroke + sdfRenderAAMargin
 		halfH += s.HalfStroke + sdfRenderAAMargin

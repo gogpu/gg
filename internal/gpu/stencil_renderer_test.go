@@ -46,13 +46,13 @@ func TestStencilRendererNew(t *testing.T) {
 	if sr.queue != queue {
 		t.Error("queue not stored correctly")
 	}
-	if sr.msaaTex != nil {
+	if sr.textures.msaaTex != nil {
 		t.Error("expected nil msaaTex before EnsureTextures")
 	}
-	if sr.stencilTex != nil {
+	if sr.textures.stencilTex != nil {
 		t.Error("expected nil stencilTex before EnsureTextures")
 	}
-	if sr.resolveTex != nil {
+	if sr.textures.resolveTex != nil {
 		t.Error("expected nil resolveTex before EnsureTextures")
 	}
 
@@ -74,22 +74,22 @@ func TestStencilRendererEnsureTextures(t *testing.T) {
 		t.Fatalf("EnsureTextures failed: %v", err)
 	}
 
-	if sr.msaaTex == nil {
+	if sr.textures.msaaTex == nil {
 		t.Error("expected non-nil msaaTex after EnsureTextures")
 	}
-	if sr.msaaView == nil {
+	if sr.textures.msaaView == nil {
 		t.Error("expected non-nil msaaView after EnsureTextures")
 	}
-	if sr.stencilTex == nil {
+	if sr.textures.stencilTex == nil {
 		t.Error("expected non-nil stencilTex after EnsureTextures")
 	}
-	if sr.stencilView == nil {
+	if sr.textures.stencilView == nil {
 		t.Error("expected non-nil stencilView after EnsureTextures")
 	}
-	if sr.resolveTex == nil {
+	if sr.textures.resolveTex == nil {
 		t.Error("expected non-nil resolveTex after EnsureTextures")
 	}
-	if sr.resolveView == nil {
+	if sr.textures.resolveView == nil {
 		t.Error("expected non-nil resolveView after EnsureTextures")
 	}
 
@@ -116,9 +116,9 @@ func TestStencilRendererEnsureTexturesIdempotent(t *testing.T) {
 	}
 
 	// Save references to verify they remain the same.
-	origMSAA := sr.msaaTex
-	origStencil := sr.stencilTex
-	origResolve := sr.resolveTex
+	origMSAA := sr.textures.msaaTex
+	origStencil := sr.textures.stencilTex
+	origResolve := sr.textures.resolveTex
 
 	// Call again with same dimensions — should be a no-op.
 	err = sr.EnsureTextures(640, 480)
@@ -126,13 +126,13 @@ func TestStencilRendererEnsureTexturesIdempotent(t *testing.T) {
 		t.Fatalf("second EnsureTextures failed: %v", err)
 	}
 
-	if sr.msaaTex != origMSAA {
+	if sr.textures.msaaTex != origMSAA {
 		t.Error("MSAA texture was recreated unnecessarily")
 	}
-	if sr.stencilTex != origStencil {
+	if sr.textures.stencilTex != origStencil {
 		t.Error("stencil texture was recreated unnecessarily")
 	}
-	if sr.resolveTex != origResolve {
+	if sr.textures.resolveTex != origResolve {
 		t.Error("resolve texture was recreated unnecessarily")
 	}
 
@@ -171,13 +171,13 @@ func TestStencilRendererEnsureTexturesResize(t *testing.T) {
 		t.Errorf("expected resized size (1920, 1080), got (%d, %d)", w, h)
 	}
 
-	if sr.msaaTex == nil {
+	if sr.textures.msaaTex == nil {
 		t.Error("expected non-nil msaaTex after resize")
 	}
-	if sr.stencilTex == nil {
+	if sr.textures.stencilTex == nil {
 		t.Error("expected non-nil stencilTex after resize")
 	}
-	if sr.resolveTex == nil {
+	if sr.textures.resolveTex == nil {
 		t.Error("expected non-nil resolveTex after resize")
 	}
 }
@@ -194,28 +194,28 @@ func TestStencilRendererDestroy(t *testing.T) {
 	}
 
 	// Verify textures exist before destroy.
-	if sr.msaaTex == nil {
+	if sr.textures.msaaTex == nil {
 		t.Fatal("expected non-nil msaaTex before Destroy")
 	}
 
 	sr.Destroy()
 
-	if sr.msaaTex != nil {
+	if sr.textures.msaaTex != nil {
 		t.Error("expected nil msaaTex after Destroy")
 	}
-	if sr.msaaView != nil {
+	if sr.textures.msaaView != nil {
 		t.Error("expected nil msaaView after Destroy")
 	}
-	if sr.stencilTex != nil {
+	if sr.textures.stencilTex != nil {
 		t.Error("expected nil stencilTex after Destroy")
 	}
-	if sr.stencilView != nil {
+	if sr.textures.stencilView != nil {
 		t.Error("expected nil stencilView after Destroy")
 	}
-	if sr.resolveTex != nil {
+	if sr.textures.resolveTex != nil {
 		t.Error("expected nil resolveTex after Destroy")
 	}
-	if sr.resolveView != nil {
+	if sr.textures.resolveView != nil {
 		t.Error("expected nil resolveView after Destroy")
 	}
 
@@ -358,7 +358,7 @@ func TestStencilRendererEnsureAfterDestroy(t *testing.T) {
 		t.Errorf("expected (512, 512) after re-creation, got (%d, %d)", w, h)
 	}
 
-	if sr.msaaTex == nil || sr.stencilTex == nil || sr.resolveTex == nil {
+	if sr.textures.msaaTex == nil || sr.textures.stencilTex == nil || sr.textures.resolveTex == nil {
 		t.Error("expected all textures to be non-nil after re-creation")
 	}
 }

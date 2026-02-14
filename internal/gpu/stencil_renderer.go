@@ -37,24 +37,8 @@ type StencilRenderer struct {
 	device hal.Device
 	queue  hal.Queue
 
-	// msaaTex is the MSAA color texture (4x samples, BGRA8Unorm).
-	// Used as the main render target during stencil-then-cover passes.
-	msaaTex  hal.Texture
-	msaaView hal.TextureView
-
-	// stencilTex is the depth/stencil texture (4x samples, Depth24PlusStencil8).
-	// The stencil component stores winding numbers during the stencil fill pass.
-	// The depth component is unused but required by the format.
-	stencilTex  hal.Texture
-	stencilView hal.TextureView
-
-	// resolveTex is the single-sample resolve target (1x sample, BGRA8Unorm, CopySrc).
-	// MSAA color data is resolved here at the end of the render pass.
-	// CopySrc usage enables GPU-to-CPU readback for software compositing.
-	resolveTex  hal.Texture
-	resolveView hal.TextureView
-
-	width, height uint32
+	// Shared MSAA color + depth/stencil + resolve textures.
+	textures textureSet
 
 	// Shader modules for stencil-then-cover rendering.
 	stencilFillShader hal.ShaderModule
@@ -96,96 +80,7 @@ func NewStencilRenderer(device hal.Device, queue hal.Queue) *StencilRenderer {
 // GPU memory leaks. Returns an error if any texture or view creation fails;
 // in that case, partially created resources are cleaned up.
 func (sr *StencilRenderer) EnsureTextures(width, height uint32) error {
-	if sr.width == width && sr.height == height && sr.msaaTex != nil {
-		return nil
-	}
-
-	// Destroy old textures if they exist (resize path).
-	sr.destroyTextures()
-
-	size := hal.Extent3D{
-		Width:              width,
-		Height:             height,
-		DepthOrArrayLayers: 1,
-	}
-
-	// Create MSAA color texture (4x samples, BGRA8Unorm).
-	msaaTex, err := sr.device.CreateTexture(&hal.TextureDescriptor{
-		Label:         "stencil_msaa_color",
-		Size:          size,
-		MipLevelCount: 1,
-		SampleCount:   sampleCount,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatBGRA8Unorm,
-		Usage:         gputypes.TextureUsageRenderAttachment,
-	})
-	if err != nil {
-		return fmt.Errorf("create MSAA color texture: %w", err)
-	}
-	sr.msaaTex = msaaTex
-
-	msaaView, err := sr.device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
-		Label: "stencil_msaa_color_view",
-	})
-	if err != nil {
-		sr.destroyTextures()
-		return fmt.Errorf("create MSAA color texture view: %w", err)
-	}
-	sr.msaaView = msaaView
-
-	// Create depth/stencil texture (4x samples, Depth24PlusStencil8).
-	stencilTex, err := sr.device.CreateTexture(&hal.TextureDescriptor{
-		Label:         "stencil_depth_stencil",
-		Size:          size,
-		MipLevelCount: 1,
-		SampleCount:   sampleCount,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatDepth24PlusStencil8,
-		Usage:         gputypes.TextureUsageRenderAttachment,
-	})
-	if err != nil {
-		sr.destroyTextures()
-		return fmt.Errorf("create depth/stencil texture: %w", err)
-	}
-	sr.stencilTex = stencilTex
-
-	stencilView, err := sr.device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
-		Label: "stencil_depth_stencil_view",
-	})
-	if err != nil {
-		sr.destroyTextures()
-		return fmt.Errorf("create depth/stencil texture view: %w", err)
-	}
-	sr.stencilView = stencilView
-
-	// Create resolve target (1x sample, BGRA8Unorm, CopySrc for readback).
-	resolveTex, err := sr.device.CreateTexture(&hal.TextureDescriptor{
-		Label:         "stencil_resolve",
-		Size:          size,
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatBGRA8Unorm,
-		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc,
-	})
-	if err != nil {
-		sr.destroyTextures()
-		return fmt.Errorf("create resolve texture: %w", err)
-	}
-	sr.resolveTex = resolveTex
-
-	resolveView, err := sr.device.CreateTextureView(resolveTex, &hal.TextureViewDescriptor{
-		Label: "stencil_resolve_view",
-	})
-	if err != nil {
-		sr.destroyTextures()
-		return fmt.Errorf("create resolve texture view: %w", err)
-	}
-	sr.resolveView = resolveView
-
-	sr.width = width
-	sr.height = height
-	return nil
+	return sr.textures.ensureTextures(sr.device, width, height, "stencil")
 }
 
 // Destroy releases all GPU resources held by the renderer: pipelines, shaders,
@@ -198,34 +93,8 @@ func (sr *StencilRenderer) Destroy() {
 }
 
 // destroyTextures releases all texture views and textures, resetting dimensions to zero.
-// Each resource is nil-checked before destruction to support partial cleanup.
 func (sr *StencilRenderer) destroyTextures() {
-	if sr.resolveView != nil {
-		sr.device.DestroyTextureView(sr.resolveView)
-		sr.resolveView = nil
-	}
-	if sr.resolveTex != nil {
-		sr.device.DestroyTexture(sr.resolveTex)
-		sr.resolveTex = nil
-	}
-	if sr.stencilView != nil {
-		sr.device.DestroyTextureView(sr.stencilView)
-		sr.stencilView = nil
-	}
-	if sr.stencilTex != nil {
-		sr.device.DestroyTexture(sr.stencilTex)
-		sr.stencilTex = nil
-	}
-	if sr.msaaView != nil {
-		sr.device.DestroyTextureView(sr.msaaView)
-		sr.msaaView = nil
-	}
-	if sr.msaaTex != nil {
-		sr.device.DestroyTexture(sr.msaaTex)
-		sr.msaaTex = nil
-	}
-	sr.width = 0
-	sr.height = 0
+	sr.textures.destroyTextures(sr.device)
 }
 
 // RenderPassDescriptor returns a configured render pass descriptor for
@@ -242,22 +111,22 @@ func (sr *StencilRenderer) destroyTextures() {
 // EnsureTextures must be called before this method. Returns nil if textures
 // have not been allocated.
 func (sr *StencilRenderer) RenderPassDescriptor() *hal.RenderPassDescriptor {
-	if sr.msaaView == nil || sr.stencilView == nil || sr.resolveView == nil {
+	if sr.textures.msaaView == nil || sr.textures.stencilView == nil || sr.textures.resolveView == nil {
 		return nil
 	}
 	return &hal.RenderPassDescriptor{
 		Label: "stencil_cover_pass",
 		ColorAttachments: []hal.RenderPassColorAttachment{
 			{
-				View:          sr.msaaView,
-				ResolveTarget: sr.resolveView,
+				View:          sr.textures.msaaView,
+				ResolveTarget: sr.textures.resolveView,
 				LoadOp:        gputypes.LoadOpClear,
 				StoreOp:       gputypes.StoreOpStore,
 				ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 			},
 		},
 		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
-			View:              sr.stencilView,
+			View:              sr.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
 			DepthClearValue:   1.0,
@@ -273,13 +142,13 @@ func (sr *StencilRenderer) RenderPassDescriptor() *hal.RenderPassDescriptor {
 // has CopySrc usage for GPU-to-CPU readback.
 // Returns nil if textures have not been allocated via EnsureTextures.
 func (sr *StencilRenderer) ResolveTexture() hal.Texture {
-	return sr.resolveTex
+	return sr.textures.resolveTex
 }
 
 // Size returns the current texture dimensions. Returns (0, 0) if textures
 // have not been allocated.
 func (sr *StencilRenderer) Size() (uint32, uint32) {
-	return sr.width, sr.height
+	return sr.textures.width, sr.textures.height
 }
 
 // stencilCoverBuffers holds all GPU buffers and bind groups for a single
@@ -509,9 +378,9 @@ func (sr *StencilRenderer) encodeAndReadback(
 	}
 	defer sr.device.DestroyBuffer(stagingBuf)
 
-	encoder.CopyTextureToBuffer(sr.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
+	encoder.CopyTextureToBuffer(sr.textures.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
 		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
-		TextureBase:  hal.ImageCopyTexture{Texture: sr.resolveTex, MipLevel: 0},
+		TextureBase:  hal.ImageCopyTexture{Texture: sr.textures.resolveTex, MipLevel: 0},
 		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
 
@@ -551,6 +420,37 @@ func (sr *StencilRenderer) submitAndReadback(
 
 	convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
 	return nil
+}
+
+// RecordPath records a stencil-then-cover path into an existing render pass.
+// The render pass is owned by GPURenderSession. This method performs two
+// pipeline switches within the pass:
+//
+//  1. SetPipeline(stencilFillPipeline) + Draw(fanVertices)
+//  2. SetPipeline(coverPipeline) + Draw(6)
+//
+// The bufs parameter holds pre-built vertex buffers, uniform buffers, and
+// bind groups for the current path. The fill rule selects between non-zero
+// and even-odd stencil pipelines.
+func (sr *StencilRenderer) RecordPath(rp hal.RenderPassEncoder, bufs *stencilCoverBuffers, fillRule gg.FillRule) {
+	// Select stencil pipeline based on fill rule.
+	stencilPipeline := sr.nonZeroStencilPipeline
+	if fillRule == gg.FillRuleEvenOdd {
+		stencilPipeline = sr.evenOddStencilPipeline
+	}
+
+	// Pass 1: Stencil fill.
+	rp.SetPipeline(stencilPipeline)
+	rp.SetBindGroup(0, bufs.stencilBindGroup, nil)
+	rp.SetVertexBuffer(0, bufs.fanVertBuf, 0)
+	rp.Draw(bufs.fanVertexCount, 1, 0, 0)
+
+	// Pass 2: Cover.
+	rp.SetPipeline(sr.nonZeroCoverPipeline)
+	rp.SetBindGroup(0, bufs.coverBindGroup, nil)
+	rp.SetVertexBuffer(0, bufs.coverVertBuf, 0)
+	rp.SetStencilReference(0)
+	rp.Draw(6, 1, 0, 0)
 }
 
 // makeStencilFillUniform creates the 16-byte uniform buffer for the stencil fill pass.
