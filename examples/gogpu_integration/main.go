@@ -27,7 +27,6 @@ import (
 	_ "github.com/gogpu/gg/gpu" // Register GPU accelerator (SDF + MSAA 4x)
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
-	"github.com/gogpu/gogpu/gmath"
 )
 
 func main() {
@@ -51,8 +50,7 @@ func main() {
 			return
 		}
 
-		dc.ClearColor(gmath.Hex(0x0d1117))
-
+		// No dc.Clear() needed — gg renders directly to surface.
 		if canvas == nil {
 			provider := app.GPUContextProvider()
 			if provider == nil {
@@ -81,8 +79,10 @@ func main() {
 			log.Printf("Draw error: %v", err)
 		}
 
-		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
-			log.Printf("Frame %d: RenderTo error: %v", frame, err)
+		// Zero-copy direct surface rendering: GPU→surface (no readback).
+		sw, sh := dc.SurfaceSize()
+		if err := canvas.RenderDirect(dc.SurfaceView(), sw, sh); err != nil {
+			log.Printf("Frame %d: RenderDirect error: %v", frame, err)
 		}
 		frame++
 	})

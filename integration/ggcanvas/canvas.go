@@ -229,6 +229,52 @@ func (c *Canvas) Flush() (any, error) {
 	return c.texture, nil
 }
 
+// RenderDirect renders canvas content directly to the given surface view,
+// bypassing the GPU→CPU→GPU readback. This is the zero-copy rendering path
+// for use with gogpu's surface texture view.
+//
+// When the GPU accelerator supports direct surface rendering, shapes are
+// rendered directly to the provided surface view via MSAA resolve. No
+// staging buffers, no ReadBuffer, no texture upload — pure GPU-to-GPU.
+//
+// If the accelerator doesn't support surface rendering, or if no GPU
+// accelerator is registered, this method falls back to the readback path
+// via Flush().
+//
+// The surfaceView parameter must be a hal.TextureView obtained from
+// gogpu.Context.SurfaceView(). Pass nil to use the readback path.
+//
+// Example:
+//
+//	app.OnDraw(func(dc *gogpu.Context) {
+//	    canvas.Draw(func(cc *gg.Context) { ... })
+//	    w, h := dc.SurfaceSize()
+//	    canvas.RenderDirect(dc.SurfaceView(), w, h)
+//	})
+func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	if surfaceView == nil {
+		return nil
+	}
+	if !c.dirty {
+		return nil
+	}
+
+	// Configure GPU accelerator for direct surface rendering.
+	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
+
+	// Flush GPU shapes directly to the surface view (no readback).
+	err := c.ctx.FlushGPU()
+
+	// Return to offscreen mode for next frame.
+	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
+
+	c.dirty = false
+	return err
+}
+
 // Texture returns the current GPU texture without flushing.
 // Returns nil if texture hasn't been created yet.
 //
