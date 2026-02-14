@@ -38,13 +38,14 @@ type textureDestroyer interface {
 // Canvas is NOT safe for concurrent use. Create one Canvas per goroutine,
 // or use external synchronization.
 type Canvas struct {
-	ctx      *gg.Context
-	provider gpucontext.DeviceProvider
-	texture  any  // Lazy-created texture (*gogpu.Texture)
-	dirty    bool // Needs GPU upload
-	width    int
-	height   int
-	closed   bool
+	ctx         *gg.Context
+	provider    gpucontext.DeviceProvider
+	texture     any  // Lazy-created texture (*gogpu.Texture)
+	dirty       bool // Needs GPU upload
+	sizeChanged bool // Resize pending — texture must be recreated
+	width       int
+	height      int
+	closed      bool
 }
 
 // New creates a Canvas for integrated mode.
@@ -122,6 +123,18 @@ func (c *Canvas) MarkDirty() {
 	c.dirty = true
 }
 
+// Draw calls fn with the gg context and marks the canvas as dirty.
+// This is the recommended way to update canvas content, as it ensures
+// the dirty flag is set correctly for GPU upload on next Flush/RenderTo.
+func (c *Canvas) Draw(fn func(*gg.Context)) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	fn(c.ctx)
+	c.dirty = true
+	return nil
+}
+
 // IsDirty returns true if the canvas has pending changes
 // that need to be uploaded to the GPU.
 func (c *Canvas) IsDirty() bool {
@@ -150,16 +163,9 @@ func (c *Canvas) Resize(width, height int) error {
 		return fmt.Errorf("ggcanvas: context resize failed: %w", err)
 	}
 
-	// Destroy old texture if it exists
-	if c.texture != nil {
-		if destroyer, ok := c.texture.(textureDestroyer); ok {
-			destroyer.Destroy()
-		}
-		c.texture = nil
-	}
-
 	c.width = width
 	c.height = height
+	c.sizeChanged = true
 	c.dirty = true
 
 	return nil
@@ -175,6 +181,18 @@ func (c *Canvas) Resize(width, height int) error {
 func (c *Canvas) Flush() (any, error) {
 	if c.closed {
 		return nil, ErrCanvasClosed
+	}
+
+	// If size changed, destroy old texture to force recreation at new size.
+	// Deferred from Resize() to keep texture alive between frames.
+	if c.sizeChanged {
+		if c.texture != nil {
+			if destroyer, ok := c.texture.(textureDestroyer); ok {
+				destroyer.Destroy()
+			}
+			c.texture = nil
+		}
+		c.sizeChanged = false
 	}
 
 	// Skip if not dirty

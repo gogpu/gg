@@ -78,15 +78,16 @@ func main() {
 		}
 
 		// Draw 2D graphics using gg API (time-based animation)
-		cc := canvas.Context()
 		elapsed := time.Since(startTime).Seconds()
-		renderFrame(cc, elapsed, cw, ch)
+		if err := canvas.Draw(func(cc *gg.Context) {
+			renderFrame(cc, elapsed, cw, ch)
+		}); err != nil {
+			log.Printf("Draw error: %v", err)
+		}
 
 		// Render canvas to gogpu window (handles texture upload automatically)
 		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
 			log.Printf("RenderTo error (frame %d, %dx%d): %v", frame, cw, ch, err)
-		} else if frame < 3 || (frame%300 == 0) {
-			log.Printf("RenderTo OK (frame %d, %dx%d)", frame, cw, ch)
 		}
 		frame++
 	})
