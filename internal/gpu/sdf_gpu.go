@@ -75,14 +75,12 @@ func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill) != 0
 }
 
-// Init initializes the GPU device and render pipelines.
-// On failure, the accelerator silently falls back to CPU rendering.
+// Init registers the accelerator. GPU device initialization is deferred
+// until the first render to avoid creating a standalone Vulkan device that
+// may interfere with an external DX12/Metal device provided later via
+// SetDeviceProvider. This lazy approach prevents Intel iGPU driver issues
+// where destroying a Vulkan device kills a coexisting DX12 device.
 func (a *SDFAccelerator) Init() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.initGPU(); err != nil {
-		log.Printf("gpu-sdf: GPU init failed, using CPU fallback: %v", err)
-	}
 	return nil
 }
 
@@ -388,6 +386,17 @@ func (a *SDFAccelerator) PendingCount() int {
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 && len(a.pendingStencilPaths) == 0 {
 		return nil
+	}
+
+	// Lazy GPU initialization: only create a standalone device if no shared
+	// device was provided via SetDeviceProvider. This avoids creating a
+	// Vulkan device at import time that can interfere with an external DX12
+	// device on the same physical GPU (Intel iGPU driver issue).
+	if a.device == nil {
+		if err := a.initGPU(); err != nil {
+			log.Printf("gpu-sdf: GPU init failed, using CPU fallback: %v", err)
+			return gg.ErrFallbackToCPU
+		}
 	}
 
 	// Ensure session exists with all renderers.

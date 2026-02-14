@@ -263,13 +263,13 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	}
 
 	// Configure GPU accelerator for direct surface rendering.
+	// The surface target stays set between frames to avoid destroying
+	// and recreating MSAA/stencil textures on every frame. The target
+	// is only cleared on Close() or when switching to offscreen mode.
 	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
 
 	// Flush GPU shapes directly to the surface view (no readback).
 	err := c.ctx.FlushGPU()
-
-	// Return to offscreen mode for next frame.
-	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
 
 	c.dirty = false
 	return err
@@ -291,6 +291,9 @@ func (c *Canvas) Close() error {
 		return nil
 	}
 	c.closed = true
+
+	// Clear surface target so GPU accelerator releases MSAA/stencil textures.
+	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
 
 	// Destroy textures (current and any deferred old texture).
 	destroyTexture(c.oldTexture)
