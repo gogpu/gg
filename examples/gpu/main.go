@@ -1,222 +1,189 @@
 //go:build !nogpu
 
-// Package main demonstrates the GPU backend for gogpu/gg.
+// Package main demonstrates GPU-accelerated 2D rendering with gg.
 //
 // This example shows how to:
-//   - Create and initialize the gpu GPU backend directly
-//   - Render a scene using GPU acceleration
-//   - Handle fallback to software rendering
+//   - Enable GPU acceleration via blank import of gg/gpu
+//   - Draw shapes that automatically use the three-tier GPU pipeline:
+//     Tier 1: SDF fragment shader (circles, rounded rects)
+//     Tier 2a: Convex polygon fast-path (triangles, pentagons, etc.)
+//     Tier 2b: Stencil-then-cover (arbitrary paths, stars, etc.)
+//   - Fall back to CPU rendering transparently when GPU is unavailable
 //
-// The GPU backend uses WebGPU (via gogpu/wgpu) for hardware-accelerated
-// 2D graphics rendering. When GPU is not available, it falls back to
-// software rendering via scene.Renderer.
-//
-// Note: The GPU rendering pipeline is implemented but GPU operations
-// currently run as stubs. When gogpu/wgpu implements texture readback
-// and buffer mapping, actual GPU rendering will be enabled.
+// The GPU backend uses WebGPU (via gogpu/wgpu) with Vulkan for
+// hardware-accelerated rendering in a single unified render pass.
 package main
 
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gg/internal/gpu"
-	"github.com/gogpu/gg/scene"
+
+	// Blank import enables GPU acceleration.
+	// Without this import, all rendering uses CPU (software) rasterization.
+	_ "github.com/gogpu/gg/gpu"
 )
 
 func main() {
-	fmt.Println("GPU Backend Example")
-	fmt.Println("===================")
+	fmt.Println("GPU-Accelerated 2D Rendering Example")
+	fmt.Println("=====================================")
 
-	// Try GPU backend first, fall back to software
-	nb := gpu.NewBackend()
-	if err := nb.Init(); err != nil {
-		fmt.Printf("GPU backend unavailable: %v\n", err)
-		fmt.Println("Falling back to software rendering...")
-		runSoftware()
-		return
+	const (
+		width  = 800
+		height = 600
+	)
+
+	dc := gg.NewContext(width, height)
+
+	// Light background.
+	dc.SetRGBA(0.95, 0.95, 0.98, 1)
+	dc.Clear()
+
+	// --- Tier 1: SDF shapes (circles, rounded rects) ---
+	// These use the SDF fragment shader for pixel-perfect edges.
+
+	// Filled circles.
+	colors := [][3]float64{
+		{0.9, 0.3, 0.3}, // Red
+		{0.3, 0.9, 0.3}, // Green
+		{0.3, 0.3, 0.9}, // Blue
+		{0.9, 0.9, 0.3}, // Yellow
+		{0.9, 0.3, 0.9}, // Magenta
 	}
-	defer nb.Close()
-
-	fmt.Printf("Using backend: %s\n\n", nb.Name())
-
-	// Create scene
-	s := buildScene()
-
-	// Create target pixmap
-	const width, height = 800, 600
-	pm := gg.NewPixmap(width, height)
-	pm.Clear(gg.White)
-
-	// Render scene
-	fmt.Println("Rendering scene...")
-	if err := nb.RenderScene(pm, s); err != nil {
-		// Note: Some errors are expected until full GPU support is implemented
-		fmt.Printf("RenderScene note: %v\n", err)
-	}
-
-	// Save result
-	outputPath := "gpu_output.png"
-	if err := pm.SavePNG(outputPath); err != nil {
-		log.Fatalf("Failed to save PNG: %v", err)
-	}
-
-	fmt.Printf("\nSaved output to: %s\n", outputPath)
-	fmt.Println("\nBackend Information:")
-	fmt.Printf("  Name: %s\n", nb.Name())
-	fmt.Println("  Type: GPU (WebGPU via gogpu/wgpu)")
-	fmt.Println("  Status: Pipeline implemented, GPU ops as stubs")
-}
-
-// runSoftware demonstrates software rendering fallback.
-func runSoftware() {
-	s := buildScene()
-
-	const width, height = 800, 600
-	pm := gg.NewPixmap(width, height)
-	pm.Clear(gg.White)
-
-	sr := scene.NewRenderer(width, height)
-	defer sr.Close()
-
-	if err := sr.Render(pm, s); err != nil {
-		log.Fatalf("Software render failed: %v", err)
-	}
-
-	outputPath := "gpu_output.png"
-	if err := pm.SavePNG(outputPath); err != nil {
-		log.Fatalf("Failed to save PNG: %v", err)
-	}
-
-	fmt.Printf("\nSaved output to: %s\n", outputPath)
-	fmt.Println("\nBackend Information:")
-	fmt.Println("  Name: software")
-	fmt.Println("  Type: CPU (Software rendering)")
-	fmt.Println("  Status: Fully functional")
-}
-
-// buildScene creates a demonstration scene with various shapes and layers.
-func buildScene() *scene.Scene {
-	builder := scene.NewSceneBuilder()
-
-	// Background
-	builder.FillRect(0, 0, 800, 600,
-		scene.SolidBrush(gg.RGBA{R: 0.95, G: 0.95, B: 0.98, A: 1}))
-
-	// Draw colored rectangles
-	colors := []gg.RGBA{
-		{R: 0.9, G: 0.3, B: 0.3, A: 1}, // Red
-		{R: 0.3, G: 0.9, B: 0.3, A: 1}, // Green
-		{R: 0.3, G: 0.3, B: 0.9, A: 1}, // Blue
-		{R: 0.9, G: 0.9, B: 0.3, A: 1}, // Yellow
-		{R: 0.9, G: 0.3, B: 0.9, A: 1}, // Magenta
-	}
-
 	for i, c := range colors {
-		x := float32(50 + i*150)
-		builder.FillRect(x, 50, 100, 100, scene.SolidBrush(c))
+		x := 100 + float64(i)*150
+		dc.SetRGB(c[0], c[1], c[2])
+		dc.DrawCircle(x, 100, 50)
+		if err := dc.Fill(); err != nil {
+			log.Printf("Fill circle: %v", err)
+		}
 	}
 
-	// Draw circles with semi-transparency
-	for i := 0; i < 6; i++ {
-		x := float32(100 + i*120)
-		builder.FillCircle(x, 250, 50,
-			scene.SolidBrush(gg.RGBA{R: 0.2, G: 0.6, B: 0.9, A: 0.6}))
+	// Filled rounded rectangle.
+	dc.SetRGBA(0.2, 0.4, 0.9, 0.8)
+	dc.DrawRoundedRectangle(50, 200, 200, 120, 20)
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill rrect: %v", err)
 	}
 
-	// Layer with multiply blend mode
-	builder.Layer(scene.BlendMultiply, 0.8, nil, func(lb *scene.SceneBuilder) {
-		lb.FillRect(200, 350, 200, 150,
-			scene.SolidBrush(gg.RGBA{R: 1, G: 0.8, B: 0.2, A: 1}))
-	})
+	// Stroked circle.
+	dc.SetRGBA(0.0, 0.9, 0.9, 1.0)
+	dc.SetLineWidth(3.0)
+	dc.DrawCircle(400, 260, 60)
+	if err := dc.Stroke(); err != nil {
+		log.Printf("Stroke circle: %v", err)
+	}
 
-	// Layer with screen blend mode
-	builder.Layer(scene.BlendScreen, 0.7, nil, func(lb *scene.SceneBuilder) {
-		lb.FillCircle(500, 420, 100,
-			scene.SolidBrush(gg.RGBA{R: 0.2, G: 0.8, B: 0.6, A: 1}))
-	})
+	// --- Tier 2a: Convex polygon fast-path ---
+	// Convex polygons with only line segments use a single draw call (no stencil).
 
-	// Stroked shapes
-	builder.StrokeRect(50, 350, 100, 150,
-		scene.SolidBrush(gg.RGBA{R: 0.2, G: 0.2, B: 0.2, A: 1}), 3)
+	// Triangle (convex).
+	dc.SetRGBA(1.0, 0.6, 0.1, 0.9)
+	dc.MoveTo(600, 180)
+	dc.LineTo(700, 320)
+	dc.LineTo(500, 320)
+	dc.ClosePath()
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill triangle: %v", err)
+	}
 
-	builder.StrokeCircle(700, 450, 75,
-		scene.SolidBrush(gg.RGBA{R: 0.4, G: 0.2, B: 0.6, A: 1}), 4)
+	// Pentagon (convex).
+	dc.SetRGBA(0.2, 0.8, 0.4, 0.85)
+	drawRegularPolygon(dc, 150, 430, 60, 5)
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill pentagon: %v", err)
+	}
 
-	// Complex path (star shape)
-	starPath := createStarPath(700, 120, 50, 25, 5)
-	builder.FillPath(starPath, scene.SolidBrush(gg.RGBA{R: 1, G: 0.7, B: 0.1, A: 1}))
+	// Hexagon (convex).
+	dc.SetRGBA(0.8, 0.2, 0.6, 0.85)
+	drawRegularPolygon(dc, 350, 430, 55, 6)
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill hexagon: %v", err)
+	}
 
-	return builder.Build()
+	// --- Tier 2b: Stencil-then-cover (arbitrary paths) ---
+	// Non-convex paths and paths with curves use stencil buffer.
+
+	// Star (non-convex).
+	dc.SetRGBA(1, 0.7, 0.1, 1.0)
+	drawStar(dc, 550, 430, 65, 30, 5)
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill star: %v", err)
+	}
+
+	// Curved path (uses cubic beziers → stencil-then-cover).
+	dc.SetRGBA(0.4, 0.2, 0.8, 0.7)
+	dc.MoveTo(650, 380)
+	dc.CubicTo(750, 350, 750, 500, 650, 480)
+	dc.CubicTo(550, 460, 550, 360, 650, 380)
+	dc.ClosePath()
+	if err := dc.Fill(); err != nil {
+		log.Printf("Fill curved path: %v", err)
+	}
+
+	// Flush any pending GPU commands.
+	if err := dc.FlushGPU(); err != nil {
+		log.Printf("FlushGPU: %v", err)
+	}
+
+	// Save result.
+	outputPath := "gpu_output.png"
+	if err := dc.SavePNG(outputPath); err != nil {
+		log.Fatalf("Failed to save PNG: %v", err)
+	}
+
+	fmt.Printf("\nSaved output to: %s\n", outputPath)
+
+	// Report accelerator status.
+	if a := gg.Accelerator(); a != nil {
+		fmt.Printf("GPU Accelerator: %s\n", a.Name())
+	} else {
+		fmt.Println("GPU Accelerator: none (CPU rendering)")
+	}
+
+	fmt.Println("\nRendering tiers used:")
+	fmt.Println("  Tier 1 (SDF):             circles, rounded rect")
+	fmt.Println("  Tier 2a (Convex):          triangle, pentagon, hexagon")
+	fmt.Println("  Tier 2b (Stencil+Cover):   star, curved path")
 }
 
-// createStarPath creates a star-shaped path.
-func createStarPath(cx, cy, outerR, innerR float32, points int) *scene.Path {
-	path := scene.NewPath()
-
-	for i := 0; i < points*2; i++ {
-		angle := float32(i) * 3.14159 / float32(points)
-		angle -= 3.14159 / 2 // Start from top
-
-		var r float32
-		if i%2 == 0 {
-			r = outerR
+// drawRegularPolygon draws a regular polygon with n sides centered at (cx, cy).
+func drawRegularPolygon(dc *gg.Context, cx, cy, radius float64, sides int) {
+	for i := 0; i < sides; i++ {
+		angle := float64(i)*2*math.Pi/float64(sides) - math.Pi/2
+		x := cx + radius*math.Cos(angle)
+		y := cy + radius*math.Sin(angle)
+		if i == 0 {
+			dc.MoveTo(x, y)
 		} else {
+			dc.LineTo(x, y)
+		}
+	}
+	dc.ClosePath()
+}
+
+// drawStar draws a star with the given number of points.
+func drawStar(dc *gg.Context, cx, cy, outerR, innerR float64, points int) {
+	for i := 0; i < points*2; i++ {
+		angle := float64(i)*math.Pi/float64(points) - math.Pi/2
+		r := outerR
+		if i%2 == 1 {
 			r = innerR
 		}
-
-		x := cx + r*cos32(angle)
-		y := cy + r*sin32(angle)
-
+		x := cx + r*math.Cos(angle)
+		y := cy + r*math.Sin(angle)
 		if i == 0 {
-			path.MoveTo(x, y)
+			dc.MoveTo(x, y)
 		} else {
-			path.LineTo(x, y)
+			dc.LineTo(x, y)
 		}
 	}
-
-	path.Close()
-	return path
-}
-
-// cos32 returns the cosine of x (float32 version).
-func cos32(x float32) float32 {
-	// Simple Taylor series approximation for small angles
-	// For production, use math.Cos with conversion
-	x = mod32(x, 2*3.14159)
-	if x > 3.14159 {
-		x -= 2 * 3.14159
-	}
-	x2 := x * x
-	return 1 - x2/2 + x2*x2/24 - x2*x2*x2/720
-}
-
-// sin32 returns the sine of x (float32 version).
-func sin32(x float32) float32 {
-	// Simple Taylor series approximation
-	x = mod32(x, 2*3.14159)
-	if x > 3.14159 {
-		x -= 2 * 3.14159
-	}
-	x2 := x * x
-	return x - x*x2/6 + x*x2*x2/120 - x*x2*x2*x2/5040
-}
-
-// mod32 returns x mod y (float32 version).
-func mod32(x, y float32) float32 {
-	for x >= y {
-		x -= y
-	}
-	for x < 0 {
-		x += y
-	}
-	return x
+	dc.ClosePath()
 }
 
 func init() {
-	// Suppress log output to stderr for cleaner demo output
-	// In production, you would want to configure proper logging
 	log.SetOutput(os.Stdout)
 }
