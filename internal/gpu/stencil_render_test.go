@@ -33,7 +33,7 @@ func TestRenderPathTriangle(t *testing.T) {
 	}
 
 	color := gg.RGBA{R: 1, G: 0, B: 0, A: 1}
-	err := sr.RenderPath(target, elements, color)
+	err := sr.RenderPath(target, elements, color, gg.FillRuleNonZero)
 	if err != nil {
 		t.Fatalf("RenderPath failed: %v", err)
 	}
@@ -57,13 +57,13 @@ func TestRenderPathEmpty(t *testing.T) {
 	}
 
 	// Empty path should return nil (no-op).
-	err := sr.RenderPath(target, nil, gg.RGBA{R: 1, G: 0, B: 0, A: 1})
+	err := sr.RenderPath(target, nil, gg.RGBA{R: 1, G: 0, B: 0, A: 1}, gg.FillRuleNonZero)
 	if err != nil {
 		t.Fatalf("RenderPath with nil elements should return nil, got: %v", err)
 	}
 
 	// Empty slice should also return nil.
-	err = sr.RenderPath(target, []gg.PathElement{}, gg.RGBA{R: 1, G: 0, B: 0, A: 1})
+	err = sr.RenderPath(target, []gg.PathElement{}, gg.RGBA{R: 1, G: 0, B: 0, A: 1}, gg.FillRuleNonZero)
 	if err != nil {
 		t.Fatalf("RenderPath with empty elements should return nil, got: %v", err)
 	}
@@ -98,9 +98,88 @@ func TestRenderPathCircle(t *testing.T) {
 	}
 
 	color := gg.RGBA{R: 0, G: 0.5, B: 1, A: 0.8}
-	err := sr.RenderPath(target, elements, color)
+	err := sr.RenderPath(target, elements, color, gg.FillRuleNonZero)
 	if err != nil {
 		t.Fatalf("RenderPath circle failed: %v", err)
+	}
+}
+
+func TestRenderPathEvenOdd(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	sr := NewStencilRenderer(device, queue)
+	defer sr.Destroy()
+
+	// Build a simple triangle path.
+	elements := []gg.PathElement{
+		gg.MoveTo{Point: gg.Pt(10, 10)},
+		gg.LineTo{Point: gg.Pt(90, 10)},
+		gg.LineTo{Point: gg.Pt(50, 90)},
+		gg.Close{},
+	}
+
+	target := gg.GPURenderTarget{
+		Data:   make([]uint8, 100*100*4),
+		Width:  100,
+		Height: 100,
+		Stride: 100 * 4,
+	}
+
+	color := gg.RGBA{R: 0, G: 1, B: 0, A: 1}
+	err := sr.RenderPath(target, elements, color, gg.FillRuleEvenOdd)
+	if err != nil {
+		t.Fatalf("RenderPath with EvenOdd fill rule failed: %v", err)
+	}
+
+	// Verify even-odd pipeline was created.
+	if sr.evenOddStencilPipeline == nil {
+		t.Error("expected non-nil evenOddStencilPipeline after EvenOdd render")
+	}
+}
+
+func TestRenderPathBothFillRules(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	sr := NewStencilRenderer(device, queue)
+	defer sr.Destroy()
+
+	elements := []gg.PathElement{
+		gg.MoveTo{Point: gg.Pt(10, 10)},
+		gg.LineTo{Point: gg.Pt(90, 10)},
+		gg.LineTo{Point: gg.Pt(50, 90)},
+		gg.Close{},
+	}
+
+	target := gg.GPURenderTarget{
+		Data:   make([]uint8, 64*64*4),
+		Width:  64,
+		Height: 64,
+		Stride: 64 * 4,
+	}
+	color := gg.RGBA{R: 1, G: 0, B: 0, A: 1}
+
+	// Render with NonZero first.
+	if err := sr.RenderPath(target, elements, color, gg.FillRuleNonZero); err != nil {
+		t.Fatalf("RenderPath NonZero failed: %v", err)
+	}
+
+	// Then render with EvenOdd — both pipelines should coexist.
+	if err := sr.RenderPath(target, elements, color, gg.FillRuleEvenOdd); err != nil {
+		t.Fatalf("RenderPath EvenOdd failed: %v", err)
+	}
+
+	// Both stencil pipelines should exist.
+	if sr.nonZeroStencilPipeline == nil {
+		t.Error("expected non-nil nonZeroStencilPipeline")
+	}
+	if sr.evenOddStencilPipeline == nil {
+		t.Error("expected non-nil evenOddStencilPipeline")
+	}
+	// Cover pipeline is shared.
+	if sr.nonZeroCoverPipeline == nil {
+		t.Error("expected non-nil nonZeroCoverPipeline (shared)")
 	}
 }
 
@@ -127,7 +206,7 @@ func TestRenderPathPipelinesCreatedOnce(t *testing.T) {
 	color := gg.RGBA{R: 1, G: 1, B: 1, A: 1}
 
 	// First call creates pipelines.
-	if err := sr.RenderPath(target, elements, color); err != nil {
+	if err := sr.RenderPath(target, elements, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("first RenderPath failed: %v", err)
 	}
 
@@ -136,7 +215,7 @@ func TestRenderPathPipelinesCreatedOnce(t *testing.T) {
 	coverPipeline := sr.nonZeroCoverPipeline
 
 	// Second call should reuse pipelines.
-	if err := sr.RenderPath(target, elements, color); err != nil {
+	if err := sr.RenderPath(target, elements, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("second RenderPath failed: %v", err)
 	}
 
@@ -170,7 +249,7 @@ func TestRenderPathResizesTextures(t *testing.T) {
 		Height: 64,
 		Stride: 64 * 4,
 	}
-	if err := sr.RenderPath(target1, elements, color); err != nil {
+	if err := sr.RenderPath(target1, elements, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath at 64x64 failed: %v", err)
 	}
 	w, h := sr.Size()
@@ -185,7 +264,7 @@ func TestRenderPathResizesTextures(t *testing.T) {
 		Height: 96,
 		Stride: 128 * 4,
 	}
-	if err := sr.RenderPath(target2, elements, color); err != nil {
+	if err := sr.RenderPath(target2, elements, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath at 128x96 failed: %v", err)
 	}
 	w, h = sr.Size()

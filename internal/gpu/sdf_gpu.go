@@ -169,7 +169,7 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 
 	color := getColorFromPaint(paint)
 	elements := path.Elements()
-	return a.stencilRenderer.RenderPath(target, elements, color)
+	return a.stencilRenderer.RenderPath(target, elements, color, paint.FillRule)
 }
 
 func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {

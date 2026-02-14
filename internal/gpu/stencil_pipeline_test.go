@@ -44,6 +44,9 @@ func TestStencilPipelineCreation(t *testing.T) {
 	if sr.nonZeroStencilPipeline == nil {
 		t.Error("expected non-nil nonZeroStencilPipeline")
 	}
+	if sr.evenOddStencilPipeline == nil {
+		t.Error("expected non-nil evenOddStencilPipeline")
+	}
 	if sr.nonZeroCoverPipeline == nil {
 		t.Error("expected non-nil nonZeroCoverPipeline")
 	}
@@ -86,6 +89,9 @@ func TestStencilPipelineDestroy(t *testing.T) {
 	if sr.nonZeroStencilPipeline != nil {
 		t.Error("expected nil nonZeroStencilPipeline after destroyPipelines")
 	}
+	if sr.evenOddStencilPipeline != nil {
+		t.Error("expected nil evenOddStencilPipeline after destroyPipelines")
+	}
 	if sr.nonZeroCoverPipeline != nil {
 		t.Error("expected nil nonZeroCoverPipeline after destroyPipelines")
 	}
@@ -126,6 +132,9 @@ func TestStencilPipelineFullDestroy(t *testing.T) {
 
 	if sr.nonZeroStencilPipeline != nil {
 		t.Error("expected nil nonZeroStencilPipeline after Destroy")
+	}
+	if sr.evenOddStencilPipeline != nil {
+		t.Error("expected nil evenOddStencilPipeline after Destroy")
 	}
 	if sr.nonZeroCoverPipeline != nil {
 		t.Error("expected nil nonZeroCoverPipeline after Destroy")
@@ -200,6 +209,9 @@ func TestStencilPipelineRecreate(t *testing.T) {
 
 	if sr.nonZeroStencilPipeline == nil {
 		t.Error("expected non-nil nonZeroStencilPipeline after recreate")
+	}
+	if sr.evenOddStencilPipeline == nil {
+		t.Error("expected non-nil evenOddStencilPipeline after recreate")
 	}
 	if sr.nonZeroCoverPipeline == nil {
 		t.Error("expected non-nil nonZeroCoverPipeline after recreate")

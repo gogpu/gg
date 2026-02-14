@@ -70,8 +70,12 @@ type StencilRenderer struct {
 	// front faces increment stencil, back faces decrement.
 	nonZeroStencilPipeline hal.RenderPipeline
 
+	// evenOddStencilPipeline implements the even-odd fill rule:
+	// both front and back faces invert the stencil value.
+	evenOddStencilPipeline hal.RenderPipeline
+
 	// nonZeroCoverPipeline draws the fill color where stencil != 0,
-	// then resets stencil to zero via PassOp.
+	// then resets stencil to zero via PassOp. Shared by both fill rules.
 	nonZeroCoverPipeline hal.RenderPipeline
 }
 
@@ -318,8 +322,9 @@ func (b *stencilCoverBuffers) destroy(device hal.Device) {
 // The algorithm works in two passes within a single render pass:
 //
 //  1. Stencil fill: Tessellate the path into triangle fan vertices and draw them
-//     with the stencil fill pipeline. Front faces increment the stencil buffer,
-//     back faces decrement it, implementing the non-zero winding fill rule.
+//     with the stencil fill pipeline. The fill rule determines stencil operations:
+//     - NonZero: front faces increment, back faces decrement (winding number).
+//     - EvenOdd: both faces invert the stencil value (parity count).
 //
 //  2. Cover: Draw a bounding quad with the cover pipeline. Only pixels with
 //     non-zero stencil values pass the stencil test and receive the fill color.
@@ -331,7 +336,7 @@ func (b *stencilCoverBuffers) destroy(device hal.Device) {
 // written to target.Data.
 //
 // Returns nil for empty paths (no triangles after tessellation).
-func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.PathElement, color gg.RGBA) error {
+func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.PathElement, color gg.RGBA, fillRule gg.FillRule) error {
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
 
 	if err := sr.ensureReady(w, h); err != nil {
@@ -354,7 +359,7 @@ func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.P
 	defer bufs.destroy(sr.device)
 
 	// Encode, submit, and read back pixels.
-	return sr.encodeAndReadback(w, h, bufs, target)
+	return sr.encodeAndReadback(w, h, bufs, target, fillRule)
 }
 
 // ensureReady ensures textures and pipelines are created for the given dimensions.
@@ -458,7 +463,7 @@ func (sr *StencilRenderer) createUniformAndBindGroup(
 // resolve texture to a staging buffer, submits GPU commands, waits for
 // completion, and writes pixel data to the target.
 func (sr *StencilRenderer) encodeAndReadback(
-	w, h uint32, bufs *stencilCoverBuffers, target gg.GPURenderTarget,
+	w, h uint32, bufs *stencilCoverBuffers, target gg.GPURenderTarget, fillRule gg.FillRule,
 ) error {
 	encoder, err := sr.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
 		Label: "stencil_cover_encoder",
@@ -473,7 +478,13 @@ func (sr *StencilRenderer) encodeAndReadback(
 	// Render pass: stencil fill + cover in a single pass.
 	rp := encoder.BeginRenderPass(sr.RenderPassDescriptor())
 
-	rp.SetPipeline(sr.nonZeroStencilPipeline)
+	// Select stencil pipeline based on fill rule.
+	stencilPipeline := sr.nonZeroStencilPipeline
+	if fillRule == gg.FillRuleEvenOdd {
+		stencilPipeline = sr.evenOddStencilPipeline
+	}
+
+	rp.SetPipeline(stencilPipeline)
 	rp.SetBindGroup(0, bufs.stencilBindGroup, nil)
 	rp.SetVertexBuffer(0, bufs.fanVertBuf, 0)
 	rp.Draw(bufs.fanVertexCount, 1, 0, 0)

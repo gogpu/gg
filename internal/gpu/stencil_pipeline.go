@@ -34,11 +34,13 @@ const vertexStride = 8
 // uniform buffer at group(0) binding(0)) and vertex layout (float32x2 at
 // location(0)).
 //
-// The stencil fill pipeline uses front=IncrementWrap / back=DecrementWrap
-// to compute winding numbers for the non-zero fill rule.
+// Two stencil fill pipeline variants are created:
+//   - NonZero: front=IncrementWrap / back=DecrementWrap (winding number).
+//   - EvenOdd: front=Invert / back=Invert (parity count).
 //
 // The cover pipeline reads the stencil buffer with NotEqual(0) and resets
 // stencil values to zero via PassOp=Zero after writing the fill color.
+// It is shared by both fill rules.
 func (sr *StencilRenderer) createPipelines() error {
 	// Compile shaders.
 	stencilShader, err := sr.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
@@ -173,6 +175,56 @@ func (sr *StencilRenderer) createPipelines() error {
 	}
 	sr.nonZeroStencilPipeline = nonZeroStencilPipeline
 
+	// --- Even-Odd Stencil Fill Pipeline ---
+	//
+	// Even-odd fill rule: both front and back faces invert the stencil value.
+	// A pixel with odd winding count has stencil != 0 (inside), even count
+	// wraps back to 0 (outside). Same shader and layout as the non-zero variant.
+	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+		Label:  "stencil_fill_even_odd_pipeline",
+		Layout: sr.stencilPipeLayout,
+		Vertex: hal.VertexState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: "vs_main",
+			Buffers:    vertexBufferLayout,
+		},
+		Fragment: &hal.FragmentState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					WriteMask: gputypes.ColorWriteMaskNone,
+				},
+			},
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{
+				Compare:     gputypes.CompareFunctionAlways,
+				FailOp:      hal.StencilOperationKeep,
+				DepthFailOp: hal.StencilOperationKeep,
+				PassOp:      hal.StencilOperationInvert,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare:     gputypes.CompareFunctionAlways,
+				FailOp:      hal.StencilOperationKeep,
+				DepthFailOp: hal.StencilOperationKeep,
+				PassOp:      hal.StencilOperationInvert,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: multisample,
+		Primitive:   primitive,
+	})
+	if err != nil {
+		return fmt.Errorf("create even-odd stencil fill pipeline: %w", err)
+	}
+	sr.evenOddStencilPipeline = evenOddStencilPipeline
+
 	// --- Cover Pipeline ---
 	//
 	// Reads stencil buffer: only pixels with stencil != 0 pass the test.
@@ -237,6 +289,10 @@ func (sr *StencilRenderer) destroyPipelines() {
 	if sr.nonZeroCoverPipeline != nil {
 		sr.device.DestroyRenderPipeline(sr.nonZeroCoverPipeline)
 		sr.nonZeroCoverPipeline = nil
+	}
+	if sr.evenOddStencilPipeline != nil {
+		sr.device.DestroyRenderPipeline(sr.evenOddStencilPipeline)
+		sr.evenOddStencilPipeline = nil
 	}
 	if sr.nonZeroStencilPipeline != nil {
 		sr.device.DestroyRenderPipeline(sr.nonZeroStencilPipeline)
