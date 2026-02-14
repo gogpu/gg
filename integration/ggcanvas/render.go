@@ -5,6 +5,7 @@ package ggcanvas
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gogpu/gpucontext"
 )
@@ -98,9 +99,12 @@ func (c *Canvas) RenderToEx(dc gpucontext.TextureDrawer, opts RenderOptions) err
 			return ErrInvalidRenderer
 		}
 
+		// NewTextureFromRGBA calls WriteTexture which does waitForGPU internally.
+		// After this returns, ALL prior GPU work is complete, so it's safe to
+		// destroy the old texture (its descriptor heap entries are no longer in use).
 		realTex, err := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
 		if err != nil {
-			return err
+			return fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", err)
 		}
 
 		// gg pixmap data is premultiplied alpha — mark texture accordingly
@@ -111,6 +115,15 @@ func (c *Canvas) RenderToEx(dc gpucontext.TextureDrawer, opts RenderOptions) err
 
 		c.texture = realTex
 		tex = realTex
+
+		// NOW safe to destroy the old texture — GPU is idle after WriteTexture's wait.
+		// This prevents use-after-free where the GPU reads freed descriptor heap entries.
+		if c.oldTexture != nil {
+			if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
+				destroyer.Destroy()
+			}
+			c.oldTexture = nil
+		}
 	}
 
 	// Get gpucontext.Texture for drawing

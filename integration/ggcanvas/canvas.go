@@ -41,6 +41,7 @@ type Canvas struct {
 	ctx         *gg.Context
 	provider    gpucontext.DeviceProvider
 	texture     any  // Lazy-created texture (*gogpu.Texture)
+	oldTexture  any  // Previous texture awaiting deferred destruction
 	dirty       bool // Needs GPU upload
 	sizeChanged bool // Resize pending — texture must be recreated
 	width       int
@@ -183,13 +184,20 @@ func (c *Canvas) Flush() (any, error) {
 		return nil, ErrCanvasClosed
 	}
 
-	// If size changed, destroy old texture to force recreation at new size.
-	// Deferred from Resize() to keep texture alive between frames.
+	// If size changed, defer old texture destruction until after GPU is idle.
+	// The old texture may still be referenced by in-flight GPU command buffers.
+	// Destroying it now would free descriptor heap entries that the GPU is reading,
+	// causing it to sample zeros (transparent). Instead, keep it alive and destroy
+	// it in RenderToEx after WriteTexture (which calls waitForGPU internally).
 	if c.sizeChanged {
 		if c.texture != nil {
-			if destroyer, ok := c.texture.(textureDestroyer); ok {
-				destroyer.Destroy()
+			// Destroy any previously deferred texture first
+			if c.oldTexture != nil {
+				if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
+					destroyer.Destroy()
+				}
 			}
+			c.oldTexture = c.texture
 			c.texture = nil
 		}
 		c.sizeChanged = false
@@ -247,7 +255,13 @@ func (c *Canvas) Close() error {
 	}
 	c.closed = true
 
-	// Destroy texture
+	// Destroy textures (current and any deferred old texture)
+	if c.oldTexture != nil {
+		if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
+			destroyer.Destroy()
+		}
+		c.oldTexture = nil
+	}
 	if c.texture != nil {
 		if destroyer, ok := c.texture.(textureDestroyer); ok {
 			destroyer.Destroy()

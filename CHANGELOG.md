@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ggcanvas: DX12 texture disappearance during resize** — deferred texture
+  destruction prevents descriptor heap use-after-free. Old texture is kept alive
+  until after `WriteTexture` completes (GPU idle), then destroyed safely.
+  Root cause: DX12 shader-visible sampler heap has a hard 2048-slot limit;
+  leaked textures exhaust it, causing `CreateBindGroup` to fail silently.
+- **ggcanvas: removed debug logging** — alpha pixel counting and diagnostic
+  `log.Printf` calls removed from `Flush()`
+
+### Added
+
+- **`Canvas.Draw()` helper** — draws with `gg.Context` and marks dirty atomically,
+  replacing manual `MarkDirty()` calls
+
 ## [0.27.1] - 2026-02-10
 
 ### Fixed

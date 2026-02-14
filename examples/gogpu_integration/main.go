@@ -26,9 +26,9 @@ import (
 func main() {
 	const width, height = 800, 600
 
-	// Create gogpu application
+	// Create gogpu application with DX12 (testing deferred clear fix)
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("GoGPU + gg Integration via ggcanvas (DX12)").
+		WithTitle("GoGPU + gg Integration via ggcanvas").
 		WithSize(width, height).
 		WithGraphicsAPI(gogpu.GraphicsAPIDX12))
 
@@ -67,17 +67,17 @@ func main() {
 			log.Printf("Canvas created: %dx%d", w, h)
 		}
 
-		// Sync canvas size with window (handles resize without timing issues)
+		// Sync canvas size with window (handles resize)
 		cw, ch := canvas.Size()
 		if cw != w || ch != h {
-			log.Printf("Resize canvas %dx%d → %dx%d", cw, ch, w, h)
 			if err := canvas.Resize(w, h); err != nil {
 				log.Printf("Resize error: %v", err)
 			}
 			cw, ch = w, h
 		}
 
-		// Draw 2D graphics using gg API (time-based animation)
+		// Draw animated content using the Draw() helper
+		// (automatically marks dirty for GPU upload)
 		elapsed := time.Since(startTime).Seconds()
 		if err := canvas.Draw(func(cc *gg.Context) {
 			renderFrame(cc, elapsed, cw, ch)
@@ -85,9 +85,9 @@ func main() {
 			log.Printf("Draw error: %v", err)
 		}
 
-		// Render canvas to gogpu window (handles texture upload automatically)
+		// Render canvas to gogpu window
 		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
-			log.Printf("RenderTo error (frame %d, %dx%d): %v", frame, cw, ch, err)
+			log.Printf("Frame %d: RenderTo error: %v", frame, err)
 		}
 		frame++
 	})
