@@ -119,6 +119,76 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 	return nil
 }
 
+// ensureSurfaceTextures creates or recreates only the MSAA color and
+// depth/stencil textures for surface rendering mode. The resolve texture
+// is NOT created because the caller-provided surface view serves as the
+// MSAA resolve target.
+//
+// If a resolve texture exists from a previous offscreen mode, it is destroyed.
+// If dimensions match and textures exist, this is a no-op.
+func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labelPrefix string) error {
+	if ts.width == w && ts.height == h && ts.msaaTex != nil {
+		return nil
+	}
+	ts.destroyTextures(device)
+
+	size := hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
+
+	// MSAA color texture (4x samples, BGRA8Unorm).
+	msaaTex, err := device.CreateTexture(&hal.TextureDescriptor{
+		Label:         labelPrefix + "_msaa_color",
+		Size:          size,
+		MipLevelCount: 1,
+		SampleCount:   sampleCount,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
+	})
+	if err != nil {
+		return fmt.Errorf("create MSAA color texture: %w", err)
+	}
+	ts.msaaTex = msaaTex
+
+	msaaView, err := device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
+		Label: labelPrefix + "_msaa_color_view",
+	})
+	if err != nil {
+		ts.destroyTextures(device)
+		return fmt.Errorf("create MSAA color view: %w", err)
+	}
+	ts.msaaView = msaaView
+
+	// Depth/stencil texture (4x samples, Depth24PlusStencil8).
+	stencilTex, err := device.CreateTexture(&hal.TextureDescriptor{
+		Label:         labelPrefix + "_depth_stencil",
+		Size:          size,
+		MipLevelCount: 1,
+		SampleCount:   sampleCount,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatDepth24PlusStencil8,
+		Usage:         gputypes.TextureUsageRenderAttachment,
+	})
+	if err != nil {
+		ts.destroyTextures(device)
+		return fmt.Errorf("create depth/stencil texture: %w", err)
+	}
+	ts.stencilTex = stencilTex
+
+	stencilView, err := device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
+		Label: labelPrefix + "_depth_stencil_view",
+	})
+	if err != nil {
+		ts.destroyTextures(device)
+		return fmt.Errorf("create depth/stencil view: %w", err)
+	}
+	ts.stencilView = stencilView
+
+	// No resolve texture -- surface view is the resolve target.
+	ts.width = w
+	ts.height = h
+	return nil
+}
+
 // destroyTextures releases all texture resources and resets dimensions.
 func (ts *textureSet) destroyTextures(device hal.Device) {
 	if ts.resolveView != nil {
