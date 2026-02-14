@@ -304,7 +304,7 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 //   - Edges partially off-screen left: winding pre-accumulated for the off-screen portion
 //
 // This matches the algorithm in fine.go which processes all pixels in each tile row.
-func (af *AnalyticFiller) computeSegmentCoverage(
+func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance-critical rasterization loop, splitting hurts cache locality
 	line *LineEdge,
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
 	yPixel, yPixelEnd, aaScaleF float32,
@@ -393,26 +393,7 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	// Pre-accumulate winding for the off-screen-left portion of the edge.
 	// When part of the edge is at X < 0, pixels at X >= 0 are to the RIGHT
 	// of that portion and must receive its winding contribution.
-	acc := float32(0)
-	if lineTopX < 0 || lineBottomX < 0 {
-		// Find Y where the edge crosses X=0
-		y0 := clamp32(lineTopY+(0-lineTopX)*ySlope, yTop, yBot)
-		if lineTopX < 0 {
-			// Top of edge is off-screen left; off-screen portion: lineTopY → y0
-			h := y0 - lineTopY
-			if h < 0 {
-				h = -h
-			}
-			acc = h * sign
-		} else {
-			// Bottom of edge is off-screen left; off-screen portion: y0 → lineBottomY
-			h := lineBottomY - y0
-			if h < 0 {
-				h = -h
-			}
-			acc = h * sign
-		}
-	}
+	acc := offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign)
 
 	// Compute the pixel range that needs detailed per-pixel processing.
 	// Pixels outside this range get only the accumulated winding (acc).
@@ -475,6 +456,29 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	for xIdx := xEnd; xIdx < af.width; xIdx++ {
 		af.winding[xIdx] += acc
 	}
+}
+
+// offscreenLeftWinding computes the winding contribution from the portion of
+// an edge that extends past the left canvas boundary (X < 0). Pixels at X >= 0
+// are to the right of that portion and must receive its winding.
+func offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign float32) float32 {
+	if lineTopX >= 0 && lineBottomX >= 0 {
+		return 0
+	}
+	// Find Y where the edge crosses X=0.
+	y0 := clamp32(lineTopY-lineTopX*ySlope, yTop, yBot)
+	var h float32
+	if lineTopX < 0 {
+		// Top of edge is off-screen left; off-screen portion: lineTopY → y0.
+		h = y0 - lineTopY
+	} else {
+		// Bottom of edge is off-screen left; off-screen portion: y0 → lineBottomY.
+		h = lineBottomY - y0
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h * sign
 }
 
 // applyFillRule converts accumulated winding values to coverage.

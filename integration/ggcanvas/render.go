@@ -92,37 +92,12 @@ func (c *Canvas) RenderToEx(dc gpucontext.TextureDrawer, opts RenderOptions) err
 		return err
 	}
 
-	// If texture is pending (placeholder), create real GPU texture now
-	if pending, isPending := tex.(*pendingTexture); isPending {
-		creator := dc.TextureCreator()
-		if creator == nil {
-			return ErrInvalidRenderer
-		}
-
-		// NewTextureFromRGBA calls WriteTexture which does waitForGPU internally.
-		// After this returns, ALL prior GPU work is complete, so it's safe to
-		// destroy the old texture (its descriptor heap entries are no longer in use).
-		realTex, err := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
+	// If texture is pending (placeholder), create real GPU texture now.
+	if _, isPending := tex.(*pendingTexture); isPending {
+		var err error
+		tex, err = c.promotePendingTexture(tex, dc)
 		if err != nil {
-			return fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", err)
-		}
-
-		// gg pixmap data is premultiplied alpha — mark texture accordingly
-		// so gogpu uses BlendFactorOne pipeline for correct compositing.
-		if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
-			pt.SetPremultiplied(true)
-		}
-
-		c.texture = realTex
-		tex = realTex
-
-		// NOW safe to destroy the old texture — GPU is idle after WriteTexture's wait.
-		// This prevents use-after-free where the GPU reads freed descriptor heap entries.
-		if c.oldTexture != nil {
-			if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
-				destroyer.Destroy()
-			}
-			c.oldTexture = nil
+			return err
 		}
 	}
 
@@ -166,4 +141,37 @@ func (c *Canvas) RenderToScaled(dc gpucontext.TextureDrawer, scale float32) erro
 		ScaleY: scale,
 		Alpha:  1,
 	})
+}
+
+// promotePendingTexture creates a real GPU texture from a pending placeholder.
+// It also destroys any deferred old texture since the GPU is idle after
+// WriteTexture's internal wait.
+func (c *Canvas) promotePendingTexture(tex any, dc gpucontext.TextureDrawer) (any, error) {
+	pending := tex.(*pendingTexture)
+	creator := dc.TextureCreator()
+	if creator == nil {
+		return nil, ErrInvalidRenderer
+	}
+
+	// NewTextureFromRGBA calls WriteTexture which does waitForGPU internally.
+	// After this returns, ALL prior GPU work is complete, so it's safe to
+	// destroy the old texture (its descriptor heap entries are no longer in use).
+	realTex, err := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
+	if err != nil {
+		return nil, fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", err)
+	}
+
+	// gg pixmap data is premultiplied alpha — mark texture accordingly
+	// so gogpu uses BlendFactorOne pipeline for correct compositing.
+	if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
+		pt.SetPremultiplied(true)
+	}
+
+	c.texture = realTex
+
+	// NOW safe to destroy the old texture — GPU is idle after WriteTexture's wait.
+	destroyTexture(c.oldTexture)
+	c.oldTexture = nil
+
+	return realTex, nil
 }

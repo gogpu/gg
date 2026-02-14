@@ -190,16 +190,7 @@ func (c *Canvas) Flush() (any, error) {
 	// causing it to sample zeros (transparent). Instead, keep it alive and destroy
 	// it in RenderToEx after WriteTexture (which calls waitForGPU internally).
 	if c.sizeChanged {
-		if c.texture != nil {
-			// Destroy any previously deferred texture first
-			if c.oldTexture != nil {
-				if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
-					destroyer.Destroy()
-				}
-			}
-			c.oldTexture = c.texture
-			c.texture = nil
-		}
+		c.deferTextureDestruction()
 		c.sizeChanged = false
 	}
 
@@ -255,19 +246,11 @@ func (c *Canvas) Close() error {
 	}
 	c.closed = true
 
-	// Destroy textures (current and any deferred old texture)
-	if c.oldTexture != nil {
-		if destroyer, ok := c.oldTexture.(textureDestroyer); ok {
-			destroyer.Destroy()
-		}
-		c.oldTexture = nil
-	}
-	if c.texture != nil {
-		if destroyer, ok := c.texture.(textureDestroyer); ok {
-			destroyer.Destroy()
-		}
-		c.texture = nil
-	}
+	// Destroy textures (current and any deferred old texture).
+	destroyTexture(c.oldTexture)
+	c.oldTexture = nil
+	destroyTexture(c.texture)
+	c.texture = nil
 
 	// Close gg context
 	if c.ctx != nil {
@@ -277,6 +260,29 @@ func (c *Canvas) Close() error {
 
 	c.provider = nil
 	return nil
+}
+
+// deferTextureDestruction moves the current texture to oldTexture so it can
+// be destroyed later (after the GPU is idle). Any previously deferred texture
+// is destroyed immediately.
+func (c *Canvas) deferTextureDestruction() {
+	if c.texture == nil {
+		return
+	}
+	destroyTexture(c.oldTexture)
+	c.oldTexture = c.texture
+	c.texture = nil
+}
+
+// destroyTexture destroys a texture if it implements the textureDestroyer
+// interface. Safe to call with nil.
+func destroyTexture(tex any) {
+	if tex == nil {
+		return
+	}
+	if d, ok := tex.(textureDestroyer); ok {
+		d.Destroy()
+	}
 }
 
 // createTexture creates a pending texture placeholder from pixel data.
