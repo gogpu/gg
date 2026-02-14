@@ -34,18 +34,23 @@ type SDFAccelerator struct {
 	device   hal.Device
 	queue    hal.Queue
 
-	// Batch dispatch pipeline (used by FillShape/StrokeShape + Flush).
+	// Batch compute dispatch pipeline (legacy, kept for fallback).
 	batchShader     hal.ShaderModule
 	batchBindLayout hal.BindGroupLayout
 	batchPipeLayout hal.PipelineLayout
 	batchPipeline   hal.ComputePipeline
 
+	// SDF render pipeline (vertex+fragment, preferred over compute).
+	sdfRenderPipeline *SDFRenderPipeline
+
 	// Stencil-then-cover renderer for general path fills.
 	stencilRenderer *StencilRenderer
 
 	// Pending shapes for batch dispatch.
-	pendingShapes []SDFBatchShape
-	pendingTarget *gg.GPURenderTarget // nil if no pending shapes
+	pendingShapes      []SDFRenderShape
+	pendingBatchShapes []SDFBatchShape     // legacy compute path
+	pendingTarget      *gg.GPURenderTarget // nil if no pending shapes
+	useRenderPipeline  bool                // true = use render pipeline, false = compute
 
 	cpuFallback    gg.SDFAccelerator
 	gpuReady       bool
@@ -73,7 +78,12 @@ func (a *SDFAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pendingShapes = nil
+	a.pendingBatchShapes = nil
 	a.pendingTarget = nil
+	if a.sdfRenderPipeline != nil {
+		a.sdfRenderPipeline.Destroy()
+		a.sdfRenderPipeline = nil
+	}
 	if a.stencilRenderer != nil {
 		a.stencilRenderer.Destroy()
 		a.stencilRenderer = nil
@@ -123,6 +133,10 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	defer a.mu.Unlock()
 
 	// Destroy own resources if we created them
+	if a.sdfRenderPipeline != nil {
+		a.sdfRenderPipeline.Destroy()
+		a.sdfRenderPipeline = nil
+	}
 	a.destroyPipelines()
 	if !a.externalDevice && a.device != nil {
 		a.device.Destroy()
@@ -142,6 +156,11 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 		a.gpuReady = false
 		return fmt.Errorf("gpu-sdf: create pipelines with shared device: %w", err)
 	}
+
+	// Create render pipeline (preferred path).
+	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.useRenderPipeline = true
+
 	a.gpuReady = true
 	log.Printf("gpu-sdf: switched to shared GPU device")
 	return nil
@@ -210,18 +229,55 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 func (a *SDFAccelerator) PendingCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.pendingShapes)
+	if a.useRenderPipeline {
+		return len(a.pendingShapes)
+	}
+	return len(a.pendingBatchShapes)
 }
 
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
+	if a.useRenderPipeline {
+		return a.flushRenderPipeline(target)
+	}
+	return a.flushComputePipeline(target)
+}
+
+// flushRenderPipeline dispatches pending shapes via the vertex+fragment render pipeline.
+func (a *SDFAccelerator) flushRenderPipeline(target gg.GPURenderTarget) error {
 	if len(a.pendingShapes) == 0 {
 		return nil
 	}
-	err := a.dispatchBatch(target)
+	if a.sdfRenderPipeline == nil {
+		a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	}
+	shapes := make([]SDFRenderShape, len(a.pendingShapes))
+	copy(shapes, a.pendingShapes)
 	a.pendingShapes = a.pendingShapes[:0]
 	a.pendingTarget = nil
+
+	err := a.sdfRenderPipeline.RenderShapes(target, shapes)
 	if err != nil {
-		log.Printf("gpu-sdf: batch dispatch error (%d shapes): %v", len(a.pendingShapes), err)
+		log.Printf("gpu-sdf: render pipeline error (%d shapes): %v", len(shapes), err)
+	}
+	return err
+}
+
+// flushComputePipeline dispatches pending shapes via the legacy compute pipeline.
+func (a *SDFAccelerator) flushComputePipeline(target gg.GPURenderTarget) error {
+	if len(a.pendingBatchShapes) == 0 {
+		return nil
+	}
+	// Temporarily swap pendingShapes with pendingBatchShapes for dispatchBatch.
+	origPending := a.pendingShapes
+	a.pendingShapes = nil
+
+	origBatch := a.pendingBatchShapes
+	err := a.dispatchBatchLegacy(target, origBatch)
+	a.pendingBatchShapes = a.pendingBatchShapes[:0]
+	a.pendingShapes = origPending
+	a.pendingTarget = nil
+	if err != nil {
+		log.Printf("gpu-sdf: batch dispatch error (%d shapes): %v", len(origBatch), err)
 	}
 	return err
 }
@@ -234,36 +290,45 @@ func (a *SDFAccelerator) queueShape(target gg.GPURenderTarget, shape gg.Detected
 		}
 	}
 
-	color := getColorFromPaint(paint)
-	var kind uint32
-	var p1, p2, p3 float32
-	switch shape.Kind {
-	case gg.ShapeCircle, gg.ShapeEllipse:
-		kind = 0
-		p1 = float32(shape.RadiusX)
-		p2 = float32(shape.RadiusY)
-	case gg.ShapeRect, gg.ShapeRRect:
-		kind = 1
-		p1 = float32(shape.Width / 2)
-		p2 = float32(shape.Height / 2)
-		p3 = float32(shape.CornerRadius)
-	default:
-		return gg.ErrFallbackToCPU
-	}
-	var halfStroke float32
-	var isStroked uint32
-	if stroked {
-		halfStroke = float32(paint.EffectiveLineWidth() / 2)
-		isStroked = 1
+	if a.useRenderPipeline {
+		rs, ok := DetectedShapeToRenderShape(shape, paint, stroked)
+		if !ok {
+			return gg.ErrFallbackToCPU
+		}
+		a.pendingShapes = append(a.pendingShapes, rs)
+	} else {
+		// Legacy compute path.
+		color := getColorFromPaint(paint)
+		var kind uint32
+		var p1, p2, p3 float32
+		switch shape.Kind {
+		case gg.ShapeCircle, gg.ShapeEllipse:
+			kind = 0
+			p1 = float32(shape.RadiusX)
+			p2 = float32(shape.RadiusY)
+		case gg.ShapeRect, gg.ShapeRRect:
+			kind = 1
+			p1 = float32(shape.Width / 2)
+			p2 = float32(shape.Height / 2)
+			p3 = float32(shape.CornerRadius)
+		default:
+			return gg.ErrFallbackToCPU
+		}
+		var halfStroke float32
+		var isStroked uint32
+		if stroked {
+			halfStroke = float32(paint.EffectiveLineWidth() / 2)
+			isStroked = 1
+		}
+		a.pendingBatchShapes = append(a.pendingBatchShapes, SDFBatchShape{
+			Kind: kind, CenterX: float32(shape.CenterX), CenterY: float32(shape.CenterY),
+			Param1: p1, Param2: p2, Param3: p3,
+			HalfStroke: halfStroke, IsStroked: isStroked,
+			ColorR: float32(color.R), ColorG: float32(color.G),
+			ColorB: float32(color.B), ColorA: float32(color.A),
+		})
 	}
 
-	a.pendingShapes = append(a.pendingShapes, SDFBatchShape{
-		Kind: kind, CenterX: float32(shape.CenterX), CenterY: float32(shape.CenterY),
-		Param1: p1, Param2: p2, Param3: p3,
-		HalfStroke: halfStroke, IsStroked: isStroked,
-		ColorR: float32(color.R), ColorG: float32(color.G),
-		ColorB: float32(color.B), ColorA: float32(color.A),
-	})
 	targetCopy := target
 	a.pendingTarget = &targetCopy
 	return nil
@@ -274,12 +339,12 @@ func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
 		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
 }
 
-// packShapesData serializes all pending shapes into a byte slice for GPU upload.
-func (a *SDFAccelerator) packShapesData() []byte {
+// packShapesData serializes batch shapes into a byte slice for GPU upload.
+func packBatchShapesData(shapes []SDFBatchShape) []byte {
 	shapeSize := int(unsafe.Sizeof(SDFBatchShape{}))
-	shapesBytes := make([]byte, shapeSize*len(a.pendingShapes))
-	for i := range a.pendingShapes {
-		src := structToBytes(unsafe.Pointer(&a.pendingShapes[i]), unsafe.Sizeof(a.pendingShapes[i])) //nolint:gosec // safe struct access
+	shapesBytes := make([]byte, shapeSize*len(shapes))
+	for i := range shapes {
+		src := structToBytes(unsafe.Pointer(&shapes[i]), unsafe.Sizeof(shapes[i])) //nolint:gosec // safe struct access
 		copy(shapesBytes[i*shapeSize:], src)
 	}
 	return shapesBytes
@@ -350,16 +415,16 @@ func (a *SDFAccelerator) encodeMultiPass(
 	return nil
 }
 
-// dispatchBatch sends all pending shapes to the GPU using multi-pass dispatch.
+// dispatchBatchLegacy sends shapes to the GPU using multi-pass compute dispatch.
 // Each shape gets its own compute pass in a single command encoder, avoiding
 // naga SPIR-V bug #5 (loops only execute the first iteration).
 // One submit + one fence wait for the entire batch.
-func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
+func (a *SDFAccelerator) dispatchBatchLegacy(target gg.GPURenderTarget, shapes []SDFBatchShape) error {
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
 	pixelBufSize := uint64(w * h * 4)
-	shapesBytes := a.packShapesData()
+	shapesBytes := packBatchShapesData(shapes)
 	packedPixels := packPixelsForGPU(target.Data, int(w*h))
-	n := len(a.pendingShapes)
+	n := len(shapes)
 
 	// Create shared buffers: shapes (all shapes) + pixels (storage) + staging (readback).
 	shapesBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
@@ -495,6 +560,11 @@ func (a *SDFAccelerator) initGPU() error {
 		a.queue = nil
 		return fmt.Errorf("create pipelines: %w", err)
 	}
+
+	// Create SDF render pipeline (preferred over compute).
+	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.useRenderPipeline = true
+
 	a.gpuReady = true
 	log.Printf("gpu-sdf: GPU accelerator initialized (%s)", selected.Info.Name)
 	return nil
