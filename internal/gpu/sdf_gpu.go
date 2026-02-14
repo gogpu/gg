@@ -24,6 +24,9 @@ import (
 // Shapes submitted via FillShape/StrokeShape are accumulated into a batch
 // and dispatched as a single GPU compute pass on Flush(). This avoids
 // per-shape fence waits and buffer allocations.
+//
+// For general path fills (non-SDF shapes), the accelerator delegates to
+// a StencilRenderer that implements the stencil-then-cover algorithm.
 type SDFAccelerator struct {
 	mu sync.Mutex
 
@@ -36,6 +39,9 @@ type SDFAccelerator struct {
 	batchBindLayout hal.BindGroupLayout
 	batchPipeLayout hal.PipelineLayout
 	batchPipeline   hal.ComputePipeline
+
+	// Stencil-then-cover renderer for general path fills.
+	stencilRenderer *StencilRenderer
 
 	// Pending shapes for batch dispatch.
 	pendingShapes []SDFBatchShape
@@ -51,7 +57,7 @@ var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF) != 0
+	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill) != 0
 }
 
 func (a *SDFAccelerator) Init() error {
@@ -68,6 +74,10 @@ func (a *SDFAccelerator) Close() {
 	defer a.mu.Unlock()
 	a.pendingShapes = nil
 	a.pendingTarget = nil
+	if a.stencilRenderer != nil {
+		a.stencilRenderer.Destroy()
+		a.stencilRenderer = nil
+	}
 	a.destroyPipelines()
 	if !a.externalDevice {
 		if a.device != nil {
@@ -137,8 +147,29 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	return nil
 }
 
-func (a *SDFAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
+// FillPath renders a filled path using the stencil-then-cover algorithm.
+// It first flushes any pending SDF shapes, then delegates to StencilRenderer.
+// Returns ErrFallbackToCPU if the GPU is not ready.
+func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Flush any pending SDF shapes before the render pass.
+	if err := a.flushLocked(target); err != nil {
+		return err
+	}
+
+	// Ensure stencil renderer exists.
+	if a.stencilRenderer == nil {
+		a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	}
+
+	color := getColorFromPaint(paint)
+	elements := path.Elements()
+	return a.stencilRenderer.RenderPath(target, elements, color)
 }
 
 func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
