@@ -366,6 +366,18 @@ func (sr *StencilRenderer) encodeAndReadback(
 
 	rp.End()
 
+	// VK-LAYOUT-001: After MSAA resolve the texture is in
+	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
+	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
+	// This is a no-op on Metal, GLES, software, and noop backends.
+	encoder.TransitionTextures([]hal.TextureBarrier{{
+		Texture: sr.textures.resolveTex,
+		Usage: hal.TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageRenderAttachment,
+			NewUsage: gputypes.TextureUsageCopySrc,
+		},
+	}})
+
 	// Copy resolve texture to staging buffer for CPU readback.
 	pixelBufSize := uint64(w) * uint64(h) * 4
 	stagingBuf, err := sr.device.CreateBuffer(&hal.BufferDescriptor{
