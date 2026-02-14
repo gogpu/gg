@@ -11,19 +11,19 @@
 struct Uniforms {
     viewport: vec2<f32>,  // width, height in pixels
     _pad: vec2<f32>,
-};
+}
 
 struct VertexInput {
     @location(0) position: vec2<f32>,  // pixel position
     @location(1) coverage: f32,        // 1.0 = interior, 0.0..1.0 = AA ramp
     @location(2) color: vec4<f32>,     // premultiplied RGBA
-};
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) coverage: f32,
     @location(1) color: vec4<f32>,
-};
+}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 

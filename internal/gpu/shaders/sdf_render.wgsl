@@ -16,7 +16,7 @@
 struct Uniforms {
     viewport: vec2<f32>,   // width, height in pixels
     _pad: vec2<f32>,
-};
+}
 
 struct VertexInput {
     @location(0) position: vec2<f32>,  // quad corner in pixel coords
@@ -28,7 +28,7 @@ struct VertexInput {
     @location(6) half_stroke: f32,     // half stroke width (0 for filled)
     @location(7) is_stroked: f32,      // 1.0 for stroked, 0.0 for filled
     @location(8) color: vec4<f32>,     // premultiplied RGBA
-};
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -40,7 +40,7 @@ struct VertexOutput {
     @location(5) half_stroke: f32,
     @location(6) is_stroked: f32,
     @location(7) color: vec4<f32>,
-};
+}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 
