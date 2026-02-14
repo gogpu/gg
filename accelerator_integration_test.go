@@ -60,6 +60,68 @@ func (a *trackingAccelerator) StrokeShape(target GPURenderTarget, shape Detected
 
 func (a *trackingAccelerator) Flush(_ GPURenderTarget) error { return nil }
 
+// flushTrackingAccelerator tracks Flush calls for testing Context.Close() behavior.
+type flushTrackingAccelerator struct {
+	trackingAccelerator
+	flushCt int
+}
+
+func (a *flushTrackingAccelerator) Flush(_ GPURenderTarget) error {
+	a.mu.Lock()
+	a.flushCt++
+	a.mu.Unlock()
+	return nil
+}
+
+func TestContextCloseFlushesGPU(t *testing.T) {
+	resetAccelerator()
+	defer resetAccelerator()
+
+	tracker := &flushTrackingAccelerator{}
+	if err := RegisterAccelerator(tracker); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+
+	dc := NewContext(200, 200)
+
+	// Draw a circle so there might be pending GPU state.
+	dc.SetColor(Red.Color())
+	dc.DrawCircle(100, 100, 30)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill() = %v", err)
+	}
+
+	tracker.mu.Lock()
+	flushBefore := tracker.flushCt
+	tracker.mu.Unlock()
+
+	// Close should flush the accelerator.
+	if err := dc.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+
+	tracker.mu.Lock()
+	flushAfter := tracker.flushCt
+	tracker.mu.Unlock()
+
+	if flushAfter <= flushBefore {
+		t.Error("expected Close to flush GPU accelerator, but Flush was not called")
+	}
+}
+
+func TestContextCloseWithoutAccelerator(t *testing.T) {
+	resetAccelerator()
+
+	// Verify Close works without panic when no accelerator is registered.
+	dc := NewContext(100, 100)
+	dc.DrawCircle(50, 50, 20)
+	_ = dc.Fill()
+
+	if err := dc.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+}
+
 func TestContextWithSDFAcceleratorFillCircle(t *testing.T) {
 	resetAccelerator()
 	defer resetAccelerator()

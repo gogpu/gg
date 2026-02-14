@@ -156,6 +156,27 @@ func Accelerator() GPUAccelerator {
 	return a
 }
 
+// CloseAccelerator shuts down the global GPU accelerator, releasing all GPU
+// resources (textures, pipelines, device, instance). After this call,
+// [Accelerator] returns nil and rendering falls back to CPU.
+//
+// Call this at application shutdown to prevent VkImage and other GPU memory
+// leaks. It is safe to call when no accelerator is registered (no-op).
+// CloseAccelerator is idempotent.
+//
+// Example:
+//
+//	defer gg.CloseAccelerator()
+func CloseAccelerator() {
+	accelMu.Lock()
+	a := accel
+	accel = nil
+	accelMu.Unlock()
+	if a != nil {
+		a.Close()
+	}
+}
+
 // SetAcceleratorDeviceProvider passes a device provider to the registered
 // accelerator, enabling GPU device sharing. If no accelerator is registered
 // or it doesn't support device sharing, this is a no-op.
