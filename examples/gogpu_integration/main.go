@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gogpu/gg"
+	_ "github.com/gogpu/gg/gpu" // Register GPU accelerator (SDF + MSAA 4x)
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gogpu/gmath"
