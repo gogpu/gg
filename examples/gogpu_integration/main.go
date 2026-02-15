@@ -14,7 +14,7 @@
 //	Tier 2b (Stencil+Cover): star shape, curved paths
 //
 // Requirements:
-//   - gogpu v0.17.0+
+//   - gogpu v0.18.0+
 //   - gg v0.28.0+
 package main
 

@@ -30,5 +30,5 @@ Resize the window to see automatic canvas reallocation.
 | Dependency | Minimum version |
 |------------|-----------------|
 | Go | 1.25+ |
-| gogpu | v0.17.0+ |
-| gg | v0.27.0+ |
+| gogpu | v0.18.0+ |
+| gg | v0.28.0+ |

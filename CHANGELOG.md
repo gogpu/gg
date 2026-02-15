@@ -90,6 +90,11 @@ Complete GPU rendering pipeline with three tiers, unified under a single render 
 - **Examples updated** — `gpu` and `gogpu_integration` examples rewritten for
   three-tier rendering architecture with GLES backend support
 
+### Dependencies
+- wgpu v0.15.0 → v0.16.0
+- naga v0.12.0 → v0.13.0
+- gogpu v0.17.0 → v0.18.0 (in examples)
+
 ## [0.27.1] - 2026-02-10
 
 ### Fixed
