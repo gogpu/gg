@@ -3,8 +3,8 @@ module github.com/gogpu/gg/examples/gogpu_integration
 go 1.25
 
 require (
-	github.com/gogpu/gg v0.27.1
-	github.com/gogpu/gogpu v0.18.0
+	github.com/gogpu/gg v0.28.0
+	github.com/gogpu/gogpu v0.18.1
 	github.com/gogpu/gpucontext v0.9.0
 )
 

@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.0
+## Current State: v0.28.1
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -29,6 +29,7 @@
 - GPUAccelerator interface with transparent CPU fallback
 - Recording System for vector export (PDF, SVG)
 - GGCanvas integration for gogpu windowed rendering
+- Porter-Duff compositing for correct GPU readback
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
@@ -106,7 +107,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.28.0** | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
+| **v0.28.1** | 2026-02 | Porter-Duff GPU compositing, event-driven example |
+| v0.28.0 | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
 | v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders, structured logging |
 | v0.26.0 | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
 | v0.25.0 | 2026-02 | Vello tile-based analytic AA rasterizer, VelloLine float pipeline |

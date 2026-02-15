@@ -126,7 +126,8 @@ func main() {
 
 For zero-copy rendering directly to a GPU surface (e.g., in a gogpu window),
 use [`ggcanvas.Canvas.RenderDirect`](integration/ggcanvas/) — see the
-[gogpu integration example](examples/gogpu_integration/).
+[gogpu integration example](examples/gogpu_integration/). The example uses
+event-driven rendering with `AnimationToken` for power-efficient VSync (0% CPU when idle).
 
 ### Custom Pixmap
 
