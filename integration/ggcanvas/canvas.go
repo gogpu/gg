@@ -45,7 +45,6 @@ type Canvas struct {
 	oldTexture  any  // Previous texture awaiting deferred destruction
 	dirty       bool // Needs GPU upload
 	sizeChanged bool // Resize pending — texture must be recreated
-	debugFrames int  // DEBUG: frame counter for diagnostics
 	width       int
 	height      int
 	closed      bool
@@ -212,27 +211,6 @@ func (c *Canvas) Flush() (any, error) {
 	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()
 	data := pixmap.Data()
-
-	// DEBUG: check if pixel data has content
-	if c.debugFrames < 3 {
-		nonZero := 0
-		total := len(data) / 4
-		for i := 0; i < len(data); i += 4 {
-			if data[i] != 0 || data[i+1] != 0 || data[i+2] != 0 || data[i+3] != 0 {
-				nonZero++
-			}
-		}
-		// Sample center pixel
-		cx, cy := pixmap.Width()/2, pixmap.Height()/2
-		off := (cy*pixmap.Width() + cx) * 4
-		var cr, cg, cb, ca byte
-		if off+3 < len(data) {
-			cr, cg, cb, ca = data[off], data[off+1], data[off+2], data[off+3]
-		}
-		log.Printf("ggcanvas: Flush frame=%d pixmap=%dx%d nonZero=%d/%d center=(%d,%d,%d,%d)",
-			c.debugFrames, pixmap.Width(), pixmap.Height(), nonZero, total, cr, cg, cb, ca)
-		c.debugFrames++
-	}
 
 	// Create texture if needed (lazy initialization)
 	if c.texture == nil {
