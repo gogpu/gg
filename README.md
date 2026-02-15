@@ -29,7 +29,7 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, GPU acceleration, Vello analytic AA, CPU fallback |
+| **Rendering** | Immediate and retained mode, three-tier GPU acceleration (SDF, Convex, Stencil+Cover), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
@@ -97,13 +97,21 @@ defer dc.Close()
 
 ### GPU Acceleration (Optional)
 
-gg supports optional GPU acceleration through the `GPUAccelerator` interface.
+gg supports optional GPU acceleration through the `GPUAccelerator` interface with
+a three-tier rendering pipeline:
+
+| Tier | Method | Best For |
+|------|--------|----------|
+| **SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
+| **Convex** | Direct vertex emission | Convex polygons, single draw call |
+| **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
+
 When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 
 ```go
 import (
     "github.com/gogpu/gg"
-    _ "github.com/gogpu/gg/gpu" // opt-in GPU acceleration (planned)
+    _ "github.com/gogpu/gg/gpu" // opt-in GPU acceleration
 )
 
 func main() {
@@ -116,9 +124,9 @@ func main() {
 }
 ```
 
-> **Note:** The `gg/gpu` package is planned for a future release.
-> Currently, all rendering uses the CPU path which includes a high-quality
-> Vello-based analytic anti-aliasing rasterizer.
+For zero-copy rendering directly to a GPU surface (e.g., in a gogpu window),
+use [`ggcanvas.Canvas.RenderDirect`](integration/ggcanvas/) — see the
+[gogpu integration example](examples/gogpu_integration/).
 
 ### Custom Pixmap
 
@@ -145,9 +153,12 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
               ┌──────────────┴──────────────┐
               │                             │
          CPU Raster                   GPUAccelerator
-      (always available)             (optional, planned)
-              │
-    internal/raster + internal/native
+      (always available)            (opt-in via gg/gpu)
+              │                             │
+    internal/raster              ┌──────────┼──────────┐
+                                 │          │          │
+                               SDF      Convex   Stencil+Cover
+                            (Tier 1)   (Tier 2)    (Tier 3)
 ```
 
 ### Rendering Structure
@@ -155,8 +166,8 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 | Component | Location | Description |
 |-----------|----------|-------------|
 | **CPU Raster** | `internal/raster` | Core analytic AA rasterizer (Vello-based) |
-| **Native Renderer** | `internal/native` | Full rendering pipeline, GPU simulation |
-| **GPU Accelerator** | `GPUAccelerator` interface | Optional GPU acceleration (planned) |
+| **GPU Accelerator** | `internal/gpu` | Three-tier GPU pipeline (SDF, Convex, Stencil+Cover) |
+| **GPU Registration** | `gpu/` | Public opt-in via `import _ "github.com/gogpu/gg/gpu"` |
 | **Software** | Root `gg` package | Default CPU renderer |
 
 ---
@@ -212,15 +223,20 @@ dc.Fill()
 GPU-optimized scene graph for complex applications:
 
 ```go
-scene := gg.NewScene()
+import "github.com/gogpu/gg/render"
 
-scene.PushLayer(gg.BlendMultiply, 0.8)
-scene.Fill(style, transform, gg.Solid(gg.Red), gg.Circle(150, 200, 100))
-scene.Fill(style, transform, gg.Solid(gg.Blue), gg.Circle(250, 200, 100))
-scene.PopLayer()
+s := render.NewScene()
 
-renderer := scene.NewRenderer()
-renderer.Render(target, scene)
+s.SetFillColor(color.RGBA{R: 255, A: 200})
+s.Circle(150, 200, 100)
+s.Fill()
+
+s.SetFillColor(color.RGBA{B: 255, A: 200})
+s.Circle(250, 200, 100)
+s.Fill()
+
+renderer := scene.NewRenderer(800, 600)
+renderer.Render(target, s)
 ```
 
 ### Text Rendering
@@ -334,11 +350,11 @@ rec.SetColor(gg.Blue)
 rec.DrawCircle(400, 300, 100)
 rec.Fill()
 
-// Export to PDF
-rec.Recording().SaveToFile("output.pdf", "pdf")
-
-// Or export to SVG
-rec.Recording().SaveToFile("output.svg", "svg")
+// Finish recording and play back to a raster backend
+r := rec.FinishRecording()
+backend := raster.NewBackend()
+r.Playback(backend)
+backend.SaveToFile("output.png")
 ```
 
 ---
