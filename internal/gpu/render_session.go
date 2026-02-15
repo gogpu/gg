@@ -88,6 +88,28 @@ type GPURenderSession struct {
 	surfaceView   hal.TextureView
 	surfaceWidth  uint32
 	surfaceHeight uint32
+
+	// Persistent per-frame GPU buffers (survive across frames).
+	// Grow-only: reallocated only when data exceeds current capacity.
+	sdfVertBuf       hal.Buffer
+	sdfVertBufCap    uint64
+	sdfUniformBuf    hal.Buffer
+	sdfBindGroup     hal.BindGroup
+	convexVertBuf    hal.Buffer
+	convexVertBufCap uint64
+	convexUniformBuf hal.Buffer
+	convexBindGroup  hal.BindGroup
+
+	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
+	stencilBufPool []*stencilCoverBuffers
+
+	// Pre-allocated CPU staging slices for vertex data generation.
+	sdfVertexStaging    []byte
+	convexVertexStaging []byte
+
+	// In-flight command buffer from the previous surface frame. Freed at
+	// the start of the next frame, when VSync guarantees the GPU is done.
+	prevCmdBuf hal.CommandBuffer
 }
 
 // NewGPURenderSession creates a new render session with the given device and
@@ -116,6 +138,13 @@ func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height 
 	modeChanged := (view == nil) != (s.surfaceView == nil)
 	sizeChanged := width != s.surfaceWidth || height != s.surfaceHeight
 	if modeChanged || sizeChanged {
+		// Drain the GPU before destroying textures — an in-flight command
+		// buffer may still reference framebuffers built from these views.
+		if s.prevCmdBuf != nil {
+			s.drainQueue()
+			s.device.FreeCommandBuffer(s.prevCmdBuf)
+			s.prevCmdBuf = nil
+		}
 		s.textures.destroyTextures(s.device)
 	}
 	s.surfaceView = view
@@ -172,12 +201,11 @@ func (s *GPURenderSession) RenderFrame(
 		return fmt.Errorf("ensure textures: %w", err)
 	}
 
-	// Ensure pipelines exist.
 	if err := s.ensurePipelines(); err != nil {
 		return fmt.Errorf("ensure pipelines: %w", err)
 	}
 
-	// Build per-frame GPU resources for SDF shapes.
+	// Build per-frame GPU resources using persistent buffers.
 	var sdfResources *sdfFrameResources
 	if len(sdfShapes) > 0 {
 		var err error
@@ -185,10 +213,8 @@ func (s *GPURenderSession) RenderFrame(
 		if err != nil {
 			return fmt.Errorf("build SDF resources: %w", err)
 		}
-		defer sdfResources.destroy(s.device)
 	}
 
-	// Build per-frame GPU resources for convex polygons.
 	var convexRes *convexFrameResources
 	if len(convexCommands) > 0 {
 		var err error
@@ -196,31 +222,13 @@ func (s *GPURenderSession) RenderFrame(
 		if err != nil {
 			return fmt.Errorf("build convex resources: %w", err)
 		}
-		defer convexRes.destroy(s.device)
 	}
 
-	// Build per-frame GPU resources for stencil paths.
-	var stencilResources []*stencilCoverBuffers
-	if len(stencilPaths) > 0 {
-		for i := range stencilPaths {
-			bufs, err := s.buildStencilResources(&stencilPaths[i], w, h)
-			if err != nil {
-				// Clean up already-created buffers.
-				for _, b := range stencilResources {
-					b.destroy(s.device)
-				}
-				return fmt.Errorf("build stencil resources for path %d: %w", i, err)
-			}
-			stencilResources = append(stencilResources, bufs)
-		}
-		defer func() {
-			for _, b := range stencilResources {
-				b.destroy(s.device)
-			}
-		}()
+	stencilResources, err := s.buildStencilResourcesBatch(stencilPaths, w, h)
+	if err != nil {
+		return err
 	}
 
-	// Encode, submit, and optionally read back.
 	if s.surfaceView != nil {
 		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths)
 	}
@@ -236,11 +244,81 @@ func (s *GPURenderSession) Size() (uint32, uint32) {
 // multiple times or on a session with no allocated resources.
 // The surface view is not destroyed -- it is owned by the caller.
 func (s *GPURenderSession) Destroy() {
+	// Drain the GPU queue before freeing any in-flight resources.
+	// Submit a no-op command buffer with a fence — the queue is FIFO,
+	// so when the fence signals, all prior submissions are complete.
+	if s.prevCmdBuf != nil {
+		s.drainQueue()
+		s.device.FreeCommandBuffer(s.prevCmdBuf)
+		s.prevCmdBuf = nil
+	}
+	s.destroyPersistentBuffers()
 	s.textures.destroyTextures(s.device)
 	s.surfaceView = nil
 	s.surfaceWidth = 0
 	s.surfaceHeight = 0
 	// Do not destroy pipelines -- they are owned by the caller.
+}
+
+// drainQueue submits a no-op command buffer with a fence and waits for it.
+// Since the GPU queue is FIFO, this guarantees all prior submissions are done.
+func (s *GPURenderSession) drainQueue() {
+	fence, err := s.device.CreateFence()
+	if err != nil {
+		return
+	}
+	defer s.device.DestroyFence(fence)
+
+	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "session_drain",
+	})
+	if err != nil {
+		return
+	}
+	if err := encoder.BeginEncoding("drain"); err != nil {
+		return
+	}
+	cmdBuf, err := encoder.EndEncoding()
+	if err != nil {
+		return
+	}
+	defer s.device.FreeCommandBuffer(cmdBuf)
+
+	_ = s.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1)
+	_, _ = s.device.Wait(fence, 1, 5*time.Second)
+}
+
+func (s *GPURenderSession) destroyPersistentBuffers() {
+	if s.sdfBindGroup != nil {
+		s.device.DestroyBindGroup(s.sdfBindGroup)
+		s.sdfBindGroup = nil
+	}
+	if s.sdfUniformBuf != nil {
+		s.device.DestroyBuffer(s.sdfUniformBuf)
+		s.sdfUniformBuf = nil
+	}
+	if s.sdfVertBuf != nil {
+		s.device.DestroyBuffer(s.sdfVertBuf)
+		s.sdfVertBuf = nil
+		s.sdfVertBufCap = 0
+	}
+	if s.convexBindGroup != nil {
+		s.device.DestroyBindGroup(s.convexBindGroup)
+		s.convexBindGroup = nil
+	}
+	if s.convexUniformBuf != nil {
+		s.device.DestroyBuffer(s.convexUniformBuf)
+		s.convexUniformBuf = nil
+	}
+	if s.convexVertBuf != nil {
+		s.device.DestroyBuffer(s.convexVertBuf)
+		s.convexVertBuf = nil
+		s.convexVertBufCap = 0
+	}
+	for _, b := range s.stencilBufPool {
+		b.destroy(s.device)
+	}
+	s.stencilBufPool = s.stencilBufPool[:0]
 }
 
 // sdfFrameResources holds per-frame GPU resources for SDF rendering.
@@ -249,18 +327,6 @@ type sdfFrameResources struct {
 	uniformBuf hal.Buffer
 	bindGroup  hal.BindGroup
 	vertCount  uint32
-}
-
-func (r *sdfFrameResources) destroy(device hal.Device) {
-	if r.bindGroup != nil {
-		device.DestroyBindGroup(r.bindGroup)
-	}
-	if r.uniformBuf != nil {
-		device.DestroyBuffer(r.uniformBuf)
-	}
-	if r.vertBuf != nil {
-		device.DestroyBuffer(r.vertBuf)
-	}
 }
 
 // ensurePipelines creates SDF, convex, and stencil pipelines if they don't exist yet.
@@ -291,105 +357,206 @@ func (s *GPURenderSession) ensurePipelines() error {
 	return nil
 }
 
-// buildSDFResources creates per-frame vertex buffer, uniform buffer, and bind
-// group for rendering SDF shapes.
+// buildSDFResources updates persistent vertex buffer, uniform buffer, and bind
+// group for rendering SDF shapes. Buffers are only reallocated when the data
+// exceeds current capacity.
 func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint32) (*sdfFrameResources, error) {
-	vertexData := buildSDFRenderVertices(shapes, w, h)
+	var vertexData []byte
+	s.sdfVertexStaging, vertexData = buildSDFRenderVerticesReuse(shapes, w, h, s.sdfVertexStaging)
 	vertexCount := uint32(len(shapes) * 6) //nolint:gosec // shape count fits uint32
+	vertSize := uint64(len(vertexData))
 
-	vertBuf, err := s.createAndUploadBuffer("session_sdf_verts", vertexData,
-		gputypes.BufferUsageVertex|gputypes.BufferUsageCopyDst)
-	if err != nil {
-		return nil, fmt.Errorf("create vertex buffer: %w", err)
+	if s.sdfVertBuf == nil || s.sdfVertBufCap < vertSize {
+		if s.sdfBindGroup != nil {
+			s.device.DestroyBindGroup(s.sdfBindGroup)
+			s.sdfBindGroup = nil
+		}
+		if s.sdfVertBuf != nil {
+			s.device.DestroyBuffer(s.sdfVertBuf)
+		}
+		allocSize := vertSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_sdf_verts",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.sdfVertBuf = nil
+			s.sdfVertBufCap = 0
+			return nil, fmt.Errorf("create vertex buffer: %w", err)
+		}
+		s.sdfVertBuf = buf
+		s.sdfVertBufCap = allocSize
 	}
+	s.queue.WriteBuffer(s.sdfVertBuf, 0, vertexData)
 
 	uniformData := makeSDFRenderUniform(w, h)
-	uniformBuf, err := s.createAndUploadBuffer("session_sdf_uniform", uniformData,
-		gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst)
-	if err != nil {
-		s.device.DestroyBuffer(vertBuf)
-		return nil, fmt.Errorf("create uniform buffer: %w", err)
+	if s.sdfUniformBuf == nil {
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_sdf_uniform",
+			Size:  sdfRenderUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create uniform buffer: %w", err)
+		}
+		s.sdfUniformBuf = buf
+		// Bind group must be recreated with the new uniform buffer.
+		if s.sdfBindGroup != nil {
+			s.device.DestroyBindGroup(s.sdfBindGroup)
+			s.sdfBindGroup = nil
+		}
 	}
+	s.queue.WriteBuffer(s.sdfUniformBuf, 0, uniformData)
 
-	bindGroup, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
-		Label:  "session_sdf_bind",
-		Layout: s.sdfPipeline.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: uniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
-			}},
-		},
-	})
-	if err != nil {
-		s.device.DestroyBuffer(uniformBuf)
-		s.device.DestroyBuffer(vertBuf)
-		return nil, fmt.Errorf("create bind group: %w", err)
+	if s.sdfBindGroup == nil {
+		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			Label:  "session_sdf_bind",
+			Layout: s.sdfPipeline.uniformLayout,
+			Entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{
+					Buffer: s.sdfUniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
+				}},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create bind group: %w", err)
+		}
+		s.sdfBindGroup = bg
 	}
 
 	return &sdfFrameResources{
-		vertBuf:    vertBuf,
-		uniformBuf: uniformBuf,
-		bindGroup:  bindGroup,
+		vertBuf:    s.sdfVertBuf,
+		uniformBuf: s.sdfUniformBuf,
+		bindGroup:  s.sdfBindGroup,
 		vertCount:  vertexCount,
 	}, nil
 }
 
-// buildConvexResources creates per-frame vertex buffer, uniform buffer, and
-// bind group for rendering convex polygons.
+// buildConvexResources updates persistent vertex buffer, uniform buffer, and
+// bind group for rendering convex polygons. Buffers are only reallocated when
+// the data exceeds current capacity.
 func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w, h uint32) (*convexFrameResources, error) {
-	vertexData := BuildConvexVertices(commands)
+	var vertexData []byte
+	s.convexVertexStaging, vertexData = buildConvexVerticesReuse(commands, s.convexVertexStaging)
 	if len(vertexData) == 0 {
 		return nil, nil //nolint:nilnil // empty vertex data is a valid no-op, not an error
 	}
 	vertexCount := convexVertexCount(commands)
+	vertSize := uint64(len(vertexData))
 
-	vertBuf, err := s.createAndUploadBuffer("session_convex_verts", vertexData,
-		gputypes.BufferUsageVertex|gputypes.BufferUsageCopyDst)
-	if err != nil {
-		return nil, fmt.Errorf("create convex vertex buffer: %w", err)
+	if s.convexVertBuf == nil || s.convexVertBufCap < vertSize {
+		if s.convexBindGroup != nil {
+			s.device.DestroyBindGroup(s.convexBindGroup)
+			s.convexBindGroup = nil
+		}
+		if s.convexVertBuf != nil {
+			s.device.DestroyBuffer(s.convexVertBuf)
+		}
+		allocSize := vertSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_convex_verts",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.convexVertBuf = nil
+			s.convexVertBufCap = 0
+			return nil, fmt.Errorf("create convex vertex buffer: %w", err)
+		}
+		s.convexVertBuf = buf
+		s.convexVertBufCap = allocSize
 	}
+	s.queue.WriteBuffer(s.convexVertBuf, 0, vertexData)
 
 	uniformData := makeSDFRenderUniform(w, h) // Same 16-byte viewport layout.
-	uniformBuf, err := s.createAndUploadBuffer("session_convex_uniform", uniformData,
-		gputypes.BufferUsageUniform|gputypes.BufferUsageCopyDst)
-	if err != nil {
-		s.device.DestroyBuffer(vertBuf)
-		return nil, fmt.Errorf("create convex uniform buffer: %w", err)
+	if s.convexUniformBuf == nil {
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_convex_uniform",
+			Size:  sdfRenderUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create convex uniform buffer: %w", err)
+		}
+		s.convexUniformBuf = buf
+		if s.convexBindGroup != nil {
+			s.device.DestroyBindGroup(s.convexBindGroup)
+			s.convexBindGroup = nil
+		}
 	}
+	s.queue.WriteBuffer(s.convexUniformBuf, 0, uniformData)
 
-	bindGroup, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
-		Label:  "session_convex_bind",
-		Layout: s.convexRenderer.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: uniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
-			}},
-		},
-	})
-	if err != nil {
-		s.device.DestroyBuffer(uniformBuf)
-		s.device.DestroyBuffer(vertBuf)
-		return nil, fmt.Errorf("create convex bind group: %w", err)
+	if s.convexBindGroup == nil {
+		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			Label:  "session_convex_bind",
+			Layout: s.convexRenderer.uniformLayout,
+			Entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{
+					Buffer: s.convexUniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
+				}},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create convex bind group: %w", err)
+		}
+		s.convexBindGroup = bg
 	}
 
 	return &convexFrameResources{
-		vertBuf:    vertBuf,
-		uniformBuf: uniformBuf,
-		bindGroup:  bindGroup,
+		vertBuf:    s.convexVertBuf,
+		uniformBuf: s.convexUniformBuf,
+		bindGroup:  s.convexBindGroup,
 		vertCount:  vertexCount,
 	}, nil
 }
 
-// buildStencilResources creates per-frame GPU buffers for a single stencil
-// path command.
-func (s *GPURenderSession) buildStencilResources(cmd *StencilPathCommand, w, h uint32) (*stencilCoverBuffers, error) {
-	color := gg.RGBA{
-		R: float64(cmd.Color[0]),
-		G: float64(cmd.Color[1]),
-		B: float64(cmd.Color[2]),
-		A: float64(cmd.Color[3]),
+// buildStencilResourcesBatch builds stencil GPU buffers for all paths,
+// reusing pooled buffer sets where possible. Unused pool entries beyond the
+// current path count are kept alive for future frames.
+func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand, w, h uint32) ([]*stencilCoverBuffers, error) {
+	if len(paths) == 0 {
+		return nil, nil
 	}
-	return s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, color)
+
+	// Grow pool if needed.
+	for len(s.stencilBufPool) < len(paths) {
+		s.stencilBufPool = append(s.stencilBufPool, nil)
+	}
+
+	result := make([]*stencilCoverBuffers, len(paths))
+	for i := range paths {
+		cmd := &paths[i]
+		color := gg.RGBA{
+			R: float64(cmd.Color[0]),
+			G: float64(cmd.Color[1]),
+			B: float64(cmd.Color[2]),
+			A: float64(cmd.Color[3]),
+		}
+
+		// Destroy old pooled entry and create fresh buffers.
+		// Stencil paths vary wildly per frame (different vertex counts, colors),
+		// so recreating is simpler than capacity tracking for 6 sub-buffers.
+		if s.stencilBufPool[i] != nil {
+			s.stencilBufPool[i].destroy(s.device)
+			s.stencilBufPool[i] = nil
+		}
+		bufs, err := s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, color)
+		if err != nil {
+			// Clean up buffers created in this batch.
+			for j := 0; j < i; j++ {
+				if s.stencilBufPool[j] != nil {
+					s.stencilBufPool[j].destroy(s.device)
+					s.stencilBufPool[j] = nil
+				}
+			}
+			return nil, fmt.Errorf("build stencil resources for path %d: %w", i, err)
+		}
+		s.stencilBufPool[i] = bufs
+		result[i] = bufs
+	}
+
+	return result, nil
 }
 
 // encodeSubmitReadback encodes the unified render pass, copies the resolve
@@ -628,43 +795,23 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
-	defer s.device.FreeCommandBuffer(cmdBuf)
 
-	// Submit without fence wait. For surface rendering, presentation
-	// handles GPU synchronization. The caller (gogpu) will Present()
-	// the surface after this returns.
-	fence, err := s.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("create fence: %w", err)
+	// Free the previous frame's command buffer. By now VSync has
+	// guaranteed the GPU finished with it.
+	if s.prevCmdBuf != nil {
+		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
-	defer s.device.DestroyFence(fence)
 
-	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	// Submit without fence -- presentation handles GPU synchronization.
+	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
 
-	// Wait for GPU to finish rendering before the surface is presented.
-	// This ensures the render pass completes before Present() is called.
-	fenceOK, err := s.device.Wait(fence, 1, 5*time.Second)
-	if err != nil || !fenceOK {
-		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
-	}
+	// Keep reference so next frame can free it after GPU is done.
+	s.prevCmdBuf = cmdBuf
 
 	return nil
-}
-
-// createAndUploadBuffer creates a GPU buffer and uploads data.
-func (s *GPURenderSession) createAndUploadBuffer(label string, data []byte, usage gputypes.BufferUsage) (hal.Buffer, error) {
-	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: label,
-		Size:  uint64(len(data)),
-		Usage: usage,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create %s: %w", label, err)
-	}
-	s.queue.WriteBuffer(buf, 0, data)
-	return buf, nil
 }
 
 // SDFPipeline returns the SDF render pipeline.

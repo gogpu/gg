@@ -649,9 +649,22 @@ func sdfRenderVertexLayout() []gputypes.VertexBufferLayout {
 // buildSDFRenderVertices generates vertex data for all shapes. Each shape
 // produces 6 vertices (2 triangles forming a screen-aligned quad).
 // The quad covers the shape's bounding box plus an AA margin.
-func buildSDFRenderVertices(shapes []SDFRenderShape, _ uint32, _ uint32) []byte {
-	// 6 vertices per shape, sdfRenderVertexStride bytes per vertex.
-	buf := make([]byte, len(shapes)*6*sdfRenderVertexStride)
+func buildSDFRenderVertices(shapes []SDFRenderShape, w, h uint32) []byte {
+	_, data := buildSDFRenderVerticesReuse(shapes, w, h, nil)
+	return data
+}
+
+// buildSDFRenderVerticesReuse generates vertex data for all shapes into the
+// provided staging buffer, growing it if necessary. Returns the (possibly
+// reallocated) staging buffer and the slice of valid vertex data.
+func buildSDFRenderVerticesReuse(shapes []SDFRenderShape, _, _ uint32, staging []byte) ([]byte, []byte) {
+	needed := len(shapes) * 6 * sdfRenderVertexStride
+	if cap(staging) < needed {
+		staging = make([]byte, needed)
+	} else {
+		staging = staging[:needed]
+	}
+	buf := staging
 	offset := 0
 
 	for i := range shapes {
@@ -687,7 +700,7 @@ func buildSDFRenderVertices(shapes []SDFRenderShape, _ uint32, _ uint32) []byte 
 		}
 	}
 
-	return buf
+	return staging, buf
 }
 
 // writeSDFRenderVertex writes a single vertex into the buffer at the current position.
