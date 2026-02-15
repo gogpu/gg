@@ -122,6 +122,9 @@ linters:
           sizeThreshold: 256
 
   exclusions:
+    paths:
+      - tmp
+
     rules:
       # Test files - allow more flexibility
       - path: _test\.go

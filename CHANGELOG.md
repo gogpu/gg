@@ -25,8 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **gogpu_integration example** — `CloseAccelerator` in `OnClose` handler with correct
   shutdown order; dependency update to gg v0.28.1.
 
+### Fixed
+- **golangci-lint config** — exclude `tmp/` directory from linting (gitignored debug files)
+
 ### Dependencies
 - wgpu v0.16.0 → v0.16.1 (Vulkan framebuffer cache invalidation fix)
+- gogpu v0.18.1 → v0.18.2, gg v0.28.1 → v0.28.2 (in examples)
 
 ## [0.28.1] - 2026-02-15
 
