@@ -294,13 +294,17 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 //  2. Add the accumulated coverage from all pixels to the LEFT (backdrop)
 //  3. Update the accumulator for the NEXT pixel
 //
-// CRITICAL: We must process ALL pixels from 0 to width, not just starting from
-// where the line enters. This ensures correct backdrop accumulation - pixels
-// to the LEFT of the line get acc=0, pixels to the RIGHT get the accumulated
-// winding from the line crossing.
+// The algorithm processes pixels left-to-right, accumulating winding contributions.
+// Pixels LEFT of the edge get acc=0, pixels RIGHT get accumulated winding.
+//
+// X-bounds clipping: edges extending beyond the canvas (common during window resize
+// when shapes are positioned relative to canvas center) are handled by:
+//   - Edges entirely off-screen right: skipped (no visible contribution)
+//   - Edges entirely off-screen left: full winding applied to all visible pixels
+//   - Edges partially off-screen left: winding pre-accumulated for the off-screen portion
 //
 // This matches the algorithm in fine.go which processes all pixels in each tile row.
-func (af *AnalyticFiller) computeSegmentCoverage(
+func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance-critical rasterization loop, splitting hurts cache locality
 	line *LineEdge,
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
 	yPixel, yPixelEnd, aaScaleF float32,
@@ -357,14 +361,58 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 	}
 	xSlope := 1.0 / ySlope // dx/dy
 
-	// Accumulate winding contribution from left edge
-	// CRITICAL: Start from 0, not from the line's X position!
-	// This ensures correct backdrop accumulation across the entire scanline.
-	acc := float32(0)
+	// --- X-bounds clipping ---
+	// Edges can extend beyond the canvas in X (e.g., large circles partially off-screen).
+	// Y-bounds clipping is handled above. Here we handle X-bounds:
+	// 1. Edges entirely off-screen right: no contribution to any visible pixel.
+	// 2. Edges entirely off-screen left: full winding applied to all visible pixels.
+	// 3. Edges partially off-screen left: pre-accumulate winding for the off-screen portion.
+	widthF := float32(af.width)
 
-	// Process each pixel column from left to right (0 to width)
-	// This matches fine.go which processes all pixels in the tile row
-	for xIdx := 0; xIdx < af.width; xIdx++ {
+	// Determine X range of the edge on this scanline
+	minLineX := lineTopX
+	maxLineX := lineBottomX
+	if minLineX > maxLineX {
+		minLineX, maxLineX = maxLineX, minLineX
+	}
+
+	// Case 1: Edge entirely off-screen right — no visible contribution
+	if minLineX >= widthF {
+		return
+	}
+
+	// Case 2: Edge entirely off-screen left — full winding to all visible pixels
+	if maxLineX < 0 {
+		fullAcc := lineDY * sign
+		for xIdx := 0; xIdx < af.width; xIdx++ {
+			af.winding[xIdx] += fullAcc
+		}
+		return
+	}
+
+	// Pre-accumulate winding for the off-screen-left portion of the edge.
+	// When part of the edge is at X < 0, pixels at X >= 0 are to the RIGHT
+	// of that portion and must receive its winding contribution.
+	acc := offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign)
+
+	// Compute the pixel range that needs detailed per-pixel processing.
+	// Pixels outside this range get only the accumulated winding (acc).
+	xStart := int(minLineX)
+	if xStart < 0 {
+		xStart = 0
+	}
+	xEnd := int(maxLineX) + 2 // +2 for partial pixel coverage at the boundary
+	if xEnd > af.width {
+		xEnd = af.width
+	}
+
+	// Apply pre-accumulated winding to pixels before the edge's range
+	for xIdx := 0; xIdx < xStart; xIdx++ {
+		af.winding[xIdx] += acc
+	}
+
+	// Process pixels in the edge's range with detailed coverage computation
+	for xIdx := xStart; xIdx < xEnd; xIdx++ {
 		pxLeftX := float32(xIdx)
 		pxRightX := pxLeftX + 1.0
 
@@ -403,6 +451,34 @@ func (af *AnalyticFiller) computeSegmentCoverage(
 		// Update accumulator for NEXT pixel
 		acc += pixelH * sign
 	}
+
+	// Apply remaining accumulated winding to pixels after the edge's range
+	for xIdx := xEnd; xIdx < af.width; xIdx++ {
+		af.winding[xIdx] += acc
+	}
+}
+
+// offscreenLeftWinding computes the winding contribution from the portion of
+// an edge that extends past the left canvas boundary (X < 0). Pixels at X >= 0
+// are to the right of that portion and must receive its winding.
+func offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign float32) float32 {
+	if lineTopX >= 0 && lineBottomX >= 0 {
+		return 0
+	}
+	// Find Y where the edge crosses X=0.
+	y0 := clamp32(lineTopY-lineTopX*ySlope, yTop, yBot)
+	var h float32
+	if lineTopX < 0 {
+		// Top of edge is off-screen left; off-screen portion: lineTopY → y0.
+		h = y0 - lineTopY
+	} else {
+		// Bottom of edge is off-screen left; off-screen portion: y0 → lineBottomY.
+		h = lineBottomY - y0
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h * sign
 }
 
 // applyFillRule converts accumulated winding values to coverage.

@@ -103,6 +103,18 @@ type DeviceProviderAware interface {
 	SetDeviceProvider(provider any) error
 }
 
+// SurfaceTargetAware is an optional interface for accelerators that support
+// direct surface rendering. When SetSurfaceTarget is called with a non-nil
+// view, the accelerator renders directly to the surface texture instead of
+// reading back pixels to CPU. This eliminates the GPU->CPU->GPU round-trip
+// for windowed rendering (ggcanvas + gogpu).
+//
+// Call SetSurfaceTarget with nil to return to offscreen (readback) mode.
+// The caller retains ownership of the surface view.
+type SurfaceTargetAware interface {
+	SetSurfaceTarget(view any, width, height uint32)
+}
+
 var (
 	accelMu sync.RWMutex
 	accel   GPUAccelerator
@@ -130,6 +142,11 @@ func RegisterAccelerator(a GPUAccelerator) error {
 	old := accel
 	accel = a
 	accelMu.Unlock()
+
+	// Propagate current logger to the new accelerator so it inherits
+	// any SetLogger configuration that was applied before registration.
+	propagateLogger(a, Logger())
+
 	if old != nil {
 		old.Close()
 	}
@@ -142,6 +159,27 @@ func Accelerator() GPUAccelerator {
 	a := accel
 	accelMu.RUnlock()
 	return a
+}
+
+// CloseAccelerator shuts down the global GPU accelerator, releasing all GPU
+// resources (textures, pipelines, device, instance). After this call,
+// [Accelerator] returns nil and rendering falls back to CPU.
+//
+// Call this at application shutdown to prevent VkImage and other GPU memory
+// leaks. It is safe to call when no accelerator is registered (no-op).
+// CloseAccelerator is idempotent.
+//
+// Example:
+//
+//	defer gg.CloseAccelerator()
+func CloseAccelerator() {
+	accelMu.Lock()
+	a := accel
+	accel = nil
+	accelMu.Unlock()
+	if a != nil {
+		a.Close()
+	}
 }
 
 // SetAcceleratorDeviceProvider passes a device provider to the registered
@@ -159,4 +197,21 @@ func SetAcceleratorDeviceProvider(provider any) error {
 		return dpa.SetDeviceProvider(provider)
 	}
 	return nil
+}
+
+// SetAcceleratorSurfaceTarget configures the registered accelerator for
+// direct surface rendering. When view is non-nil, the accelerator renders
+// directly to the surface texture view, eliminating GPU->CPU readback.
+// Call with nil view to return to offscreen mode.
+//
+// If no accelerator is registered or it doesn't support surface rendering,
+// this is a no-op. The view parameter should be a hal.TextureView.
+func SetAcceleratorSurfaceTarget(view any, width, height uint32) {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if sta, ok := a.(SurfaceTargetAware); ok {
+		sta.SetSurfaceTarget(view, width, height)
+	}
 }

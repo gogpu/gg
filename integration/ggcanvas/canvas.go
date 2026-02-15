@@ -38,13 +38,15 @@ type textureDestroyer interface {
 // Canvas is NOT safe for concurrent use. Create one Canvas per goroutine,
 // or use external synchronization.
 type Canvas struct {
-	ctx      *gg.Context
-	provider gpucontext.DeviceProvider
-	texture  any  // Lazy-created texture (*gogpu.Texture)
-	dirty    bool // Needs GPU upload
-	width    int
-	height   int
-	closed   bool
+	ctx         *gg.Context
+	provider    gpucontext.DeviceProvider
+	texture     any  // Lazy-created texture (*gogpu.Texture)
+	oldTexture  any  // Previous texture awaiting deferred destruction
+	dirty       bool // Needs GPU upload
+	sizeChanged bool // Resize pending — texture must be recreated
+	width       int
+	height      int
+	closed      bool
 }
 
 // New creates a Canvas for integrated mode.
@@ -122,6 +124,18 @@ func (c *Canvas) MarkDirty() {
 	c.dirty = true
 }
 
+// Draw calls fn with the gg context and marks the canvas as dirty.
+// This is the recommended way to update canvas content, as it ensures
+// the dirty flag is set correctly for GPU upload on next Flush/RenderTo.
+func (c *Canvas) Draw(fn func(*gg.Context)) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	fn(c.ctx)
+	c.dirty = true
+	return nil
+}
+
 // IsDirty returns true if the canvas has pending changes
 // that need to be uploaded to the GPU.
 func (c *Canvas) IsDirty() bool {
@@ -150,16 +164,9 @@ func (c *Canvas) Resize(width, height int) error {
 		return fmt.Errorf("ggcanvas: context resize failed: %w", err)
 	}
 
-	// Destroy old texture if it exists
-	if c.texture != nil {
-		if destroyer, ok := c.texture.(textureDestroyer); ok {
-			destroyer.Destroy()
-		}
-		c.texture = nil
-	}
-
 	c.width = width
 	c.height = height
+	c.sizeChanged = true
 	c.dirty = true
 
 	return nil
@@ -177,13 +184,28 @@ func (c *Canvas) Flush() (any, error) {
 		return nil, ErrCanvasClosed
 	}
 
+	// If size changed, defer old texture destruction until after GPU is idle.
+	// The old texture may still be referenced by in-flight GPU command buffers.
+	// Destroying it now would free descriptor heap entries that the GPU is reading,
+	// causing it to sample zeros (transparent). Instead, keep it alive and destroy
+	// it in RenderToEx after WriteTexture (which calls waitForGPU internally).
+	if c.sizeChanged {
+		c.deferTextureDestruction()
+		c.sizeChanged = false
+	}
+
 	// Skip if not dirty
 	if !c.dirty && c.texture != nil {
 		return c.texture, nil
 	}
 
 	// Flush pending GPU shapes to pixel buffer before reading pixel data.
-	_ = c.ctx.FlushGPU()
+	// Errors are logged but not fatal — CPU fallback may have already rendered.
+	if err := c.ctx.FlushGPU(); err != nil {
+		// FlushGPU can fail if GPU accelerator has issues (e.g., compute dispatch failure).
+		// This is non-fatal: CPU-rendered content is still in the pixmap.
+		gg.Logger().Warn("FlushGPU error", "err", err)
+	}
 
 	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()
@@ -207,6 +229,52 @@ func (c *Canvas) Flush() (any, error) {
 	return c.texture, nil
 }
 
+// RenderDirect renders canvas content directly to the given surface view,
+// bypassing the GPU→CPU→GPU readback. This is the zero-copy rendering path
+// for use with gogpu's surface texture view.
+//
+// When the GPU accelerator supports direct surface rendering, shapes are
+// rendered directly to the provided surface view via MSAA resolve. No
+// staging buffers, no ReadBuffer, no texture upload — pure GPU-to-GPU.
+//
+// If the accelerator doesn't support surface rendering, or if no GPU
+// accelerator is registered, this method falls back to the readback path
+// via Flush().
+//
+// The surfaceView parameter must be a hal.TextureView obtained from
+// gogpu.Context.SurfaceView(). Pass nil to use the readback path.
+//
+// Example:
+//
+//	app.OnDraw(func(dc *gogpu.Context) {
+//	    canvas.Draw(func(cc *gg.Context) { ... })
+//	    w, h := dc.SurfaceSize()
+//	    canvas.RenderDirect(dc.SurfaceView(), w, h)
+//	})
+func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	if surfaceView == nil {
+		return nil
+	}
+	if !c.dirty {
+		return nil
+	}
+
+	// Configure GPU accelerator for direct surface rendering.
+	// The surface target stays set between frames to avoid destroying
+	// and recreating MSAA/stencil textures on every frame. The target
+	// is only cleared on Close() or when switching to offscreen mode.
+	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
+
+	// Flush GPU shapes directly to the surface view (no readback).
+	err := c.ctx.FlushGPU()
+
+	c.dirty = false
+	return err
+}
+
 // Texture returns the current GPU texture without flushing.
 // Returns nil if texture hasn't been created yet.
 //
@@ -224,13 +292,14 @@ func (c *Canvas) Close() error {
 	}
 	c.closed = true
 
-	// Destroy texture
-	if c.texture != nil {
-		if destroyer, ok := c.texture.(textureDestroyer); ok {
-			destroyer.Destroy()
-		}
-		c.texture = nil
-	}
+	// Clear surface target so GPU accelerator releases MSAA/stencil textures.
+	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
+
+	// Destroy textures (current and any deferred old texture).
+	destroyTexture(c.oldTexture)
+	c.oldTexture = nil
+	destroyTexture(c.texture)
+	c.texture = nil
 
 	// Close gg context
 	if c.ctx != nil {
@@ -240,6 +309,29 @@ func (c *Canvas) Close() error {
 
 	c.provider = nil
 	return nil
+}
+
+// deferTextureDestruction moves the current texture to oldTexture so it can
+// be destroyed later (after the GPU is idle). Any previously deferred texture
+// is destroyed immediately.
+func (c *Canvas) deferTextureDestruction() {
+	if c.texture == nil {
+		return
+	}
+	destroyTexture(c.oldTexture)
+	c.oldTexture = c.texture
+	c.texture = nil
+}
+
+// destroyTexture destroys a texture if it implements the textureDestroyer
+// interface. Safe to call with nil.
+func destroyTexture(tex any) {
+	if tex == nil {
+		return
+	}
+	if d, ok := tex.(textureDestroyer); ok {
+		d.Destroy()
+	}
 }
 
 // createTexture creates a pending texture placeholder from pixel data.

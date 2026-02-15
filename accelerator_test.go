@@ -2,16 +2,18 @@ package gg
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
 )
 
-// mockAccelerator implements GPUAccelerator for testing.
+// mockAccelerator implements GPUAccelerator and loggerSetter for testing.
 type mockAccelerator struct {
 	name     string
 	initErr  error
 	closed   bool
 	canAccel AcceleratedOp
+	logger   *slog.Logger
 	mu       sync.Mutex
 }
 
@@ -52,6 +54,8 @@ func (m *mockAccelerator) StrokeShape(_ GPURenderTarget, _ DetectedShape, _ *Pai
 }
 
 func (m *mockAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
+func (m *mockAccelerator) SetLogger(l *slog.Logger) { m.logger = l }
 
 // resetAccelerator clears the global accelerator state between tests.
 func resetAccelerator() {
@@ -219,6 +223,61 @@ func TestCanAccelerate(t *testing.T) {
 	}
 
 	resetAccelerator()
+}
+
+func TestCloseAcceleratorClosesAndUnregisters(t *testing.T) {
+	resetAccelerator()
+
+	mock := &mockAccelerator{name: "closeable"}
+	if err := RegisterAccelerator(mock); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify registered.
+	if Accelerator() == nil {
+		t.Fatal("expected non-nil accelerator after registration")
+	}
+
+	CloseAccelerator()
+
+	// Verify unregistered.
+	if Accelerator() != nil {
+		t.Error("expected nil accelerator after CloseAccelerator")
+	}
+
+	// Verify Close was called.
+	if !mock.isClosed() {
+		t.Error("expected accelerator to be closed after CloseAccelerator")
+	}
+}
+
+func TestCloseAcceleratorIdempotent(t *testing.T) {
+	resetAccelerator()
+
+	mock := &mockAccelerator{name: "idempotent"}
+	if err := RegisterAccelerator(mock); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Multiple calls should not panic.
+	CloseAccelerator()
+	CloseAccelerator()
+	CloseAccelerator()
+
+	if Accelerator() != nil {
+		t.Error("expected nil accelerator after CloseAccelerator")
+	}
+}
+
+func TestCloseAcceleratorNoop(t *testing.T) {
+	resetAccelerator()
+
+	// Should not panic when no accelerator is registered.
+	CloseAccelerator()
+
+	if Accelerator() != nil {
+		t.Error("expected nil accelerator")
+	}
 }
 
 func TestErrFallbackToCPU(t *testing.T) {

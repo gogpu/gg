@@ -19,17 +19,19 @@
 
 ---
 
-## Current State: v0.26.0
+## Current State: v0.28.0
 
-✅ **Production-ready** for CPU rendering with full feature set:
+✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
+- Three-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover)
+- RenderDirect zero-copy GPU surface rendering
 - Analytic anti-aliasing (Vello tile-based AA)
-- GPUAccelerator interface for optional GPU acceleration
-- Internal architecture: CPU raster core + optional GPU
+- GPUAccelerator interface with transparent CPU fallback
 - Recording System for vector export (PDF, SVG)
-- GGCanvas integration with gpucontext.TextureDrawer interface
+- GGCanvas integration for gogpu windowed rendering
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
+- Structured logging via log/slog
 
 ---
 
@@ -46,11 +48,18 @@
 - [x] Move implementation details to internal/
 - [x] Clean go.mod dependencies
 
-### v0.27.0 — GPU Acceleration (Planned)
-- [ ] gg/gpu package with wgpu-based GPUAccelerator
-- [ ] GPU-accelerated fill and stroke operations
-- [ ] Native curve evaluation in tiles
-- [ ] Performance optimizations
+### v0.27.0 — GPU Acceleration Foundation ✅ Released
+- [x] gg/gpu package with wgpu-based GPUAccelerator
+- [x] SDF GPU acceleration for circles, ellipses, rects, rounded rects
+- [x] Compute shader pipeline via naga WGSL compiler
+- [x] Structured logging via log/slog
+
+### v0.28.0 — Three-Tier GPU Rendering ✅ Released
+- [x] Three-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover)
+- [x] Fan tessellator for path-to-triangle conversion
+- [x] RenderDirect zero-copy GPU surface rendering
+- [x] EvenOdd fill rule support in stencil pipeline
+- [x] ggcanvas deferred texture destruction for DX12 stability
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee
@@ -86,9 +95,9 @@
               ┌──────────────┴──────────────┐
               │                             │
          CPU Raster                   GPUAccelerator
-      (always available)             (optional, planned)
-              │
-    internal/raster + internal/native
+      (always available)              (opt-in via gpu/)
+              │                             │
+    internal/raster              internal/gpu (three-tier)
 ```
 
 ---
@@ -97,7 +106,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.26.0** | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
+| **v0.28.0** | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
+| v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders, structured logging |
+| v0.26.0 | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
 | v0.25.0 | 2026-02 | Vello tile-based analytic AA rasterizer, VelloLine float pipeline |
 | v0.24.x | 2026-02 | Premultiplied alpha, HarfBuzz shaping, WebP, gogpu_integration |
 | v0.23.0 | 2026-02 | Recording System for vector export (PDF, SVG backends) |

@@ -125,11 +125,20 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 // After Close, the Context should not be used.
 // Close is idempotent - multiple calls are safe.
 // Implements io.Closer.
+//
+// Close flushes any pending GPU accelerator operations to ensure all
+// queued draw commands are rendered before releasing context state.
+// Note: Close does NOT shut down the global GPU accelerator itself,
+// since it may be shared by other contexts. To release GPU resources
+// at application shutdown, call [CloseAccelerator].
 func (c *Context) Close() error {
 	if c.closed {
 		return nil
 	}
 	c.closed = true
+
+	// Flush pending GPU operations so queued shapes are not lost.
+	c.flushGPUAccelerator()
 
 	// Clear path to release memory
 	c.ClearPath()

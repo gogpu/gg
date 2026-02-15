@@ -4,7 +4,6 @@
 package gpu
 
 import (
-	"log"
 	"sync"
 
 	"github.com/gogpu/gg/scene"
@@ -83,11 +82,11 @@ func NewHybridFineRasterizer(width, height uint16, config HybridFineRasterizerCo
 	if !config.ForceCPU && config.Device != nil && config.Queue != nil {
 		gpu, err := NewGPUFineRasterizer(config.Device, config.Queue, width, height)
 		if err != nil {
-			log.Printf("wgpu: GPU fine rasterizer unavailable, using CPU: %v", err)
+			slogger().Warn("GPU fine rasterizer unavailable, using CPU", "err", err)
 		} else {
 			h.gpu = gpu
 			h.gpuAvailable = true
-			log.Println("wgpu: GPU fine rasterizer enabled")
+			slogger().Debug("GPU fine rasterizer enabled")
 		}
 	}
 
@@ -114,7 +113,7 @@ func (h *HybridFineRasterizer) Rasterize(
 	if useGPU {
 		coverage, err := h.gpu.Rasterize(coarse, segments, backdrop, h.cpu.FillRule())
 		if err != nil {
-			log.Printf("wgpu: GPU rasterization failed, falling back to CPU: %v", err)
+			slogger().Warn("GPU rasterization failed, falling back to CPU", "err", err)
 			// Fall through to CPU fallback below
 		} else {
 			// Convert GPU coverage to tile grid
@@ -469,31 +468,31 @@ func (p *HybridPipeline) initGPURasterizers(config HybridPipelineConfig) {
 	// Flatten rasterizer
 	flatten, err := NewGPUFlattenRasterizer(config.Device, config.Queue, maxPaths, maxSegments)
 	if err != nil {
-		log.Printf("wgpu: GPU flatten rasterizer unavailable: %v", err)
+		slogger().Warn("GPU flatten rasterizer unavailable", "err", err)
 	} else {
 		p.flatten = flatten
 		p.flattenGPUAvailable = true
-		log.Println("wgpu: GPU flatten rasterizer enabled")
+		slogger().Debug("GPU flatten rasterizer enabled")
 	}
 
 	// Coarse rasterizer
 	coarse, err := NewGPUCoarseRasterizer(config.Device, config.Queue, p.width, p.height)
 	if err != nil {
-		log.Printf("wgpu: GPU coarse rasterizer unavailable: %v", err)
+		slogger().Warn("GPU coarse rasterizer unavailable", "err", err)
 	} else {
 		p.coarse = coarse
 		p.coarseGPUAvailable = true
-		log.Println("wgpu: GPU coarse rasterizer enabled")
+		slogger().Debug("GPU coarse rasterizer enabled")
 	}
 
 	// Fine rasterizer
 	fine, err := NewGPUFineRasterizer(config.Device, config.Queue, p.width, p.height)
 	if err != nil {
-		log.Printf("wgpu: GPU fine rasterizer unavailable: %v", err)
+		slogger().Warn("GPU fine rasterizer unavailable", "err", err)
 	} else {
 		p.fine = fine
 		p.fineGPUAvailable = true
-		log.Println("wgpu: GPU fine rasterizer enabled")
+		slogger().Debug("GPU fine rasterizer enabled")
 	}
 
 	// Update stats
@@ -568,7 +567,7 @@ func (p *HybridPipeline) runFlattenStage(path *scene.Path, transform scene.Affin
 			p.stats.LastSegmentCount = segments.Len()
 			return segments
 		}
-		log.Printf("wgpu: GPU flatten failed, falling back to CPU: %v", err)
+		slogger().Warn("GPU flatten failed, falling back to CPU", "err", err)
 	}
 
 	// CPU fallback
@@ -598,7 +597,7 @@ func (p *HybridPipeline) runCoarseStage(segments *SegmentList) {
 			p.stats.LastTileEntryCount = len(p.cpuCoarse.Entries())
 			return
 		}
-		log.Printf("wgpu: GPU coarse failed, falling back to CPU: %v", err)
+		slogger().Warn("GPU coarse failed, falling back to CPU", "err", err)
 	}
 
 	// CPU fallback
@@ -634,7 +633,7 @@ func (p *HybridPipeline) runFineStage(segments *SegmentList, fillRule scene.Fill
 			p.coverageToFineGrid(coverage)
 			return
 		}
-		log.Printf("wgpu: GPU fine failed, falling back to CPU: %v", err)
+		slogger().Warn("GPU fine failed, falling back to CPU", "err", err)
 	}
 
 	// CPU fallback

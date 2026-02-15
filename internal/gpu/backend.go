@@ -5,7 +5,6 @@ package gpu
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -101,7 +100,7 @@ func (b *Backend) Init() error {
 	b.queue = queueID
 
 	b.initialized = true
-	log.Println("gpu: backend initialized successfully")
+	slogger().Debug("backend initialized")
 
 	return nil
 }
@@ -121,14 +120,14 @@ func (b *Backend) Close() {
 
 	if !b.device.IsZero() {
 		if err := releaseDevice(b.device); err != nil {
-			log.Printf("gpu: error releasing device: %v", err)
+			slogger().Warn("error releasing device", "err", err)
 		}
 		b.device = core.DeviceID{}
 	}
 
 	if !b.adapter.IsZero() {
 		if err := releaseAdapter(b.adapter); err != nil {
-			log.Printf("gpu: error releasing adapter: %v", err)
+			slogger().Warn("error releasing adapter", "err", err)
 		}
 		b.adapter = core.AdapterID{}
 	}
@@ -139,7 +138,7 @@ func (b *Backend) Close() {
 	b.gpuInfo = nil
 	b.initialized = false
 
-	log.Println("gpu: backend closed")
+	slogger().Debug("backend closed")
 }
 
 // NewRenderer creates a renderer for immediate mode rendering.
@@ -152,12 +151,12 @@ func (b *Backend) NewRenderer(width, height int) gg.Renderer {
 	defer b.mu.RUnlock()
 
 	if !b.initialized {
-		log.Println("gpu: warning - creating renderer on uninitialized backend")
+		slogger().Warn("creating renderer on uninitialized backend")
 		return nil
 	}
 
 	if width <= 0 || height <= 0 {
-		log.Printf("gpu: warning - invalid dimensions: %dx%d", width, height)
+		slogger().Warn("invalid dimensions", "width", width, "height", height)
 		return nil
 	}
 
@@ -204,7 +203,7 @@ func (b *Backend) RenderScene(target *gg.Pixmap, s *scene.Scene) error {
 		// In this case, the GPU pipeline was executed but we can't retrieve results
 		if errors.Is(err, ErrTextureReadbackNotSupported) {
 			// Log for debugging but don't fail - GPU ops were executed
-			log.Printf("gpu: RenderScene completed on GPU (readback pending wgpu support)")
+			slogger().Debug("RenderScene completed on GPU", "note", "readback pending wgpu support")
 			return nil
 		}
 		return fmt.Errorf("GPU render failed: %w", err)

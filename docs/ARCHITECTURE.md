@@ -24,45 +24,72 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
              │  CPU Raster │             │    GPU      │
              │  (default)  │             │ Accelerator │
              └──────┬──────┘             └──────┬──────┘
-                    │                           │ (optional)
+                    │                           │ (optional, 3 tiers)
              ┌──────▼──────┐             ┌──────▼──────┐
              │  internal/  │             │  internal/  │
-             │   raster    │             │   native    │
+             │   raster    │             │    gpu      │
              └─────────────┘             └──────┬──────┘
                                                 │
                                          ┌──────▼──────┐
                                          │    wgpu     │
                                          └──────┬──────┘
                                                 │
-                                      ┌─────────┼─────────┐
-                                      │         │         │
-                                   ┌──▼──┐  ┌───▼───┐  ┌──▼──┐
-                                   │ Vk  │  │ Metal │  │Soft │
-                                   └─────┘  └───────┘  └─────┘
-                                           wgpu/hal
+                                  ┌──────┬──────┼──────┬──────┐
+                                  │      │      │      │      │
+                               ┌──▼──┐┌──▼──┐┌──▼──┐┌──▼──┐┌──▼──┐
+                               │ Vk  ││DX12 ││Metal││GLES ││Soft │
+                               └─────┘└─────┘└─────┘└─────┘└─────┘
+                                            wgpu/hal
 ```
 
-## GPU Accelerator (v0.26.0)
+## GPU Accelerator (v0.26.0+)
 
 GPU acceleration is opt-in via the `GPUAccelerator` interface:
 
 ```go
-// GPUAccelerator provides optional GPU acceleration
+// GPUAccelerator is an optional GPU acceleration provider.
 type GPUAccelerator interface {
     Name() string
-    AccelerateOp(op AcceleratedOp, args any) (any, error)
+    Init() error
     Close()
+    CanAccelerate(op AcceleratedOp) bool
+    FillPath(target GPURenderTarget, path *Path, paint *Paint) error
+    StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
+    FillShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+    StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+    Flush(target GPURenderTarget) error
 }
 
 // Register via blank import pattern
-import _ "github.com/gogpu/gg/internal/gpu"
+import _ "github.com/gogpu/gg/gpu"  // enables GPU acceleration
 ```
+
+Optional extension interfaces for gogpu integration:
+
+- **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
+- **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
+
+### Three-Tier GPU Rendering
+
+The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
+dispatches shapes to three rendering tiers within a single render pass:
+
+| Tier | Name | Shapes | Technique |
+|------|------|--------|-----------|
+| **1** | SDF | Circles, ellipses, rounded rects | SDF shader evaluation per-pixel |
+| **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
+| **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
+
+This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio):
+one render pass, multiple pipeline switches.
 
 Key design:
 - `RegisterAccelerator()` for opt-in GPU
 - `ErrFallbackToCPU` sentinel error for graceful degradation
 - `AcceleratedOp` bitfield for capability checking
-- Zero overhead (~17ns) when no GPU registered
+- Shape detection (`DetectShape`) auto-identifies circles, rects, rounded rects from path data
+- `Flush()` dispatches batched GPU operations in a single pass
+- Two render modes: offscreen (readback to CPU) and surface (zero-copy to window)
 - CPU raster always available as fallback
 
 ## Package Structure
@@ -72,18 +99,31 @@ gg/
 ├── context.go              # Canvas-like drawing context
 ├── software.go             # SoftwareRenderer (uses internal/raster directly)
 ├── accelerator.go          # GPUAccelerator interface + registration
+├── sdf.go                  # CPU SDF coverage functions (circles, ellipses, rects)
+├── sdf_accelerator.go      # SDFAccelerator (CPU-based SDF for simple shapes)
+├── shape_detect.go         # DetectShape: auto-detect circles/rects/rrects from paths
 ├── options.go              # Configuration options
 ├── path.go                 # Vector path operations
 ├── paint.go                # Fill and stroke styles
 ├── pixmap.go               # Pixel buffer operations
 ├── text.go                 # Text rendering
 │
+├── gpu/                    # PUBLIC opt-in GPU registration (blank import)
+│   └── gpu.go              # init() registers internal/gpu accelerator
+│
+├── integration/
+│   └── ggcanvas/           # gogpu integration (Canvas for windowed rendering)
+│       ├── canvas.go       # Canvas with Draw(), Flush(), Resize()
+│       └── render.go       # RenderTo, RenderDirect (zero-copy)
+│
 ├── render/                 # Cross-package rendering
 │   ├── scene.go            # Scene with damage tracking
 │   ├── software.go         # Software renderer
 │   ├── layers.go           # LayeredTarget for z-ordering
-│   ├── surface.go          # Render target abstraction
-│   └── types.go            # DeviceHandle (gpucontext.DeviceProvider)
+│   ├── device.go           # DeviceHandle (gpucontext.DeviceProvider)
+│   ├── target.go           # Render target abstraction
+│   ├── renderer.go         # Renderer interface
+│   └── gpu_renderer.go     # GPU-accelerated renderer
 │
 ├── internal/
 │   ├── raster/             # CPU rasterization core
@@ -97,8 +137,17 @@ gg/
 │   │   ├── path_geometry.go    # Y-monotonic curve chopping
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
-│   ├── native/             # GPU rendering pipeline
+│   ├── gpu/                # GPU rendering pipeline (three-tier)
 │   │   ├── backend.go      # GPU backend implementation
+│   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL)
+│   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
+│   │   ├── convex_renderer.go  # Convex polygon renderer (Tier 2a)
+│   │   ├── convexity.go    # Convexity detection algorithm
+│   │   ├── stencil_renderer.go # Stencil+Cover renderer (Tier 2b)
+│   │   ├── stencil_pipeline.go # Stencil render pipeline setup
+│   │   ├── render_session.go   # GPURenderSession (unified render pass)
+│   │   ├── gpu_textures.go # MSAA + stencil + resolve texture management
+│   │   ├── tessellate.go   # Fan tessellation for paths
 │   │   ├── adapter.go      # Analytic AA adapter
 │   │   ├── analytic_filler.go  # GPU-side analytic filler
 │   │   ├── analytic_filler_vello.go  # Vello tile rasterizer
@@ -110,8 +159,20 @@ gg/
 │   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
 │   │   ├── buffer.go       # Buffer with async mapping
-│   │   ├── shaders/        # WGSL compute shaders
-│   │   └── scene_bridge.go # Scene to native bridge
+│   │   ├── scene_bridge.go # Scene to native bridge
+│   │   └── shaders/        # WGSL shaders
+│   │       ├── sdf_render.wgsl    # SDF shape rendering (Tier 1)
+│   │       ├── convex.wgsl        # Convex polygon fill (Tier 2a)
+│   │       ├── stencil_fill.wgsl  # Stencil fill pass (Tier 2b)
+│   │       ├── cover.wgsl         # Cover pass (Tier 2b)
+│   │       ├── fine.wgsl          # Fine rasterization
+│   │       ├── coarse.wgsl        # Coarse rasterization
+│   │       ├── flatten.wgsl       # Path flattening
+│   │       ├── blend.wgsl         # Blending operations
+│   │       ├── blit.wgsl          # Blit / copy
+│   │       ├── composite.wgsl     # Compositing
+│   │       ├── strip.wgsl         # Strip rendering
+│   │       └── msdf_text.wgsl     # MSDF text rendering
 │   │
 │   ├── cache/              # LRU caching infrastructure
 │   │   ├── cache.go        # Generic cache
@@ -125,18 +186,17 @@ gg/
 │   │   └── shaders/        # WGSL compute shaders
 │   │
 │   ├── blend/              # Color blending (29 modes)
-│   ├── tile/               # Parallel rendering
+│   ├── parallel/           # Parallel tile rendering
 │   ├── wide/               # SIMD operations
 │   ├── stroke/             # Stroke expansion (kurbo/tiny-skia)
 │   └── filter/             # Blur, shadow, color matrix
 │
 ├── recording/              # Drawing recording for vector export
 │   ├── recorder.go         # Command-based drawing recorder
-│   ├── recording.go        # Recording with ResourcePool
-│   ├── commands.go         # Typed command definitions
+│   ├── command.go          # Typed command definitions
 │   ├── backend.go          # Backend interface (Writer, File)
 │   ├── registry.go         # Backend registration
-│   └── raster/             # Built-in raster backend
+│   └── backends/raster/    # Built-in raster backend
 │
 ├── surface/                # Render surfaces
 │   ├── image_surface.go    # Image-based surface
@@ -152,13 +212,12 @@ gg/
 │   ├── msdf/               # MSDF text rendering
 │   └── emoji/              # Color emoji support
 │
-├── font/                   # Font loading
-└── image/                  # Image I/O (PNG, JPEG, WebP)
+└── internal/image/          # Image I/O (PNG, JPEG, WebP)
 ```
 
 ## Vello Tile Rasterizer (v0.25.0)
 
-Port of vello_shaders CPU fine rasterizer to Go. Used in `internal/native/`.
+Port of vello_shaders CPU fine rasterizer to Go. Used in `internal/gpu/`.
 
 ### Architecture
 
@@ -216,6 +275,32 @@ Converts stroked paths to filled outlines using the kurbo/tiny-skia algorithm:
 - **Line Joins**: Miter (with limit), Round, Bevel
 - **Curves**: Quadratic and cubic Bezier flattening with tolerance
 
+## gogpu Integration (integration/ggcanvas)
+
+The `integration/ggcanvas/` package bridges gg with gogpu for windowed rendering:
+
+```go
+import "github.com/gogpu/gg/integration/ggcanvas"
+
+canvas := ggcanvas.New(provider, width, height)
+defer canvas.Close()
+
+dc := canvas.Context()
+dc.DrawCircle(400, 300, 100)
+dc.Fill()
+canvas.Flush()
+
+// Zero-copy surface rendering (gg draws directly to window surface):
+canvas.RenderDirect(surfaceView, surfaceWidth, surfaceHeight)
+
+// Or readback-based rendering (GPU -> CPU -> texture):
+canvas.RenderTo(drawContext)
+```
+
+When used with gogpu, the accelerator shares the gogpu GPU device via `DeviceProviderAware`,
+and can render directly to the window surface via `SurfaceTargetAware`, eliminating the
+GPU->CPU->GPU round-trip.
+
 ## Recording System (v0.23.0)
 
 Command-based drawing recording for vector export (Cairo/Skia-inspired).
@@ -263,14 +348,19 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Purpose**           | 2D graphics library   | GPU framework        |
 | **CPU rendering**     | Built-in (core)       | No                   |
 | **GPU rendering**     | Optional accelerator  | Primary              |
-| **Dependencies**      | wgpu, naga, gpucontext| wgpu, gpucontext    |
+| **Dependencies**      | wgpu, naga, gpucontext | wgpu, gpucontext   |
 | **gpucontext role**   | Consumer              | Provider             |
 
 ## Key Design Patterns
 
 | Pattern | Source | Implementation |
 |---------|--------|----------------|
-| **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via blank import |
+| **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
+| **Three-Tier Rendering** | Skia Ganesh/Impeller | SDF, convex, stencil+cover in one render pass |
+| **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |
+| **Stencil-Then-Cover** | GPU Gems 3, NV_path_rendering | Winding via stencil buffer, then cover fill |
+| **Fan Tessellation** | Skia Ganesh | Convex path to triangle fan for GPU |
+| **Shape Detection** | gg | Auto-detect circle/rect/rrect from path elements |
 | **Lazy Default View** | wgpu-rs | `sync.Once` for thread-safe texture view |
 | **State Machine** | wgpu | Command encoder lifecycle |
 | **FNV-1a Hashing** | wgpu-core | Pipeline cache key generation |
@@ -282,6 +372,8 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Tile Rasterization** | vello | 16x16 tile binning + DDA |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
+| **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
+| **Zero-Copy Surface** | Flutter Impeller | SurfaceTargetAware for direct window rendering |
 
 ## See Also
 

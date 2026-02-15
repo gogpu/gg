@@ -3,12 +3,9 @@
 package gpu
 
 import (
-	"encoding/binary"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
-	"time"
-	"unsafe"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
@@ -18,12 +15,17 @@ import (
 	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
-// SDFAccelerator provides GPU-accelerated SDF rendering using wgpu/hal
-// compute shaders. It implements the gg.GPUAccelerator interface.
+// SDFAccelerator provides GPU-accelerated rendering using wgpu/hal render
+// pipelines. It implements the gg.GPUAccelerator interface.
 //
-// Shapes submitted via FillShape/StrokeShape are accumulated into a batch
-// and dispatched as a single GPU compute pass on Flush(). This avoids
-// per-shape fence waits and buffer allocations.
+// The accelerator uses a unified GPURenderSession to render all draw commands
+// (SDF shapes + convex polygons + stencil-then-cover paths) in a single render
+// pass. Shapes submitted via FillShape/StrokeShape and paths via FillPath are
+// accumulated and rendered together on Flush().
+//
+// This unified approach matches enterprise 2D engines (Skia Ganesh/Graphite,
+// Flutter Impeller, Gio): one render pass with pipeline switching, shared
+// MSAA + stencil textures, single submit + fence wait, single readback.
 type SDFAccelerator struct {
 	mu sync.Mutex
 
@@ -31,15 +33,31 @@ type SDFAccelerator struct {
 	device   hal.Device
 	queue    hal.Queue
 
-	// Batch dispatch pipeline (used by FillShape/StrokeShape + Flush).
-	batchShader     hal.ShaderModule
-	batchBindLayout hal.BindGroupLayout
-	batchPipeLayout hal.PipelineLayout
-	batchPipeline   hal.ComputePipeline
+	// Unified render session managing shared textures and frame encoding.
+	session *GPURenderSession
 
-	// Pending shapes for batch dispatch.
-	pendingShapes []SDFBatchShape
-	pendingTarget *gg.GPURenderTarget // nil if no pending shapes
+	// SDF render pipeline (vertex+fragment) -- owned by the accelerator,
+	// shared with the session.
+	sdfRenderPipeline *SDFRenderPipeline
+
+	// Convex polygon renderer -- owned by the accelerator,
+	// shared with the session.
+	convexRenderer *ConvexRenderer
+
+	// Stencil-then-cover renderer -- owned by the accelerator,
+	// shared with the session.
+	stencilRenderer *StencilRenderer
+
+	// Pending SDF shapes for batch dispatch.
+	pendingShapes []SDFRenderShape
+
+	// Pending convex polygon commands for batch dispatch.
+	pendingConvexCommands []ConvexDrawCommand
+
+	// Pending stencil paths for unified dispatch.
+	pendingStencilPaths []StencilPathCommand
+
+	pendingTarget *gg.GPURenderTarget // nil if no pending commands
 
 	cpuFallback    gg.SDFAccelerator
 	gpuReady       bool
@@ -47,28 +65,49 @@ type SDFAccelerator struct {
 }
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
+var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
 
+// Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 
+// CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF) != 0
+	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill) != 0
 }
 
+// Init registers the accelerator. GPU device initialization is deferred
+// until the first render to avoid creating a standalone Vulkan device that
+// may interfere with an external DX12/Metal device provided later via
+// SetDeviceProvider. This lazy approach prevents Intel iGPU driver issues
+// where destroying a Vulkan device kills a coexisting DX12 device.
 func (a *SDFAccelerator) Init() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.initGPU(); err != nil {
-		log.Printf("gpu-sdf: GPU init failed, using CPU fallback: %v", err)
-	}
 	return nil
 }
 
+// Close releases all GPU resources held by the accelerator.
 func (a *SDFAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pendingShapes = nil
+	a.pendingConvexCommands = nil
+	a.pendingStencilPaths = nil
 	a.pendingTarget = nil
-	a.destroyPipelines()
+	if a.session != nil {
+		a.session.Destroy()
+		a.session = nil
+	}
+	if a.sdfRenderPipeline != nil {
+		a.sdfRenderPipeline.Destroy()
+		a.sdfRenderPipeline = nil
+	}
+	if a.convexRenderer != nil {
+		a.convexRenderer.Destroy()
+		a.convexRenderer = nil
+	}
+	if a.stencilRenderer != nil {
+		a.stencilRenderer.Destroy()
+		a.stencilRenderer = nil
+	}
 	if !a.externalDevice {
 		if a.device != nil {
 			a.device.Destroy()
@@ -79,13 +118,19 @@ func (a *SDFAccelerator) Close() {
 			a.instance = nil
 		}
 	} else {
-		// Don't destroy shared resources — we don't own them
+		// Don't destroy shared resources -- we don't own them.
 		a.device = nil
 		a.instance = nil
 	}
 	a.queue = nil
 	a.gpuReady = false
 	a.externalDevice = false
+}
+
+// SetLogger sets the logger for the GPU accelerator and its internal packages.
+// Called by gg.SetLogger to propagate logging configuration.
+func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
+	setLogger(l)
 }
 
 // SetDeviceProvider switches the accelerator to use a shared GPU device
@@ -112,8 +157,23 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Destroy own resources if we created them
-	a.destroyPipelines()
+	// Destroy own resources if we created them.
+	if a.session != nil {
+		a.session.Destroy()
+		a.session = nil
+	}
+	if a.sdfRenderPipeline != nil {
+		a.sdfRenderPipeline.Destroy()
+		a.sdfRenderPipeline = nil
+	}
+	if a.convexRenderer != nil {
+		a.convexRenderer.Destroy()
+		a.convexRenderer = nil
+	}
+	if a.stencilRenderer != nil {
+		a.stencilRenderer.Destroy()
+		a.stencilRenderer = nil
+	}
 	if !a.externalDevice && a.device != nil {
 		a.device.Destroy()
 	}
@@ -122,25 +182,171 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 		a.instance = nil
 	}
 
-	// Use provided resources
+	// Use provided resources.
 	a.device = device
 	a.queue = queue
 	a.externalDevice = true
 
-	// Recreate pipelines with shared device
-	if err := a.createPipelines(); err != nil {
-		a.gpuReady = false
-		return fmt.Errorf("gpu-sdf: create pipelines with shared device: %w", err)
-	}
+	// Create pipelines and session with shared device.
+	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.convexRenderer = NewConvexRenderer(a.device, a.queue)
+	a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	a.session = NewGPURenderSession(a.device, a.queue)
+	a.session.SetSDFPipeline(a.sdfRenderPipeline)
+	a.session.SetConvexRenderer(a.convexRenderer)
+	a.session.SetStencilRenderer(a.stencilRenderer)
+
 	a.gpuReady = true
-	log.Printf("gpu-sdf: switched to shared GPU device")
+	slogger().Debug("switched to shared GPU device")
 	return nil
 }
 
-func (a *SDFAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
+// SetSurfaceTarget configures the accelerator for direct surface rendering.
+// When view is non-nil, Flush() renders directly to the surface texture view
+// instead of reading back to GPURenderTarget.Data. This eliminates the
+// GPU->CPU readback for windowed rendering.
+//
+// Call with nil to return to offscreen mode. The caller retains ownership
+// of the view.
+func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.session == nil {
+		return
+	}
+	if view == nil {
+		a.session.SetSurfaceTarget(nil, 0, 0)
+		return
+	}
+	halView, ok := view.(hal.TextureView)
+	if !ok {
+		slogger().Warn("SetSurfaceTarget: view is not hal.TextureView")
+		return
+	}
+	a.session.SetSurfaceTarget(halView, width, height)
 }
 
+// FillPath queues a filled path for GPU rendering. The path is analyzed to
+// determine the optimal rendering tier:
+//
+//   - If the path is a single closed convex polygon with only line segments,
+//     it is queued as a ConvexDrawCommand (Tier 2a: single draw call, no stencil).
+//   - Otherwise, it is tessellated into fan triangles and queued as a
+//     StencilPathCommand (Tier 2b: stencil-then-cover).
+//
+// Rendering is deferred until Flush() so all commands can be combined in a
+// single render pass. Returns ErrFallbackToCPU if the GPU is not ready.
+func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
+
+	// If target changed, flush previous batch first.
+	if a.pendingTarget != nil && !sameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	color := getColorFromPaint(paint)
+	premulR := float32(color.R * color.A)
+	premulG := float32(color.G * color.A)
+	premulB := float32(color.B * color.A)
+	premulA := float32(color.A)
+
+	// Try convex fast-path: extract points from path elements and check convexity.
+	if points, ok := extractConvexPolygon(path); ok {
+		cmd := ConvexDrawCommand{
+			Points: points,
+			Color:  [4]float32{premulR, premulG, premulB, premulA},
+		}
+		a.pendingConvexCommands = append(a.pendingConvexCommands, cmd)
+
+		targetCopy := target
+		a.pendingTarget = &targetCopy
+		return nil
+	}
+
+	// Fall back to stencil-then-cover for non-convex or complex paths.
+	tess := NewFanTessellator()
+	tess.TessellatePath(path.Elements())
+	fanVerts := tess.Vertices()
+	if len(fanVerts) == 0 {
+		return nil // empty path, nothing to render
+	}
+
+	cmd := StencilPathCommand{
+		Vertices:  make([]float32, len(fanVerts)),
+		CoverQuad: tess.CoverQuad(),
+		Color:     [4]float32{premulR, premulG, premulB, premulA},
+		FillRule:  paint.FillRule,
+	}
+	copy(cmd.Vertices, fanVerts)
+	a.pendingStencilPaths = append(a.pendingStencilPaths, cmd)
+
+	targetCopy := target
+	a.pendingTarget = &targetCopy
+	return nil
+}
+
+// extractConvexPolygon checks if a path is a single closed contour made entirely
+// of line segments that form a convex polygon. If so, it returns the polygon
+// points. If the path contains curves, multiple subpaths, or is not convex,
+// it returns nil, false.
+//
+// This enables Tier 2a (convex fast-path) for paths like triangles, pentagons,
+// and other convex shapes that don't need stencil-then-cover.
+func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
+	elements := path.Elements()
+	if len(elements) < 3 {
+		return nil, false
+	}
+
+	var points []gg.Point
+	moveCount := 0
+	closed := false
+
+	for _, elem := range elements {
+		switch e := elem.(type) {
+		case gg.MoveTo:
+			moveCount++
+			if moveCount > 1 {
+				// Multiple subpaths: not a single polygon.
+				return nil, false
+			}
+			points = append(points, e.Point)
+		case gg.LineTo:
+			points = append(points, e.Point)
+		case gg.QuadTo, gg.CubicTo:
+			// Paths with curves need flattening, which changes point positions.
+			// Use stencil-then-cover for these (fan tessellator handles curves).
+			return nil, false
+		case gg.Close:
+			closed = true
+		}
+	}
+
+	// Must be a single closed subpath with no curves.
+	if !closed || moveCount != 1 {
+		return nil, false
+	}
+
+	// Need at least 3 points for a polygon.
+	if len(points) < 3 {
+		return nil, false
+	}
+
+	// Check convexity.
+	if !IsConvex(points) {
+		return nil, false
+	}
+
+	return points, true
+}
+
+// StrokePath is not yet GPU-accelerated; it falls back to CPU rendering.
 func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
 	return gg.ErrFallbackToCPU
 }
@@ -167,30 +373,73 @@ func (a *SDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.Detecte
 	return a.queueShape(target, shape, paint, true)
 }
 
-// Flush dispatches all pending shapes in a single GPU compute pass.
-// Returns nil if there are no pending shapes.
+// Flush dispatches all pending commands (SDF shapes + convex polygons +
+// stencil paths) via the unified render session. All commands are rendered
+// in a single render pass. Returns nil if there are no pending commands.
 func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.flushLocked(target)
 }
 
-// PendingCount returns the number of shapes waiting for dispatch (for testing).
+// PendingCount returns the number of commands waiting for dispatch (for testing).
 func (a *SDFAccelerator) PendingCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.pendingShapes)
+	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths)
 }
 
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
-	if len(a.pendingShapes) == 0 {
+	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 && len(a.pendingStencilPaths) == 0 {
 		return nil
 	}
-	err := a.dispatchBatch(target)
+
+	// Lazy GPU initialization: only create a standalone device if no shared
+	// device was provided via SetDeviceProvider. This avoids creating a
+	// Vulkan device at import time that can interfere with an external DX12
+	// device on the same physical GPU (Intel iGPU driver issue).
+	if a.device == nil {
+		if err := a.initGPU(); err != nil {
+			slogger().Warn("GPU init failed, using CPU fallback", "err", err)
+			return gg.ErrFallbackToCPU
+		}
+	}
+
+	// Ensure session exists with all renderers.
+	if a.session == nil {
+		a.session = NewGPURenderSession(a.device, a.queue)
+		if a.sdfRenderPipeline == nil {
+			a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+		}
+		if a.convexRenderer == nil {
+			a.convexRenderer = NewConvexRenderer(a.device, a.queue)
+		}
+		if a.stencilRenderer == nil {
+			a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+		}
+		a.session.SetSDFPipeline(a.sdfRenderPipeline)
+		a.session.SetConvexRenderer(a.convexRenderer)
+		a.session.SetStencilRenderer(a.stencilRenderer)
+	}
+
+	// Take ownership of pending data.
+	shapes := make([]SDFRenderShape, len(a.pendingShapes))
+	copy(shapes, a.pendingShapes)
 	a.pendingShapes = a.pendingShapes[:0]
+
+	convexCmds := make([]ConvexDrawCommand, len(a.pendingConvexCommands))
+	copy(convexCmds, a.pendingConvexCommands)
+	a.pendingConvexCommands = a.pendingConvexCommands[:0]
+
+	paths := make([]StencilPathCommand, len(a.pendingStencilPaths))
+	copy(paths, a.pendingStencilPaths)
+	a.pendingStencilPaths = a.pendingStencilPaths[:0]
 	a.pendingTarget = nil
+
+	err := a.session.RenderFrame(target, shapes, convexCmds, paths)
 	if err != nil {
-		log.Printf("gpu-sdf: batch dispatch error (%d shapes): %v", len(a.pendingShapes), err)
+		slogger().Warn("render session error",
+			"shapes", len(shapes), "convex", len(convexCmds), "paths", len(paths), "err", err)
 	}
 	return err
 }
@@ -203,36 +452,12 @@ func (a *SDFAccelerator) queueShape(target gg.GPURenderTarget, shape gg.Detected
 		}
 	}
 
-	color := getColorFromPaint(paint)
-	var kind uint32
-	var p1, p2, p3 float32
-	switch shape.Kind {
-	case gg.ShapeCircle, gg.ShapeEllipse:
-		kind = 0
-		p1 = float32(shape.RadiusX)
-		p2 = float32(shape.RadiusY)
-	case gg.ShapeRect, gg.ShapeRRect:
-		kind = 1
-		p1 = float32(shape.Width / 2)
-		p2 = float32(shape.Height / 2)
-		p3 = float32(shape.CornerRadius)
-	default:
+	rs, ok := DetectedShapeToRenderShape(shape, paint, stroked)
+	if !ok {
 		return gg.ErrFallbackToCPU
 	}
-	var halfStroke float32
-	var isStroked uint32
-	if stroked {
-		halfStroke = float32(paint.EffectiveLineWidth() / 2)
-		isStroked = 1
-	}
+	a.pendingShapes = append(a.pendingShapes, rs)
 
-	a.pendingShapes = append(a.pendingShapes, SDFBatchShape{
-		Kind: kind, CenterX: float32(shape.CenterX), CenterY: float32(shape.CenterY),
-		Param1: p1, Param2: p2, Param3: p3,
-		HalfStroke: halfStroke, IsStroked: isStroked,
-		ColorR: float32(color.R), ColorG: float32(color.G),
-		ColorB: float32(color.B), ColorA: float32(color.A),
-	})
 	targetCopy := target
 	a.pendingTarget = &targetCopy
 	return nil
@@ -241,190 +466,6 @@ func (a *SDFAccelerator) queueShape(target gg.GPURenderTarget, shape gg.Detected
 func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
 	return a.Width == b.Width && a.Height == b.Height &&
 		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
-}
-
-// packShapesData serializes all pending shapes into a byte slice for GPU upload.
-func (a *SDFAccelerator) packShapesData() []byte {
-	shapeSize := int(unsafe.Sizeof(SDFBatchShape{}))
-	shapesBytes := make([]byte, shapeSize*len(a.pendingShapes))
-	for i := range a.pendingShapes {
-		src := structToBytes(unsafe.Pointer(&a.pendingShapes[i]), unsafe.Sizeof(a.pendingShapes[i])) //nolint:gosec // safe struct access
-		copy(shapesBytes[i*shapeSize:], src)
-	}
-	return shapesBytes
-}
-
-// makeFrameParams returns a 16-byte FrameParams for a single shape index.
-func makeFrameParams(w, h, shapeIndex uint32) []byte {
-	params := SDFBatchFrameParams{
-		TargetWidth: w, TargetHeight: h,
-		ShapeIndex: shapeIndex,
-	}
-	return structToBytes(unsafe.Pointer(&params), unsafe.Sizeof(params)) //nolint:gosec // safe struct access
-}
-
-// encodeMultiPass creates N compute passes (one per shape) in a single command
-// encoder. Each pass processes one shape, with implicit storage buffer barriers
-// between passes ensuring correct compositing order.
-// This avoids naga SPIR-V bug #5 (loops only execute first iteration).
-func (a *SDFAccelerator) encodeMultiPass(
-	bindGroups []hal.BindGroup, storageBuf, stagingBuf hal.Buffer,
-	w, h uint32, pixelBufSize uint64, target gg.GPURenderTarget,
-) error {
-	encoder, err := a.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "sdf_batch_encoder"})
-	if err != nil {
-		return fmt.Errorf("create command encoder: %w", err)
-	}
-	if err := encoder.BeginEncoding("sdf_batch"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
-	// One compute pass per shape — same pipeline, different uniform (shape_index).
-	for i, bg := range bindGroups {
-		_ = i
-		computePass := encoder.BeginComputePass(&hal.ComputePassDescriptor{Label: "sdf_pass"})
-		computePass.SetPipeline(a.batchPipeline)
-		computePass.SetBindGroup(0, bg, nil)
-		computePass.Dispatch((w+7)/8, (h+7)/8, 1)
-		computePass.End()
-	}
-
-	encoder.CopyBufferToBuffer(storageBuf, stagingBuf, []hal.BufferCopy{
-		{SrcOffset: 0, DstOffset: 0, Size: pixelBufSize},
-	})
-	cmdBuf, err := encoder.EndEncoding()
-	if err != nil {
-		return fmt.Errorf("end encoding: %w", err)
-	}
-	defer a.device.FreeCommandBuffer(cmdBuf)
-
-	fence, err := a.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("create fence: %w", err)
-	}
-	defer a.device.DestroyFence(fence)
-	if err := a.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
-		return fmt.Errorf("submit: %w", err)
-	}
-	fenceOK, err := a.device.Wait(fence, 1, 5*time.Second)
-	if err != nil || !fenceOK {
-		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
-	}
-
-	readback := make([]byte, pixelBufSize)
-	if err := a.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
-		return fmt.Errorf("readback: %w", err)
-	}
-	unpackPixelsFromGPU(readback, target.Data, int(w*h))
-	return nil
-}
-
-// dispatchBatch sends all pending shapes to the GPU using multi-pass dispatch.
-// Each shape gets its own compute pass in a single command encoder, avoiding
-// naga SPIR-V bug #5 (loops only execute the first iteration).
-// One submit + one fence wait for the entire batch.
-func (a *SDFAccelerator) dispatchBatch(target gg.GPURenderTarget) error {
-	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
-	pixelBufSize := uint64(w * h * 4)
-	shapesBytes := a.packShapesData()
-	packedPixels := packPixelsForGPU(target.Data, int(w*h))
-	n := len(a.pendingShapes)
-
-	// Create shared buffers: shapes (all shapes) + pixels (storage) + staging (readback).
-	shapesBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_shapes", Size: uint64(len(shapesBytes)),
-		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("create shapes buffer: %w", err)
-	}
-	defer a.device.DestroyBuffer(shapesBuf)
-
-	storageBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_pixels", Size: pixelBufSize,
-		Usage: gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("create storage buffer: %w", err)
-	}
-	defer a.device.DestroyBuffer(storageBuf)
-
-	stagingBuf, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-		Label: "sdf_staging", Size: pixelBufSize,
-		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return fmt.Errorf("create staging buffer: %w", err)
-	}
-	defer a.device.DestroyBuffer(stagingBuf)
-
-	a.queue.WriteBuffer(shapesBuf, 0, shapesBytes)
-	a.queue.WriteBuffer(storageBuf, 0, packedPixels)
-
-	// Create per-shape uniform buffers and bind groups.
-	uniformBufs, bindGroups, err := a.createPerShapeBindings(n, w, h, shapesBuf, shapesBytes, storageBuf, pixelBufSize)
-	if err != nil {
-		a.cleanupBindings(uniformBufs, bindGroups)
-		return err
-	}
-	defer a.cleanupBindings(uniformBufs, bindGroups)
-
-	return a.encodeMultiPass(bindGroups, storageBuf, stagingBuf, w, h, pixelBufSize, target)
-}
-
-// createPerShapeBindings creates N uniform buffers (one per shape with shape_index)
-// and N bind groups. Each bind group shares the same shapes and pixels buffers.
-func (a *SDFAccelerator) createPerShapeBindings(
-	n int, w, h uint32,
-	shapesBuf hal.Buffer, shapesBytes []byte,
-	storageBuf hal.Buffer, pixelBufSize uint64,
-) ([]hal.Buffer, []hal.BindGroup, error) {
-	paramSize := uint64(unsafe.Sizeof(SDFBatchFrameParams{}))
-	uniformBufs := make([]hal.Buffer, 0, n)
-	bindGroups := make([]hal.BindGroup, 0, n)
-
-	for i := 0; i < n; i++ {
-		paramsBytes := makeFrameParams(w, h, uint32(i)) //nolint:gosec // shape index fits uint32
-
-		ub, err := a.device.CreateBuffer(&hal.BufferDescriptor{
-			Label: "sdf_params", Size: paramSize,
-			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			return uniformBufs, bindGroups, fmt.Errorf("create uniform buffer %d: %w", i, err)
-		}
-		uniformBufs = append(uniformBufs, ub)
-		a.queue.WriteBuffer(ub, 0, paramsBytes)
-
-		bg, err := a.device.CreateBindGroup(&hal.BindGroupDescriptor{
-			Label: "sdf_bind", Layout: a.batchBindLayout,
-			Entries: []gputypes.BindGroupEntry{
-				{Binding: 0, Resource: gputypes.BufferBinding{Buffer: ub.NativeHandle(), Offset: 0, Size: paramSize}},
-				{Binding: 1, Resource: gputypes.BufferBinding{Buffer: shapesBuf.NativeHandle(), Offset: 0, Size: uint64(len(shapesBytes))}},
-				{Binding: 2, Resource: gputypes.BufferBinding{Buffer: storageBuf.NativeHandle(), Offset: 0, Size: pixelBufSize}},
-			},
-		})
-		if err != nil {
-			return uniformBufs, bindGroups, fmt.Errorf("create bind group %d: %w", i, err)
-		}
-		bindGroups = append(bindGroups, bg)
-	}
-
-	return uniformBufs, bindGroups, nil
-}
-
-// cleanupBindings destroys uniform buffers and bind groups.
-func (a *SDFAccelerator) cleanupBindings(uniformBufs []hal.Buffer, bindGroups []hal.BindGroup) {
-	for _, bg := range bindGroups {
-		if bg != nil {
-			a.device.DestroyBindGroup(bg)
-		}
-	}
-	for _, ub := range uniformBufs {
-		if ub != nil {
-			a.device.DestroyBuffer(ub)
-		}
-	}
 }
 
 func (a *SDFAccelerator) initGPU() error {
@@ -458,76 +499,19 @@ func (a *SDFAccelerator) initGPU() error {
 	}
 	a.device = openDev.Device
 	a.queue = openDev.Queue
-	if err := a.createPipelines(); err != nil {
-		a.device.Destroy()
-		a.device = nil
-		a.queue = nil
-		return fmt.Errorf("create pipelines: %w", err)
-	}
+
+	// Create pipelines and session.
+	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
+	a.convexRenderer = NewConvexRenderer(a.device, a.queue)
+	a.stencilRenderer = NewStencilRenderer(a.device, a.queue)
+	a.session = NewGPURenderSession(a.device, a.queue)
+	a.session.SetSDFPipeline(a.sdfRenderPipeline)
+	a.session.SetConvexRenderer(a.convexRenderer)
+	a.session.SetStencilRenderer(a.stencilRenderer)
+
 	a.gpuReady = true
-	log.Printf("gpu-sdf: GPU accelerator initialized (%s)", selected.Info.Name)
+	slogger().Info("GPU accelerator initialized", "adapter", selected.Info.Name)
 	return nil
-}
-
-func (a *SDFAccelerator) createPipelines() error {
-	batchShader, err := a.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "sdf_batch",
-		Source: hal.ShaderSource{WGSL: sdfBatchShaderSource},
-	})
-	if err != nil {
-		return fmt.Errorf("compile sdf_batch shader: %w", err)
-	}
-	a.batchShader = batchShader
-
-	batchBindLayout, err := a.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
-		Label: "sdf_batch_bind_layout",
-		Entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
-			{Binding: 1, Visibility: gputypes.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
-			{Binding: 2, Visibility: gputypes.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("create batch bind group layout: %w", err)
-	}
-	a.batchBindLayout = batchBindLayout
-
-	batchPipeLayout, err := a.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
-		Label: "sdf_batch_pipe_layout", BindGroupLayouts: []hal.BindGroupLayout{a.batchBindLayout},
-	})
-	if err != nil {
-		return fmt.Errorf("create batch pipeline layout: %w", err)
-	}
-	a.batchPipeLayout = batchPipeLayout
-
-	batchPipeline, err := a.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label: "sdf_batch_pipeline", Layout: a.batchPipeLayout,
-		Compute: hal.ComputeState{Module: a.batchShader, EntryPoint: "main"},
-	})
-	if err != nil {
-		return fmt.Errorf("create batch compute pipeline: %w", err)
-	}
-	a.batchPipeline = batchPipeline
-
-	return nil
-}
-
-func (a *SDFAccelerator) destroyPipelines() {
-	if a.device == nil {
-		return
-	}
-	if a.batchPipeline != nil {
-		a.device.DestroyComputePipeline(a.batchPipeline)
-	}
-	if a.batchPipeLayout != nil {
-		a.device.DestroyPipelineLayout(a.batchPipeLayout)
-	}
-	if a.batchBindLayout != nil {
-		a.device.DestroyBindGroupLayout(a.batchBindLayout)
-	}
-	if a.batchShader != nil {
-		a.device.DestroyShaderModule(a.batchShader)
-	}
 }
 
 func getColorFromPaint(paint *gg.Paint) gg.RGBA {
@@ -538,33 +522,4 @@ func getColorFromPaint(paint *gg.Paint) gg.RGBA {
 		return paint.Brush.ColorAt(0, 0)
 	}
 	return gg.Black
-}
-
-func structToBytes(ptr unsafe.Pointer, size uintptr) []byte {
-	return unsafe.Slice((*byte)(ptr), size) //nolint:gosec // safe struct serialization
-}
-
-func packPixelsForGPU(data []uint8, pixelCount int) []byte {
-	out := make([]byte, pixelCount*4)
-	for i := 0; i < pixelCount; i++ {
-		srcIdx := i * 4
-		r := uint32(data[srcIdx+0])
-		g := uint32(data[srcIdx+1])
-		b := uint32(data[srcIdx+2])
-		a := uint32(data[srcIdx+3])
-		packed := r | (g << 8) | (b << 16) | (a << 24)
-		binary.LittleEndian.PutUint32(out[i*4:], packed)
-	}
-	return out
-}
-
-func unpackPixelsFromGPU(packed []byte, dst []uint8, pixelCount int) {
-	for i := 0; i < pixelCount; i++ {
-		val := binary.LittleEndian.Uint32(packed[i*4:])
-		dstIdx := i * 4
-		dst[dstIdx+0] = uint8(val & 0xFF)         //nolint:gosec // masked to 8 bits
-		dst[dstIdx+1] = uint8((val >> 8) & 0xFF)  //nolint:gosec // masked to 8 bits
-		dst[dstIdx+2] = uint8((val >> 16) & 0xFF) //nolint:gosec // masked to 8 bits
-		dst[dstIdx+3] = uint8((val >> 24) & 0xFF) //nolint:gosec // masked to 8 bits
-	}
 }

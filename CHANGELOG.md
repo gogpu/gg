@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-02-15
+
+### Added
+
+#### Three-Tier GPU Render Pipeline
+
+Complete GPU rendering pipeline with three tiers, unified under a single render pass.
+
+##### Tier 1: SDF Render Pipeline
+- **SDF render pipeline** — Signed Distance Field rendering for smooth primitive shapes
+  - GPU-accelerated SDF for circles, ellipses, rectangles, rounded rectangles
+  - Convexity detection for automatic tier selection
+  - WGSL SDF shaders with analytic anti-aliasing
+
+##### Tier 2a: Convex Fast-Path Renderer
+- **Convex fast-path renderer** — optimized rendering for convex polygons
+  - Direct vertex emission without tessellation overhead
+  - Automatic convexity detection from path geometry
+  - Single draw call per convex shape
+
+##### Tier 2b: Stencil-Then-Cover (Arbitrary Paths)
+- **Stencil-then-cover pipeline** — GPU rendering for arbitrary complex paths
+  - `StencilRenderer` with MSAA + stencil texture management
+  - Fan tessellator for converting paths to triangle fans
+  - Stencil fill + cover render pipelines with WGSL shaders
+  - EvenOdd fill rule support for stencil-then-cover (GG-GPU-010)
+  - Integrated into `GPUAccelerator.FillPath`
+
+##### Unified Architecture
+- **Unified render pass** — all three tiers rendered in a single `BeginRenderPass`
+  - Eliminates per-tier render pass overhead
+  - Shared depth/stencil state across tiers
+- **`RenderDirect()`** — zero-copy GPU surface rendering (GG-GPU-019)
+  - Renders directly to GPU surface without intermediate buffer copies
+  - `CloseAccelerator()` and GPU flush on `Context.Close()`
+  - Lazy GPU initialization with surface target persistence between frames
+
+#### ggcanvas Enhancements
+- **`Canvas.Draw()` helper** — draws with `gg.Context` and marks dirty atomically,
+  replacing manual `MarkDirty()` calls
+- **Deferred texture destruction** on resize for DX12 stability
+
+#### Observability
+- **Structured logging via `log/slog`** — all GPU subsystem logging uses `slog`,
+  silent by default (no output unless handler configured)
+
+#### Testing
+- **Raster package coverage** increased from 42.9% to 90.8%
+
+### Fixed
+
+- **TextureViewDescriptor wgpu-native compatibility** — all `CreateTextureView` calls now
+  set explicit `Format`, `Dimension`, `Aspect`, and `MipLevelCount` instead of relying on
+  zero-value defaults. Native Go backends handle zero defaults gracefully, but wgpu-native
+  panics on `MipLevelCount=0`.
+- **ggcanvas: DX12 texture disappearance during resize** — deferred texture
+  destruction prevents descriptor heap use-after-free. Old texture is kept alive
+  until after `WriteTexture` completes (GPU idle), then destroyed safely.
+  Root cause: DX12 shader-visible sampler heap has a hard 2048-slot limit;
+  leaked textures exhaust it, causing `CreateBindGroup` to fail silently
+- **ggcanvas: removed debug logging** — alpha pixel counting and diagnostic
+  `log.Printf` calls removed from `Flush()`
+- **GPU readback pitch alignment** — aligned readback buffer pitch and added
+  barrier after copy for correct GPU-to-CPU data transfer
+- **GPU texture layout transition** — added texture layout transition before
+  `CopyTextureToBuffer` to prevent validation errors
+- **Surface target persistence** — keep surface target between frames, lazy GPU
+  initialization prevents crashes on early frames
+- **WGSL shader syntax** — removed stray semicolons from WGSL shader struct
+  declarations
+- **Raster X-bounds clipping** — added X-bounds clipping to analytic AA coverage
+  computation, preventing out-of-bounds writes
+- **gogpu integration exit crash** — example updated to use `App.OnClose()` for canvas
+  cleanup, preventing Vulkan validation errors when GPU resources were destroyed after device
+- **Linter warnings** resolved in raster and ggcanvas packages
+
+### Changed
+
+- **GPU architecture refactored** — deleted compute pipeline legacy code, retained
+  render pipeline only
+- **Examples updated** — `gpu` and `gogpu_integration` examples rewritten for
+  three-tier rendering architecture with GLES backend support
+
+### Dependencies
+- wgpu v0.15.0 → v0.16.0
+- naga v0.12.0 → v0.13.0
+- gogpu v0.17.0 → v0.18.0 (in examples)
+
 ## [0.27.1] - 2026-02-10
 
 ### Fixed
@@ -1568,7 +1656,9 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/gogpu/gg/compare/v0.27.1...v0.28.0
+[0.27.1]: https://github.com/gogpu/gg/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/gogpu/gg/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/gogpu/gg/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/gogpu/gg/compare/v0.25.0...v0.26.0
