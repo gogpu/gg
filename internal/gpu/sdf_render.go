@@ -549,7 +549,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 		return fmt.Errorf("readback: %w", err)
 	}
 
-	convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil
 }
 

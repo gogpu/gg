@@ -538,19 +538,22 @@ func (s *GPURenderSession) copySubmitAndReadback(
 		return fmt.Errorf("readback: %w", err)
 	}
 
-	// Strip row padding (if any) and convert BGRA → RGBA.
+	// Strip row padding (if any) and composite BGRA over existing RGBA pixmap.
+	// Compositing (Porter-Duff "over") preserves existing pixmap content where
+	// the GPU rendered transparent pixels. This is essential when Flush() is
+	// called multiple times per frame (e.g., before each CPU text draw).
 	if alignedBytesPerRow == bytesPerRow {
 		// No padding — fast path.
-		convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+		compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	} else {
-		// Strip per-row padding from aligned readback data, then convert.
+		// Strip per-row padding from aligned readback data, then composite.
 		tight := make([]byte, uint64(bytesPerRow)*uint64(h))
 		for row := uint32(0); row < h; row++ {
 			srcOff := int(row) * int(alignedBytesPerRow)
 			dstOff := int(row) * int(bytesPerRow)
 			copy(tight[dstOff:dstOff+int(bytesPerRow)], readback[srcOff:srcOff+int(bytesPerRow)])
 		}
-		convertBGRAToRGBA(tight, target.Data, target.Width*target.Height)
+		compositeBGRAOverRGBA(tight, target.Data, target.Width*target.Height)
 	}
 	return nil
 }
