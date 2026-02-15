@@ -338,22 +338,34 @@ func convexVertexLayout() []gputypes.VertexBufferLayout {
 //   - N interior triangles (3N vertices)
 //   - N AA fringe quads = 2N fringe triangles (6N vertices)
 //   - Total: 9N vertices per polygon
-func BuildConvexVertices(commands []ConvexDrawCommand) []byte { //nolint:funlen // vertex generation loop is a single cohesive unit
-	// Count total vertices.
+func BuildConvexVertices(commands []ConvexDrawCommand) []byte {
+	_, data := buildConvexVerticesReuse(commands, nil)
+	return data
+}
+
+// buildConvexVerticesReuse generates vertex data into the provided staging
+// buffer, growing it if necessary. Returns the (possibly reallocated) staging
+// buffer and the slice of valid vertex data.
+func buildConvexVerticesReuse(commands []ConvexDrawCommand, staging []byte) ([]byte, []byte) { //nolint:funlen // vertex generation loop is a single cohesive unit
 	totalVerts := 0
 	for i := range commands {
 		n := len(commands[i].Points)
 		if n < 3 {
 			continue
 		}
-		// 3N interior + 6N fringe = 9N vertices per polygon.
 		totalVerts += n * 9
 	}
 	if totalVerts == 0 {
-		return nil
+		return staging, nil
 	}
 
-	buf := make([]byte, totalVerts*convexVertexStride)
+	needed := totalVerts * convexVertexStride
+	if cap(staging) < needed {
+		staging = make([]byte, needed)
+	} else {
+		staging = staging[:needed]
+	}
+	buf := staging
 	offset := 0
 
 	for i := range commands {
@@ -461,7 +473,7 @@ func BuildConvexVertices(commands []ConvexDrawCommand) []byte { //nolint:funlen 
 		}
 	}
 
-	return buf[:offset]
+	return staging, buf[:offset]
 }
 
 // writeConvexVertex writes a single convex vertex into the buffer.

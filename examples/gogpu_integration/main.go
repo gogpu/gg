@@ -121,6 +121,9 @@ func main() {
 		if animToken != nil {
 			animToken.Stop()
 		}
+		// Close accelerator first: drains GPU queue and destroys session
+		// resources (persistent buffers, textures) while the device is alive.
+		gg.CloseAccelerator()
 		if canvas != nil {
 			_ = canvas.Close()
 			canvas = nil

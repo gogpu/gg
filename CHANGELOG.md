@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.2] - 2026-02-15
+
+### Changed
+
+- **Persistent GPU buffers** — SDF/convex vertex buffers, uniform buffers, and bind
+  groups survive across frames with grow-only reallocation (2x headroom). Reduces
+  per-frame GPU overhead from ~14 buffer create/destroy cycles to zero in steady-state.
+- **Fence-free surface submit** — surface rendering mode submits without fence wait;
+  previous frame's command buffer freed at start of next frame (VSync guarantees GPU
+  completion). Readback mode still uses fence. Eliminates 0.5-2ms/frame fence latency.
+- **Vertex staging reuse** — CPU-side byte slices for SDF and convex vertex data reused
+  across frames with grow-only strategy to reduce GC pressure.
+- **Stencil buffer pooling** — pool-based approach for multi-path stencil buffer reuse.
+- **GPU queue drain on shutdown** — no-op command buffer ensures GPU idle before resource
+  destruction on shutdown and mode switch.
+- **gogpu_integration example** — `CloseAccelerator` in `OnClose` handler with correct
+  shutdown order; dependency update to gg v0.28.1.
+
+### Fixed
+- **golangci-lint config** — exclude `tmp/` directory from linting (gitignored debug files)
+
+### Dependencies
+- wgpu v0.16.0 → v0.16.1 (Vulkan framebuffer cache invalidation fix)
+- gogpu v0.18.1 → v0.18.2, gg v0.28.1 → v0.28.2 (in examples)
+
 ## [0.28.1] - 2026-02-15
 
 ### Fixed
@@ -1672,7 +1697,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.1...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.2...HEAD
+[0.28.2]: https://github.com/gogpu/gg/compare/v0.28.1...v0.28.2
 [0.28.1]: https://github.com/gogpu/gg/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/gogpu/gg/compare/v0.27.1...v0.28.0
 [0.27.1]: https://github.com/gogpu/gg/compare/v0.27.0...v0.27.1
