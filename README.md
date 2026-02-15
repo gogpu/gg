@@ -25,6 +25,15 @@
 
 **gg** is a 2D graphics library for Go designed to power IDEs, browsers, and graphics-intensive applications. Built with modern patterns inspired by [vello](https://github.com/linebender/vello) and [tiny-skia](https://github.com/RazrFalcon/tiny-skia), it delivers production-grade rendering with zero CGO dependencies.
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/34243cff-5434-411c-a17c-3e52a80f1d57" width="100%" autoplay loop muted playsinline>
+    Three-Tier GPU Rendering: SDF circles, convex polygons, stencil+cover star — all in a single render pass
+  </video>
+  <br>
+  <sub>Three-tier GPU rendering: SDF shapes, convex polygons, and stencil+cover paths in a single render pass.
+  Pure Go, Vulkan backend, zero CGO. (<a href="examples/gogpu_integration/">source</a>)</sub>
+</p>
+
 ### Key Features
 
 | Category | Capabilities |
