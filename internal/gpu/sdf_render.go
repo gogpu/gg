@@ -196,7 +196,11 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	p.msaaTex = msaaTex
 
 	msaaView, err := p.device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
-		Label: "sdf_render_msaa_view",
+		Label:         "sdf_render_msaa_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		p.destroyTextures()
@@ -221,7 +225,11 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	p.resolveTex = resolveTex
 
 	resolveView, err := p.device.CreateTextureView(resolveTex, &hal.TextureViewDescriptor{
-		Label: "sdf_render_resolve_view",
+		Label:         "sdf_render_resolve_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		p.destroyTextures()

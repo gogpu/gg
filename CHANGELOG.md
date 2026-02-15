@@ -58,6 +58,10 @@ Complete GPU rendering pipeline with three tiers, unified under a single render 
 
 ### Fixed
 
+- **TextureViewDescriptor wgpu-native compatibility** — all `CreateTextureView` calls now
+  set explicit `Format`, `Dimension`, `Aspect`, and `MipLevelCount` instead of relying on
+  zero-value defaults. Native Go backends handle zero defaults gracefully, but wgpu-native
+  panics on `MipLevelCount=0`.
 - **ggcanvas: DX12 texture disappearance during resize** — deferred texture
   destruction prevents descriptor heap use-after-free. Old texture is kept alive
   until after `WriteTexture` completes (GPU idle), then destroyed safely.

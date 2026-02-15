@@ -56,7 +56,11 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 	ts.msaaTex = msaaTex
 
 	msaaView, err := device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
-		Label: labelPrefix + "_msaa_color_view",
+		Label:         labelPrefix + "_msaa_color_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		ts.destroyTextures(device)
@@ -81,7 +85,11 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 	ts.stencilTex = stencilTex
 
 	stencilView, err := device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
-		Label: labelPrefix + "_depth_stencil_view",
+		Label:         labelPrefix + "_depth_stencil_view",
+		Format:        gputypes.TextureFormatDepth24PlusStencil8,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		ts.destroyTextures(device)
@@ -106,7 +114,11 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 	ts.resolveTex = resolveTex
 
 	resolveView, err := device.CreateTextureView(resolveTex, &hal.TextureViewDescriptor{
-		Label: labelPrefix + "_resolve_view",
+		Label:         labelPrefix + "_resolve_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		ts.destroyTextures(device)
@@ -150,7 +162,11 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 	ts.msaaTex = msaaTex
 
 	msaaView, err := device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
-		Label: labelPrefix + "_msaa_color_view",
+		Label:         labelPrefix + "_msaa_color_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		ts.destroyTextures(device)
@@ -175,7 +191,11 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 	ts.stencilTex = stencilTex
 
 	stencilView, err := device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
-		Label: labelPrefix + "_depth_stencil_view",
+		Label:         labelPrefix + "_depth_stencil_view",
+		Format:        gputypes.TextureFormatDepth24PlusStencil8,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
 	})
 	if err != nil {
 		ts.destroyTextures(device)
