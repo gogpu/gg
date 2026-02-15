@@ -34,7 +34,6 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GoGPU + gg: Three-Tier GPU Rendering").
-		WithGraphicsAPI(gogpu.GraphicsAPIGLES).
 		WithSize(width, height))
 
 	var canvas *ggcanvas.Canvas
@@ -80,9 +79,11 @@ func main() {
 			log.Printf("Draw error: %v", err)
 		}
 
-		// Render via texture upload path (works on all backends including GLES).
-		if err := canvas.RenderTo(dc.AsTextureDrawer()); err != nil {
-			log.Printf("Frame %d: RenderTo error: %v", frame, err)
+		// Render directly to surface (zero-copy, no readback).
+		sv := dc.SurfaceView()
+		sw, sh := dc.SurfaceSize()
+		if err := canvas.RenderDirect(sv, sw, sh); err != nil {
+			log.Printf("Frame %d: RenderDirect error: %v", frame, err)
 		}
 		frame++
 	})

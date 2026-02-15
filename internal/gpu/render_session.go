@@ -466,10 +466,15 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	}})
 
 	// Copy resolve texture to staging buffer for CPU readback.
-	pixelBufSize := uint64(w) * uint64(h) * 4
+	// WebGPU (and DX12) requires BytesPerRow aligned to 256 bytes.
+	bytesPerRow := w * 4
+	const copyPitchAlignment = 256
+	alignedBytesPerRow := (bytesPerRow + copyPitchAlignment - 1) &^ (copyPitchAlignment - 1)
+	stagingBufSize := uint64(alignedBytesPerRow) * uint64(h)
+
 	stagingBuf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
 		Label: "session_staging",
-		Size:  pixelBufSize,
+		Size:  stagingBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
@@ -479,9 +484,21 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	defer s.device.DestroyBuffer(stagingBuf)
 
 	encoder.CopyTextureToBuffer(s.textures.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
-		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: alignedBytesPerRow, RowsPerImage: h},
 		TextureBase:  hal.ImageCopyTexture{Texture: s.textures.resolveTex, MipLevel: 0},
 		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+	}})
+
+	// Transition resolve texture back to RenderAttachment so the next frame's
+	// render pass End() can transition from RENDER_TARGET → RESOLVE_DEST.
+	// Without this, the texture remains in COPY_SOURCE and the next resolve
+	// barrier (which expects RENDER_TARGET) would be invalid on DX12.
+	encoder.TransitionTextures([]hal.TextureBarrier{{
+		Texture: s.textures.resolveTex,
+		Usage: hal.TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageCopySrc,
+			NewUsage: gputypes.TextureUsageRenderAttachment,
+		},
 	}})
 
 	cmdBuf, err := encoder.EndEncoding()
@@ -505,12 +522,25 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
 	}
 
-	readback := make([]byte, pixelBufSize)
+	readback := make([]byte, stagingBufSize)
 	if err := s.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
 		return fmt.Errorf("readback: %w", err)
 	}
 
-	convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+	// Strip row padding (if any) and convert BGRA → RGBA.
+	if alignedBytesPerRow == bytesPerRow {
+		// No padding — fast path.
+		convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+	} else {
+		// Strip per-row padding from aligned readback data, then convert.
+		tight := make([]byte, uint64(bytesPerRow)*uint64(h))
+		for row := uint32(0); row < h; row++ {
+			srcOff := int(row) * int(alignedBytesPerRow)
+			dstOff := int(row) * int(bytesPerRow)
+			copy(tight[dstOff:dstOff+int(bytesPerRow)], readback[srcOff:srcOff+int(bytesPerRow)])
+		}
+		convertBGRAToRGBA(tight, target.Data, target.Width*target.Height)
+	}
 	return nil
 }
 
