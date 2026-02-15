@@ -430,7 +430,7 @@ func (sr *StencilRenderer) submitAndReadback(
 		return fmt.Errorf("readback: %w", err)
 	}
 
-	convertBGRAToRGBA(readback, target.Data, target.Width*target.Height)
+	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil
 }
 
@@ -513,5 +513,44 @@ func convertBGRAToRGBA(src, dst []byte, pixelCount int) {
 		dst[off+1] = g
 		dst[off+2] = b
 		dst[off+3] = a
+	}
+}
+
+// compositeBGRAOverRGBA composites GPU readback pixels (BGRA, premultiplied
+// alpha) over existing pixmap content (RGBA, premultiplied alpha) using the
+// Porter-Duff "over" operator: out = src + dst * (1 - src_alpha).
+//
+// Transparent source pixels (alpha=0) leave the destination unchanged. Fully
+// opaque source pixels (alpha=255) replace the destination. Semi-transparent
+// source pixels are blended correctly with existing content.
+//
+// This is essential when the GPU accelerator flushes multiple times per frame
+// (e.g., before each CPU text draw). Without compositing, each flush would
+// clear the pixmap, losing previously rendered content.
+func compositeBGRAOverRGBA(src, dst []byte, pixelCount int) {
+	for i := 0; i < pixelCount; i++ {
+		off := i * 4
+		sa := src[off+3]
+		if sa == 0 {
+			continue // transparent source: leave dst unchanged
+		}
+		sr, sg, sb := src[off+2], src[off+1], src[off]
+		if sa == 255 {
+			// Fully opaque: direct copy (BGRA→RGBA swap).
+			dst[off] = sr
+			dst[off+1] = sg
+			dst[off+2] = sb
+			dst[off+3] = 255
+			continue
+		}
+		// Semi-transparent: premultiplied "over" compositing.
+		// out_c = src_c + dst_c * (255 - src_a) / 255
+		// Max value: 255 + 255*255/255 = 510, but premultiplied invariant
+		// guarantees src_c <= src_a, so result fits in uint8.
+		invA := uint16(255 - sa)
+		dst[off] = sr + uint8(uint16(dst[off])*invA/255)     //nolint:gosec // G115: premultiplied alpha guarantees no overflow
+		dst[off+1] = sg + uint8(uint16(dst[off+1])*invA/255) //nolint:gosec // G115: premultiplied alpha guarantees no overflow
+		dst[off+2] = sb + uint8(uint16(dst[off+2])*invA/255) //nolint:gosec // G115: premultiplied alpha guarantees no overflow
+		dst[off+3] = sa + uint8(uint16(dst[off+3])*invA/255) //nolint:gosec // G115: premultiplied alpha guarantees no overflow
 	}
 }

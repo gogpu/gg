@@ -285,10 +285,11 @@ import "github.com/gogpu/gg/integration/ggcanvas"
 canvas := ggcanvas.New(provider, width, height)
 defer canvas.Close()
 
-dc := canvas.Context()
-dc.DrawCircle(400, 300, 100)
-dc.Fill()
-canvas.Flush()
+// Draw() marks canvas dirty atomically — recommended pattern:
+canvas.Draw(func(dc *gg.Context) {
+    dc.DrawCircle(400, 300, 100)
+    dc.Fill()
+})
 
 // Zero-copy surface rendering (gg draws directly to window surface):
 canvas.RenderDirect(surfaceView, surfaceWidth, surfaceHeight)
@@ -296,6 +297,15 @@ canvas.RenderDirect(surfaceView, surfaceWidth, surfaceHeight)
 // Or readback-based rendering (GPU -> CPU -> texture):
 canvas.RenderTo(drawContext)
 ```
+
+Key implementation details:
+
+- **`Draw()` helper** — draws with `gg.Context` and marks dirty atomically,
+  skipping GPU upload when content is unchanged
+- **Deferred texture destruction** — `Resize()` sets a `sizeChanged` flag instead
+  of destroying the texture immediately, preventing DX12 descriptor heap issues
+- **Porter-Duff compositing** — GPU readback uses "over" compositing
+  (`compositeBGRAOverRGBA`) for correct multi-flush blending
 
 When used with gogpu, the accelerator shares the gogpu GPU device via `DeviceProviderAware`,
 and can render directly to the window surface via `SurfaceTargetAware`, eliminating the

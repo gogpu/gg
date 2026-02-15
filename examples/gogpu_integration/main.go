@@ -13,9 +13,13 @@
 //	Tier 2a (Convex):       triangle, pentagon, hexagon
 //	Tier 2b (Stencil+Cover): star shape, curved paths
 //
+// Rendering mode: event-driven with animation token.
+// Uses ContinuousRender=false + StartAnimation() to render at VSync
+// only while animation is active. Press Space to pause/resume.
+//
 // Requirements:
-//   - gogpu v0.18.0+
-//   - gg v0.28.0+
+//   - gogpu v0.18.1+
+//   - gg v0.28.1+
 package main
 
 import (
@@ -27,6 +31,7 @@ import (
 	_ "github.com/gogpu/gg/gpu" // Register GPU accelerator (SDF + MSAA 4x)
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gogpu"
+	"github.com/gogpu/gpucontext"
 )
 
 func main() {
@@ -34,15 +39,21 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GoGPU + gg: Three-Tier GPU Rendering").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(false)) // Event-driven: 0% CPU when paused
 
 	var canvas *ggcanvas.Canvas
+	var animToken *gogpu.AnimationToken
 	var frame int
+	paused := false
 	startTime := time.Now()
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		if frame == 0 {
 			log.Printf("Backend: %s", dc.Backend())
+			// Start animation — renders at VSync while token is alive.
+			animToken = app.StartAnimation()
+			log.Printf("Animation started (Space to pause/resume)")
 		}
 
 		w, h := dc.Width(), dc.Height()
@@ -88,7 +99,28 @@ func main() {
 		frame++
 	})
 
+	// Space toggles animation pause/resume — demonstrates three-state model.
+	app.EventSource().OnKeyPress(func(key gpucontext.Key, _ gpucontext.Modifiers) {
+		if key != gpucontext.KeySpace {
+			return
+		}
+		paused = !paused
+		if paused {
+			if animToken != nil {
+				animToken.Stop()
+				animToken = nil
+			}
+			log.Printf("Paused (0%% CPU idle, press Space to resume)")
+		} else {
+			animToken = app.StartAnimation()
+			log.Printf("Resumed")
+		}
+	})
+
 	app.OnClose(func() {
+		if animToken != nil {
+			animToken.Stop()
+		}
 		if canvas != nil {
 			_ = canvas.Close()
 			canvas = nil
