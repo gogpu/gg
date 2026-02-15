@@ -88,11 +88,15 @@ func main() {
 		frame++
 	})
 
+	app.OnClose(func() {
+		if canvas != nil {
+			_ = canvas.Close()
+			canvas = nil
+		}
+	})
+
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
-	}
-	if canvas != nil {
-		_ = canvas.Close()
 	}
 }
 

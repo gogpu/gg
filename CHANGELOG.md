@@ -79,6 +79,8 @@ Complete GPU rendering pipeline with three tiers, unified under a single render 
   declarations
 - **Raster X-bounds clipping** — added X-bounds clipping to analytic AA coverage
   computation, preventing out-of-bounds writes
+- **gogpu integration exit crash** — example updated to use `App.OnClose()` for canvas
+  cleanup, preventing Vulkan validation errors when GPU resources were destroyed after device
 - **Linter warnings** resolved in raster and ggcanvas packages
 
 ### Changed
