@@ -465,6 +465,17 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		},
 	}})
 
+	// Encode copy and submit, then read back pixels to the target.
+	return s.copySubmitAndReadback(encoder, w, h, target)
+}
+
+// copySubmitAndReadback creates a staging buffer, encodes the texture-to-buffer
+// copy, submits the command buffer, waits for the GPU, and reads back pixels
+// into the render target. This is the second half of encodeSubmitReadback,
+// extracted for readability.
+func (s *GPURenderSession) copySubmitAndReadback(
+	encoder hal.CommandEncoder, w, h uint32, target gg.GPURenderTarget,
+) error {
 	// Copy resolve texture to staging buffer for CPU readback.
 	// WebGPU (and DX12) requires BytesPerRow aligned to 256 bytes.
 	bytesPerRow := w * 4

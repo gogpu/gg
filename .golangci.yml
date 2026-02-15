@@ -204,6 +204,21 @@ linters:
           - cyclop       # Same reason
           - funlen       # Conversion functions map all 28+ modes
 
+      # Internal packages that intentionally shadow stdlib names.
+      # These are INTERNAL packages — renaming would be a massive refactor
+      # for no benefit. The names match their domain (color, image, path).
+      - path: internal/color/.*\.go
+        linters:
+          - revive        # var-naming: package name shadows stdlib color
+
+      - path: internal/image/.*\.go
+        linters:
+          - revive        # var-naming: package name shadows stdlib image
+
+      - path: internal/path/.*\.go
+        linters:
+          - revive        # var-naming: package name shadows stdlib path
+
       # GPU compute shaders - similar initialization patterns (Phase 6)
       # Each rasterizer has structurally similar but functionally different code
       - path: internal/gpu/gpu_.*.go
