@@ -142,6 +142,11 @@ func RegisterAccelerator(a GPUAccelerator) error {
 	old := accel
 	accel = a
 	accelMu.Unlock()
+
+	// Propagate current logger to the new accelerator so it inherits
+	// any SetLogger configuration that was applied before registration.
+	propagateLogger(a, Logger())
+
 	if old != nil {
 		old.Close()
 	}

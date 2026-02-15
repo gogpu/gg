@@ -15,8 +15,6 @@
 package gpu
 
 import (
-	"log"
-
 	"github.com/gogpu/gg"
 	gpuimpl "github.com/gogpu/gg/internal/gpu"
 )
@@ -24,7 +22,7 @@ import (
 func init() {
 	accel := &gpuimpl.SDFAccelerator{}
 	if err := gg.RegisterAccelerator(accel); err != nil {
-		log.Printf("gpu: GPU accelerator not available: %v", err)
+		gg.Logger().Warn("GPU accelerator not available", "err", err)
 	}
 }
 

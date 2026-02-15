@@ -6,7 +6,6 @@ package ggcanvas
 import (
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
@@ -205,7 +204,7 @@ func (c *Canvas) Flush() (any, error) {
 	if err := c.ctx.FlushGPU(); err != nil {
 		// FlushGPU can fail if GPU accelerator has issues (e.g., compute dispatch failure).
 		// This is non-fatal: CPU-rendered content is still in the pixmap.
-		log.Printf("ggcanvas: FlushGPU error: %v", err)
+		gg.Logger().Warn("FlushGPU error", "err", err)
 	}
 
 	// Get pixel data from gg context

@@ -4,7 +4,7 @@ package gpu
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -127,6 +127,12 @@ func (a *SDFAccelerator) Close() {
 	a.externalDevice = false
 }
 
+// SetLogger sets the logger for the GPU accelerator and its internal packages.
+// Called by gg.SetLogger to propagate logging configuration.
+func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
+	setLogger(l)
+}
+
 // SetDeviceProvider switches the accelerator to use a shared GPU device
 // from an external provider (e.g., gogpu). The provider must implement
 // HalDevice() any and HalQueue() any returning hal.Device and hal.Queue.
@@ -191,7 +197,7 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
-	log.Printf("gpu-sdf: switched to shared GPU device")
+	slogger().Debug("switched to shared GPU device")
 	return nil
 }
 
@@ -214,7 +220,7 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 	}
 	halView, ok := view.(hal.TextureView)
 	if !ok {
-		log.Printf("gpu-sdf: SetSurfaceTarget: view is not hal.TextureView")
+		slogger().Warn("SetSurfaceTarget: view is not hal.TextureView")
 		return
 	}
 	a.session.SetSurfaceTarget(halView, width, height)
@@ -394,7 +400,7 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	// device on the same physical GPU (Intel iGPU driver issue).
 	if a.device == nil {
 		if err := a.initGPU(); err != nil {
-			log.Printf("gpu-sdf: GPU init failed, using CPU fallback: %v", err)
+			slogger().Warn("GPU init failed, using CPU fallback", "err", err)
 			return gg.ErrFallbackToCPU
 		}
 	}
@@ -432,8 +438,8 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 
 	err := a.session.RenderFrame(target, shapes, convexCmds, paths)
 	if err != nil {
-		log.Printf("gpu-sdf: render session error (%d shapes, %d convex, %d paths): %v",
-			len(shapes), len(convexCmds), len(paths), err)
+		slogger().Warn("render session error",
+			"shapes", len(shapes), "convex", len(convexCmds), "paths", len(paths), "err", err)
 	}
 	return err
 }
@@ -504,7 +510,7 @@ func (a *SDFAccelerator) initGPU() error {
 	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
-	log.Printf("gpu-sdf: GPU accelerator initialized (%s)", selected.Info.Name)
+	slogger().Info("GPU accelerator initialized", "adapter", selected.Info.Name)
 	return nil
 }
 

@@ -2,16 +2,18 @@ package gg
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
 )
 
-// mockAccelerator implements GPUAccelerator for testing.
+// mockAccelerator implements GPUAccelerator and loggerSetter for testing.
 type mockAccelerator struct {
 	name     string
 	initErr  error
 	closed   bool
 	canAccel AcceleratedOp
+	logger   *slog.Logger
 	mu       sync.Mutex
 }
 
@@ -52,6 +54,8 @@ func (m *mockAccelerator) StrokeShape(_ GPURenderTarget, _ DetectedShape, _ *Pai
 }
 
 func (m *mockAccelerator) Flush(_ GPURenderTarget) error { return nil }
+
+func (m *mockAccelerator) SetLogger(l *slog.Logger) { m.logger = l }
 
 // resetAccelerator clears the global accelerator state between tests.
 func resetAccelerator() {

@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/core"
@@ -49,14 +48,11 @@ func getGPUInfo(adapterID core.AdapterID) (*GPUInfo, error) {
 func logGPUInfo(adapterID core.AdapterID) {
 	info, err := getGPUInfo(adapterID)
 	if err != nil {
-		log.Printf("wgpu: failed to get GPU info: %v", err)
+		slogger().Warn("failed to get GPU info", "err", err)
 		return
 	}
 
-	log.Printf("wgpu: GPU: %s", info.String())
-	if info.Driver != "" {
-		log.Printf("wgpu: Driver: %s", info.Driver)
-	}
+	slogger().Info("GPU selected", "gpu", info.String(), "driver", info.Driver)
 }
 
 // createDevice creates a logical device from an adapter.
@@ -120,10 +116,10 @@ func CheckDeviceLimits(deviceID core.DeviceID) error {
 		return fmt.Errorf("failed to get device limits: %w", err)
 	}
 
-	// For now, just log some basic limits
-	// In the future, we can validate minimum requirements
-	log.Printf("wgpu: Max texture dimension 2D: %d", limits.MaxTextureDimension2D)
-	log.Printf("wgpu: Max buffer size: %d", limits.MaxBufferSize)
+	// Log some basic limits for diagnostics.
+	slogger().Debug("device limits",
+		"maxTexture2D", limits.MaxTextureDimension2D,
+		"maxBuffer", limits.MaxBufferSize)
 
 	return nil
 }
