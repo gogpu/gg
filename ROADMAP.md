@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.1
+## Current State: v0.28.2
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -107,7 +107,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.28.1** | 2026-02 | Porter-Duff GPU compositing, event-driven example |
+| **v0.28.2** | 2026-02 | Persistent GPU buffers, fence-free submit, buffer pooling |
+| v0.28.1 | 2026-02 | Porter-Duff GPU compositing, event-driven example |
 | v0.28.0 | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
 | v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders, structured logging |
 | v0.26.0 | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
