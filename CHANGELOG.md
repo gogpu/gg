@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dependencies
+- wgpu v0.16.2 → v0.16.3 (per-frame fence tracking, GLES VSync fix, WaitIdle)
+
 ## [0.28.3] - 2026-02-16
 
 ### Dependencies
