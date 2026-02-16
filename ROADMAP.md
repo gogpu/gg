@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.2
+## Current State: v0.28.3
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -107,7 +107,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.28.2** | 2026-02 | Persistent GPU buffers, fence-free submit, buffer pooling |
+| **v0.28.3** | 2026-02 | wgpu v0.16.2 (Metal autorelease pool fix), gogpu v0.19.0 in examples |
+| v0.28.2 | 2026-02 | Persistent GPU buffers, fence-free submit, buffer pooling |
 | v0.28.1 | 2026-02 | Porter-Duff GPU compositing, event-driven example |
 | v0.28.0 | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
 | v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders, structured logging |
