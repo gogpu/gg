@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.3] - 2026-02-16
+
+### Dependencies
+- wgpu v0.16.1 → v0.16.2 (Metal autorelease pool LIFO fix for macOS Tahoe)
+
 ## [0.28.2] - 2026-02-15
 
 ### Changed
@@ -1697,7 +1702,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.2...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.3...HEAD
+[0.28.3]: https://github.com/gogpu/gg/compare/v0.28.2...v0.28.3
 [0.28.2]: https://github.com/gogpu/gg/compare/v0.28.1...v0.28.2
 [0.28.1]: https://github.com/gogpu/gg/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/gogpu/gg/compare/v0.27.1...v0.28.0
