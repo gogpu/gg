@@ -22,7 +22,9 @@ linters:
     - staticcheck   # Comprehensive static analysis
     - errcheck      # Check that errors are handled
     - errorlint     # Check error wrapping
-    - gosec         # Security issues
+    # gosec disabled: v2.23.0 panics on float constants (securego/gosec#1502)
+    # Re-enable after golangci-lint ships gosec ≥2.23.1
+    # - gosec
     - nilnil        # Check that functions don't return nil both ways
     - nilerr        # Check nil error returns
     - ineffassign   # Detect ineffectual assignments

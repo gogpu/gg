@@ -141,7 +141,14 @@ func (d *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDesc
 }
 func (d *mockHALDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
 
-func (d *mockHALDevice) Destroy() {}
+//nolint:nilnil // Mock: unused interface methods.
+func (d *mockHALDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, nil
+}
+func (d *mockHALDevice) DestroyQuerySet(_ hal.QuerySet) {}
+
+func (d *mockHALDevice) WaitIdle() error { return nil }
+func (d *mockHALDevice) Destroy()        {}
 
 // mockHALTexture is a test double for hal.Texture.
 type mockHALTexture struct {

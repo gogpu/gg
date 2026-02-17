@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.4] - 2026-02-18
+
 ### Dependencies
-- wgpu v0.16.2 → v0.16.3 (per-frame fence tracking, GLES VSync fix, WaitIdle)
+- wgpu v0.16.3 → v0.16.4 (Vulkan timeline semaphore, FencePool, command buffer batch allocation, hot-path allocation optimization)
+- naga v0.13.0 → v0.13.1 (SPIR-V OpArrayLength fix, −32% compiler allocations)
+- gogpu v0.19.1 → v0.19.2 in examples (hot-path benchmarks)
 
 ## [0.28.3] - 2026-02-16
 
@@ -1705,7 +1709,8 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.3...HEAD
+[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.4...HEAD
+[0.28.4]: https://github.com/gogpu/gg/compare/v0.28.3...v0.28.4
 [0.28.3]: https://github.com/gogpu/gg/compare/v0.28.2...v0.28.3
 [0.28.2]: https://github.com/gogpu/gg/compare/v0.28.1...v0.28.2
 [0.28.1]: https://github.com/gogpu/gg/compare/v0.28.0...v0.28.1
