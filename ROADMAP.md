@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.4
+## Current State: v0.28.5
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
