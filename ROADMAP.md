@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.28.5
+## Current State: v0.28.6
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -107,7 +107,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.28.4** | 2026-02 | wgpu v0.16.4 (timeline semaphore, FencePool), naga v0.13.1 |
+| **v0.28.6** | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
+| v0.28.5 | 2026-02 | wgpu v0.16.5 (per-encoder command pools) |
+| v0.28.4 | 2026-02 | wgpu v0.16.4 (timeline semaphore, FencePool), naga v0.13.1 |
 | v0.28.3 | 2026-02 | wgpu v0.16.3 (per-frame fence tracking, WaitIdle) |
 | v0.28.2 | 2026-02 | Persistent GPU buffers, fence-free submit, buffer pooling |
 | v0.28.1 | 2026-02 | Porter-Duff GPU compositing, event-driven example |

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.6] - 2026-02-18
+
+### Dependencies
+- wgpu v0.16.5 → v0.16.6 (Metal debug logging, goffi v0.3.9)
+
 ## [0.28.5] - 2026-02-18
 
 ### Dependencies
