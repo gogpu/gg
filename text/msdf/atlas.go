@@ -193,7 +193,12 @@ type Region struct {
 	AtlasIndex int
 
 	// UV coordinates [0, 1] for texture sampling.
+	// Inset by 0.5 texels to prevent bilinear bleed from adjacent cells.
 	U0, V0, U1, V1 float32
+
+	// PlaneBounds: MSDF cell extent in outline reference coordinates.
+	// At render time: quad_pos = cursor + PlaneBound * (fontSize / refSize)
+	PlaneMinX, PlaneMinY, PlaneMaxX, PlaneMaxY float32
 
 	// Pixel coordinates in atlas.
 	X, Y, Width, Height int
@@ -305,9 +310,20 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 	// Copy MSDF data to atlas
 	atlas.copyMSDF(msdf, x, y)
 
-	// Create region
+	// Compute planeBounds: cell extent in outline reference coordinates.
+	// The MSDF cell covers [0, Width] x [0, Height] pixels.
+	planeMinX, planeMinY := msdf.PixelToOutline(0, 0)
+	planeMaxX, planeMaxY := msdf.PixelToOutline(float64(msdf.Width), float64(msdf.Height))
+
+	// Create region with half-pixel UV inset.
+	// Bilinear sampling at exact cell edges reads from the neighbor cell.
+	// Inset by 0.5 texels so sample points land on texel centers.
 	glyphSize := m.config.GlyphSize
 	atlasSize := float32(m.config.Size)
+	halfTexel := float32(0.5) / atlasSize
+
+	// Corresponding planeBounds inset: 0.5 MSDF pixel in outline coords.
+	halfPixelInOutline := 0.5 / msdf.Scale
 
 	region := Region{
 		AtlasIndex: atlas.index,
@@ -315,10 +331,14 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 		Y:          y,
 		Width:      glyphSize,
 		Height:     glyphSize,
-		U0:         float32(x) / atlasSize,
-		V0:         float32(y) / atlasSize,
-		U1:         float32(x+glyphSize) / atlasSize,
-		V1:         float32(y+glyphSize) / atlasSize,
+		U0:         float32(x)/atlasSize + halfTexel,
+		V0:         float32(y)/atlasSize + halfTexel,
+		U1:         float32(x+glyphSize)/atlasSize - halfTexel,
+		V1:         float32(y+glyphSize)/atlasSize - halfTexel,
+		PlaneMinX:  float32(planeMinX + halfPixelInOutline),
+		PlaneMinY:  float32(planeMinY + halfPixelInOutline),
+		PlaneMaxX:  float32(planeMaxX - halfPixelInOutline),
+		PlaneMaxY:  float32(planeMaxY - halfPixelInOutline),
 	}
 
 	// Store in lookup
@@ -396,9 +416,15 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 		// Copy MSDF data to atlas
 		atlas.copyMSDF(msdf, x, y)
 
-		// Create region
+		// Compute planeBounds: cell extent in outline reference coordinates.
+		planeMinX, planeMinY := msdf.PixelToOutline(0, 0)
+		planeMaxX, planeMaxY := msdf.PixelToOutline(float64(msdf.Width), float64(msdf.Height))
+
+		// Half-pixel UV inset + corresponding planeBounds inset.
 		glyphSize := m.config.GlyphSize
 		atlasSize := float32(m.config.Size)
+		halfTexel := float32(0.5) / atlasSize
+		halfPixelInOutline := 0.5 / msdf.Scale
 
 		region := Region{
 			AtlasIndex: atlas.index,
@@ -406,10 +432,14 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 			Y:          y,
 			Width:      glyphSize,
 			Height:     glyphSize,
-			U0:         float32(x) / atlasSize,
-			V0:         float32(y) / atlasSize,
-			U1:         float32(x+glyphSize) / atlasSize,
-			V1:         float32(y+glyphSize) / atlasSize,
+			U0:         float32(x)/atlasSize + halfTexel,
+			V0:         float32(y)/atlasSize + halfTexel,
+			U1:         float32(x+glyphSize)/atlasSize - halfTexel,
+			V1:         float32(y+glyphSize)/atlasSize - halfTexel,
+			PlaneMinX:  float32(planeMinX + halfPixelInOutline),
+			PlaneMinY:  float32(planeMinY + halfPixelInOutline),
+			PlaneMaxX:  float32(planeMaxX - halfPixelInOutline),
+			PlaneMaxY:  float32(planeMaxY - halfPixelInOutline),
 		}
 
 		// Store in lookup

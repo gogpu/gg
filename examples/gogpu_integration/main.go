@@ -190,7 +190,7 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 	panelW := float64(width)/2 - 50
 	panelH := float64(height) - 60
 
-	cc.SetRGBA(1, 1, 1, 1)
+	cc.SetRGBA(0.12, 0.12, 0.14, 1)
 	cc.DrawRoundedRectangle(panelX, panelY, panelW, panelH, 12)
 	cc.Fill()
 
@@ -199,21 +199,21 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 		y := panelY + 50
 		x := panelX + 24
 
-		// 28px bold, dark (33, 33, 33) — matches UI title
+		// 28px bold, white — title
 		cc.SetFont(face28)
-		cc.SetRGBA(33.0/255, 33.0/255, 33.0/255, 1)
+		cc.SetRGBA(1, 1, 1, 1)
 		cc.DrawString("Widget Demo Title", x, y)
 		y += 40
 
-		// 18px bold, medium gray (66, 66, 66) — matches UI section headers
+		// 18px bold, light gray — section headers
 		cc.SetFont(face18)
-		cc.SetRGBA(66.0/255, 66.0/255, 66.0/255, 1)
+		cc.SetRGBA(0.85, 0.85, 0.85, 1)
 		cc.DrawString("Checkboxes", x, y)
 		y += 28
 
-		// 14px regular, dark — matches checkbox labels
+		// 14px regular, white — checkbox labels
 		cc.SetFont(face14)
-		cc.SetRGBA(33.0/255, 33.0/255, 33.0/255, 1)
+		cc.SetRGBA(1, 1, 1, 1)
 		cc.DrawString("Enable notifications", x, y)
 		y += 22
 		cc.DrawString("Dark mode", x, y)
@@ -221,15 +221,15 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 		cc.DrawString("Disabled checkbox", x, y)
 		y += 32
 
-		// 18px bold, medium gray — Radio Buttons header
+		// 18px bold, light gray — Radio Buttons header
 		cc.SetFont(face18)
-		cc.SetRGBA(66.0/255, 66.0/255, 66.0/255, 1)
+		cc.SetRGBA(0.85, 0.85, 0.85, 1)
 		cc.DrawString("Radio Buttons", x, y)
 		y += 28
 
-		// 14px regular, dark — radio labels
+		// 14px regular, white — radio labels
 		cc.SetFont(face14)
-		cc.SetRGBA(33.0/255, 33.0/255, 33.0/255, 1)
+		cc.SetRGBA(1, 1, 1, 1)
 		cc.DrawString("Small", x, y)
 		y += 22
 		cc.DrawString("Medium", x, y)
@@ -237,15 +237,15 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 		cc.DrawString("Large", x, y)
 		y += 32
 
-		// 14px light gray (100, 100, 100) — matches "Horizontal Radio"
-		cc.SetRGBA(100.0/255, 100.0/255, 100.0/255, 1)
+		// 14px light gray — "Horizontal Radio"
+		cc.SetRGBA(0.7, 0.7, 0.7, 1)
 		cc.DrawString("Horizontal Radio", x, y)
 		y += 22
 		cc.DrawString("Light    Dark    System", x, y)
 		y += 32
 
 		// Additional test: even smaller sizes
-		cc.SetRGBA(33.0/255, 33.0/255, 33.0/255, 1)
+		cc.SetRGBA(1, 1, 1, 1)
 		cc.DrawString("The quick brown fox jumps over the lazy dog", x, y)
 	}
 

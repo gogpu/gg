@@ -127,41 +127,21 @@ func (e *GPUTextEngine) LayoutText(
 			continue
 		}
 
-		// Outline bounds are at refSize. Convert to screen coords via ratio.
-		ob := outline.Bounds
-		refW := float64(ob.MaxX - ob.MinX) // width at refSize
-		refH := float64(ob.MaxY - ob.MinY) // height at refSize
-
-		if refW <= 0 || refH <= 0 {
+		// Skip empty/degenerate regions (e.g. space characters).
+		if region.PlaneMaxX <= region.PlaneMinX || region.PlaneMaxY <= region.PlaneMinY {
 			boundsSkip++
 			continue
 		}
 
-		// Replicate the MSDF generator's UNIFORM scale formula using refSize
-		// bounds (which the generator actually used):
-		//   available = msdfSize - 2*pxRange
-		//   scale = min(available/(refW+2*pxRange), available/(refH+2*pxRange))
-		//   cellRef = msdfSize / scale  (cell size in refSize coords)
-		//   cellScreen = cellRef * ratio (cell size in screen pixels)
-		avail := float64(e.msdfSize) - 2*float64(e.pxRange)
-		expandedW := refW + 2*float64(e.pxRange)
-		expandedH := refH + 2*float64(e.pxRange)
-		scaleX := avail / expandedW
-		scaleY := avail / expandedH
-		scale := min(scaleX, scaleY)
-
-		cellRef := float64(e.msdfSize) / scale
-		padXRef := (cellRef - refW) / 2
-		padYRef := (cellRef - refH) / 2
-
-		// Convert from refSize coords to screen coords.
-		// No pixel-snapping: MSDF rendering is resolution-independent and
-		// produces smooth AA at any sub-pixel position. Per-glyph Floor/Ceil
-		// causes ±1px baseline jitter between glyphs of different sizes.
-		qx0 := float32(x + glyph.X + (float64(ob.MinX)-padXRef)*ratio)
-		qx1 := float32(x + glyph.X + (float64(ob.MaxX)+padXRef)*ratio)
-		qy0 := float32(y + (float64(ob.MinY)-padYRef)*ratio)
-		qy1 := float32(y + (float64(ob.MaxY)+padYRef)*ratio)
+		// Position quad using pre-computed planeBounds from the atlas.
+		// PlaneBounds are in refSize outline coordinates; multiply by ratio
+		// to convert to screen pixels. This replaces the 15-line
+		// scale/padding recomputation that previously duplicated the
+		// generator's math.
+		qx0 := float32(x + glyph.X + float64(region.PlaneMinX)*ratio)
+		qx1 := float32(x + glyph.X + float64(region.PlaneMaxX)*ratio)
+		qy0 := float32(y + float64(region.PlaneMinY)*ratio)
+		qy1 := float32(y + float64(region.PlaneMaxY)*ratio)
 
 		quads = append(quads, TextQuad{
 			X0: qx0, Y0: qy0,
