@@ -103,21 +103,22 @@ fn median3(r: f32, g: f32, b: f32) -> f32 {
     return max(min(r, g), min(max(r, g), b));
 }
 
+// sampleSD: Sample the MSDF atlas and return the signed distance at a UV.
+// Returns the median of RGB channels minus 0.5, so 0.0 = on edge,
+// positive = inside glyph, negative = outside.
+fn sampleSD(uv: vec2<f32>) -> f32 {
+    let msdf = textureSample(msdf_atlas, msdf_sampler, uv).rgb;
+    return median3(msdf.r, msdf.g, msdf.b) - 0.5;
+}
+
 // ============================================================================
 // Fragment shader
 // ============================================================================
 
 // fs_main: Sample MSDF atlas and compute anti-aliased alpha.
-// Uses screen-space derivatives for proper scaling at any zoom level.
+// Uses 2x2 supersampling of the signed distance for smoother edges.
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample the MSDF atlas texture
-    let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
-
-    // Recover signed distance from median of RGB channels.
-    // MSDF stores distance as [0, 1] range, 0.5 = on edge.
-    let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
-
     // Standard MSDF screenPxRange calculation (Chlumsky/msdfgen reference).
     // unitRange = pxRange / atlasSize — the fraction of the texture that is
     // the distance field range.
@@ -132,6 +133,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // max(..., 1.0) prevents artifacts on narrow/small characters where
     // the range would otherwise collapse below one pixel.
     let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
+
+    // 2x2 supersampling of the signed distance.
+    // Offsets are ±0.25 texel in screen space via fwidth, giving a rotated
+    // grid pattern that smooths sub-pixel aliasing at small font sizes.
+    let offset = fwidth(in.tex_coord) * 0.25;
+    let sd0 = sampleSD(in.tex_coord + vec2<f32>(-offset.x, -offset.y));
+    let sd1 = sampleSD(in.tex_coord + vec2<f32>( offset.x, -offset.y));
+    let sd2 = sampleSD(in.tex_coord + vec2<f32>(-offset.x,  offset.y));
+    let sd3 = sampleSD(in.tex_coord + vec2<f32>( offset.x,  offset.y));
+    let sd = (sd0 + sd1 + sd2 + sd3) * 0.25;
 
     // Scale signed distance to screen pixels and compute anti-aliased alpha.
     let alpha = clamp(screen_px_range * sd + 0.5, 0.0, 1.0);

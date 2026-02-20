@@ -14,7 +14,7 @@ import (
 // from producing incorrect median values at texel boundaries.
 // 0.35 ≈ 89/255: preserves corner sharpness while eliminating the worst
 // bilinear artifacts visible on small/gray text.
-const msdfErrorCorrectionThreshold = 0.35
+const msdfErrorCorrectionThreshold = 0.25
 
 // AtlasConfig holds atlas configuration.
 type AtlasConfig struct {
@@ -278,6 +278,11 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 		return Region{}, fmt.Errorf("failed to generate MSDF: %w", err)
 	}
 
+	// Apply median filter to clean MSDF noise before error correction.
+	// MedianFilter smooths outlier texels that arise from edge-case
+	// distance evaluations, reducing color fringing at glyph boundaries.
+	msdf = MedianFilter(msdf)
+
 	// Apply error correction to prevent bilinear interpolation artifacts.
 	// Without this, GPU bilinear filtering between adjacent MSDF texels can
 	// cause channel ordering to change, producing incorrect median values
@@ -372,7 +377,8 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 			return nil, fmt.Errorf("failed to generate MSDF for key %v: %w", key, err)
 		}
 
-		// Apply error correction (see single-glyph Get for rationale).
+		// Apply median filter + error correction (see single-glyph Get for rationale).
+		msdf = MedianFilter(msdf)
 		ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
 
 		// Find or create atlas with space

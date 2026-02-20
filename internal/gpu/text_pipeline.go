@@ -176,6 +176,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 		MagFilter:    gputypes.FilterModeLinear,
 		MinFilter:    gputypes.FilterModeLinear,
 		MipmapFilter: gputypes.FilterModeLinear,
+		Anisotropy:   4, // reduces blurring at small text sizes
 	})
 	if err != nil {
 		return fmt.Errorf("create msdf_text sampler: %w", err)

@@ -153,7 +153,6 @@ func main() {
 
 // renderFrame draws animated 2D graphics demonstrating all four GPU tiers.
 func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]text.Face, frame int) {
-	face := faces[0]
 	face28, face18, face14 := faces[1], faces[2], faces[3]
 
 	cc.SetRGBA(0, 0, 0, 0)
@@ -250,12 +249,14 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 		cc.DrawString("The quick brown fox jumps over the lazy dog", x, y)
 	}
 
-	// Original title and FPS (using face20).
-	if face != nil {
-		cc.SetFont(face)
-		cc.SetRGBA(1, 1, 1, 0.95)
-		cc.DrawStringAnchored("Four-Tier GPU Rendering", cx/2, 15, 0.5, 0)
-
+	// Title (28px) and frame counter (14px).
+	if face28 != nil {
+		cc.SetFont(face28)
+		cc.SetRGBA(1, 1, 1, 1)
+		cc.DrawStringAnchored("Four-Tier GPU Rendering", cx/2, 30, 0.5, 0)
+	}
+	if face14 != nil {
+		cc.SetFont(face14)
 		cc.SetRGBA(0.7, 0.7, 0.7, 0.8)
 		fpsText := fmt.Sprintf("Frame %d | %.1fs", frame, elapsed)
 		cc.DrawString(fpsText, 10, float64(height)-10)
