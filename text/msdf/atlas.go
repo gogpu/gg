@@ -8,6 +8,14 @@ import (
 	"github.com/gogpu/gg/text"
 )
 
+// msdfErrorCorrectionThreshold is the maximum allowed deviation (as a
+// fraction of full range) of any channel from the median.  Channels that
+// exceed this are clamped toward the median, preventing bilinear filtering
+// from producing incorrect median values at texel boundaries.
+// 0.35 ≈ 89/255: preserves corner sharpness while eliminating the worst
+// bilinear artifacts visible on small/gray text.
+const msdfErrorCorrectionThreshold = 0.35
+
 // AtlasConfig holds atlas configuration.
 type AtlasConfig struct {
 	// Size is the atlas texture size (width = height).
@@ -270,6 +278,12 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 		return Region{}, fmt.Errorf("failed to generate MSDF: %w", err)
 	}
 
+	// Apply error correction to prevent bilinear interpolation artifacts.
+	// Without this, GPU bilinear filtering between adjacent MSDF texels can
+	// cause channel ordering to change, producing incorrect median values
+	// that manifest as color fringing on small or gray text.
+	ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
+
 	// Find or create atlas with space
 	atlas, err := m.findOrCreateAtlas()
 	if err != nil {
@@ -357,6 +371,9 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate MSDF for key %v: %w", key, err)
 		}
+
+		// Apply error correction (see single-glyph Get for rationale).
+		ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
 
 		// Find or create atlas with space
 		atlas, err := m.findOrCreateAtlas()

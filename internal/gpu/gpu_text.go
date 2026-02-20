@@ -97,12 +97,20 @@ func (e *GPUTextEngine) LayoutText(
 	var quads []TextQuad
 	var glyphCount, outlineSkip, atlasSkip, boundsSkip int
 
+	// Scale ratio: outline is extracted at msdfSize, positions are at fontSize.
+	// All outline-space values are multiplied by ratio to get screen pixels.
+	refSize := float64(e.msdfSize)
+	ratio := fontSize / refSize
+
 	for glyph := range face.Glyphs(s) {
 		glyphCount++
-		// Extract outline for this glyph.
-		outline, err := e.extractor.ExtractOutline(fontSource.Parsed(), glyph.GID, fontSize)
+
+		// Extract outline at the REFERENCE size (msdfSize), NOT the rendering
+		// fontSize. This ensures the outline bounds EXACTLY match what the MSDF
+		// generator uses, regardless of which fontSize first triggered generation.
+		// The MSDF is resolution-independent; its cache key is (font, glyph, msdfSize).
+		outline, err := e.extractor.ExtractOutline(fontSource.Parsed(), glyph.GID, refSize)
 		if err != nil || outline == nil || outline.IsEmpty() {
-			// Space or unsupported glyph -- skip (advance is handled by position).
 			outlineSkip++
 			continue
 		}
@@ -120,59 +128,39 @@ func (e *GPUTextEngine) LayoutText(
 			continue
 		}
 
-		// Calculate screen-space quad position.
-		// glyph.Bounds gives the bounding box in font units at the given size.
-		// X,Y in glyph are relative to text origin (0,0).
-		// We position the quad so the MSDF cell covers the glyph bounds.
-		bounds := glyph.Bounds
-		glyphW := bounds.Width()
-		glyphH := bounds.Height()
+		// Outline bounds are at refSize. Convert to screen coords via ratio.
+		ob := outline.Bounds
+		refW := float64(ob.MaxX - ob.MinX) // width at refSize
+		refH := float64(ob.MaxY - ob.MinY) // height at refSize
 
-		// If bounds are empty (degenerate glyph), skip.
-		if glyphW <= 0 || glyphH <= 0 {
+		if refW <= 0 || refH <= 0 {
 			boundsSkip++
 			continue
 		}
 
-		// Glyph screen position: baseline origin + glyph offset + bounds offset.
-		// bounds.MinX/MinY are relative to the glyph origin.
-		//
-		// The MSDF generator fits the glyph into a square cell (msdfSize x msdfSize)
-		// using UNIFORM scaling: scale = min(scaleX, scaleY). This preserves the
-		// aspect ratio but means one axis may not fill the cell. We must replicate
-		// that same scale here to compute correct padding for BOTH axes.
-		//
-		// Generator formula (see generator.go:calculateScale):
+		// Replicate the MSDF generator's UNIFORM scale formula using refSize
+		// bounds (which the generator actually used):
 		//   available = msdfSize - 2*pxRange
-		//   expandedDim = glyphDim + 2*pxRange  (bounds expanded by pxRange)
-		//   scale = min(available/expandedW, available/expandedH)
-		//
-		// Full cell in screen units = msdfSize / scale (square).
-		// Padding per axis = (cellScreen - glyphDim) / 2.
+		//   scale = min(available/(refW+2*pxRange), available/(refH+2*pxRange))
+		//   cellRef = msdfSize / scale  (cell size in refSize coords)
+		//   cellScreen = cellRef * ratio (cell size in screen pixels)
 		avail := float64(e.msdfSize) - 2*float64(e.pxRange)
-		expandedW := glyphW + 2*float64(e.pxRange)
-		expandedH := glyphH + 2*float64(e.pxRange)
+		expandedW := refW + 2*float64(e.pxRange)
+		expandedH := refH + 2*float64(e.pxRange)
 		scaleX := avail / expandedW
 		scaleY := avail / expandedH
 		scale := min(scaleX, scaleY)
 
-		// Full MSDF cell in screen (font) units — square, uniform scale.
-		cellScreen := float64(e.msdfSize) / scale
-		padX := (cellScreen - glyphW) / 2
-		padY := (cellScreen - glyphH) / 2
+		cellRef := float64(e.msdfSize) / scale
+		padXRef := (cellRef - refW) / 2
+		padYRef := (cellRef - refH) / 2
 
-		// Pixel-snap quad corners to the pixel grid. Without snapping,
-		// sub-pixel offsets cause the MSDF to be sampled between texels,
-		// producing blurry edges on narrow characters like 'i' and 'l'.
-		qx0 := float32(math.Floor(x + glyph.X + bounds.MinX - padX))
-		qx1 := float32(math.Ceil(x + glyph.X + bounds.MaxX + padX))
-
-		// Y coordinate: Go sfnt returns bounds in Y-down convention
-		// (matching Go image coords). MinY is negative (above baseline),
-		// MaxY is zero or positive (at/below baseline).
-		// Screen Y is also Y-down, so: screenY = baseline + fontY
-		qy0 := float32(math.Floor(y + bounds.MinY - padY)) // top of glyph on screen
-		qy1 := float32(math.Ceil(y + bounds.MaxY + padY))  // bottom of glyph on screen
+		// Convert from refSize coords to screen coords.
+		// Pixel-snap quad corners to the pixel grid.
+		qx0 := float32(math.Floor(x + glyph.X + (float64(ob.MinX)-padXRef)*ratio))
+		qx1 := float32(math.Ceil(x + glyph.X + (float64(ob.MaxX)+padXRef)*ratio))
+		qy0 := float32(math.Floor(y + (float64(ob.MinY)-padYRef)*ratio))
+		qy1 := float32(math.Ceil(y + (float64(ob.MaxY)+padYRef)*ratio))
 
 		quads = append(quads, TextQuad{
 			X0: qx0, Y0: qy0,

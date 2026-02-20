@@ -56,14 +56,14 @@ func (g *Generator) Generate(outline *text.GlyphOutline) (*MSDF, error) {
 	AssignColors(shape, g.config.AngleThreshold)
 
 	// Calculate scaling and translation
-	bounds := shape.Bounds
-	if bounds.IsEmpty() {
+	shapeBounds := shape.Bounds
+	if shapeBounds.IsEmpty() {
 		return g.generateEmpty(), nil
 	}
 
 	// Add padding for the distance range
 	padding := g.config.Range
-	bounds = bounds.Expand(padding)
+	bounds := shapeBounds.Expand(padding)
 
 	// Calculate scale to fit in texture size
 	scale := calculateScale(bounds, g.config.Size, padding)

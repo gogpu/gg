@@ -82,8 +82,8 @@ type MSDF struct {
 	// Height of the texture in pixels.
 	Height int
 
-	// Bounds is the bounding box in the original outline coordinate space.
-	// Used for mapping UV coordinates.
+	// Bounds is the expanded bounding box (shape bounds + pxRange padding)
+	// in the original outline coordinate space.
 	Bounds Rect
 
 	// Scale is the scaling factor from outline coordinates to pixel coordinates.
