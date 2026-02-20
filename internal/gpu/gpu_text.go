@@ -5,7 +5,6 @@ package gpu
 import (
 	"fmt"
 	"hash/fnv"
-	"math"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -156,11 +155,13 @@ func (e *GPUTextEngine) LayoutText(
 		padYRef := (cellRef - refH) / 2
 
 		// Convert from refSize coords to screen coords.
-		// Pixel-snap quad corners to the pixel grid.
-		qx0 := float32(math.Floor(x + glyph.X + (float64(ob.MinX)-padXRef)*ratio))
-		qx1 := float32(math.Ceil(x + glyph.X + (float64(ob.MaxX)+padXRef)*ratio))
-		qy0 := float32(math.Floor(y + (float64(ob.MinY)-padYRef)*ratio))
-		qy1 := float32(math.Ceil(y + (float64(ob.MaxY)+padYRef)*ratio))
+		// No pixel-snapping: MSDF rendering is resolution-independent and
+		// produces smooth AA at any sub-pixel position. Per-glyph Floor/Ceil
+		// causes ±1px baseline jitter between glyphs of different sizes.
+		qx0 := float32(x + glyph.X + (float64(ob.MinX)-padXRef)*ratio)
+		qx1 := float32(x + glyph.X + (float64(ob.MaxX)+padXRef)*ratio)
+		qy0 := float32(y + (float64(ob.MinY)-padYRef)*ratio)
+		qy1 := float32(y + (float64(ob.MaxY)+padYRef)*ratio)
 
 		quads = append(quads, TextQuad{
 			X0: qx0, Y0: qy0,
