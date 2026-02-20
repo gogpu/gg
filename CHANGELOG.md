@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.29.0] - 2026-02-20
+## [0.29.0] - 2026-02-21
 
 ### Added
 - **GPU MSDF text pipeline** — `MSDFTextPipeline` renders text entirely on GPU using
@@ -20,10 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ggcanvas auto-registration** — `ggcanvas.Canvas` auto-registers with `App.TrackResource()`
   via duck-typed interface detection. No manual `defer canvas.Close()` or `OnClose` wiring
   needed — shutdown cleanup is automatic (LIFO order).
+- **GPU stroke rendering** — `SDFAccelerator.StrokePath()` converts stroked paths to filled
+  polygon outlines via stroke-expand-then-fill, then routes through the GPU convex polygon
+  renderer. Eliminates CPU fallback for line strokes (checkbox checkmarks, radio outlines).
 
 ### Fixed
 - **GPU text pipeline resource leak** — destroy MSDFTextPipeline in SDFAccelerator.Close()
   (ShaderModule, PipelineLayout, Pipelines, DescriptorSetLayout, Sampler).
+- **Surface dimension mismatch** — `GPURenderSession.RenderFrame()` uses surface dimensions
+  for MSAA texture sizing and viewport uniforms in RenderDirect mode.
 
 ### Dependencies
 - gogpu v0.19.6 → v0.20.0 (ResourceTracker, automatic GPU resource cleanup)

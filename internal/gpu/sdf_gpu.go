@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
@@ -81,7 +82,7 @@ func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelText) != 0
+	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0
 }
 
 // Init registers the accelerator. GPU device initialization is deferred
@@ -413,9 +414,75 @@ func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
 	return points, true
 }
 
-// StrokePath is not yet GPU-accelerated; it falls back to CPU rendering.
-func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
+// StrokePath renders a stroked path on the GPU by expanding the stroke into a
+// filled outline and routing it through the fill pipeline (convex fast-path or
+// stencil-then-cover). Dashed strokes fall back to CPU rendering.
+func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	if paint.IsDashed() {
+		return gg.ErrFallbackToCPU
+	}
+
+	ggElems := path.Elements()
+	if len(ggElems) == 0 {
+		return nil
+	}
+
+	// Convert gg path elements to stroke package elements.
+	strokeElems := make([]stroke.PathElement, 0, len(ggElems))
+	for _, e := range ggElems {
+		switch el := e.(type) {
+		case gg.MoveTo:
+			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.LineTo:
+			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.QuadTo:
+			strokeElems = append(strokeElems, stroke.QuadTo{
+				Control: stroke.Point{X: el.Control.X, Y: el.Control.Y},
+				Point:   stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.CubicTo:
+			strokeElems = append(strokeElems, stroke.CubicTo{
+				Control1: stroke.Point{X: el.Control1.X, Y: el.Control1.Y},
+				Control2: stroke.Point{X: el.Control2.X, Y: el.Control2.Y},
+				Point:    stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.Close:
+			strokeElems = append(strokeElems, stroke.Close{})
+		}
+	}
+
+	// Expand stroke to filled outline.
+	style := stroke.Stroke{
+		Width:      paint.EffectiveLineWidth(),
+		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
+		Join:       stroke.LineJoin(paint.EffectiveLineJoin()),
+		MiterLimit: paint.EffectiveMiterLimit(),
+	}
+	expander := stroke.NewStrokeExpander(style)
+	expanded := expander.Expand(strokeElems)
+	if len(expanded) == 0 {
+		return nil
+	}
+
+	// Build a gg.Path from the expanded outline.
+	fillPath := gg.NewPath()
+	for _, e := range expanded {
+		switch el := e.(type) {
+		case stroke.MoveTo:
+			fillPath.MoveTo(el.Point.X, el.Point.Y)
+		case stroke.LineTo:
+			fillPath.LineTo(el.Point.X, el.Point.Y)
+		case stroke.QuadTo:
+			fillPath.QuadraticTo(el.Control.X, el.Control.Y, el.Point.X, el.Point.Y)
+		case stroke.CubicTo:
+			fillPath.CubicTo(el.Control1.X, el.Control1.Y, el.Control2.X, el.Control2.Y, el.Point.X, el.Point.Y)
+		case stroke.Close:
+			fillPath.Close()
+		}
+	}
+
+	// Route through the fill pipeline (convex fast-path or stencil-then-cover).
+	return a.FillPath(target, fillPath, paint)
 }
 
 // FillShape accumulates a filled shape for batch dispatch.

@@ -210,6 +210,12 @@ func (s *GPURenderSession) RenderFrame(
 	}
 
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
+	// In surface mode, use surface dimensions for MSAA textures and viewport.
+	// The target (gg pixmap) may differ from the surface; the MSAA resolve
+	// target must match the surface view dimensions.
+	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
+		w, h = s.surfaceWidth, s.surfaceHeight
+	}
 	if err := s.EnsureTextures(w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
