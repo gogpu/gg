@@ -117,17 +117,17 @@ func main() {
 		}
 	})
 
+	// GPU resources are automatically cleaned up on shutdown:
+	// - ggcanvas.Canvas auto-registers with App's ResourceTracker
+	// - App.Run() calls tracker.CloseAll() before Renderer.Destroy()
+	// - OnClose is still available for additional cleanup (e.g., accelerator)
 	app.OnClose(func() {
 		if animToken != nil {
 			animToken.Stop()
 		}
-		// Close accelerator first: drains GPU queue and destroys session
+		// Close accelerator: drains GPU queue and destroys session
 		// resources (persistent buffers, textures) while the device is alive.
 		gg.CloseAccelerator()
-		if canvas != nil {
-			_ = canvas.Close()
-			canvas = nil
-		}
 	})
 
 	if err := app.Run(); err != nil {

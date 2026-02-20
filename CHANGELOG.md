@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **ggcanvas auto-registration** — `ggcanvas.Canvas` auto-registers with `App.TrackResource()` via duck-typed interface detection. No manual `defer canvas.Close()` or `OnClose` wiring needed — shutdown cleanup is automatic (LIFO order).
+
+### Dependencies
+- gogpu v0.19.6 → v0.20.0 (ResourceTracker, automatic GPU resource cleanup)
+
 ## [0.28.6] - 2026-02-18
 
 ### Dependencies

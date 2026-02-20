@@ -283,7 +283,7 @@ The `integration/ggcanvas/` package bridges gg with gogpu for windowed rendering
 import "github.com/gogpu/gg/integration/ggcanvas"
 
 canvas := ggcanvas.New(provider, width, height)
-defer canvas.Close()
+// canvas auto-registers with App.TrackResource() — no manual Close needed
 
 // Draw() marks canvas dirty atomically — recommended pattern:
 canvas.Draw(func(dc *gg.Context) {
@@ -306,6 +306,10 @@ Key implementation details:
   of destroying the texture immediately, preventing DX12 descriptor heap issues
 - **Porter-Duff compositing** — GPU readback uses "over" compositing
   (`compositeBGRAOverRGBA`) for correct multi-flush blending
+- **Auto-registration** — Canvas detects if the provider implements
+  `TrackResource(io.Closer)` (duck-typed interface) and auto-registers.
+  On shutdown, gogpu closes all tracked resources in LIFO order — no manual
+  `defer canvas.Close()` or `OnClose` wiring needed.
 
 When used with gogpu, the accelerator shares the gogpu GPU device via `DeviceProviderAware`,
 and can render directly to the window surface via `SurfaceTargetAware`, eliminating the

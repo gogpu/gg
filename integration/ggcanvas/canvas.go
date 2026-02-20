@@ -6,6 +6,7 @@ package ggcanvas
 import (
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
@@ -32,6 +33,15 @@ type textureDestroyer interface {
 	Destroy()
 }
 
+// resourceTracker is a duck-typed interface matching gogpu.ResourceTracker.
+// Using a local interface avoids importing gogpu (which would create a
+// circular dependency gg -> gogpu). Go's structural typing ensures that
+// gogpu.App satisfies this interface without explicit declaration.
+type resourceTracker interface {
+	TrackResource(io.Closer)
+	UntrackResource(io.Closer)
+}
+
 // Canvas wraps gg.Context with gogpu integration.
 // It manages the CPU-to-GPU pipeline automatically.
 //
@@ -47,6 +57,7 @@ type Canvas struct {
 	width       int
 	height      int
 	closed      bool
+	tracked     bool // true if auto-registered with a ResourceTracker
 }
 
 // New creates a Canvas for integrated mode.
@@ -69,13 +80,23 @@ func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error)
 	// provider may not implement HalProvider. GPU will initialize its own device.
 	_ = gg.SetAcceleratorDeviceProvider(provider)
 
-	return &Canvas{
+	c := &Canvas{
 		ctx:      gg.NewContext(width, height),
 		provider: provider,
 		width:    width,
 		height:   height,
 		dirty:    true, // Mark dirty so first Flush creates texture
-	}, nil
+	}
+
+	// Auto-register with ResourceTracker if the provider supports it.
+	// This enables automatic cleanup on application shutdown without
+	// requiring manual OnClose callbacks.
+	if tracker, ok := provider.(resourceTracker); ok {
+		tracker.TrackResource(c)
+		c.tracked = true
+	}
+
+	return c, nil
 }
 
 // MustNew is like New but panics on error.
@@ -291,6 +312,14 @@ func (c *Canvas) Close() error {
 		return nil
 	}
 	c.closed = true
+
+	// Untrack from ResourceTracker if auto-registered, to prevent double-close.
+	if c.tracked {
+		if tracker, ok := c.provider.(resourceTracker); ok {
+			tracker.UntrackResource(c)
+		}
+		c.tracked = false
+	}
 
 	// Clear surface target so GPU accelerator releases MSAA/stencil textures.
 	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
