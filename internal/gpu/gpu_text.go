@@ -137,24 +137,29 @@ func (e *GPUTextEngine) LayoutText(
 		// Glyph screen position: baseline origin + glyph offset + bounds offset.
 		// bounds.MinX/MinY are relative to the glyph origin.
 		//
-		// The MSDF cell (msdfSize px) contains:
-		//   pxRange margin + expanded bounds + pxRange margin.
-		// The available area for the glyph is (msdfSize - 2*pxRange) pixels,
-		// which maps to (glyphDim + 2*pxRange) font units (the generator
-		// expands bounds by pxRange on each side). The UV covers the full
-		// cell, so the screen quad must represent the full cell too.
+		// The MSDF generator fits the glyph into a square cell (msdfSize x msdfSize)
+		// using UNIFORM scaling: scale = min(scaleX, scaleY). This preserves the
+		// aspect ratio but means one axis may not fill the cell. We must replicate
+		// that same scale here to compute correct padding for BOTH axes.
 		//
-		// scale = avail / (glyphDim + 2*pxRange)
-		// cellScreen = msdfSize / scale = msdfSize * (glyphDim + 2*pxRange) / avail
-		// pad = (cellScreen - glyphDim) / 2
+		// Generator formula (see generator.go:calculateScale):
+		//   available = msdfSize - 2*pxRange
+		//   expandedDim = glyphDim + 2*pxRange  (bounds expanded by pxRange)
+		//   scale = min(available/expandedW, available/expandedH)
+		//
+		// Full cell in screen units = msdfSize / scale (square).
+		// Padding per axis = (cellScreen - glyphDim) / 2.
 		avail := float64(e.msdfSize) - 2*float64(e.pxRange)
 		expandedW := glyphW + 2*float64(e.pxRange)
-		cellScreenW := float64(e.msdfSize) * expandedW / avail
-		padX := (cellScreenW - glyphW) / 2
-
 		expandedH := glyphH + 2*float64(e.pxRange)
-		cellScreenH := float64(e.msdfSize) * expandedH / avail
-		padY := (cellScreenH - glyphH) / 2
+		scaleX := avail / expandedW
+		scaleY := avail / expandedH
+		scale := min(scaleX, scaleY)
+
+		// Full MSDF cell in screen (font) units — square, uniform scale.
+		cellScreen := float64(e.msdfSize) / scale
+		padX := (cellScreen - glyphW) / 2
+		padY := (cellScreen - glyphH) / 2
 
 		// Pixel-snap quad corners to the pixel grid. Without snapping,
 		// sub-pixel offsets cause the MSDF to be sampled between texels,

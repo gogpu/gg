@@ -68,9 +68,15 @@ func (g *Generator) Generate(outline *text.GlyphOutline) (*MSDF, error) {
 	// Calculate scale to fit in texture size
 	scale := calculateScale(bounds, g.config.Size, padding)
 
-	// Calculate translation to center the glyph
-	translateX := padding
-	translateY := padding
+	// Center the expanded bounds within the MSDF cell.
+	// With uniform scaling (min of scaleX, scaleY), the non-limiting axis
+	// doesn't fill the available space. Centering ensures the glyph content
+	// is at the center of the cell, which allows symmetric padding in the
+	// screen quad computation (gpu_text.go).
+	occupiedW := bounds.Width() * scale
+	occupiedH := bounds.Height() * scale
+	translateX := (float64(g.config.Size) - occupiedW) / 2
+	translateY := (float64(g.config.Size) - occupiedH) / 2
 
 	// Create the MSDF texture
 	msdf := &MSDF{
