@@ -104,6 +104,14 @@ func (a *SDFAccelerator) Close() {
 	a.textEngine = nil
 	a.pendingTarget = nil
 	if a.session != nil {
+		// Destroy the text pipeline before the session. The session does not
+		// own pipelines (Destroy says "owned by the caller"), but the text
+		// pipeline is lazily created inside the session and the accelerator
+		// has no direct reference to it. Without this, ShaderModule,
+		// PipelineLayout, Pipelines, DescriptorSetLayout, and Sampler leak.
+		if tp := a.session.TextPipelineRef(); tp != nil {
+			tp.Destroy()
+		}
 		a.session.Destroy()
 		a.session = nil
 	}

@@ -461,13 +461,13 @@ func quadsToVertices(quads []TextQuad) []TextVertex {
 	for i, q := range quads {
 		base := i * 4
 
-		// Vertex 0: bottom-left
+		// Vertex 0: top-left
 		vertices[base+0] = TextVertex{X: q.X0, Y: q.Y0, U: q.U0, V: q.V0}
-		// Vertex 1: bottom-right
+		// Vertex 1: top-right
 		vertices[base+1] = TextVertex{X: q.X1, Y: q.Y0, U: q.U1, V: q.V0}
-		// Vertex 2: top-right
+		// Vertex 2: bottom-right
 		vertices[base+2] = TextVertex{X: q.X1, Y: q.Y1, U: q.U1, V: q.V1}
-		// Vertex 3: top-left
+		// Vertex 3: bottom-left
 		vertices[base+3] = TextVertex{X: q.X0, Y: q.Y1, U: q.U0, V: q.V1}
 	}
 
@@ -506,16 +506,16 @@ func buildTextVertexData(quads []TextQuad) []byte {
 	data := make([]byte, len(quads)*4*textVertexStride)
 	off := 0
 	for _, q := range quads {
-		// Vertex 0: bottom-left
+		// Vertex 0: top-left
 		writeTextVertex(data[off:], q.X0, q.Y0, q.U0, q.V0)
 		off += textVertexStride
-		// Vertex 1: bottom-right
+		// Vertex 1: top-right
 		writeTextVertex(data[off:], q.X1, q.Y0, q.U1, q.V0)
 		off += textVertexStride
-		// Vertex 2: top-right
+		// Vertex 2: bottom-right
 		writeTextVertex(data[off:], q.X1, q.Y1, q.U1, q.V1)
 		off += textVertexStride
-		// Vertex 3: top-left
+		// Vertex 3: bottom-left
 		writeTextVertex(data[off:], q.X0, q.Y1, q.U0, q.V1)
 		off += textVertexStride
 	}

@@ -123,22 +123,35 @@ func (e *GPUTextEngine) LayoutText(
 
 		// Glyph screen position: baseline origin + glyph offset + bounds offset.
 		// bounds.MinX/MinY are relative to the glyph origin.
-		// The MSDF has padding (pxRange), so we expand the quad slightly
-		// to account for the distance field extending beyond the glyph bounds.
-		padX := float64(e.pxRange) * glyphW / float64(e.msdfSize)
-		padY := float64(e.pxRange) * glyphH / float64(e.msdfSize)
+		//
+		// The MSDF cell (msdfSize px) contains:
+		//   pxRange margin + expanded bounds + pxRange margin.
+		// The available area for the glyph is (msdfSize - 2*pxRange) pixels,
+		// which maps to (glyphDim + 2*pxRange) font units (the generator
+		// expands bounds by pxRange on each side). The UV covers the full
+		// cell, so the screen quad must represent the full cell too.
+		//
+		// scale = avail / (glyphDim + 2*pxRange)
+		// cellScreen = msdfSize / scale = msdfSize * (glyphDim + 2*pxRange) / avail
+		// pad = (cellScreen - glyphDim) / 2
+		avail := float64(e.msdfSize) - 2*float64(e.pxRange)
+		expandedW := glyphW + 2*float64(e.pxRange)
+		cellScreenW := float64(e.msdfSize) * expandedW / avail
+		padX := (cellScreenW - glyphW) / 2
+
+		expandedH := glyphH + 2*float64(e.pxRange)
+		cellScreenH := float64(e.msdfSize) * expandedH / avail
+		padY := (cellScreenH - glyphH) / 2
 
 		qx0 := float32(x + glyph.X + bounds.MinX - padX)
 		qx1 := float32(x + glyph.X + bounds.MaxX + padX)
 
-		// Y coordinate conversion: font coordinates have Y increasing upward,
-		// but screen coordinates have Y increasing downward.
-		// - y is the baseline in screen coordinates
-		// - bounds.MaxY is the top of the glyph in font coords = top on screen
-		// - bounds.MinY is the bottom in font coords = bottom on screen
-		// Flip: screenY = baseline - fontY
-		qy0 := float32(y - bounds.MaxY - padY) // top of glyph on screen
-		qy1 := float32(y - bounds.MinY + padY) // bottom of glyph on screen
+		// Y coordinate: Go sfnt returns bounds in Y-down convention
+		// (matching Go image coords). MinY is negative (above baseline),
+		// MaxY is zero or positive (at/below baseline).
+		// Screen Y is also Y-down, so: screenY = baseline + fontY
+		qy0 := float32(y + bounds.MinY - padY) // top of glyph on screen
+		qy1 := float32(y + bounds.MaxY + padY) // bottom of glyph on screen
 
 		quads = append(quads, TextQuad{
 			X0: qx0, Y0: qy0,
