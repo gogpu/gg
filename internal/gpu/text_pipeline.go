@@ -545,18 +545,23 @@ func makeTextUniform(color gg.RGBA, transform gg.Matrix, pxRange, atlasSize floa
 	buf := make([]byte, textUniformSize)
 	off := 0
 
-	// Transform: 4x4 row-major matrix (column-major for WGSL mat4x4 is
-	// what the shader reads with column vectors; our row-major layout
-	// matches the WGSL column-major read order because WGSL mat4x4 is
-	// stored column-by-column but we fill it row-by-row matching the
-	// shader's expected layout).
-	// Input affine: a b c / d e f
-	// Output 4x4:   a b 0 c / d e 0 f / 0 0 1 0 / 0 0 0 1
+	// Transform: WGSL mat4x4<f32> is stored COLUMN-MAJOR in memory.
+	// Each group of 4 floats is one column vector.
+	//
+	// Affine 2D transform: x' = Ax + By + C,  y' = Dx + Ey + F
+	// As a 4x4 matrix (math notation, row-major):
+	//   | A  B  0  C |
+	//   | D  E  0  F |
+	//   | 0  0  1  0 |
+	//   | 0  0  0  1 |
+	//
+	// Column-major storage for WGSL:
+	//   col0=[A,D,0,0]  col1=[B,E,0,0]  col2=[0,0,1,0]  col3=[C,F,0,1]
 	t := [16]float32{
-		float32(transform.A), float32(transform.B), 0, float32(transform.C),
-		float32(transform.D), float32(transform.E), 0, float32(transform.F),
-		0, 0, 1, 0,
-		0, 0, 0, 1,
+		float32(transform.A), float32(transform.D), 0, 0, // column 0
+		float32(transform.B), float32(transform.E), 0, 0, // column 1
+		0, 0, 1, 0, // column 2
+		float32(transform.C), float32(transform.F), 0, 1, // column 3
 	}
 	for _, v := range t {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(v))

@@ -7,11 +7,12 @@
 //
 //	gg.Context (draw) → ggcanvas.Canvas → gogpu.Context (GPU) → Window
 //
-// The example showcases all three GPU rendering tiers:
+// The example showcases all four GPU rendering tiers:
 //
 //	Tier 1 (SDF):           circles, rounded rectangles
 //	Tier 2a (Convex):       triangle, pentagon, hexagon
 //	Tier 2b (Stencil+Cover): star shape, curved paths
+//	Tier 4 (MSDF text):     title text, FPS counter
 //
 // Rendering mode: event-driven with animation token.
 // Uses ContinuousRender=false + StartAnimation() to render at VSync
@@ -23,13 +24,16 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
+	"os"
 	"time"
 
 	"github.com/gogpu/gg"
-	_ "github.com/gogpu/gg/gpu" // Register GPU accelerator (SDF + MSAA 4x)
+	_ "github.com/gogpu/gg/gpu" // Register GPU accelerator (SDF + MSAA 4x + MSDF text)
 	"github.com/gogpu/gg/integration/ggcanvas"
+	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gpucontext"
 )
@@ -38,9 +42,12 @@ func main() {
 	const width, height = 800, 600
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("GoGPU + gg: Three-Tier GPU Rendering").
+		WithTitle("GoGPU + gg: Four-Tier GPU Rendering").
 		WithSize(width, height).
 		WithContinuousRender(false)) // Event-driven: 0% CPU when paused
+
+	// Load system font for Tier 4 (MSDF text rendering).
+	fontFace := loadFont()
 
 	var canvas *ggcanvas.Canvas
 	var animToken *gogpu.AnimationToken
@@ -85,7 +92,7 @@ func main() {
 
 		elapsed := time.Since(startTime).Seconds()
 		if err := canvas.Draw(func(cc *gg.Context) {
-			renderFrame(cc, elapsed, cw, ch)
+			renderFrame(cc, elapsed, cw, ch, fontFace, frame)
 		}); err != nil {
 			log.Printf("Draw error: %v", err)
 		}
@@ -135,8 +142,8 @@ func main() {
 	}
 }
 
-// renderFrame draws animated 2D graphics demonstrating all three GPU tiers.
-func renderFrame(cc *gg.Context, elapsed float64, width, height int) {
+// renderFrame draws animated 2D graphics demonstrating all four GPU tiers.
+func renderFrame(cc *gg.Context, elapsed float64, width, height int, face text.Face, frame int) {
 	cc.SetRGBA(0, 0, 0, 0)
 	cc.Clear()
 
@@ -208,6 +215,19 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int) {
 	cc.ClosePath()
 	cc.SetRGBA(0.5, 0.2, 0.9, 0.7)
 	cc.Fill()
+
+	// --- Tier 4: MSDF text (GPU-accelerated text rendering) ---
+	if face != nil {
+		// Title text.
+		cc.SetFont(face)
+		cc.SetRGBA(1, 1, 1, 0.95)
+		cc.DrawStringAnchored("Four-Tier GPU Rendering", cx, 30, 0.5, 0)
+
+		// Frame counter in the bottom-right corner.
+		cc.SetRGBA(0.7, 0.7, 0.7, 0.8)
+		fpsText := fmt.Sprintf("Frame %d | %.1fs", frame, elapsed)
+		cc.DrawString(fpsText, 10, float64(height)-10)
+	}
 }
 
 // drawRotatedPolygon draws a regular polygon rotated by angle radians.
@@ -242,6 +262,51 @@ func drawRotatedStar(cc *gg.Context, cx, cy, outerR, innerR float64, points int,
 		}
 	}
 	cc.ClosePath()
+}
+
+// loadFont finds a system font and creates a Face for text rendering.
+// Returns nil if no font is available (text rendering will be skipped).
+func loadFont() text.Face {
+	fontPath := findSystemFont()
+	if fontPath == "" {
+		log.Println("No system font found. Tier 4 (MSDF text) disabled.")
+		return nil
+	}
+
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		log.Printf("Failed to load font %s: %v", fontPath, err)
+		return nil
+	}
+
+	log.Printf("Loaded font: %s", source.Name())
+	return source.Face(20)
+}
+
+// findSystemFont returns path to a TTF font (TTC collections not supported).
+func findSystemFont() string {
+	candidates := []string{
+		// Windows
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"C:\\Windows\\Fonts\\calibri.ttf",
+		"C:\\Windows\\Fonts\\segoeui.ttf",
+		// macOS
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		// Linux
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
 }
 
 func hsvToRGB(h, s, v float64) (r, g, b float64) {

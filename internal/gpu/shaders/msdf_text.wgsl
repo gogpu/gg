@@ -13,9 +13,8 @@
 // ============================================================================
 
 struct TextUniforms {
-    // Transform matrix (4x4 for alignment, only 3x3 used for 2D transform)
-    // Row-major: [a, b, c, 0, d, e, f, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-    // Transforms: x' = a*x + b*y + c, y' = d*x + e*y + f
+    // Transform matrix: column-major mat4x4 for pixel-to-NDC conversion.
+    // Stored as 4 column vectors in memory.
     transform: mat4x4<f32>,
 
     // Text color (RGBA, premultiplied alpha)
@@ -71,8 +70,15 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Apply 2D transform (using mat4x4 for alignment, treating as affine 2D)
-    let pos = uniforms.transform * vec4<f32>(in.position, 0.0, 1.0);
+    // Apply 2D transform (using mat4x4 for alignment, treating as affine 2D).
+    // Manual column multiply: naga SPIR-V backend does not yet support
+    // mat4x4 * vec4 as a single binary operator.
+    let p = vec4<f32>(in.position, 0.0, 1.0);
+    let col0 = uniforms.transform[0];
+    let col1 = uniforms.transform[1];
+    let col2 = uniforms.transform[2];
+    let col3 = uniforms.transform[3];
+    let pos = p.x * col0 + p.y * col1 + p.z * col2 + p.w * col3;
     out.position = pos;
 
     // Pass through texture coordinates
@@ -108,35 +114,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample the MSDF atlas texture
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
 
-    // Recover signed distance from median of RGB channels
-    // MSDF stores distance as [0, 1] range, 0.5 = on edge
-    // Signed distance: negative = inside, positive = outside
+    // Recover signed distance from median of RGB channels.
+    // MSDF stores distance as [0, 1] range, 0.5 = on edge.
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
-    // Get texture dimensions for screen-space derivative calculation
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
+    // Atlas size from uniforms for screen-space derivative calculation.
+    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
 
-    // Calculate screen-space derivatives of UV coordinates
-    // fwidth gives the rate of change of UV across the pixel
-    // This allows proper anti-aliasing at any scale
+    // Calculate screen-space derivatives of UV coordinates.
+    // fwidth gives the rate of change of UV across the pixel.
     let dx_dy = fwidth(in.tex_coord) * tex_size;
 
-    // Get the distance range from uniforms (typically 4.0 pixels)
+    // Get the distance range from uniforms (typically 4.0 pixels).
     let px_range = uniforms.msdf_params.x;
 
-    // Convert to screen pixel range
-    // This normalizes the signed distance to screen pixels
-    let screen_px_range = px_range / length(dx_dy);
+    // Convert to screen pixel range and scale signed distance.
+    let screen_px_distance = (px_range / length(dx_dy)) * sd;
 
-    // Scale signed distance to screen pixels
-    let screen_px_distance = screen_px_range * sd;
-
-    // Compute anti-aliased alpha using smoothstep-like function
-    // +0.5 centers the edge at the glyph boundary
-    // clamp ensures alpha stays in [0, 1]
+    // Compute anti-aliased alpha.
+    // +0.5 centers the edge at the glyph boundary.
     let alpha = clamp(screen_px_distance + 0.5, 0.0, 1.0);
 
-    // Apply alpha to text color (premultiplied alpha output)
+    // Apply alpha to text color (premultiplied alpha output).
     return vec4<f32>(in.color.rgb * alpha, in.color.a * alpha);
 }
 
@@ -151,10 +150,9 @@ fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
+    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
     let dx_dy = fwidth(in.tex_coord) * tex_size;
-    let px_range = uniforms.msdf_params.x;
-    let screen_px_range = px_range / length(dx_dy);
+    let screen_px_range = uniforms.msdf_params.x / length(dx_dy);
     let screen_px_distance = screen_px_range * sd;
 
     // Outline width in screen pixels (stored in msdf_params.z)
@@ -171,8 +169,9 @@ fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let outline_color = vec4<f32>(1.0 - in.color.rgb, 1.0);
 
     // Composite: fill over outline
+    let outline_diff = outline_alpha - fill_alpha;
     let fill = vec4<f32>(in.color.rgb * fill_alpha, in.color.a * fill_alpha);
-    let outline = vec4<f32>(outline_color.rgb * (outline_alpha - fill_alpha), outline_color.a * (outline_alpha - fill_alpha));
+    let outline = vec4<f32>(outline_color.rgb * outline_diff, outline_color.a * outline_diff);
 
     return fill + outline;
 }
@@ -185,10 +184,9 @@ fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow_offset = vec2<f32>(0.002, 0.002);
     let shadow_color = vec4<f32>(0.0, 0.0, 0.0, 0.5);
 
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
+    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
     let dx_dy = fwidth(in.tex_coord) * tex_size;
-    let px_range = uniforms.msdf_params.x;
-    let screen_px_range = px_range / length(dx_dy);
+    let screen_px_range = uniforms.msdf_params.x / length(dx_dy);
 
     // Sample shadow (offset)
     let shadow_msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord - shadow_offset).rgb;
@@ -197,13 +195,12 @@ fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Sample fill (no offset)
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
-    let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
-    let fill_alpha = clamp(screen_px_range * sd + 0.5, 0.0, 1.0);
+    let fill_sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
+    let fill_alpha = clamp(screen_px_range * fill_sd + 0.5, 0.0, 1.0);
 
-    // Composite: fill over shadow
+    // Composite: fill over shadow (Porter-Duff Source Over)
     let shadow = vec4<f32>(shadow_color.rgb * shadow_alpha, shadow_color.a * shadow_alpha);
     let fill = vec4<f32>(in.color.rgb * fill_alpha, in.color.a * fill_alpha);
 
-    // Fill over shadow compositing (Porter-Duff Source Over)
     return fill + shadow * (1.0 - fill.a);
 }

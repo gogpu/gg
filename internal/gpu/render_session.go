@@ -245,12 +245,11 @@ func (s *GPURenderSession) RenderFrame(
 	var textRes *textFrameResources
 	if len(textBatches) > 0 {
 		if err := s.ensureTextPipeline(); err != nil {
-			return fmt.Errorf("ensure text pipeline: %w", err)
-		}
-		var buildErr error
-		textRes, buildErr = s.buildTextResources(textBatches)
-		if buildErr != nil {
-			return fmt.Errorf("build text resources: %w", buildErr)
+			// Text pipeline failure is non-fatal: log and skip text,
+			// but continue rendering shapes (SDF/convex/stencil).
+			hal.Logger().Warn("text pipeline init failed", "err", err)
+		} else {
+			textRes, _ = s.buildTextResources(textBatches)
 		}
 	}
 
@@ -792,6 +791,12 @@ func (s *GPURenderSession) SetTextAtlas(tex hal.Texture, view hal.TextureView) {
 // ensurePipelines, so may be nil before RenderFrame is called.
 func (s *GPURenderSession) TextPipelineRef() *MSDFTextPipeline {
 	return s.textPipeline
+}
+
+// TextAtlasView returns the current text atlas texture view, or nil if no
+// atlas has been uploaded yet.
+func (s *GPURenderSession) TextAtlasView() hal.TextureView {
+	return s.textAtlasView
 }
 
 // SetTextPipeline sets an external MSDF text pipeline for the session to use.
