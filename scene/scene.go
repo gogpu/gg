@@ -100,6 +100,7 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 		shapeBounds = transformBounds(shapeBounds, combinedTransform)
 	}
 	s.bounds = s.bounds.Union(shapeBounds)
+	enc.UpdateBounds(shapeBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(shapeBounds)
@@ -149,6 +150,7 @@ func (s *Scene) Stroke(style *StrokeStyle, transform Affine, brush Brush, shape 
 		shapeBounds = transformBounds(shapeBounds, combinedTransform)
 	}
 	s.bounds = s.bounds.Union(shapeBounds)
+	enc.UpdateBounds(shapeBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(shapeBounds)
@@ -186,6 +188,7 @@ func (s *Scene) DrawImage(img *Image, transform Affine) {
 		imgBounds = transformBounds(imgBounds, combinedTransform)
 	}
 	s.bounds = s.bounds.Union(imgBounds)
+	enc.UpdateBounds(imgBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(imgBounds)
@@ -497,7 +500,11 @@ func (s *Scene) encodeScenePath(enc *Encoding, path *Path) {
 	}
 
 	enc.tags = append(enc.tags, TagEndPath)
-	enc.bounds = enc.bounds.Union(enc.pathBounds)
+	// Note: we intentionally do NOT update enc.bounds here.
+	// Bounds management is handled at the Scene level (Fill/Stroke/DrawImage)
+	// with proper coordinate transforms applied. This avoids the bug where
+	// untransformed path coordinates cause the tile-based renderer to miss
+	// content that was moved by transforms (gg#116).
 }
 
 // flattenLayers collapses all layer content into the root encoding.

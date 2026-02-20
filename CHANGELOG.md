@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renderer. Eliminates CPU fallback for line strokes (checkbox checkmarks, radio outlines).
 
 ### Fixed
+- **SceneBuilder.WithTransform invisible rendering** ([#116](https://github.com/gogpu/gg/issues/116)) —
+  tile-based renderer early-out used untransformed encoding bounds, causing content moved by
+  transforms to be skipped. Bounds management moved from Encoding to Scene level with proper
+  coordinate transforms. Clip paths no longer incorrectly expand encoding bounds.
 - **GPU text pipeline resource leak** — destroy MSDFTextPipeline in SDFAccelerator.Close()
   (ShaderModule, PipelineLayout, Pipelines, DescriptorSetLayout, Sampler).
 - **Surface dimension mismatch** — `GPURenderSession.RenderFrame()` uses surface dimensions

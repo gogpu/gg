@@ -929,3 +929,62 @@ func BenchmarkScenePoolGetPut(b *testing.B) {
 		pool.Put(s)
 	}
 }
+
+// TestEncodingBoundsWithTransform verifies that encoding bounds include
+// transformed coordinates, not just raw path coords. This is the fix for
+// gg#116: WithTransform caused invisible rendering because the tile-based
+// renderer's early-out check used untransformed encoding bounds.
+func TestEncodingBoundsWithTransform(t *testing.T) {
+	scene := NewScene()
+
+	// Draw a rect at (0,0)-(100,100) with translate(200,300)
+	transform := TranslateAffine(200, 300)
+	scene.Fill(FillNonZero, transform, SolidBrush(gg.Red), NewRectShape(0, 0, 100, 100))
+
+	// Scene bounds should reflect transform
+	sceneBounds := scene.Bounds()
+	if sceneBounds.MinX != 200 || sceneBounds.MinY != 300 ||
+		sceneBounds.MaxX != 300 || sceneBounds.MaxY != 400 {
+		t.Errorf("scene bounds = %+v, want (200,300)-(300,400)", sceneBounds)
+	}
+
+	// Critical: encoding bounds must ALSO include the transformed coordinates.
+	// Before the fix, encoding bounds only had (0,0)-(100,100) which caused
+	// the renderer to skip tiles in the (200,300) area.
+	enc := scene.Encoding()
+	encBounds := enc.Bounds()
+
+	// Encoding bounds must intersect with the (200,300)-(300,400) region
+	if encBounds.MaxX < 300 || encBounds.MaxY < 400 {
+		t.Errorf("encoding bounds = %+v, must include transformed region (200,300)-(300,400)", encBounds)
+	}
+}
+
+// TestEncodingBoundsClipDoesNotExpand verifies that clip paths do not
+// expand encoding bounds (clips restrict visible area, not expand it).
+func TestEncodingBoundsClipDoesNotExpand(t *testing.T) {
+	scene := NewScene()
+
+	// Draw content at (0,0)-(50,50)
+	scene.Fill(FillNonZero, IdentityAffine(), SolidBrush(gg.Red), NewRectShape(0, 0, 50, 50))
+
+	boundsBeforeClip := scene.Encoding().Bounds()
+
+	// Push a clip that extends far beyond the content
+	scene.PushClip(NewRectShape(0, 0, 1000, 1000))
+
+	// Draw more content within the clip
+	scene.Fill(FillNonZero, IdentityAffine(), SolidBrush(gg.Blue), NewRectShape(10, 10, 30, 30))
+
+	scene.PopClip()
+
+	boundsAfterClip := scene.Encoding().Bounds()
+
+	// The clip path itself should NOT expand the encoding bounds beyond
+	// where the actual content is. The bounds should be determined by
+	// the drawn content, not by the clip shape.
+	if boundsAfterClip.MaxX > boundsBeforeClip.MaxX+1 || boundsAfterClip.MaxY > boundsBeforeClip.MaxY+1 {
+		t.Errorf("clip expanded encoding bounds: before=%+v after=%+v (clip should restrict, not expand)",
+			boundsBeforeClip, boundsAfterClip)
+	}
+}
