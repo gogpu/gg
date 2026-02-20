@@ -244,6 +244,9 @@ func (s *GPURenderSession) RenderFrame(
 
 	var textRes *textFrameResources
 	if len(textBatches) > 0 {
+		if err := s.ensureTextPipeline(); err != nil {
+			return fmt.Errorf("ensure text pipeline: %w", err)
+		}
 		var buildErr error
 		textRes, buildErr = s.buildTextResources(textBatches)
 		if buildErr != nil {
@@ -378,8 +381,10 @@ type sdfFrameResources struct {
 	vertCount  uint32
 }
 
-// ensurePipelines creates SDF, convex, stencil, and text pipelines if they
-// don't exist yet. Pipelines are lazily created on first use.
+// ensurePipelines creates SDF, convex, and stencil pipelines if they don't
+// exist yet. Pipelines are lazily created on first use. The text pipeline
+// is NOT created here — it is created on demand when text batches are present
+// (see ensureTextPipeline).
 func (s *GPURenderSession) ensurePipelines() error {
 	if s.sdfPipeline == nil {
 		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue)
@@ -404,13 +409,18 @@ func (s *GPURenderSession) ensurePipelines() error {
 		}
 	}
 
+	return nil
+}
+
+// ensureTextPipeline creates the MSDF text pipeline on demand. Called only
+// when text batches are present. Returns error if shader compilation fails.
+func (s *GPURenderSession) ensureTextPipeline() error {
 	if s.textPipeline == nil {
 		s.textPipeline = NewMSDFTextPipeline(s.device, s.queue)
 	}
 	if err := s.textPipeline.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("text pipeline: %w", err)
 	}
-
 	return nil
 }
 

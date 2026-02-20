@@ -114,7 +114,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
     // Get texture dimensions for screen-space derivative calculation
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
 
     // Calculate screen-space derivatives of UV coordinates
     // fwidth gives the rate of change of UV across the pixel
@@ -151,7 +151,7 @@ fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
     let dx_dy = fwidth(in.tex_coord) * tex_size;
     let px_range = uniforms.msdf_params.x;
     let screen_px_range = px_range / length(dx_dy);
@@ -185,7 +185,7 @@ fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow_offset = vec2<f32>(0.002, 0.002);
     let shadow_color = vec4<f32>(0.0, 0.0, 0.0, 0.5);
 
-    let tex_size = vec2<f32>(textureDimensions(msdf_atlas));
+    let tex_size = vec2<f32>(textureDimensions(msdf_atlas, 0));
     let dx_dy = fwidth(in.tex_coord) * tex_size;
     let px_range = uniforms.msdf_params.x;
     let screen_px_range = px_range / length(dx_dy);
