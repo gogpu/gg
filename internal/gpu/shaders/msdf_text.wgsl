@@ -118,22 +118,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // MSDF stores distance as [0, 1] range, 0.5 = on edge.
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
-    // Atlas size from uniforms for screen-space derivative calculation.
-    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
-
-    // Calculate screen-space derivatives of UV coordinates.
-    // fwidth gives the rate of change of UV across the pixel.
-    let dx_dy = fwidth(in.tex_coord) * tex_size;
-
-    // Get the distance range from uniforms (typically 4.0 pixels).
+    // Standard MSDF screenPxRange calculation (Chlumsky/msdfgen reference).
+    // unitRange = pxRange / atlasSize — the fraction of the texture that is
+    // the distance field range.
     let px_range = uniforms.msdf_params.x;
+    let atlas_size = uniforms.msdf_params.y;
+    let unit_range = vec2<f32>(px_range / atlas_size, px_range / atlas_size);
 
-    // Convert to screen pixel range and scale signed distance.
-    let screen_px_distance = (px_range / length(dx_dy)) * sd;
+    // screenTexSize = how many screen pixels one texel covers.
+    let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
 
-    // Compute anti-aliased alpha.
-    // +0.5 centers the edge at the glyph boundary.
-    let alpha = clamp(screen_px_distance + 0.5, 0.0, 1.0);
+    // screenPxRange: how many screen pixels the distance range spans.
+    // max(..., 1.0) prevents artifacts on narrow/small characters where
+    // the range would otherwise collapse below one pixel.
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
+
+    // Scale signed distance to screen pixels and compute anti-aliased alpha.
+    let alpha = clamp(screen_px_range * sd + 0.5, 0.0, 1.0);
 
     // Apply alpha to text color (premultiplied alpha output).
     return vec4<f32>(in.color.rgb * alpha, in.color.a * alpha);
@@ -150,9 +151,10 @@ fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
     let sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
 
-    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
-    let dx_dy = fwidth(in.tex_coord) * tex_size;
-    let screen_px_range = uniforms.msdf_params.x / length(dx_dy);
+    let unit_range = vec2<f32>(uniforms.msdf_params.x / uniforms.msdf_params.y,
+                              uniforms.msdf_params.x / uniforms.msdf_params.y);
+    let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
     let screen_px_distance = screen_px_range * sd;
 
     // Outline width in screen pixels (stored in msdf_params.z)
@@ -184,9 +186,10 @@ fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow_offset = vec2<f32>(0.002, 0.002);
     let shadow_color = vec4<f32>(0.0, 0.0, 0.0, 0.5);
 
-    let tex_size = vec2<f32>(uniforms.msdf_params.y, uniforms.msdf_params.y);
-    let dx_dy = fwidth(in.tex_coord) * tex_size;
-    let screen_px_range = uniforms.msdf_params.x / length(dx_dy);
+    let unit_range = vec2<f32>(uniforms.msdf_params.x / uniforms.msdf_params.y,
+                              uniforms.msdf_params.x / uniforms.msdf_params.y);
+    let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
 
     // Sample shadow (offset)
     let shadow_msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord - shadow_offset).rgb;

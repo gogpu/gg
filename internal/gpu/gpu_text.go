@@ -5,6 +5,7 @@ package gpu
 import (
 	"fmt"
 	"hash/fnv"
+	"math"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -39,11 +40,23 @@ type GPUTextEngine struct {
 
 // NewGPUTextEngine creates a new GPU text engine with default configuration.
 func NewGPUTextEngine() *GPUTextEngine {
+	const glyphSize = 48
+	const pxRange = 6.0
+
+	cfg := msdf.DefaultAtlasConfig()
+	cfg.GlyphSize = glyphSize
+	mgr, _ := msdf.NewAtlasManager(cfg)
+
+	// Update generator range to match our pxRange.
+	genCfg := mgr.Generator().Config()
+	genCfg.Range = pxRange
+	mgr.Generator().SetConfig(genCfg)
+
 	return &GPUTextEngine{
-		atlasManager: msdf.NewAtlasManagerDefault(),
+		atlasManager: mgr,
 		extractor:    text.NewOutlineExtractor(),
-		msdfSize:     32,
-		pxRange:      4.0,
+		msdfSize:     glyphSize,
+		pxRange:      pxRange,
 	}
 }
 
@@ -143,15 +156,18 @@ func (e *GPUTextEngine) LayoutText(
 		cellScreenH := float64(e.msdfSize) * expandedH / avail
 		padY := (cellScreenH - glyphH) / 2
 
-		qx0 := float32(x + glyph.X + bounds.MinX - padX)
-		qx1 := float32(x + glyph.X + bounds.MaxX + padX)
+		// Pixel-snap quad corners to the pixel grid. Without snapping,
+		// sub-pixel offsets cause the MSDF to be sampled between texels,
+		// producing blurry edges on narrow characters like 'i' and 'l'.
+		qx0 := float32(math.Floor(x + glyph.X + bounds.MinX - padX))
+		qx1 := float32(math.Ceil(x + glyph.X + bounds.MaxX + padX))
 
 		// Y coordinate: Go sfnt returns bounds in Y-down convention
 		// (matching Go image coords). MinY is negative (above baseline),
 		// MaxY is zero or positive (at/below baseline).
 		// Screen Y is also Y-down, so: screenY = baseline + fontY
-		qy0 := float32(y + bounds.MinY - padY) // top of glyph on screen
-		qy1 := float32(y + bounds.MaxY + padY) // bottom of glyph on screen
+		qy0 := float32(math.Floor(y + bounds.MinY - padY)) // top of glyph on screen
+		qy1 := float32(math.Ceil(y + bounds.MaxY + padY))  // bottom of glyph on screen
 
 		quads = append(quads, TextQuad{
 			X0: qx0, Y0: qy0,
