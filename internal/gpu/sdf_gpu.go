@@ -436,7 +436,7 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	a.pendingStencilPaths = a.pendingStencilPaths[:0]
 	a.pendingTarget = nil
 
-	err := a.session.RenderFrame(target, shapes, convexCmds, paths)
+	err := a.session.RenderFrame(target, shapes, convexCmds, paths, nil)
 	if err != nil {
 		slogger().Warn("render session error",
 			"shapes", len(shapes), "convex", len(convexCmds), "paths", len(paths), "err", err)

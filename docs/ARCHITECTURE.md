@@ -24,7 +24,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
              │  CPU Raster │             │    GPU      │
              │  (default)  │             │ Accelerator │
              └──────┬──────┘             └──────┬──────┘
-                    │                           │ (optional, 3 tiers)
+                    │                           │ (optional, 4 tiers)
              ┌──────▼──────┐             ┌──────▼──────┐
              │  internal/  │             │  internal/  │
              │   raster    │             │    gpu      │
@@ -69,16 +69,17 @@ Optional extension interfaces for gogpu integration:
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
 - **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
 
-### Three-Tier GPU Rendering
+### Four-Tier GPU Rendering
 
 The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
-dispatches shapes to three rendering tiers within a single render pass:
+dispatches shapes and text to four rendering tiers within a single render pass:
 
-| Tier | Name | Shapes | Technique |
-|------|------|--------|-----------|
+| Tier | Name | Content | Technique |
+|------|------|---------|-----------|
 | **1** | SDF | Circles, ellipses, rounded rects | SDF shader evaluation per-pixel |
 | **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
+| **4** | MSDF Text | Text glyphs | Multi-channel SDF with median+smoothstep shader |
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio):
 one render pass, multiple pipeline switches.
@@ -137,7 +138,7 @@ gg/
 │   │   ├── path_geometry.go    # Y-monotonic curve chopping
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
-│   ├── gpu/                # GPU rendering pipeline (three-tier)
+│   ├── gpu/                # GPU rendering pipeline (four-tier)
 │   │   ├── backend.go      # GPU backend implementation
 │   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
@@ -159,6 +160,7 @@ gg/
 │   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
 │   │   ├── buffer.go       # Buffer with async mapping
+│   │   ├── text_pipeline.go    # MSDF text rendering pipeline (Tier 4)
 │   │   ├── scene_bridge.go # Scene to native bridge
 │   │   └── shaders/        # WGSL shaders
 │   │       ├── sdf_render.wgsl    # SDF shape rendering (Tier 1)
@@ -370,7 +372,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | Pattern | Source | Implementation |
 |---------|--------|----------------|
 | **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
-| **Three-Tier Rendering** | Skia Ganesh/Impeller | SDF, convex, stencil+cover in one render pass |
+| **Four-Tier Rendering** | Skia Ganesh/Impeller | SDF, convex, stencil+cover, MSDF text in one render pass |
 | **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |
 | **Stencil-Then-Cover** | GPU Gems 3, NV_path_rendering | Winding via stencil buffer, then cover fill |
 | **Fan Tessellation** | Skia Ganesh | Convex path to triangle fan for GPU |

@@ -23,7 +23,7 @@
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
-- Three-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover)
+- Four-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text)
 - RenderDirect zero-copy GPU surface rendering
 - Analytic anti-aliasing (Vello tile-based AA)
 - GPUAccelerator interface with transparent CPU fallback
@@ -61,6 +61,13 @@
 - [x] RenderDirect zero-copy GPU surface rendering
 - [x] EvenOdd fill rule support in stencil pipeline
 - [x] ggcanvas deferred texture destruction for DX12 stability
+
+### v0.29.0 — GPU Text Rendering
+- [x] MSDF text pipeline (Tier 4 in GPURenderSession)
+- [x] WGSL MSDF fragment shader (median + smoothstep)
+- [x] Persistent text vertex/index/uniform buffers
+- [ ] Atlas generation from font glyphs
+- [ ] DrawString → GPU text batch integration
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee

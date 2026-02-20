@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GPU MSDF text pipeline** — `MSDFTextPipeline` renders text entirely on GPU using
+  Multi-channel Signed Distance Field technique. WGSL fragment shader with
+  `median(r,g,b) + smoothstep` produces resolution-independent anti-aliased text.
+  Integrated as Tier 4 in GPURenderSession with persistent vertex/index/uniform buffers.
+
 ### Changed
 - **ggcanvas auto-registration** — `ggcanvas.Canvas` auto-registers with `App.TrackResource()` via duck-typed interface detection. No manual `defer canvas.Close()` or `OnClose` wiring needed — shutdown cleanup is automatic (LIFO order).
+- **Four-tier GPU render pipeline** — GPURenderSession upgraded from three-tier to
+  four-tier: SDF (Tier 1) + Convex (Tier 2a) + Stencil+Cover (Tier 2b) + MSDF Text (Tier 4).
 
 ### Dependencies
 - gogpu v0.19.6 → v0.20.0 (ResourceTracker, automatic GPU resource cleanup)
