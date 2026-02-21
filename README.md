@@ -27,18 +27,18 @@
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/34243cff-5434-411c-a17c-3e52a80f1d57" width="100%" autoplay loop muted playsinline>
-    Three-Tier GPU Rendering: SDF circles, convex polygons, stencil+cover star — all in a single render pass
+    Four-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text — all in a single render pass
   </video>
   <br>
-  <sub>Three-tier GPU rendering: SDF shapes, convex polygons, and stencil+cover paths in a single render pass.
-  Pure Go, Vulkan backend, zero CGO. (<a href="examples/gogpu_integration/">source</a>)</sub>
+  <sub>Four-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, and MSDF text in a single render pass.
+  Pure Go, Vulkan/DX12/GLES backends, zero CGO. (<a href="examples/gogpu_integration/">source</a>)</sub>
 </p>
 
 ### Key Features
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, three-tier GPU acceleration (SDF, Convex, Stencil+Cover), Vello analytic AA, CPU fallback |
+| **Rendering** | Immediate and retained mode, four-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
@@ -107,13 +107,14 @@ defer dc.Close()
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with
-a three-tier rendering pipeline:
+a four-tier rendering pipeline:
 
 | Tier | Method | Best For |
 |------|--------|----------|
 | **SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
 | **Convex** | Direct vertex emission | Convex polygons, single draw call |
 | **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
+| **MSDF Text** | Multi-channel Signed Distance Field | Resolution-independent anti-aliased text |
 
 When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 

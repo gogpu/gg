@@ -33,8 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ShaderModule, PipelineLayout, Pipelines, DescriptorSetLayout, Sampler).
 - **Surface dimension mismatch** — `GPURenderSession.RenderFrame()` uses surface dimensions
   for MSAA texture sizing and viewport uniforms in RenderDirect mode.
+- **DX12 text disappearing after ~1 second** — text bind group was unconditionally destroyed
+  and recreated every frame, freeing DX12 descriptor heap slots still referenced by in-flight
+  GPU work. Changed to persistent bind group pattern (matching SDF) — create once, invalidate
+  only when buffers are reallocated or atlas changes.
 
 ### Dependencies
+- wgpu v0.16.6 → v0.16.9 (Metal presentDrawable fix, naga v0.14.1)
+- naga v0.13.1 → v0.14.1 (HLSL row_major matrices for DX12, GLSL namedExpressions fix for GLES)
 - gogpu v0.19.6 → v0.20.0 (ResourceTracker, automatic GPU resource cleanup)
 
 ## [0.28.6] - 2026-02-18

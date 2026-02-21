@@ -19,8 +19,8 @@
 // only while animation is active. Press Space to pause/resume.
 //
 // Requirements:
-//   - gogpu v0.18.1+
-//   - gg v0.28.1+
+//   - gogpu v0.20.0+
+//   - gg v0.29.0+
 package main
 
 import (

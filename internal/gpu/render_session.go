@@ -248,26 +248,32 @@ func (s *GPURenderSession) RenderFrame(
 		return err
 	}
 
-	var textRes *textFrameResources
-	if len(textBatches) > 0 {
-		if err := s.ensureTextPipeline(); err != nil {
-			// Text pipeline failure is non-fatal: log and skip text,
-			// but continue rendering shapes (SDF/convex/stencil).
-			hal.Logger().Warn("text pipeline init failed", "err", err)
-		} else {
-			var textErr error
-			textRes, textErr = s.buildTextResources(textBatches)
-			if textErr != nil {
-				return fmt.Errorf("build text resources: %w", textErr)
-			}
-			_ = textRes // resources may be nil if atlas not yet uploaded
-		}
+	textRes, err := s.prepareTextResources(textBatches)
+	if err != nil {
+		return err
 	}
 
 	if s.surfaceView != nil {
 		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes)
 	}
 	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, target)
+}
+
+// prepareTextResources builds text GPU resources if there are text batches.
+// Text pipeline failure is non-fatal: logs and skips text rendering.
+func (s *GPURenderSession) prepareTextResources(textBatches []TextBatch) (*textFrameResources, error) {
+	if len(textBatches) == 0 {
+		return nil, nil //nolint:nilnil // no text to render
+	}
+	if err := s.ensureTextPipeline(); err != nil {
+		hal.Logger().Warn("text pipeline init failed", "err", err)
+		return nil, nil //nolint:nilnil // non-fatal, skip text
+	}
+	res, err := s.buildTextResources(textBatches)
+	if err != nil {
+		return nil, fmt.Errorf("build text resources: %w", err)
+	}
+	return res, nil
 }
 
 // Size returns the current shared texture dimensions.
@@ -641,26 +647,31 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 // atlas). Buffers are grow-only: reallocated only when data exceeds current
 // capacity.
 //
-// The bind group is recreated every frame because the atlas texture or
-// uniform content may change. In a future optimization, bind groups could
-// be cached per atlas texture identity.
+// aggregateTextBatches merges all batches into a single quad list and returns
+// the first batch for color/transform/atlas parameters.
+func aggregateTextBatches(batches []TextBatch) ([]TextQuad, TextBatch) {
+	n := 0
+	for i := range batches {
+		n += len(batches[i].Quads)
+	}
+	allQuads := make([]TextQuad, 0, n)
+	for i := range batches {
+		allQuads = append(allQuads, batches[i].Quads...)
+	}
+	return allQuads, batches[0]
+}
+
+// The bind group is persistent (matching SDF pattern) — recreated only when
+// buffers are reallocated or atlas changes via SetTextAtlas.
 func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) {
 	if len(batches) == 0 {
 		return nil, nil //nolint:nilnil // empty batch list is a valid no-op, not an error
 	}
 
-	// Aggregate all quads from all batches into one draw call.
-	// For simplicity, use the first batch's color/transform/atlas params.
-	// Multi-batch rendering with different colors will be added later.
-	var allQuads []TextQuad
-	for i := range batches {
-		allQuads = append(allQuads, batches[i].Quads...)
-	}
+	allQuads, batch := aggregateTextBatches(batches)
 	if len(allQuads) == 0 {
 		return nil, nil //nolint:nilnil // no quads to render
 	}
-
-	batch := batches[0]
 
 	// Build vertex data (4 vertices per quad, 16 bytes per vertex).
 	vertexData := buildTextVertexData(allQuads)
