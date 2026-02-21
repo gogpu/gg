@@ -774,7 +774,7 @@ func TestRenderSessionConvexOnly(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, nil, commands, nil)
+	err := s.RenderFrame(target, nil, commands, nil, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame with convex commands failed: %v", err)
 	}
@@ -821,7 +821,7 @@ func TestRenderSessionMixedWithConvex(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, shapes, convexCmds, paths)
+	err := s.RenderFrame(target, shapes, convexCmds, paths, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame with all three tiers failed: %v", err)
 	}

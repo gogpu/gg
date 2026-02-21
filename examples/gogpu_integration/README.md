@@ -19,15 +19,16 @@ gogpu.Context (GPU rendering)
 Window (Vulkan / Metal / DX12)
 ```
 
-### Three-Tier GPU Rendering
+### Four-Tier GPU Rendering
 
-The example showcases all three GPU rendering tiers:
+The example showcases all four GPU rendering tiers:
 
 | Tier | Shapes | Technique |
 |------|--------|-----------|
 | **SDF** | Circles, rounded rect | Signed Distance Field per-pixel |
 | **Convex** | Triangle, pentagon, hexagon | Fan tessellation, single draw call |
 | **Stencil+Cover** | Star, curved paths | Stencil buffer winding + cover fill |
+| **MSDF Text** | Title, labels, FPS counter | Multi-channel SDF resolution-independent text |
 
 ## Run
 
@@ -35,7 +36,7 @@ The example showcases all three GPU rendering tiers:
 go run .
 ```
 
-The example opens an 800×600 window with animated shapes across all three
+The example opens an 800×600 window with animated shapes across all four
 GPU tiers. Press **Space** to pause (0% CPU idle) and resume (VSync ~60fps).
 
 ## Requirements
@@ -43,5 +44,5 @@ GPU tiers. Press **Space** to pause (0% CPU idle) and resume (VSync ~60fps).
 | Dependency | Minimum version |
 |------------|-----------------|
 | Go | 1.25+ |
-| gogpu | v0.18.1+ |
-| gg | v0.28.1+ |
+| gogpu | v0.20.0+ |
+| gg | v0.29.0+ |

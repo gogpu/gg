@@ -568,6 +568,14 @@ func (e *Encoding) Bounds() Rect {
 	return e.bounds
 }
 
+// UpdateBounds expands the encoding's bounding box to include the given rect.
+// This is used to propagate transformed bounds from Scene to Encoding,
+// ensuring that the tile-based renderer's early-out intersection test
+// uses correct post-transform coordinates.
+func (e *Encoding) UpdateBounds(bounds Rect) {
+	e.bounds = e.bounds.Union(bounds)
+}
+
 // Hash computes a 64-bit FNV-1a hash of the encoding for cache keys.
 // The hash includes all stream data to ensure uniqueness.
 func (e *Encoding) Hash() uint64 {

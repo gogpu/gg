@@ -173,12 +173,12 @@ func TestRenderSessionEmpty(t *testing.T) {
 	}
 
 	// Empty frame should return nil without creating textures.
-	err := s.RenderFrame(target, nil, nil, nil)
+	err := s.RenderFrame(target, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame(nil, nil) failed: %v", err)
 	}
 
-	err = s.RenderFrame(target, []SDFRenderShape{}, nil, []StencilPathCommand{})
+	err = s.RenderFrame(target, []SDFRenderShape{}, nil, []StencilPathCommand{}, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame([], []) failed: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestRenderSessionSDFOnly(t *testing.T) {
 
 	// This tests the full pipeline creation and render pass encoding
 	// with the noop device.
-	err := s.RenderFrame(target, shapes, nil, nil)
+	err := s.RenderFrame(target, shapes, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame with SDF shapes failed: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestRenderSessionStencilOnly(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, nil, nil, paths)
+	err := s.RenderFrame(target, nil, nil, paths, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame with stencil paths failed: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestRenderSessionMixed(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, shapes, nil, paths)
+	err := s.RenderFrame(target, shapes, nil, paths, nil)
 	if err != nil {
 		t.Fatalf("RenderFrame with mixed content failed: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestRenderSessionMultipleFrames(t *testing.T) {
 
 	// Multiple frames should reuse textures and pipelines.
 	for i := 0; i < 3; i++ {
-		err := s.RenderFrame(target, shapes, nil, nil)
+		err := s.RenderFrame(target, shapes, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("frame %d failed: %v", i, err)
 		}
@@ -536,7 +536,7 @@ func TestRenderSessionSurfaceMode(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, shapes, nil, nil)
+	err := s.RenderFrame(target, shapes, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("surface mode RenderFrame failed: %v", err)
 	}
@@ -742,7 +742,7 @@ func TestRenderSessionSurfaceModeStencilPaths(t *testing.T) {
 		},
 	}
 
-	err := s.RenderFrame(target, shapes, nil, paths)
+	err := s.RenderFrame(target, shapes, nil, paths, nil)
 	if err != nil {
 		t.Fatalf("surface mode mixed render failed: %v", err)
 	}

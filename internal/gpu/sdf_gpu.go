@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/internal/stroke"
+	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 
@@ -57,6 +59,13 @@ type SDFAccelerator struct {
 	// Pending stencil paths for unified dispatch.
 	pendingStencilPaths []StencilPathCommand
 
+	// Pending MSDF text batches for Tier 4 dispatch.
+	pendingTextBatches []TextBatch
+
+	// GPUTextEngine bridges text shaping with the MSDF atlas + quad pipeline.
+	// Lazily created on first DrawText call.
+	textEngine *GPUTextEngine
+
 	pendingTarget *gg.GPURenderTarget // nil if no pending commands
 
 	cpuFallback    gg.SDFAccelerator
@@ -66,13 +75,14 @@ type SDFAccelerator struct {
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
+var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 
 // Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill) != 0
+	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0
 }
 
 // Init registers the accelerator. GPU device initialization is deferred
@@ -91,8 +101,18 @@ func (a *SDFAccelerator) Close() {
 	a.pendingShapes = nil
 	a.pendingConvexCommands = nil
 	a.pendingStencilPaths = nil
+	a.pendingTextBatches = nil
+	a.textEngine = nil
 	a.pendingTarget = nil
 	if a.session != nil {
+		// Destroy the text pipeline before the session. The session does not
+		// own pipelines (Destroy says "owned by the caller"), but the text
+		// pipeline is lazily created inside the session and the accelerator
+		// has no direct reference to it. Without this, ShaderModule,
+		// PipelineLayout, Pipelines, DescriptorSetLayout, and Sampler leak.
+		if tp := a.session.TextPipelineRef(); tp != nil {
+			tp.Destroy()
+		}
 		a.session.Destroy()
 		a.session = nil
 	}
@@ -226,6 +246,54 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 	a.session.SetSurfaceTarget(halView, width, height)
 }
 
+// DrawText queues text for GPU MSDF rendering. The face parameter must be a
+// text.Face; it is typed as any in the GPUTextAccelerator interface to avoid
+// a circular dependency between gg and the text package.
+//
+// The text is shaped into glyphs, each glyph's MSDF is generated and packed
+// into the atlas, and TextQuads are produced for the unified render pass.
+// Actual rendering is deferred to Flush().
+//
+// Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
+func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA) error {
+	textFace, ok := face.(text.Face)
+	if !ok || textFace == nil {
+		return gg.ErrFallbackToCPU
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Lazily create the text engine.
+	if a.textEngine == nil {
+		a.textEngine = NewGPUTextEngine()
+	}
+
+	// If target changed, flush previous batch first.
+	if a.pendingTarget != nil && !sameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	batch, err := a.textEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height)
+	if err != nil {
+		return gg.ErrFallbackToCPU
+	}
+	if len(batch.Quads) == 0 {
+		return nil // Empty text (e.g., all spaces), nothing to render.
+	}
+
+	a.pendingTextBatches = append(a.pendingTextBatches, batch)
+	targetCopy := target
+	a.pendingTarget = &targetCopy
+	return nil
+}
+
 // FillPath queues a filled path for GPU rendering. The path is analyzed to
 // determine the optimal rendering tier:
 //
@@ -346,9 +414,75 @@ func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
 	return points, true
 }
 
-// StrokePath is not yet GPU-accelerated; it falls back to CPU rendering.
-func (a *SDFAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
+// StrokePath renders a stroked path on the GPU by expanding the stroke into a
+// filled outline and routing it through the fill pipeline (convex fast-path or
+// stencil-then-cover). Dashed strokes fall back to CPU rendering.
+func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	if paint.IsDashed() {
+		return gg.ErrFallbackToCPU
+	}
+
+	ggElems := path.Elements()
+	if len(ggElems) == 0 {
+		return nil
+	}
+
+	// Convert gg path elements to stroke package elements.
+	strokeElems := make([]stroke.PathElement, 0, len(ggElems))
+	for _, e := range ggElems {
+		switch el := e.(type) {
+		case gg.MoveTo:
+			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.LineTo:
+			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.QuadTo:
+			strokeElems = append(strokeElems, stroke.QuadTo{
+				Control: stroke.Point{X: el.Control.X, Y: el.Control.Y},
+				Point:   stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.CubicTo:
+			strokeElems = append(strokeElems, stroke.CubicTo{
+				Control1: stroke.Point{X: el.Control1.X, Y: el.Control1.Y},
+				Control2: stroke.Point{X: el.Control2.X, Y: el.Control2.Y},
+				Point:    stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.Close:
+			strokeElems = append(strokeElems, stroke.Close{})
+		}
+	}
+
+	// Expand stroke to filled outline.
+	style := stroke.Stroke{
+		Width:      paint.EffectiveLineWidth(),
+		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
+		Join:       stroke.LineJoin(paint.EffectiveLineJoin()),
+		MiterLimit: paint.EffectiveMiterLimit(),
+	}
+	expander := stroke.NewStrokeExpander(style)
+	expanded := expander.Expand(strokeElems)
+	if len(expanded) == 0 {
+		return nil
+	}
+
+	// Build a gg.Path from the expanded outline.
+	fillPath := gg.NewPath()
+	for _, e := range expanded {
+		switch el := e.(type) {
+		case stroke.MoveTo:
+			fillPath.MoveTo(el.Point.X, el.Point.Y)
+		case stroke.LineTo:
+			fillPath.LineTo(el.Point.X, el.Point.Y)
+		case stroke.QuadTo:
+			fillPath.QuadraticTo(el.Control.X, el.Control.Y, el.Point.X, el.Point.Y)
+		case stroke.CubicTo:
+			fillPath.CubicTo(el.Control1.X, el.Control1.Y, el.Control2.X, el.Control2.Y, el.Point.X, el.Point.Y)
+		case stroke.Close:
+			fillPath.Close()
+		}
+	}
+
+	// Route through the fill pipeline (convex fast-path or stencil-then-cover).
+	return a.FillPath(target, fillPath, paint)
 }
 
 // FillShape accumulates a filled shape for batch dispatch.
@@ -386,11 +520,12 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 func (a *SDFAccelerator) PendingCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths)
+	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths) + len(a.pendingTextBatches)
 }
 
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
-	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 && len(a.pendingStencilPaths) == 0 {
+	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 &&
+		len(a.pendingStencilPaths) == 0 && len(a.pendingTextBatches) == 0 {
 		return nil
 	}
 
@@ -434,14 +569,90 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	paths := make([]StencilPathCommand, len(a.pendingStencilPaths))
 	copy(paths, a.pendingStencilPaths)
 	a.pendingStencilPaths = a.pendingStencilPaths[:0]
+
+	textBatches := make([]TextBatch, len(a.pendingTextBatches))
+	copy(textBatches, a.pendingTextBatches)
+	a.pendingTextBatches = a.pendingTextBatches[:0]
 	a.pendingTarget = nil
 
-	err := a.session.RenderFrame(target, shapes, convexCmds, paths)
+	// Upload dirty MSDF atlases to the GPU before rendering text.
+	if len(textBatches) > 0 && a.textEngine != nil {
+		if err := a.syncTextAtlases(); err != nil {
+			slogger().Warn("atlas sync failed", "err", err)
+			textBatches = nil
+		}
+	}
+
+	err := a.session.RenderFrame(target, shapes, convexCmds, paths, textBatches)
 	if err != nil {
 		slogger().Warn("render session error",
-			"shapes", len(shapes), "convex", len(convexCmds), "paths", len(paths), "err", err)
+			"shapes", len(shapes), "convex", len(convexCmds),
+			"paths", len(paths), "text", len(textBatches), "err", err)
 	}
 	return err
+}
+
+// syncTextAtlases uploads any dirty MSDF atlas pages to the GPU as textures.
+// The session's SetTextAtlas method is called with the newly created (or
+// recreated) texture and view. Currently supports a single atlas (index 0).
+func (a *SDFAccelerator) syncTextAtlases() error {
+	dirtyIndices := a.textEngine.DirtyAtlases()
+	if len(dirtyIndices) == 0 {
+		return nil
+	}
+
+	for _, idx := range dirtyIndices {
+		rgbaData, size, _ := a.textEngine.AtlasRGBAData(idx)
+		if rgbaData == nil || size == 0 {
+			continue
+		}
+
+		atlasSize := uint32(size) //nolint:gosec // atlas size always fits uint32
+
+		// Create the GPU texture for this atlas page.
+		tex, err := a.device.CreateTexture(&hal.TextureDescriptor{
+			Label:         fmt.Sprintf("msdf_atlas_%d", idx),
+			Size:          hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+			MipLevelCount: 1,
+			SampleCount:   1,
+			Dimension:     gputypes.TextureDimension2D,
+			Format:        gputypes.TextureFormatRGBA8Unorm,
+			Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
+		})
+		if err != nil {
+			return fmt.Errorf("create atlas texture %d: %w", idx, err)
+		}
+
+		view, err := a.device.CreateTextureView(tex, &hal.TextureViewDescriptor{
+			Label:         fmt.Sprintf("msdf_atlas_%d_view", idx),
+			Format:        gputypes.TextureFormatRGBA8Unorm,
+			Dimension:     gputypes.TextureViewDimension2D,
+			Aspect:        gputypes.TextureAspectAll,
+			MipLevelCount: 1,
+		})
+		if err != nil {
+			a.device.DestroyTexture(tex)
+			return fmt.Errorf("create atlas texture view %d: %w", idx, err)
+		}
+
+		// Upload RGBA data to the GPU texture.
+		a.queue.WriteTexture(
+			&hal.ImageCopyTexture{Texture: tex, MipLevel: 0},
+			rgbaData,
+			&hal.ImageDataLayout{
+				Offset:       0,
+				BytesPerRow:  atlasSize * 4,
+				RowsPerImage: atlasSize,
+			},
+			&hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+		)
+
+		// Pass texture ownership to the session (it destroys the old one).
+		a.session.SetTextAtlas(tex, view)
+		a.textEngine.MarkClean(idx)
+	}
+
+	return nil
 }
 
 func (a *SDFAccelerator) queueShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {

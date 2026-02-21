@@ -25,15 +25,45 @@ func (c *Context) Font() text.Face {
 // DrawString draws text at position (x, y) where y is the baseline.
 // If no font has been set with SetFont, this function does nothing.
 //
+// If a GPU accelerator is registered and supports text rendering (implements
+// GPUTextAccelerator), the text is rendered via the GPU MSDF pipeline.
+// Otherwise, the software freetype renderer is used as fallback.
+//
 // The baseline is the line on which most letters sit. Characters with
 // descenders (like 'g', 'j', 'p', 'q', 'y') extend below the baseline.
 func (c *Context) DrawString(s string, x, y float64) {
 	if c.face == nil {
 		return
 	}
+
+	// Try GPU text rendering first.
+	if c.tryGPUText(s, x, y) {
+		return
+	}
+
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
+}
+
+// tryGPUText attempts to render text via the GPU MSDF pipeline.
+// Returns true if GPU text rendering was successful (queued for batch render).
+func (c *Context) tryGPUText(s string, x, y float64) bool {
+	a := Accelerator()
+	if a == nil {
+		return false
+	}
+	if !a.CanAccelerate(AccelText) {
+		return false
+	}
+	ta, ok := a.(GPUTextAccelerator)
+	if !ok {
+		return false
+	}
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	err := ta.DrawText(target, c.face, s, x, y, col)
+	return err == nil
 }
 
 // DrawStringAnchored draws text with an anchor point.
@@ -55,6 +85,11 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	// Calculate offset based on anchor
 	x -= w * ax
 	y += h * ay // Note: y is baseline, so we adjust upward for top alignment
+
+	// Try GPU text rendering first.
+	if c.tryGPUText(s, x, y) {
+		return
+	}
 
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-02-21
+
+### Added
+- **GPU MSDF text pipeline** — `MSDFTextPipeline` renders text entirely on GPU using
+  Multi-channel Signed Distance Field technique (Tier 4). WGSL fragment shader with
+  standard Chlumsky/msdfgen `screenPxRange` formula produces resolution-independent
+  anti-aliased text. 48px MSDF cells, pxRange=6, pixel-snapped quads, centered glyph
+  content in atlas cells for correct positioning of all glyph aspect ratios.
+- **Four-tier GPU render pipeline** — GPURenderSession upgraded from three-tier to
+  four-tier: SDF (Tier 1) + Convex (Tier 2a) + Stencil+Cover (Tier 2b) + MSDF Text (Tier 4).
+- **ggcanvas auto-registration** — `ggcanvas.Canvas` auto-registers with `App.TrackResource()`
+  via duck-typed interface detection. No manual `defer canvas.Close()` or `OnClose` wiring
+  needed — shutdown cleanup is automatic (LIFO order).
+- **GPU stroke rendering** — `SDFAccelerator.StrokePath()` converts stroked paths to filled
+  polygon outlines via stroke-expand-then-fill, then routes through the GPU convex polygon
+  renderer. Eliminates CPU fallback for line strokes (checkbox checkmarks, radio outlines).
+
+### Fixed
+- **SceneBuilder.WithTransform invisible rendering** ([#116](https://github.com/gogpu/gg/issues/116)) —
+  tile-based renderer early-out used untransformed encoding bounds, causing content moved by
+  transforms to be skipped. Bounds management moved from Encoding to Scene level with proper
+  coordinate transforms. Clip paths no longer incorrectly expand encoding bounds.
+- **GPU text pipeline resource leak** — destroy MSDFTextPipeline in SDFAccelerator.Close()
+  (ShaderModule, PipelineLayout, Pipelines, DescriptorSetLayout, Sampler).
+- **Surface dimension mismatch** — `GPURenderSession.RenderFrame()` uses surface dimensions
+  for MSAA texture sizing and viewport uniforms in RenderDirect mode.
+- **DX12 text disappearing after ~1 second** — text bind group was unconditionally destroyed
+  and recreated every frame, freeing DX12 descriptor heap slots still referenced by in-flight
+  GPU work. Changed to persistent bind group pattern (matching SDF) — create once, invalidate
+  only when buffers are reallocated or atlas changes.
+
+### Dependencies
+- wgpu v0.16.6 → v0.16.9 (Metal presentDrawable fix, naga v0.14.1)
+- naga v0.13.1 → v0.14.1 (HLSL row_major matrices for DX12, GLSL namedExpressions fix for GLES)
+- gogpu v0.19.6 → v0.20.0 (ResourceTracker, automatic GPU resource cleanup)
+
 ## [0.28.6] - 2026-02-18
 
 ### Dependencies

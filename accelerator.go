@@ -115,6 +115,22 @@ type SurfaceTargetAware interface {
 	SetSurfaceTarget(view any, width, height uint32)
 }
 
+// GPUTextAccelerator is an optional interface for accelerators that support
+// GPU-accelerated text rendering via MSDF (Multi-channel Signed Distance
+// Field). When the registered accelerator implements this interface,
+// Context.DrawString will use the GPU pipeline instead of CPU freetype.
+//
+// Text is rendered as Tier 4 in the unified render pass, after SDF shapes,
+// convex polygons, and stencil-then-cover paths. The MSDF approach provides
+// resolution-independent, crisp text at any scale.
+type GPUTextAccelerator interface {
+	// DrawText renders text at position (x, y) where y is the baseline.
+	// The face provides font metrics and glyph iteration.
+	// Color is the text color in RGBA.
+	// Returns ErrFallbackToCPU if GPU text rendering is not available.
+	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA) error
+}
+
 var (
 	accelMu sync.RWMutex
 	accel   GPUAccelerator

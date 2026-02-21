@@ -51,10 +51,10 @@ const (
 // all draw commands in a single render pass with pipeline switching.
 //
 // This is the central abstraction that unifies SDF shape rendering (Tier 1),
-// convex polygon fast-path rendering (Tier 2a), and stencil-then-cover path
-// rendering (Tier 2b) into one GPU submission.
-// Enterprise 2D engines (Skia Ganesh/Graphite, Flutter Impeller, Gio) use
-// the same pattern: one render pass, multiple pipeline switches.
+// convex polygon fast-path rendering (Tier 2a), stencil-then-cover path
+// rendering (Tier 2b), and MSDF text rendering (Tier 4) into one GPU
+// submission. Enterprise 2D engines (Skia Ganesh/Graphite, Flutter Impeller,
+// Gio) use the same pattern: one render pass, multiple pipeline switches.
 //
 // The session supports two render modes:
 //   - Offscreen (default): renders to an internal resolve texture, then reads
@@ -66,7 +66,7 @@ const (
 //
 //	GPURenderSession
 //	  +-- Manages shared MSAA + stencil + resolve textures (via textureSet)
-//	  +-- Holds references to SDFRenderPipeline, ConvexRenderer, StencilRenderer
+//	  +-- Holds references to SDFRenderPipeline, ConvexRenderer, StencilRenderer, MSDFTextPipeline
 //	  +-- Encodes single render pass with pipeline switching
 //	  +-- Single submit + fence wait
 //	  +-- Single readback (offscreen) or resolve to surface (direct)
@@ -82,6 +82,7 @@ type GPURenderSession struct {
 	sdfPipeline     *SDFRenderPipeline
 	convexRenderer  *ConvexRenderer
 	stencilRenderer *StencilRenderer
+	textPipeline    *MSDFTextPipeline
 
 	// Surface rendering mode fields. When surfaceView is non-nil, the session
 	// renders directly to the surface instead of reading back to CPU.
@@ -99,6 +100,17 @@ type GPURenderSession struct {
 	convexVertBufCap uint64
 	convexUniformBuf hal.Buffer
 	convexBindGroup  hal.BindGroup
+
+	// Tier 4: MSDF text persistent buffers.
+	textVertBuf    hal.Buffer
+	textVertBufCap uint64
+	textIdxBuf     hal.Buffer
+	textIdxBufCap  uint64
+	textUniformBuf hal.Buffer
+	textBindGroup  hal.BindGroup
+	// Atlas texture and view for current frame's text rendering.
+	textAtlasTex  hal.Texture
+	textAtlasView hal.TextureView
 
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
@@ -175,8 +187,8 @@ func (s *GPURenderSession) EnsureTextures(w, h uint32) error {
 }
 
 // RenderFrame renders all draw commands (SDF shapes + convex polygons +
-// stencil paths) in a single render pass. This is the main entry point
-// for unified rendering.
+// stencil paths + MSDF text) in a single render pass. This is the main
+// entry point for unified rendering.
 //
 // The render pass uses the shared textures with:
 //   - MSAA color cleared to transparent black
@@ -191,12 +203,19 @@ func (s *GPURenderSession) RenderFrame(
 	sdfShapes []SDFRenderShape,
 	convexCommands []ConvexDrawCommand,
 	stencilPaths []StencilPathCommand,
+	textBatches []TextBatch,
 ) error {
-	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 {
+	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 && len(textBatches) == 0 {
 		return nil
 	}
 
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
+	// In surface mode, use surface dimensions for MSAA textures and viewport.
+	// The target (gg pixmap) may differ from the surface; the MSAA resolve
+	// target must match the surface view dimensions.
+	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
+		w, h = s.surfaceWidth, s.surfaceHeight
+	}
 	if err := s.EnsureTextures(w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
@@ -229,10 +248,32 @@ func (s *GPURenderSession) RenderFrame(
 		return err
 	}
 
-	if s.surfaceView != nil {
-		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths)
+	textRes, err := s.prepareTextResources(textBatches)
+	if err != nil {
+		return err
 	}
-	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, target)
+
+	if s.surfaceView != nil {
+		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes)
+	}
+	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, target)
+}
+
+// prepareTextResources builds text GPU resources if there are text batches.
+// Text pipeline failure is non-fatal: logs and skips text rendering.
+func (s *GPURenderSession) prepareTextResources(textBatches []TextBatch) (*textFrameResources, error) {
+	if len(textBatches) == 0 {
+		return nil, nil //nolint:nilnil // no text to render
+	}
+	if err := s.ensureTextPipeline(); err != nil {
+		hal.Logger().Warn("text pipeline init failed", "err", err)
+		return nil, nil //nolint:nilnil // non-fatal, skip text
+	}
+	res, err := s.buildTextResources(textBatches)
+	if err != nil {
+		return nil, fmt.Errorf("build text resources: %w", err)
+	}
+	return res, nil
 }
 
 // Size returns the current shared texture dimensions.
@@ -315,6 +356,33 @@ func (s *GPURenderSession) destroyPersistentBuffers() {
 		s.convexVertBuf = nil
 		s.convexVertBufCap = 0
 	}
+	// Tier 4: Text buffers.
+	if s.textBindGroup != nil {
+		s.device.DestroyBindGroup(s.textBindGroup)
+		s.textBindGroup = nil
+	}
+	if s.textUniformBuf != nil {
+		s.device.DestroyBuffer(s.textUniformBuf)
+		s.textUniformBuf = nil
+	}
+	if s.textIdxBuf != nil {
+		s.device.DestroyBuffer(s.textIdxBuf)
+		s.textIdxBuf = nil
+		s.textIdxBufCap = 0
+	}
+	if s.textVertBuf != nil {
+		s.device.DestroyBuffer(s.textVertBuf)
+		s.textVertBuf = nil
+		s.textVertBufCap = 0
+	}
+	if s.textAtlasView != nil {
+		s.device.DestroyTextureView(s.textAtlasView)
+		s.textAtlasView = nil
+	}
+	if s.textAtlasTex != nil {
+		s.device.DestroyTexture(s.textAtlasTex)
+		s.textAtlasTex = nil
+	}
 	for _, b := range s.stencilBufPool {
 		b.destroy(s.device)
 	}
@@ -329,7 +397,10 @@ type sdfFrameResources struct {
 	vertCount  uint32
 }
 
-// ensurePipelines creates SDF, convex, and stencil pipelines if they don't exist yet.
+// ensurePipelines creates SDF, convex, and stencil pipelines if they don't
+// exist yet. Pipelines are lazily created on first use. The text pipeline
+// is NOT created here — it is created on demand when text batches are present
+// (see ensureTextPipeline).
 func (s *GPURenderSession) ensurePipelines() error {
 	if s.sdfPipeline == nil {
 		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue)
@@ -354,6 +425,18 @@ func (s *GPURenderSession) ensurePipelines() error {
 		}
 	}
 
+	return nil
+}
+
+// ensureTextPipeline creates the MSDF text pipeline on demand. Called only
+// when text batches are present. Returns error if shader compilation fails.
+func (s *GPURenderSession) ensureTextPipeline() error {
+	if s.textPipeline == nil {
+		s.textPipeline = NewMSDFTextPipeline(s.device, s.queue)
+	}
+	if err := s.textPipeline.ensurePipelineWithStencil(); err != nil {
+		return fmt.Errorf("text pipeline: %w", err)
+	}
 	return nil
 }
 
@@ -559,6 +642,197 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 	return result, nil
 }
 
+// buildTextResources updates persistent vertex, index, and uniform buffers
+// for MSDF text rendering. Currently handles a single atlas (first batch's
+// atlas). Buffers are grow-only: reallocated only when data exceeds current
+// capacity.
+//
+// aggregateTextBatches merges all batches into a single quad list and returns
+// the first batch for color/transform/atlas parameters.
+func aggregateTextBatches(batches []TextBatch) ([]TextQuad, TextBatch) {
+	n := 0
+	for i := range batches {
+		n += len(batches[i].Quads)
+	}
+	allQuads := make([]TextQuad, 0, n)
+	for i := range batches {
+		allQuads = append(allQuads, batches[i].Quads...)
+	}
+	return allQuads, batches[0]
+}
+
+// The bind group is persistent (matching SDF pattern) — recreated only when
+// buffers are reallocated or atlas changes via SetTextAtlas.
+func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) {
+	if len(batches) == 0 {
+		return nil, nil //nolint:nilnil // empty batch list is a valid no-op, not an error
+	}
+
+	allQuads, batch := aggregateTextBatches(batches)
+	if len(allQuads) == 0 {
+		return nil, nil //nolint:nilnil // no quads to render
+	}
+
+	// Build vertex data (4 vertices per quad, 16 bytes per vertex).
+	vertexData := buildTextVertexData(allQuads)
+	vertSize := uint64(len(vertexData))
+
+	if s.textVertBuf == nil || s.textVertBufCap < vertSize {
+		if s.textBindGroup != nil {
+			s.device.DestroyBindGroup(s.textBindGroup)
+			s.textBindGroup = nil
+		}
+		if s.textVertBuf != nil {
+			s.device.DestroyBuffer(s.textVertBuf)
+		}
+		allocSize := vertSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_text_verts",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.textVertBuf = nil
+			s.textVertBufCap = 0
+			return nil, fmt.Errorf("create text vertex buffer: %w", err)
+		}
+		s.textVertBuf = buf
+		s.textVertBufCap = allocSize
+	}
+	s.queue.WriteBuffer(s.textVertBuf, 0, vertexData)
+
+	// Build index data (6 indices per quad, 2 bytes per index).
+	indexData := buildTextIndexData(len(allQuads))
+	idxSize := uint64(len(indexData))
+
+	if s.textIdxBuf == nil || s.textIdxBufCap < idxSize {
+		if s.textBindGroup != nil {
+			s.device.DestroyBindGroup(s.textBindGroup)
+			s.textBindGroup = nil
+		}
+		if s.textIdxBuf != nil {
+			s.device.DestroyBuffer(s.textIdxBuf)
+		}
+		allocSize := idxSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_text_indices",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.textIdxBuf = nil
+			s.textIdxBufCap = 0
+			return nil, fmt.Errorf("create text index buffer: %w", err)
+		}
+		s.textIdxBuf = buf
+		s.textIdxBufCap = allocSize
+	}
+	s.queue.WriteBuffer(s.textIdxBuf, 0, indexData)
+
+	// Build uniform data (96 bytes).
+	uniformData := makeTextUniform(batch.Color, batch.Transform, batch.PxRange, batch.AtlasSize)
+	if s.textUniformBuf == nil {
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_text_uniform",
+			Size:  textUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create text uniform buffer: %w", err)
+		}
+		s.textUniformBuf = buf
+		// Bind group must be recreated with the new uniform buffer.
+		if s.textBindGroup != nil {
+			s.device.DestroyBindGroup(s.textBindGroup)
+			s.textBindGroup = nil
+		}
+	}
+	s.queue.WriteBuffer(s.textUniformBuf, 0, uniformData)
+
+	// The bind group requires an atlas texture view. If no atlas view is
+	// available yet, skip text rendering this frame.
+	if s.textAtlasView == nil {
+		hal.Logger().Warn("text atlas view is nil, skipping text rendering")
+		return nil, nil //nolint:nilnil // no atlas uploaded yet
+	}
+
+	// Reuse persistent bind group (same pattern as SDF). The bind group is
+	// invalidated (set to nil) when buffers are reallocated or atlas changes
+	// via SetTextAtlas. The CBV/SRV descriptors reference buffer GPU addresses
+	// and texture views — uniform DATA changes via WriteBuffer don't require
+	// bind group recreation.
+	if s.textBindGroup == nil {
+		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			Label:  "session_text_bind",
+			Layout: s.textPipeline.uniformLayout,
+			Entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{
+					Buffer: s.textUniformBuf.NativeHandle(), Offset: 0, Size: textUniformSize,
+				}},
+				{Binding: 1, Resource: gputypes.TextureViewBinding{
+					TextureView: s.textAtlasView.NativeHandle(),
+				}},
+				{Binding: 2, Resource: gputypes.SamplerBinding{
+					Sampler: s.textPipeline.sampler.NativeHandle(),
+				}},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create text bind group: %w", err)
+		}
+		s.textBindGroup = bg
+	}
+
+	indexCount := uint32(len(allQuads) * 6) //nolint:gosec // quad count bounded by MaxQuadCapacity
+	return &textFrameResources{
+		vertBuf:    s.textVertBuf,
+		idxBuf:     s.textIdxBuf,
+		uniformBuf: s.textUniformBuf,
+		bindGroup:  s.textBindGroup,
+		indexCount: indexCount,
+	}, nil
+}
+
+// SetTextAtlas sets the atlas texture and view for MSDF text rendering.
+// The session takes ownership of both the texture and view and will destroy
+// them when the session is destroyed or when a new atlas is set.
+//
+// Call this after uploading atlas data to the GPU (e.g., from
+// TextRenderer.SyncAtlases). The atlas view is used in the text bind group.
+func (s *GPURenderSession) SetTextAtlas(tex hal.Texture, view hal.TextureView) {
+	if s.textAtlasView != nil {
+		s.device.DestroyTextureView(s.textAtlasView)
+	}
+	if s.textAtlasTex != nil {
+		s.device.DestroyTexture(s.textAtlasTex)
+	}
+	s.textAtlasTex = tex
+	s.textAtlasView = view
+	// Invalidate bind group -- it references the old texture view.
+	if s.textBindGroup != nil {
+		s.device.DestroyBindGroup(s.textBindGroup)
+		s.textBindGroup = nil
+	}
+}
+
+// TextPipelineRef returns the MSDF text pipeline. It is lazily created by
+// ensurePipelines, so may be nil before RenderFrame is called.
+func (s *GPURenderSession) TextPipelineRef() *MSDFTextPipeline {
+	return s.textPipeline
+}
+
+// TextAtlasView returns the current text atlas texture view, or nil if no
+// atlas has been uploaded yet.
+func (s *GPURenderSession) TextAtlasView() hal.TextureView {
+	return s.textAtlasView
+}
+
+// SetTextPipeline sets an external MSDF text pipeline for the session to use.
+// The session does not own the pipeline and will not destroy it.
+func (s *GPURenderSession) SetTextPipeline(p *MSDFTextPipeline) {
+	s.textPipeline = p
+}
+
 // encodeSubmitReadback encodes the unified render pass, copies the resolve
 // texture to a staging buffer, submits, waits, and reads back pixels.
 func (s *GPURenderSession) encodeSubmitReadback(
@@ -568,6 +842,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	convexRes *convexFrameResources,
 	stencilRes []*stencilCoverBuffers,
 	stencilPaths []StencilPathCommand,
+	textRes *textFrameResources,
 	target gg.GPURenderTarget,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
@@ -616,6 +891,11 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	// Tier 2b: Stencil-then-cover paths.
 	for i, bufs := range stencilRes {
 		s.stencilRenderer.RecordPath(rp, bufs, stencilPaths[i].FillRule)
+	}
+
+	// Tier 4: MSDF text (rendered last, on top of all other geometry).
+	if textRes != nil && textRes.indexCount > 0 {
+		s.textPipeline.RecordDraws(rp, textRes)
 	}
 
 	rp.End()
@@ -739,6 +1019,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	convexRes *convexFrameResources,
 	stencilRes []*stencilCoverBuffers,
 	stencilPaths []StencilPathCommand,
+	textRes *textFrameResources,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
 		Label: "session_surface_encoder",
@@ -788,6 +1069,11 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.stencilRenderer.RecordPath(rp, bufs, stencilPaths[i].FillRule)
 	}
 
+	// Tier 4: MSDF text (rendered last, on top of all other geometry).
+	if textRes != nil && textRes.indexCount > 0 {
+		s.textPipeline.RecordDraws(rp, textRes)
+	}
+
 	rp.End()
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
@@ -802,7 +1088,6 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	// Submit without fence -- presentation handles GPU synchronization.
 	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)

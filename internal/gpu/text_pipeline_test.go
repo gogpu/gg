@@ -9,7 +9,6 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text/msdf"
-	"github.com/gogpu/wgpu/core"
 )
 
 // TestMSDFTextShaderSource tests that the shader source is properly embedded.
@@ -177,11 +176,12 @@ func TestTextPipelineConfig(t *testing.T) {
 	})
 }
 
-// TestNewTextPipeline tests pipeline creation.
+// TestNewTextPipeline tests pipeline creation with HAL device and queue.
 func TestNewTextPipeline(t *testing.T) {
+	device := &mockHALDevice{}
+
 	t.Run("with default config", func(t *testing.T) {
-		device := core.DeviceID{}
-		pipeline, err := NewTextPipelineDefault(device)
+		pipeline, err := NewTextPipelineDefault(device, nil)
 
 		if err != nil {
 			t.Fatalf("NewTextPipelineDefault() error = %v", err)
@@ -196,13 +196,12 @@ func TestNewTextPipeline(t *testing.T) {
 	})
 
 	t.Run("with custom config", func(t *testing.T) {
-		device := core.DeviceID{}
 		config := TextPipelineConfig{
 			InitialQuadCapacity: 512,
 			MaxQuadCapacity:     8192,
 			DefaultPxRange:      6.0,
 		}
-		pipeline, err := NewTextPipeline(device, config)
+		pipeline, err := NewTextPipeline(device, nil, config)
 
 		if err != nil {
 			t.Fatalf("NewTextPipeline() error = %v", err)
@@ -213,9 +212,8 @@ func TestNewTextPipeline(t *testing.T) {
 	})
 
 	t.Run("with zero config values", func(t *testing.T) {
-		device := core.DeviceID{}
 		config := TextPipelineConfig{} // All zeros
-		pipeline, err := NewTextPipeline(device, config)
+		pipeline, err := NewTextPipeline(device, nil, config)
 
 		if err != nil {
 			t.Fatalf("NewTextPipeline() error = %v", err)
@@ -227,10 +225,12 @@ func TestNewTextPipeline(t *testing.T) {
 	})
 }
 
-// TestTextPipelineInit tests pipeline initialization.
+// TestTextPipelineInit tests pipeline initialization via noop device.
 func TestTextPipelineInit(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, err := NewTextPipelineDefault(device)
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	pipeline, err := NewTextPipelineDefault(device, queue)
 	if err != nil {
 		t.Fatalf("NewTextPipelineDefault() error = %v", err)
 	}
@@ -255,8 +255,10 @@ func TestTextPipelineInit(t *testing.T) {
 
 // TestTextPipelineClose tests pipeline cleanup.
 func TestTextPipelineClose(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, err := NewTextPipelineDefault(device)
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	pipeline, err := NewTextPipelineDefault(device, queue)
 	if err != nil {
 		t.Fatalf("NewTextPipelineDefault() error = %v", err)
 	}
@@ -274,13 +276,15 @@ func TestTextPipelineClose(t *testing.T) {
 
 // TestTextPipelineRenderText tests the RenderText method.
 func TestTextPipelineRenderText(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, _ := NewTextPipelineDefault(device)
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	pipeline, _ := NewTextPipelineDefault(device, queue)
 	_ = pipeline.Init()
 	defer pipeline.Close()
 
 	t.Run("not initialized error", func(t *testing.T) {
-		uninitPipeline, _ := NewTextPipelineDefault(device)
+		uninitPipeline, _ := NewTextPipelineDefault(device, queue)
 		err := uninitPipeline.RenderText(nil, []TextQuad{{X0: 0}}, 0, gg.White, gg.Identity())
 		if !errors.Is(err, ErrTextPipelineNotInitialized) {
 			t.Errorf("expected ErrTextPipelineNotInitialized, got %v", err)
@@ -322,63 +326,10 @@ func TestTextPipelineRenderText(t *testing.T) {
 	})
 }
 
-// TestTextPipelineAtlasBindGroups tests bind group caching.
-func TestTextPipelineAtlasBindGroups(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, _ := NewTextPipelineDefault(device)
-	_ = pipeline.Init()
-	defer pipeline.Close()
-
-	t.Run("get or create", func(t *testing.T) {
-		tex, _ := CreateTexture(nil, TextureConfig{Width: 256, Height: 256})
-		defer tex.Close()
-
-		bg1, err := pipeline.GetOrCreateAtlasBindGroup(0, tex)
-		if err != nil {
-			t.Fatalf("GetOrCreateAtlasBindGroup() error = %v", err)
-		}
-
-		// Should return same bind group
-		bg2, err := pipeline.GetOrCreateAtlasBindGroup(0, tex)
-		if err != nil {
-			t.Fatalf("second GetOrCreateAtlasBindGroup() error = %v", err)
-		}
-
-		if bg1 != bg2 {
-			t.Error("should return cached bind group")
-		}
-	})
-
-	t.Run("invalidate single", func(t *testing.T) {
-		tex, _ := CreateTexture(nil, TextureConfig{Width: 256, Height: 256})
-		defer tex.Close()
-
-		_, _ = pipeline.GetOrCreateAtlasBindGroup(1, tex)
-		pipeline.InvalidateAtlasBindGroup(1)
-
-		// After invalidation, should create new bind group
-		// (In real implementation, would verify different ID)
-	})
-
-	t.Run("invalidate all", func(t *testing.T) {
-		tex, _ := CreateTexture(nil, TextureConfig{Width: 256, Height: 256})
-		defer tex.Close()
-
-		_, _ = pipeline.GetOrCreateAtlasBindGroup(0, tex)
-		_, _ = pipeline.GetOrCreateAtlasBindGroup(1, tex)
-		pipeline.InvalidateAllAtlasBindGroups()
-
-		// All should be cleared
-	})
-}
-
 // TestTextUniforms tests uniform struct preparation.
 func TestTextUniforms(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, _ := NewTextPipelineDefault(device)
-
 	t.Run("identity transform", func(t *testing.T) {
-		uniforms := pipeline.prepareUniforms(gg.White, gg.Identity(), 4.0)
+		uniforms := prepareUniforms(gg.White, gg.Identity(), 4.0)
 
 		// Check transform is identity-ish (in row-major 4x4 format)
 		if uniforms.Transform[0] != 1 || uniforms.Transform[5] != 1 {
@@ -397,7 +348,7 @@ func TestTextUniforms(t *testing.T) {
 	})
 
 	t.Run("translated transform", func(t *testing.T) {
-		uniforms := pipeline.prepareUniforms(gg.Red, gg.Translate(100, 50), 4.0)
+		uniforms := prepareUniforms(gg.Red, gg.Translate(100, 50), 4.0)
 
 		// Translation should be in the transform
 		if uniforms.Transform[3] != 100 || uniforms.Transform[7] != 50 {
@@ -407,7 +358,7 @@ func TestTextUniforms(t *testing.T) {
 
 	t.Run("premultiplied color", func(t *testing.T) {
 		semiTransparent := gg.RGBA{R: 1, G: 0.5, B: 0, A: 0.5}
-		uniforms := pipeline.prepareUniforms(semiTransparent, gg.Identity(), 4.0)
+		uniforms := prepareUniforms(semiTransparent, gg.Identity(), 4.0)
 
 		// Premultiplied: RGB * A
 		if uniforms.Color[0] != 0.5 { // R: 1.0 * 0.5 = 0.5
@@ -433,19 +384,18 @@ func TestTextRendererConfig(t *testing.T) {
 
 // TestNewTextRenderer tests renderer creation.
 func TestNewTextRenderer(t *testing.T) {
-	t.Run("nil backend error", func(t *testing.T) {
-		_, err := NewTextRenderer(nil, DefaultTextRendererConfig())
-		if !errors.Is(err, ErrNilBackend) {
-			t.Errorf("expected ErrNilBackend, got %v", err)
+	t.Run("nil device error", func(t *testing.T) {
+		_, err := NewTextRenderer(nil, nil, DefaultTextRendererConfig())
+		if !errors.Is(err, ErrNilHALDevice) {
+			t.Errorf("expected ErrNilHALDevice, got %v", err)
 		}
 	})
 
-	t.Run("with valid backend", func(t *testing.T) {
-		backend := NewBackend()
-		_ = backend.Init()
-		defer backend.Close()
+	t.Run("with valid device", func(t *testing.T) {
+		device, queue, cleanup := createNoopDevice(t)
+		defer cleanup()
 
-		renderer, err := NewTextRenderer(backend, DefaultTextRendererConfig())
+		renderer, err := NewTextRenderer(device, queue, DefaultTextRendererConfig())
 		if err != nil {
 			t.Fatalf("NewTextRenderer() error = %v", err)
 		}
@@ -463,11 +413,10 @@ func TestNewTextRenderer(t *testing.T) {
 
 // TestTextRendererInit tests renderer initialization.
 func TestTextRendererInit(t *testing.T) {
-	backend := NewBackend()
-	_ = backend.Init()
-	defer backend.Close()
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	renderer, err := NewTextRenderer(backend, DefaultTextRendererConfig())
+	renderer, err := NewTextRenderer(device, queue, DefaultTextRendererConfig())
 	if err != nil {
 		t.Fatalf("NewTextRenderer() error = %v", err)
 	}
@@ -487,11 +436,10 @@ func TestTextRendererInit(t *testing.T) {
 
 // TestTextRendererSyncAtlases tests atlas synchronization.
 func TestTextRendererSyncAtlases(t *testing.T) {
-	backend := NewBackend()
-	_ = backend.Init()
-	defer backend.Close()
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	renderer, _ := NewTextRenderer(backend, DefaultTextRendererConfig())
+	renderer, _ := NewTextRenderer(device, queue, DefaultTextRendererConfig())
 	_ = renderer.Init()
 	defer renderer.Close()
 
@@ -520,8 +468,10 @@ func TestTextBatch(t *testing.T) {
 
 // TestRenderTextBatch tests batch rendering.
 func TestRenderTextBatch(t *testing.T) {
-	device := core.DeviceID{}
-	pipeline, _ := NewTextPipelineDefault(device)
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	pipeline, _ := NewTextPipelineDefault(device, queue)
 	_ = pipeline.Init()
 	defer pipeline.Close()
 
@@ -564,6 +514,167 @@ func TestMSDFTextShaderComments(t *testing.T) {
 	}
 }
 
+// TestBuildTextVertexData tests vertex data serialization.
+func TestBuildTextVertexData(t *testing.T) {
+	t.Run("empty quads", func(t *testing.T) {
+		data := buildTextVertexData(nil)
+		if data != nil {
+			t.Error("expected nil for empty quads")
+		}
+	})
+
+	t.Run("single quad", func(t *testing.T) {
+		quads := []TextQuad{
+			{X0: 0, Y0: 0, X1: 10, Y1: 20, U0: 0, V0: 0, U1: 0.5, V1: 1},
+		}
+		data := buildTextVertexData(quads)
+		// 1 quad * 4 vertices * 16 bytes = 64 bytes
+		if len(data) != 64 {
+			t.Errorf("got %d bytes, want 64", len(data))
+		}
+	})
+
+	t.Run("multiple quads", func(t *testing.T) {
+		quads := []TextQuad{
+			{X0: 0, Y0: 0, X1: 10, Y1: 10},
+			{X0: 10, Y0: 0, X1: 20, Y1: 10},
+		}
+		data := buildTextVertexData(quads)
+		// 2 quads * 4 vertices * 16 bytes = 128 bytes
+		if len(data) != 128 {
+			t.Errorf("got %d bytes, want 128", len(data))
+		}
+	})
+}
+
+// TestBuildTextIndexData tests index data serialization.
+func TestBuildTextIndexData(t *testing.T) {
+	t.Run("single quad", func(t *testing.T) {
+		data := buildTextIndexData(1)
+		// 1 quad * 6 indices * 2 bytes = 12 bytes
+		if len(data) != 12 {
+			t.Errorf("got %d bytes, want 12", len(data))
+		}
+	})
+
+	t.Run("multiple quads", func(t *testing.T) {
+		data := buildTextIndexData(5)
+		// 5 quads * 6 indices * 2 bytes = 60 bytes
+		if len(data) != 60 {
+			t.Errorf("got %d bytes, want 60", len(data))
+		}
+	})
+}
+
+// TestMakeTextUniform tests uniform buffer creation.
+func TestMakeTextUniform(t *testing.T) {
+	buf := makeTextUniform(gg.White, gg.Identity(), 4.0, 256.0)
+	if len(buf) != textUniformSize {
+		t.Errorf("got %d bytes, want %d", len(buf), textUniformSize)
+	}
+}
+
+// TestRgbToRGBA tests RGB to RGBA conversion.
+func TestRgbToRGBA(t *testing.T) {
+	t.Run("single pixel", func(t *testing.T) {
+		rgb := []byte{255, 128, 64}
+		rgba := rgbToRGBA(rgb, 1, 1)
+		if len(rgba) != 4 {
+			t.Fatalf("got %d bytes, want 4", len(rgba))
+		}
+		if rgba[0] != 255 || rgba[1] != 128 || rgba[2] != 64 || rgba[3] != 255 {
+			t.Errorf("got [%d,%d,%d,%d], want [255,128,64,255]", rgba[0], rgba[1], rgba[2], rgba[3])
+		}
+	})
+
+	t.Run("2x2 image", func(t *testing.T) {
+		rgb := []byte{
+			255, 0, 0, // red
+			0, 255, 0, // green
+			0, 0, 255, // blue
+			128, 128, 128, // gray
+		}
+		rgba := rgbToRGBA(rgb, 2, 2)
+		if len(rgba) != 16 {
+			t.Fatalf("got %d bytes, want 16", len(rgba))
+		}
+		// Check alpha for all pixels
+		for i := 0; i < 4; i++ {
+			if rgba[i*4+3] != 255 {
+				t.Errorf("pixel %d alpha: got %d, want 255", i, rgba[i*4+3])
+			}
+		}
+	})
+}
+
+// TestMSDFTextPipelineCreate tests real pipeline creation via noop backend.
+func TestMSDFTextPipelineCreate(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	p := NewMSDFTextPipeline(device, queue)
+	defer p.Destroy()
+
+	if err := p.createPipeline(); err != nil {
+		t.Fatalf("createPipeline() error = %v", err)
+	}
+	if p.shader == nil {
+		t.Error("expected non-nil shader")
+	}
+	if p.uniformLayout == nil {
+		t.Error("expected non-nil uniformLayout")
+	}
+	if p.pipeLayout == nil {
+		t.Error("expected non-nil pipeLayout")
+	}
+	if p.pipeline == nil {
+		t.Error("expected non-nil pipeline")
+	}
+	if p.sampler == nil {
+		t.Error("expected non-nil sampler")
+	}
+}
+
+// TestMSDFTextPipelineWithStencil tests stencil variant creation.
+func TestMSDFTextPipelineWithStencil(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	p := NewMSDFTextPipeline(device, queue)
+	defer p.Destroy()
+
+	if err := p.ensurePipelineWithStencil(); err != nil {
+		t.Fatalf("ensurePipelineWithStencil() error = %v", err)
+	}
+	if p.pipelineWithStencil == nil {
+		t.Error("expected non-nil pipelineWithStencil")
+	}
+
+	// Second call should be a no-op.
+	if err := p.ensurePipelineWithStencil(); err != nil {
+		t.Fatalf("second ensurePipelineWithStencil() error = %v", err)
+	}
+}
+
+// TestMSDFTextPipelineDestroy tests cleanup.
+func TestMSDFTextPipelineDestroy(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	p := NewMSDFTextPipeline(device, queue)
+	_ = p.ensurePipelineWithStencil()
+	p.Destroy()
+
+	// All fields should be nil after destroy.
+	if p.shader != nil || p.uniformLayout != nil || p.pipeLayout != nil ||
+		p.pipeline != nil || p.pipelineWithStencil != nil || p.sampler != nil {
+		t.Error("expected all pipeline fields nil after Destroy")
+	}
+
+	// Double destroy should be safe.
+	p.Destroy()
+}
+
 // BenchmarkQuadsToVertices benchmarks quad to vertex conversion.
 func BenchmarkQuadsToVertices(b *testing.B) {
 	quads := make([]TextQuad, 100)
@@ -590,15 +701,12 @@ func BenchmarkGenerateQuadIndices(b *testing.B) {
 
 // BenchmarkPrepareUniforms benchmarks uniform preparation.
 func BenchmarkPrepareUniforms(b *testing.B) {
-	device := core.DeviceID{}
-	pipeline, _ := NewTextPipelineDefault(device)
-
 	color := gg.RGBA{R: 1, G: 0.5, B: 0.25, A: 0.8}
 	transform := gg.Translate(100, 50).Multiply(gg.Scale(2, 2))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = pipeline.prepareUniforms(color, transform, 4.0)
+		_ = prepareUniforms(color, transform, 4.0)
 	}
 }
 
