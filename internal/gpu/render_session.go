@@ -255,7 +255,12 @@ func (s *GPURenderSession) RenderFrame(
 			// but continue rendering shapes (SDF/convex/stencil).
 			hal.Logger().Warn("text pipeline init failed", "err", err)
 		} else {
-			textRes, _ = s.buildTextResources(textBatches)
+			var textErr error
+			textRes, textErr = s.buildTextResources(textBatches)
+			if textErr != nil {
+				return fmt.Errorf("build text resources: %w", textErr)
+			}
+			_ = textRes // resources may be nil if atlas not yet uploaded
 		}
 	}
 
@@ -725,41 +730,47 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 			return nil, fmt.Errorf("create text uniform buffer: %w", err)
 		}
 		s.textUniformBuf = buf
+		// Bind group must be recreated with the new uniform buffer.
+		if s.textBindGroup != nil {
+			s.device.DestroyBindGroup(s.textBindGroup)
+			s.textBindGroup = nil
+		}
 	}
 	s.queue.WriteBuffer(s.textUniformBuf, 0, uniformData)
-
-	// Recreate bind group every frame (atlas texture or uniform content may
-	// change between frames). The bind group layout is owned by textPipeline.
-	if s.textBindGroup != nil {
-		s.device.DestroyBindGroup(s.textBindGroup)
-		s.textBindGroup = nil
-	}
 
 	// The bind group requires an atlas texture view. If no atlas view is
 	// available yet, skip text rendering this frame.
 	if s.textAtlasView == nil {
+		hal.Logger().Warn("text atlas view is nil, skipping text rendering")
 		return nil, nil //nolint:nilnil // no atlas uploaded yet
 	}
 
-	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
-		Label:  "session_text_bind",
-		Layout: s.textPipeline.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: s.textUniformBuf.NativeHandle(), Offset: 0, Size: textUniformSize,
-			}},
-			{Binding: 1, Resource: gputypes.TextureViewBinding{
-				TextureView: s.textAtlasView.NativeHandle(),
-			}},
-			{Binding: 2, Resource: gputypes.SamplerBinding{
-				Sampler: s.textPipeline.sampler.NativeHandle(),
-			}},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create text bind group: %w", err)
+	// Reuse persistent bind group (same pattern as SDF). The bind group is
+	// invalidated (set to nil) when buffers are reallocated or atlas changes
+	// via SetTextAtlas. The CBV/SRV descriptors reference buffer GPU addresses
+	// and texture views — uniform DATA changes via WriteBuffer don't require
+	// bind group recreation.
+	if s.textBindGroup == nil {
+		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			Label:  "session_text_bind",
+			Layout: s.textPipeline.uniformLayout,
+			Entries: []gputypes.BindGroupEntry{
+				{Binding: 0, Resource: gputypes.BufferBinding{
+					Buffer: s.textUniformBuf.NativeHandle(), Offset: 0, Size: textUniformSize,
+				}},
+				{Binding: 1, Resource: gputypes.TextureViewBinding{
+					TextureView: s.textAtlasView.NativeHandle(),
+				}},
+				{Binding: 2, Resource: gputypes.SamplerBinding{
+					Sampler: s.textPipeline.sampler.NativeHandle(),
+				}},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create text bind group: %w", err)
+		}
+		s.textBindGroup = bg
 	}
-	s.textBindGroup = bg
 
 	indexCount := uint32(len(allQuads) * 6) //nolint:gosec // quad count bounded by MaxQuadCapacity
 	return &textFrameResources{
@@ -1066,7 +1077,6 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	// Submit without fence -- presentation handles GPU synchronization.
 	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
