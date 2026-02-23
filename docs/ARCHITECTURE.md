@@ -193,6 +193,13 @@ gg/
 │   ├── stroke/             # Stroke expansion (kurbo/tiny-skia)
 │   └── filter/             # Blur, shadow, color matrix
 │
+├── scene/                 # Retained-mode scene graph
+│   ├── scene.go           # Scene encoding (draw commands → byte stream)
+│   ├── renderer.go        # Tile-parallel renderer (delegates to SoftwareRenderer)
+│   ├── builder.go         # Scene builder API
+│   ├── path.go            # Scene path type (float32)
+│   └── tile.go            # Tile grid and dirty region tracking
+│
 ├── recording/              # Drawing recording for vector export
 │   ├── recorder.go         # Command-based drawing recorder
 │   ├── command.go          # Typed command definitions
@@ -216,6 +223,58 @@ gg/
 │
 └── internal/image/          # Image I/O (PNG, JPEG, WebP)
 ```
+
+## Scene Renderer (scene/)
+
+Retained-mode scene graph with tile-based parallel rendering. The `scene.Renderer`
+handles orchestration (tile grid, worker pool, dirty regions, layer cache) while
+delegating pixel rendering to `gg.SoftwareRenderer`.
+
+### Architecture
+
+```
+scene.Scene (encoded draw commands)
+       │
+       ▼
+scene.Renderer (orchestration)
+       │
+       ├── TileGrid (64x64 tiles)
+       ├── DirtyRegion tracking
+       ├── WorkerPool (parallel tiles)
+       └── LayerCache (inter-frame reuse)
+              │
+              ▼ (per-tile)
+       gg.SoftwareRenderer  ◄── delegation (v0.29.4)
+              │
+              ▼
+       internal/raster (analytic AA)
+```
+
+### Delegation Pattern (v0.29.4)
+
+Following the universal pattern confirmed by Qt Quick, Skia, Vello, and Flutter/Impeller:
+**scene graph orchestrates, immediate-mode backend rasterizes.**
+
+Per-tile rendering:
+1. Acquire `SoftwareRenderer` + `Pixmap` from `sync.Pool`
+2. Decode scene commands (fill, stroke, transform, etc.)
+3. Convert `scene.Path` (float32) → `gg.Path` (float64) with tile offset subtraction
+4. Convert `scene.Brush` → `gg.Paint` (fill rule, stroke params)
+5. Delegate: `sr.Fill(pm, path, paint)` / `sr.Stroke(pm, path, paint)`
+6. Composite tile onto target with premultiplied source-over alpha blending
+7. Return resources to pool
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `scene.Scene` | Encodes draw commands into byte stream |
+| `scene.Renderer` | Orchestrates tile-parallel rendering |
+| `TileGrid` | 64x64 tile partitioning |
+| `WorkerPool` | Goroutine pool for parallel tile rendering |
+| `DirtyRegion` | Tracks changed areas to minimize re-rendering |
+| `LayerCache` | Caches rendered layers between frames |
+| `tilePool` | sync.Pool for per-tile SoftwareRenderer/Pixmap reuse |
 
 ## Vello Tile Rasterizer (v0.25.0)
 
@@ -371,6 +430,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 
 | Pattern | Source | Implementation |
 |---------|--------|----------------|
+| **Scene Delegation** | Qt/Skia/Vello/Flutter | Scene orchestrates tiles, SoftwareRenderer rasterizes |
 | **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
 | **Four-Tier Rendering** | Skia Ganesh/Impeller | SDF, convex, stencil+cover, MSDF text in one render pass |
 | **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |

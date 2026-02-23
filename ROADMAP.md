@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.3
+## Current State: v0.29.4
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -36,13 +36,16 @@
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
 
+**New in v0.29.4:**
+- scene.Renderer delegates rasterization to gg.SoftwareRenderer (#124)
+- Analytic AA, full curve support, premultiplied alpha compositing in scene rendering
+- sync.Pool-based per-tile SoftwareRenderer/Pixmap reuse
+- Background preservation (no more clear(tile.Data) destruction)
+- 11 new pixel-level tests for scene.Renderer
+
 **New in v0.29.3:**
 - wgpu v0.16.12 (Vulkan debug object naming)
 - gogpu v0.20.3 (examples/gogpu_integration)
-
-**New in v0.29.2:**
-- wgpu v0.16.11 (Vulkan zero-extent swapchain fix)
-- gogpu v0.20.2 (examples/gogpu_integration)
 
 ---
 
@@ -71,6 +74,13 @@
 - [x] RenderDirect zero-copy GPU surface rendering
 - [x] EvenOdd fill rule support in stencil pipeline
 - [x] ggcanvas deferred texture destruction for DX12 stability
+
+### v0.29.4 — Scene Renderer Bug Fixes ✅ Released
+- [x] Delegate rasterization to gg.SoftwareRenderer (#124)
+- [x] sync.Pool per-tile SoftwareRenderer/Pixmap reuse
+- [x] Premultiplied source-over alpha compositing in tile compositor
+- [x] Background preservation (no more tile data destruction)
+- [x] Full curve support in scene strokes (CubicTo, QuadTo)
 
 ### v0.29.0 — GPU Text Rendering
 - [x] MSDF text pipeline (Tier 4 in GPURenderSession)
@@ -106,16 +116,19 @@
          ┌───────────────────┼───────────────────┐
          │                   │                   │
    Immediate Mode       Retained Mode        Resources
-   (Context API)        (Scene Graph)     (Images, Fonts)
+   (Context API)      (scene.Renderer)    (Images, Fonts)
+         │                   │                   │
+         │              orchestration            │
+         │         (tiles, workers, cache)       │
          │                   │                   │
          └───────────────────┼───────────────────┘
-                             │
+                             │ delegation
               ┌──────────────┴──────────────┐
               │                             │
-         CPU Raster                   GPUAccelerator
+      SoftwareRenderer                GPUAccelerator
       (always available)              (opt-in via gpu/)
               │                             │
-    internal/raster              internal/gpu (three-tier)
+    internal/raster              internal/gpu (four-tier)
 ```
 
 ---
@@ -124,7 +137,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.29.3** | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
+| **v0.29.4** | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
+| v0.29.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
 | v0.29.2 | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
 | v0.29.1 | 2026-02 | wgpu v0.16.10, naga v0.14.2 |
 | v0.29.0 | 2026-02 | GPU MSDF text pipeline, four-tier rendering, GPU strokes |
