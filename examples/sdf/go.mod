@@ -2,7 +2,7 @@ module github.com/gogpu/gg/examples/sdf
 
 go 1.25
 
-require github.com/gogpu/gg v0.29.2
+require github.com/gogpu/gg v0.29.3
 
 require (
 	github.com/go-text/typesetting v0.3.3 // indirect
