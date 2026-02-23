@@ -19,20 +19,26 @@
 
 ---
 
-## Current State: v0.28.6
+## Current State: v0.29.2
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
 - Four-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text)
+- GPU MSDF text pipeline (resolution-independent anti-aliased text)
+- GPU stroke rendering (stroke-expand-then-fill via convex polygon renderer)
 - RenderDirect zero-copy GPU surface rendering
 - Analytic anti-aliasing (Vello tile-based AA)
 - GPUAccelerator interface with transparent CPU fallback
 - Recording System for vector export (PDF, SVG)
-- GGCanvas integration for gogpu windowed rendering
+- GGCanvas integration for gogpu windowed rendering (auto-registration)
 - Porter-Duff compositing for correct GPU readback
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
+
+**New in v0.29.2:**
+- wgpu v0.16.11 (Vulkan zero-extent swapchain fix)
+- gogpu v0.20.2 (examples/gogpu_integration)
 
 ---
 
@@ -114,7 +120,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.28.6** | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
+| **v0.29.2** | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
+| v0.29.1 | 2026-02 | wgpu v0.16.10, naga v0.14.2 |
+| v0.29.0 | 2026-02 | GPU MSDF text pipeline, four-tier rendering, GPU strokes |
+| v0.28.6 | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
 | v0.28.5 | 2026-02 | wgpu v0.16.5 (per-encoder command pools) |
 | v0.28.4 | 2026-02 | wgpu v0.16.4 (timeline semaphore, FencePool), naga v0.13.1 |
 | v0.28.3 | 2026-02 | wgpu v0.16.3 (per-frame fence tracking, WaitIdle) |
