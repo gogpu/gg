@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.29.2
+## Current State: v0.29.3
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -35,6 +35,10 @@
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
+
+**New in v0.29.3:**
+- wgpu v0.16.12 (Vulkan debug object naming)
+- gogpu v0.20.3 (examples/gogpu_integration)
 
 **New in v0.29.2:**
 - wgpu v0.16.11 (Vulkan zero-extent swapchain fix)
@@ -120,7 +124,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.29.2** | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
+| **v0.29.3** | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
+| v0.29.2 | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
 | v0.29.1 | 2026-02 | wgpu v0.16.10, naga v0.14.2 |
 | v0.29.0 | 2026-02 | GPU MSDF text pipeline, four-tier rendering, GPU strokes |
 | v0.28.6 | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
