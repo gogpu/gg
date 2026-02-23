@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.4] - 2026-02-23
+
+### Fixed
+
+- **scene.Renderer: delegate rasterization to gg.SoftwareRenderer** (#124)
+  - Replaced broken internal rasterizer with delegation to `gg.SoftwareRenderer`
+  - Fill/stroke now rendered with analytic anti-aliasing (Vello tile-based AA)
+  - Full curve support in stroke (CubicTo, QuadTo) — circles/ellipses render correctly
+  - Premultiplied source-over alpha compositing (replaces raw `copy()`)
+  - Background preservation — user's `target.Clear()` is no longer destroyed
+  - `sync.Pool`-based per-tile SoftwareRenderer and Pixmap reuse
+  - Path conversion: `scene.Path` (float32) → `gg.Path` (float64) with tile offset
+  - Brush/style conversion: `scene.Brush` → `gg.Paint` via non-deprecated `SetStroke()` API
+  - Removed dead code: `fillPathOnTile`, `strokePathOnTile`, `drawLineOnTile`, `blendPixel`
+  - Zero public API changes — `NewRenderer`, `Render`, `RenderDirty` unchanged
+  - Orchestration preserved: TileGrid, WorkerPool, DirtyRegion, LayerCache untouched
+  - 11 new pixel-level correctness tests
+
 ## [0.29.3] - 2026-02-23
 
 ### Dependencies

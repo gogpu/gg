@@ -10,6 +10,47 @@ import (
 	"github.com/gogpu/gg/internal/parallel"
 )
 
+// tilePool manages pooled resources for per-tile rendering.
+// SoftwareRenderers and Pixmaps are expensive to allocate, so we reuse them
+// across tiles and frames via sync.Pool.
+type tilePool struct {
+	renderers sync.Pool // *gg.SoftwareRenderer
+	pixmaps   sync.Pool // *gg.Pixmap
+}
+
+// getRenderer returns a SoftwareRenderer from the pool, resizing if necessary.
+func (p *tilePool) getRenderer(w, h int) *gg.SoftwareRenderer {
+	if v := p.renderers.Get(); v != nil {
+		sr := v.(*gg.SoftwareRenderer)
+		sr.Resize(w, h)
+		return sr
+	}
+	return gg.NewSoftwareRenderer(w, h)
+}
+
+// putRenderer returns a SoftwareRenderer to the pool for reuse.
+func (p *tilePool) putRenderer(sr *gg.SoftwareRenderer) {
+	p.renderers.Put(sr)
+}
+
+// getPixmap returns a Pixmap from the pool. If the cached pixmap has the right
+// dimensions it is cleared and reused; otherwise a new one is allocated.
+func (p *tilePool) getPixmap(w, h int) *gg.Pixmap {
+	if v := p.pixmaps.Get(); v != nil {
+		pm := v.(*gg.Pixmap)
+		if pm.Width() == w && pm.Height() == h {
+			pm.Clear(gg.Transparent)
+			return pm
+		}
+	}
+	return gg.NewPixmap(w, h)
+}
+
+// putPixmap returns a Pixmap to the pool for reuse.
+func (p *tilePool) putPixmap(pm *gg.Pixmap) {
+	p.pixmaps.Put(pm)
+}
+
 // Renderer renders Scene content to a target Pixmap using parallel tile-based processing.
 // It integrates with TileGrid for spatial subdivision and WorkerPool for concurrent execution.
 //
@@ -28,6 +69,9 @@ type Renderer struct {
 
 	// Layer caching
 	cache *LayerCache
+
+	// Per-tile resource pool (SoftwareRenderer + Pixmap reuse)
+	pool tilePool
 
 	// Dimensions
 	width  int
@@ -358,7 +402,7 @@ func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel
 }
 
 // renderTile renders the scene encoding to a single tile.
-func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, target *gg.Pixmap) {
+func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap) {
 	if tile == nil || enc == nil {
 		return
 	}
@@ -383,19 +427,35 @@ func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, target *gg.Pix
 	// Clear tile before rendering
 	clear(tile.Data)
 
-	// Create decoder and render commands
+	// Acquire pooled resources for this tile
+	pm := r.pool.getPixmap(tileW, tileH)
+	sr := r.pool.getRenderer(tileW, tileH)
+
+	// Create decoder and render commands using gg.SoftwareRenderer
 	dec := NewDecoder(enc)
-	r.executeEncodingOnTile(dec, tile, tileBounds, target)
+	r.executeEncodingOnTile(dec, tile, pm, sr)
+
+	// Copy rendered pixmap data into the tile buffer.
+	// Pixmap stores premultiplied RGBA, same as tile.Data.
+	pmData := pm.Data()
+	copy(tile.Data, pmData)
+
+	// Return resources to pool
+	r.pool.putPixmap(pm)
+	r.pool.putRenderer(sr)
 
 	tile.Dirty = true
 }
 
-// executeEncodingOnTile executes encoding commands on a single tile.
+// executeEncodingOnTile executes encoding commands on a single tile, delegating
+// rasterization to gg.SoftwareRenderer for analytic anti-aliased output.
 //
 //nolint:gocyclo,cyclop // Command interpreter with multiple cases is inherently complex
-func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, tileBounds Rect, _ *gg.Pixmap) {
+func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
 	var currentPath *Path
 	currentTransform := IdentityAffine()
+
+	tileX, tileY, _, _ := tile.Bounds()
 
 	for dec.Next() {
 		switch dec.Tag() {
@@ -447,13 +507,17 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, tile
 		case TagFill:
 			brush, style := dec.Fill()
 			if currentPath != nil && !currentPath.IsEmpty() {
-				r.fillPathOnTile(tile, tileBounds, currentPath, brush, style)
+				ggPath := convertPath(currentPath, tileX, tileY)
+				paint := convertFillPaint(brush, style)
+				_ = sr.Fill(pm, ggPath, paint)
 			}
 
 		case TagStroke:
 			brush, style := dec.Stroke()
 			if currentPath != nil && !currentPath.IsEmpty() {
-				r.strokePathOnTile(tile, tileBounds, currentPath, brush, style)
+				ggPath := convertPath(currentPath, tileX, tileY)
+				paint := convertStrokePaint(brush, style)
+				_ = sr.Stroke(pm, ggPath, paint)
 			}
 
 		case TagPushLayer:
@@ -480,161 +544,99 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, tile
 	}
 }
 
-// fillPathOnTile fills a path on a tile using simple scanline rasterization.
-func (r *Renderer) fillPathOnTile(tile *parallel.Tile, tileBounds Rect, path *Path, brush Brush, _ FillStyle) {
-	if path.IsEmpty() || brush.Kind != BrushSolid {
-		return
-	}
+// ---------------------------------------------------------------------------
+// Path and Paint Conversion (scene types -> gg types)
+// ---------------------------------------------------------------------------
 
-	// Get path bounds
-	pathBounds := path.Bounds()
-	if !rectIntersects(pathBounds, tileBounds) {
-		return
-	}
+// convertPath converts a scene.Path (float32, canvas space) to a gg.Path
+// (float64, tile-local space) by subtracting the tile origin offset.
+// The scene.Path is already in transformed canvas coordinates.
+func convertPath(scenePath *Path, tileOffsetX, tileOffsetY int) *gg.Path {
+	p := gg.NewPath()
+	ox := float64(tileOffsetX)
+	oy := float64(tileOffsetY)
 
-	// Convert color to bytes
-	color := brush.Color
-	r8 := uint8(clamp01(color.R) * 255)
-	g8 := uint8(clamp01(color.G) * 255)
-	b8 := uint8(clamp01(color.B) * 255)
-	a8 := uint8(clamp01(color.A) * 255)
-
-	// Simple bounding box fill for demonstration
-	// Full implementation would use scanline rasterization
-	tileX, tileY, _, _ := tile.Bounds()
-
-	// Calculate intersection of path bounds with tile
-	minX := int(pathBounds.MinX) - tileX
-	minY := int(pathBounds.MinY) - tileY
-	maxX := int(pathBounds.MaxX) - tileX
-	maxY := int(pathBounds.MaxY) - tileY
-
-	// Clamp to tile bounds
-	if minX < 0 {
-		minX = 0
-	}
-	if minY < 0 {
-		minY = 0
-	}
-	if maxX > tile.Width {
-		maxX = tile.Width
-	}
-	if maxY > tile.Height {
-		maxY = tile.Height
-	}
-
-	// Fill pixels (simplified - should use actual path containment)
-	for y := minY; y < maxY; y++ {
-		for x := minX; x < maxX; x++ {
-			// Check if point is inside path using winding number
-			px := float32(tileX+x) + 0.5
-			py := float32(tileY+y) + 0.5
-
-			if path.Contains(px, py) {
-				offset := tile.PixelOffset(x, y)
-				blendPixel(tile.Data, offset, r8, g8, b8, a8)
-			}
-		}
-	}
-}
-
-// strokePathOnTile strokes a path on a tile.
-func (r *Renderer) strokePathOnTile(tile *parallel.Tile, tileBounds Rect, path *Path, brush Brush, style *StrokeStyle) {
-	if path.IsEmpty() || brush.Kind != BrushSolid {
-		return
-	}
-
-	// Get expanded path bounds for stroke width
-	pathBounds := path.Bounds()
-	halfWidth := style.Width / 2
-	pathBounds.MinX -= halfWidth
-	pathBounds.MinY -= halfWidth
-	pathBounds.MaxX += halfWidth
-	pathBounds.MaxY += halfWidth
-
-	if !rectIntersects(pathBounds, tileBounds) {
-		return
-	}
-
-	// Convert color to bytes
-	color := brush.Color
-	r8 := uint8(clamp01(color.R) * 255)
-	g8 := uint8(clamp01(color.G) * 255)
-	b8 := uint8(clamp01(color.B) * 255)
-	a8 := uint8(clamp01(color.A) * 255)
-
-	tileX, tileY, _, _ := tile.Bounds()
-
-	// Iterate through path segments and draw lines
-	var lastX, lastY float32
-	var lastValid bool
-
-	for i := 0; i < len(path.verbs); i++ {
-		verb := path.verbs[i]
-
+	pointIdx := 0
+	pts := scenePath.Points()
+	for _, verb := range scenePath.Verbs() {
 		switch verb {
 		case VerbMoveTo:
-			if i*2+1 < len(path.points) {
-				lastX = path.points[i*2]
-				lastY = path.points[i*2+1]
-				lastValid = true
-			}
-
+			p.MoveTo(float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy)
+			pointIdx += 2
 		case VerbLineTo:
-			if lastValid && i*2+1 < len(path.points) {
-				x := path.points[i*2]
-				y := path.points[i*2+1]
-				r.drawLineOnTile(tile, tileX, tileY, lastX, lastY, x, y, style.Width, r8, g8, b8, a8)
-				lastX, lastY = x, y
-			}
-
+			p.LineTo(float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy)
+			pointIdx += 2
+		case VerbQuadTo:
+			p.QuadraticTo(
+				float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy,
+				float64(pts[pointIdx+2])-ox, float64(pts[pointIdx+3])-oy,
+			)
+			pointIdx += 4
+		case VerbCubicTo:
+			p.CubicTo(
+				float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy,
+				float64(pts[pointIdx+2])-ox, float64(pts[pointIdx+3])-oy,
+				float64(pts[pointIdx+4])-ox, float64(pts[pointIdx+5])-oy,
+			)
+			pointIdx += 6
 		case VerbClose:
-			// Draw line back to subpath start if needed
+			p.Close()
 		}
 	}
+	return p
 }
 
-// drawLineOnTile draws a line segment on a tile with the given stroke width.
-func (r *Renderer) drawLineOnTile(tile *parallel.Tile, tileX, tileY int, x1, y1, x2, y2, width float32, red, green, blue, alpha uint8) {
-	// Simple Bresenham-style line drawing for demonstration
-	// Full implementation would use proper thick line rasterization
-
-	dx := x2 - x1
-	dy := y2 - y1
-
-	// Number of steps based on the longer dimension
-	steps := int(abs32(dx))
-	if int(abs32(dy)) > steps {
-		steps = int(abs32(dy))
+// convertFillPaint converts a scene.Brush and FillStyle to a gg.Paint
+// suitable for gg.SoftwareRenderer.Fill.
+func convertFillPaint(brush Brush, style FillStyle) *gg.Paint {
+	paint := gg.NewPaint()
+	if brush.Kind == BrushSolid {
+		paint.SetBrush(gg.Solid(brush.Color))
 	}
-	if steps == 0 {
-		steps = 1
+	if style == FillEvenOdd {
+		paint.FillRule = gg.FillRuleEvenOdd
+	}
+	return paint
+}
+
+// convertStrokePaint converts a scene.Brush and StrokeStyle to a gg.Paint
+// suitable for gg.SoftwareRenderer.Stroke.
+func convertStrokePaint(brush Brush, style *StrokeStyle) *gg.Paint {
+	if style == nil {
+		style = DefaultStrokeStyle()
 	}
 
-	xInc := dx / float32(steps)
-	yInc := dy / float32(steps)
-
-	x := x1
-	y := y1
-	halfWidth := width / 2
-
-	for i := 0; i <= steps; i++ {
-		// Draw a small area around the point for thick lines
-		for offsetY := -int(halfWidth); offsetY <= int(halfWidth); offsetY++ {
-			for offsetX := -int(halfWidth); offsetX <= int(halfWidth); offsetX++ {
-				px := int(x+0.5) + offsetX - tileX
-				py := int(y+0.5) + offsetY - tileY
-
-				if px >= 0 && px < tile.Width && py >= 0 && py < tile.Height {
-					offset := tile.PixelOffset(px, py)
-					blendPixel(tile.Data, offset, red, green, blue, alpha)
-				}
-			}
-		}
-
-		x += xInc
-		y += yInc
+	paint := gg.NewPaint()
+	if brush.Kind == BrushSolid {
+		paint.SetBrush(gg.Solid(brush.Color))
 	}
+
+	// Build a gg.Stroke using the non-deprecated API
+	s := gg.Stroke{
+		Width:      float64(style.Width),
+		MiterLimit: float64(style.MiterLimit),
+	}
+
+	switch style.Cap {
+	case LineCapButt:
+		s.Cap = gg.LineCapButt
+	case LineCapRound:
+		s.Cap = gg.LineCapRound
+	case LineCapSquare:
+		s.Cap = gg.LineCapSquare
+	}
+
+	switch style.Join {
+	case LineJoinMiter:
+		s.Join = gg.LineJoinMiter
+	case LineJoinRound:
+		s.Join = gg.LineJoinRound
+	case LineJoinBevel:
+		s.Join = gg.LineJoinBevel
+	}
+
+	paint.SetStroke(s)
+	return paint
 }
 
 // compositeTiles copies rendered tiles to the target pixmap.
@@ -657,7 +659,11 @@ func (r *Renderer) compositeTiles(tiles []*parallel.Tile, target *gg.Pixmap) {
 	r.workerPool.ExecuteAll(work)
 }
 
-// compositeTile copies a single tile's data to the target buffer.
+// compositeTile blends a single tile's data onto the target buffer using
+// premultiplied source-over alpha compositing. This preserves the user's
+// pre-existing background (e.g. a Clear(white) call) instead of overwriting it.
+//
+//nolint:gosec // G115: Integer overflow is not possible - math is bounded to [0,255]
 func (r *Renderer) compositeTile(tile *parallel.Tile, dst []byte, dstStride int) {
 	tileX, tileY, _, _ := tile.Bounds()
 
@@ -669,22 +675,46 @@ func (r *Renderer) compositeTile(tile *parallel.Tile, dst []byte, dstStride int)
 			break
 		}
 
-		dstOffset := canvasY*dstStride + tileX*4
-		srcOffset := row * srcStride
+		dstRowStart := canvasY*dstStride + tileX*4
+		srcRowStart := row * srcStride
 
-		copyLen := srcStride
-		if tileX*4+copyLen > dstStride {
-			copyLen = dstStride - tileX*4
+		// Determine number of pixels to process in this row
+		pixelsInRow := tile.Width
+		if tileX+pixelsInRow > r.width {
+			pixelsInRow = r.width - tileX
 		}
-		if copyLen <= 0 {
+		if pixelsInRow <= 0 {
 			continue
 		}
 
-		if dstOffset+copyLen > len(dst) || srcOffset+copyLen > len(tile.Data) {
-			continue
-		}
+		for col := 0; col < pixelsInRow; col++ {
+			srcOff := srcRowStart + col*4
+			dstOff := dstRowStart + col*4
 
-		copy(dst[dstOffset:dstOffset+copyLen], tile.Data[srcOffset:srcOffset+copyLen])
+			if srcOff+3 >= len(tile.Data) || dstOff+3 >= len(dst) {
+				continue
+			}
+
+			sa := tile.Data[srcOff+3]
+			if sa == 0 {
+				continue // Fully transparent source pixel, keep destination
+			}
+			if sa == 255 {
+				// Fully opaque source, overwrite destination (fast path)
+				dst[dstOff] = tile.Data[srcOff]
+				dst[dstOff+1] = tile.Data[srcOff+1]
+				dst[dstOff+2] = tile.Data[srcOff+2]
+				dst[dstOff+3] = tile.Data[srcOff+3]
+				continue
+			}
+
+			// Premultiplied source-over: dst' = src + dst * (1 - srcAlpha)
+			invAlpha := 255 - uint32(sa)
+			dst[dstOff] = tile.Data[srcOff] + uint8((uint32(dst[dstOff])*invAlpha+127)/255)
+			dst[dstOff+1] = tile.Data[srcOff+1] + uint8((uint32(dst[dstOff+1])*invAlpha+127)/255)
+			dst[dstOff+2] = tile.Data[srcOff+2] + uint8((uint32(dst[dstOff+2])*invAlpha+127)/255)
+			dst[dstOff+3] = tile.Data[srcOff+3] + uint8((uint32(dst[dstOff+3])*invAlpha+127)/255)
+		}
 	}
 }
 
@@ -822,45 +852,4 @@ func rectIntersects(a, b Rect) bool {
 	}
 	return !(a.MaxX < b.MinX || a.MinX > b.MaxX ||
 		a.MaxY < b.MinY || a.MinY > b.MaxY)
-}
-
-// clamp01 clamps a value to the range [0, 1].
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
-// abs32 returns the absolute value of a float32.
-func abs32(x float32) float32 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// blendPixel blends source color onto destination using source-over blending.
-// The offset is the byte offset into the tile data, and src is RGBA bytes.
-//
-//nolint:gosec // G115: Integer overflow is not possible here - math is bounded to [0,255]
-func blendPixel(data []byte, offset int, sr, sg, sb, sa uint8) {
-	if offset < 0 || offset+3 >= len(data) {
-		return
-	}
-	if sa == 255 {
-		data[offset] = sr
-		data[offset+1] = sg
-		data[offset+2] = sb
-		data[offset+3] = sa
-	} else if sa > 0 {
-		invAlpha := 255 - sa
-		data[offset] = sr + uint8((uint32(data[offset])*uint32(invAlpha)+127)/255)
-		data[offset+1] = sg + uint8((uint32(data[offset+1])*uint32(invAlpha)+127)/255)
-		data[offset+2] = sb + uint8((uint32(data[offset+2])*uint32(invAlpha)+127)/255)
-		data[offset+3] = sa + uint8((uint32(data[offset+3])*uint32(invAlpha)+127)/255)
-	}
 }
