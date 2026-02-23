@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.3] - 2026-02-23
+
+### Dependencies
+
+- wgpu v0.16.11 → v0.16.12 (Vulkan debug object naming)
+- gogpu v0.20.2 → v0.20.3 (examples/gogpu_integration)
+
 ## [0.29.2] - 2026-02-23
 
 ### Dependencies
