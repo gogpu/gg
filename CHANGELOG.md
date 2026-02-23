@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-02-23
+
+### Dependencies
+
+- wgpu v0.16.10 → v0.16.11 (Vulkan zero-extent swapchain fix)
+- gogpu v0.20.1 → v0.20.2 (examples/gogpu_integration)
+
 ## [0.29.1] - 2026-02-22
 
 ### Dependencies
