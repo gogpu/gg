@@ -592,6 +592,13 @@ func clampF(v, lo, hi float32) float32 {
 	return v
 }
 
+// InitStandalone initializes a standalone Vulkan device for compute-only use.
+// This is the public entry point for examples and tools that use the compute
+// pipeline without an external device provider (gogpu).
+func (a *VelloAccelerator) InitStandalone() error {
+	return a.initGPU()
+}
+
 // initGPU creates a standalone Vulkan device for compute-only use.
 // This is the fallback path when no external device is provided via
 // SetDeviceProvider (e.g., when gg is used without gogpu).
