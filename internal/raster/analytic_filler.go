@@ -192,8 +192,16 @@ func (af *AnalyticFiller) processScanlineWithScale(
 	// Convert coverage to alpha runs
 	af.coverageToRuns()
 
-	// Advance edges for next scanline
-	af.aet.AdvanceX()
+	// NOTE: Do NOT call aet.AdvanceX() here.
+	// computeSegmentCoverage computes line positions analytically via:
+	//   lineTopX = x + dx*(lineTopY - firstY)
+	// where x = FDot16ToFloat32(line.X)/aaScale is the position at firstY.
+	// AdvanceX() modifies line.X by DX (one sub-pixel step), but the outer
+	// loop processes one PIXEL scanline (= aaScale sub-pixel steps). This
+	// causes line.X to drift, while firstY stays fixed, leading to progressive
+	// position error: slope * N / aaScale per pixel scanline.
+	// Since the line equation already computes correct positions from the
+	// original line.X and firstY, advancing line.X is both unnecessary and harmful.
 
 	// Callback with the alpha runs (in pixel coordinates)
 	callback(y, af.alphaRuns)
