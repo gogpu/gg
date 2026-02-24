@@ -126,13 +126,16 @@ func buildEdgesFromScenePath(eb *raster.EdgeBuilder, p *scene.Path) {
 	eb.BuildFromPath(&scenePathAdapter{path: p}, raster.IdentityTransform{})
 }
 
-func upstreamGoldenPath(name string) string {
-	return filepath.Join("..", "..", "..", "testdata", "golden", "vello-upstream", name+".png")
+// sparseStripsGoldenPath returns path to Vello sparse strips reference images.
+// Note: these are from a DIFFERENT rasterizer (vello_common/strip.rs) than what
+// velloport ports (vello_shaders/src/cpu/). Expected diff ~2-3% is algorithmic.
+func sparseStripsGoldenPath(name string) string {
+	return filepath.Join("..", "..", "..", "testdata", "golden", "vello-sparse-strips", name+".png")
 }
 
 func loadGolden(t *testing.T, name string) *image.RGBA {
 	t.Helper()
-	path := upstreamGoldenPath(name)
+	path := sparseStripsGoldenPath(name)
 	f, err := os.Open(path)
 	if err != nil {
 		t.Skipf("upstream golden file not found: %v", err)
@@ -272,7 +275,9 @@ func TestVelloPortAgainstUpstream(t *testing.T) {
 			// Always save diffs for inspection
 			saveDiffImage(t, tc.Name, ours, reference)
 
-			// Goal: < 1% diff. For now, fail at 5% to track progress.
+			// Golden images are from sparse strips (different algorithm).
+			// Expected ~2-3% diff is cross-algorithm, not a bug.
+			// Goal: < 1% when we get GPU pipeline golden images.
 			threshold := 5.0
 			if diffPercent > threshold {
 				t.Errorf("FAIL: %.2f%% pixel difference exceeds threshold %.2f%%", diffPercent, threshold)

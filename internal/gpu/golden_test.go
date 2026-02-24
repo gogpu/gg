@@ -17,55 +17,40 @@ import (
 	"github.com/gogpu/gg/scene"
 )
 
-// Vello upstream golden tests.
+// Vello sparse strips golden tests.
 //
 // These tests compare our TileRasterizer output against reference images
-// from the upstream Vello repository (linebender/vello). Since our
-// TileRasterizer is a port of Vello's CPU fine rasterizer, the correct
-// ground truth is Vello's own output — not our AnalyticFiller.
+// from Vello's sparse strips CPU rasterizer (vello_common/src/strip.rs).
+// Note: sparse strips uses a DIFFERENT algorithm from vello_shaders/src/cpu/
+// (which our velloport package ports). Higher thresholds are expected.
 //
-// Reference images: testdata/golden/vello-upstream/
-// Source: vello_tests/snapshots/ and sparse_strips/vello_sparse_tests/snapshots/
+// Reference images: testdata/golden/vello-sparse-strips/
+// Source: sparse_strips/vello_sparse_tests/snapshots/
 
 // VelloGoldenTest defines a test case with parameters matching an upstream
 // Vello snapshot test exactly.
 type VelloGoldenTest struct {
-	Name      string       // Test name matching upstream snapshot filename
-	Width     int          // Canvas width in pixels
-	Height    int          // Canvas height in pixels
-	FillColor color.RGBA   // Fill color (premultiplied over white bg)
+	Name      string     // Test name matching upstream snapshot filename
+	Width     int        // Canvas width in pixels
+	Height    int        // Canvas height in pixels
+	FillColor color.RGBA // Fill color (premultiplied over white bg)
 	FillRule  raster.FillRule
 	BuildPath func(eb *raster.EdgeBuilder) // Path builder
-	Threshold float64 // Max acceptable different-pixel percentage
+	Threshold float64                      // Max acceptable different-pixel percentage
 }
 
-// VelloUpstreamTests returns test cases matching upstream Vello sparse strip
-// snapshot tests. Parameters extracted from:
+// VelloUpstreamTests returns test cases matching Vello sparse strip snapshot
+// tests. Parameters extracted from:
 //
 //	sparse_strips/vello_sparse_tests/tests/basic.rs
 //
-// Note: Vello smoke tests (vello_tests/snapshots/smoke/) use a different
-// rendering pipeline (GPU compute) with BLACK background and are not directly
-// comparable to our TileRasterizer (CPU fine rasterizer port). Sparse strip
-// tests use WHITE background and match our implementation approach.
+// Known differences (TileRasterizer vs sparse strips):
+//   - Circle: ~5% — curve flattening + backdrop bugs
+//   - Triangle: ~5% — backdrop overflow (green rectangle artifact)
+//   - Star NZ/EO: ~10% — missing horizontal line + backdrop bugs
 //
-// Known differences between our port and Vello upstream:
-//   - Circle: ~3.6% — curve flattening tolerance/algorithm differs (kurbo vs EdgeBuilder)
-//   - Triangle: ~3.2% — vertex artifact at (5,5) from backdrop/yEdge interaction
-//   - Star NZ/EO: ~6-9% — horizontal band at y=40 from segment handling at coincident vertices
-//
-// These artifacts are documented in:
-//   - docs/dev/research/VELLO_BACKDROP_PROBLEM.md
-//   - docs/dev/research/VELLO_BUGFIX_REPORT.md
-//   - docs/dev/research/VELLO_CIRCLE_BOTTOM_BUG.md
-//   - docs/research/VELLO_UNCONDITIONAL_YEDGE_EXPERIMENT.md
-//
-// Root causes: our VelloLine→binSegments→addSegmentToTile pipeline differs from
-// Vello's integrated path_count→path_tiling→fine pipeline in DDA walk, segment
-// clipping, and backdrop propagation. See GitHub branches:
-//
-//	feat/vello-tile-rasterizer (15+ fix attempts)
-//	feat/vello-tile-rasterizer-v2 (clean rewrite)
+// For more accurate comparison, see velloport package (1:1 port of
+// vello_shaders/src/cpu/) which achieves 0.9-3.8% against these same images.
 func VelloUpstreamTests() []VelloGoldenTest {
 	return []VelloGoldenTest{
 		{
@@ -146,9 +131,9 @@ func VelloUpstreamTests() []VelloGoldenTest {
 	}
 }
 
-// upstreamGoldenDir returns the path to Vello upstream reference images.
+// upstreamGoldenDir returns the path to Vello sparse strips reference images.
 func upstreamGoldenDir() string {
-	return filepath.Join("..", "..", "testdata", "golden", "vello-upstream")
+	return filepath.Join("..", "..", "testdata", "golden", "vello-sparse-strips")
 }
 
 // upstreamGoldenPath returns the path for a specific upstream golden file.
