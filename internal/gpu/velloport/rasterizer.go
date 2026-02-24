@@ -209,6 +209,104 @@ func (r *Rasterizer) RasterizeScene(bgColor [4]uint8, paths []PathDef) *image.RG
 	return img
 }
 
+// RasterizeScenePTCL renders multiple paths using the full Vello compute pipeline:
+// scene encoding -> pathtag reduce/scan -> draw reduce/scan -> flatten -> coarse -> fine PTCL.
+// This matches Vello's actual GPU pipeline architecture where all paths are processed
+// together through shared tile command lists, enabling correct multi-path compositing
+// in a single fine rasterization pass.
+//
+// The result should be pixel-identical (within rounding tolerance) to RasterizeScene,
+// which processes paths individually and composites in a separate step.
+func (r *Rasterizer) RasterizeScenePTCL(bgColor [4]uint8, paths []PathDef) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+
+	// Convert bgColor (straight uint8) to premultiplied float32.
+	bgA := float32(bgColor[3]) / 255.0
+	bgFloat := [4]float32{
+		float32(bgColor[0]) / 255.0 * bgA,
+		float32(bgColor[1]) / 255.0 * bgA,
+		float32(bgColor[2]) / 255.0 * bgA,
+		bgA,
+	}
+
+	if len(paths) == 0 {
+		// Fill with background and return.
+		bg := color.RGBA{R: bgColor[0], G: bgColor[1], B: bgColor[2], A: bgColor[3]}
+		for y := 0; y < r.height; y++ {
+			for x := 0; x < r.width; x++ {
+				img.SetRGBA(x, y, bg)
+			}
+		}
+		return img
+	}
+
+	// Step 1: Encode scene.
+	enc := EncodeScene(paths)
+
+	// Step 2: Pack scene.
+	scene := PackScene(enc)
+
+	// Step 3: Path tag reduce/scan.
+	reduced := pathtagReduce(scene)
+	_ = pathtagScan(scene, reduced) // Scan result not used in CPU path yet, but called for correctness.
+
+	// Step 4: Draw reduce/scan.
+	drawReduced := drawReduce(scene)
+	drawMonoids, info := drawLeafScan(scene, drawReduced)
+
+	// Step 5: Build allLines with correct PathIx for each path.
+	var allLines []LineSoup
+	for pathIx, pd := range paths {
+		for _, line := range pd.Lines {
+			allLines = append(allLines, LineSoup{
+				PathIx: uint32(pathIx),
+				P0:     line.P0,
+				P1:     line.P1,
+			})
+		}
+	}
+
+	// Step 6: Coarse rasterize.
+	coarseOut := CoarseRasterize(scene, drawMonoids, info, allLines, r.width, r.height)
+
+	// Step 7: Fine rasterize each tile.
+	widthInTiles := coarseOut.WidthInTiles
+	heightInTiles := coarseOut.HeightInTiles
+
+	for ty := 0; ty < heightInTiles; ty++ {
+		for tx := 0; tx < widthInTiles; tx++ {
+			tileIdx := ty*widthInTiles + tx
+			tilePixels := fineRasterizeTile(coarseOut.TilePTCLs[tileIdx], coarseOut.Segments, bgFloat)
+
+			// Write tile pixels to output image.
+			globalTileX := tx * TileWidth
+			globalTileY := ty * TileHeight
+			for ly := 0; ly < TileHeight; ly++ {
+				py := globalTileY + ly
+				if py >= r.height {
+					break
+				}
+				for lx := 0; lx < TileWidth; lx++ {
+					px := globalTileX + lx
+					if px >= r.width {
+						break
+					}
+					pm := tilePixels[ly*TileWidth+lx]
+					straight := premulToStraightU8(pm)
+					img.SetRGBA(px, py, color.RGBA{
+						R: straight[0],
+						G: straight[1],
+						B: straight[2],
+						A: straight[3],
+					})
+				}
+			}
+		}
+	}
+
+	return img
+}
+
 // computePath computes the Path struct and tile grid dimensions from lines.
 func (r *Rasterizer) computePath(lines []LineSoup) (Path, int, int) {
 	// Compute pixel bounding box from all lines
