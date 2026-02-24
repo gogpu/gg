@@ -22,7 +22,7 @@ import (
 // These tests compare our TileRasterizer output against reference images
 // from Vello's sparse strips CPU rasterizer (vello_common/src/strip.rs).
 // Note: sparse strips uses a DIFFERENT algorithm from vello_shaders/src/cpu/
-// (which our velloport package ports). Higher thresholds are expected.
+// (which our tilecompute package ports). Higher thresholds are expected.
 //
 // Reference images: testdata/golden/vello-sparse-strips/
 // Source: sparse_strips/vello_sparse_tests/snapshots/
@@ -49,7 +49,7 @@ type VelloGoldenTest struct {
 //   - Triangle: ~5% — backdrop overflow (green rectangle artifact)
 //   - Star NZ/EO: ~10% — missing horizontal line + backdrop bugs
 //
-// For more accurate comparison, see velloport package (1:1 port of
+// For more accurate comparison, see tilecompute package (1:1 port of
 // vello_shaders/src/cpu/) which achieves 0.9-3.8% against these same images.
 func VelloUpstreamTests() []VelloGoldenTest {
 	return []VelloGoldenTest{

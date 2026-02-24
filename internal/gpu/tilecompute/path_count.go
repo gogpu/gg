@@ -4,7 +4,7 @@
 // Direct port of vello_shaders/src/cpu/path_count.rs
 // Variable names match Rust originals for cross-reference.
 
-package velloport
+package tilecompute
 
 // pathCountMain is a direct port of path_count_main from path_count.rs.
 // Stage 1: DDA tile walk + backdrop computation + segment counting.

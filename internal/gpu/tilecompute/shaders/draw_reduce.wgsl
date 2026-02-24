@@ -3,7 +3,7 @@
 //
 // draw_reduce.wgsl — Parallel reduction of DrawMonoid over draw tag words.
 //
-// CPU reference: velloport/draw_leaf.go drawReduce()
+// CPU reference: tilecompute/draw_leaf.go drawReduce()
 // Same tree reduction pattern as pathtag_reduce, but for DrawMonoid.
 // Each workgroup processes 256 draw tags, producing one combined DrawMonoid.
 

@@ -3,8 +3,8 @@
 //
 // backdrop.wgsl — Left-to-right backdrop prefix sum per tile row.
 //
-// CPU reference: velloport/rasterizer.go lines 89-99 (backdrop prefix sum),
-//                velloport/coarse.go runPathStages() lines 292-299.
+// CPU reference: tilecompute/rasterizer.go lines 89-99 (backdrop prefix sum),
+//                tilecompute/coarse.go runPathStages() lines 292-299.
 //
 // For each path, the backdrop values computed by path_count represent the
 // winding number delta at each tile boundary. This shader accumulates them

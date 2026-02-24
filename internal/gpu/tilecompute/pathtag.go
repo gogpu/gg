@@ -7,7 +7,7 @@
 // Reference: vello_shaders/src/cpu/pathtag_reduce.rs, pathtag_scan.rs
 // Variable names match Rust/WGSL originals for cross-reference.
 
-package velloport
+package tilecompute
 
 import "math/bits"
 

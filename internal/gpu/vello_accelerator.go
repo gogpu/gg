@@ -38,7 +38,7 @@ type VelloAccelerator struct {
 	dispatcher *VelloComputeDispatcher
 
 	// TODO: scene encoding accumulation
-	// pendingScene *velloport.SceneEncoding
+	// pendingScene *tilecompute.SceneEncoding
 
 	gpuReady       bool
 	externalDevice bool // true when using shared device (don't destroy on Close)

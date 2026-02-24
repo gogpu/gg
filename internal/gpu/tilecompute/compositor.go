@@ -4,7 +4,7 @@
 // Compositing helpers for multi-path rendering.
 // Implements premultiplied source-over blending matching Vello's fine.rs.
 
-package velloport
+package tilecompute
 
 // blendSourceOver composites src over dst using premultiplied alpha source-over.
 // srcColor is the path color in straight alpha RGBA.

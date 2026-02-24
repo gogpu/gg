@@ -3,7 +3,7 @@
 //
 // fine.wgsl — Per-pixel rasterization driven by PTCL command streams.
 //
-// CPU reference: velloport/fine.go fineRasterizeTile(), fillPath()
+// CPU reference: tilecompute/fine.go fineRasterizeTile(), fillPath()
 // One workgroup per tile, 256 threads = 16x16 pixels. Each thread handles
 // one pixel of the tile and walks the same PTCL command stream, but computes
 // pixel-specific coverage and color values.

@@ -9,7 +9,7 @@
 //
 // Reference: vello_shaders/src/cpu/coarse.rs, tile_alloc.rs, backdrop.rs
 
-package velloport
+package tilecompute
 
 import "math"
 

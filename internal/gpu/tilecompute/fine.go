@@ -4,7 +4,7 @@
 // Direct port of fill_path from vello_shaders/src/cpu/fine.rs (lines 51-109).
 // Variable names match Rust originals for cross-reference.
 
-package velloport
+package tilecompute
 
 // fineRasterizeTile processes a PTCL command stream for a single tile,
 // producing RGBA pixel output. This is the CPU version of Vello's fine.wgsl main loop.

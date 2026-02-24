@@ -1,12 +1,12 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package velloport is a direct 1:1 port of Vello's CPU rasterization pipeline.
+// Package tilecompute is a direct 1:1 port of Vello's CPU rasterization pipeline.
 // Variable names and logic match the Rust originals for easy cross-reference.
 // This is intentionally NOT idiomatic Go — it prioritizes pixel-perfect matching.
 //
 // Source: linebender/vello vello_shaders/src/cpu/
-package velloport
+package tilecompute
 
 import "math"
 

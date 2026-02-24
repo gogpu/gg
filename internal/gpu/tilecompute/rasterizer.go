@@ -4,7 +4,7 @@
 // Rasterizer ties together all Vello CPU pipeline stages into a single API.
 // This is NOT part of the Vello source — it's our integration layer.
 
-package velloport
+package tilecompute
 
 import (
 	"image"

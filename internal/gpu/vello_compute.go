@@ -5,7 +5,7 @@
 
 // vello_compute.go defines the GPU dispatch orchestration for the Vello-style
 // compute pipeline. It manages shader compilation, buffer allocation, and the
-// 8-stage dispatch sequence that mirrors the CPU reference in velloport/.
+// 8-stage dispatch sequence that mirrors the CPU reference in tilecompute/.
 
 package gpu
 
@@ -24,31 +24,31 @@ import (
 // Embedded WGSL Shader Sources
 // =============================================================================
 
-// Shader sources are embedded from the velloport/shaders directory.
+// Shader sources are embedded from the tilecompute/shaders directory.
 // Each file corresponds to one stage of the Vello compute pipeline.
 
-//go:embed velloport/shaders/pathtag_reduce.wgsl
+//go:embed tilecompute/shaders/pathtag_reduce.wgsl
 var shaderPathtagReduce string
 
-//go:embed velloport/shaders/pathtag_scan.wgsl
+//go:embed tilecompute/shaders/pathtag_scan.wgsl
 var shaderPathtagScan string
 
-//go:embed velloport/shaders/draw_reduce.wgsl
+//go:embed tilecompute/shaders/draw_reduce.wgsl
 var shaderDrawReduce string
 
-//go:embed velloport/shaders/draw_leaf.wgsl
+//go:embed tilecompute/shaders/draw_leaf.wgsl
 var shaderDrawLeaf string
 
-//go:embed velloport/shaders/path_count.wgsl
+//go:embed tilecompute/shaders/path_count.wgsl
 var shaderPathCount string
 
-//go:embed velloport/shaders/backdrop.wgsl
+//go:embed tilecompute/shaders/backdrop.wgsl
 var shaderBackdrop string
 
-//go:embed velloport/shaders/coarse.wgsl
+//go:embed tilecompute/shaders/coarse.wgsl
 var shaderVelloCoarse string
 
-//go:embed velloport/shaders/fine.wgsl
+//go:embed tilecompute/shaders/fine.wgsl
 var shaderVelloFine string
 
 // =============================================================================
@@ -332,7 +332,7 @@ type VelloComputeBuffers struct {
 
 // VelloComputeDispatcher orchestrates the Vello-style compute pipeline.
 // It manages shader compilation, buffer allocation, and the 8-stage
-// dispatch sequence that mirrors the CPU reference in velloport/.
+// dispatch sequence that mirrors the CPU reference in tilecompute/.
 //
 // Pipeline stages (in dispatch order):
 //  1. pathtag_reduce -- parallel reduction of PathMonoid over path tags
@@ -347,8 +347,8 @@ type VelloComputeBuffers struct {
 // Each stage's output feeds into subsequent stages through GPU storage buffers.
 // All inter-stage data flows through the buffers in VelloComputeBuffers.
 //
-// Reference: internal/gpu/velloport/ (CPU implementation)
-// Reference: internal/gpu/velloport/shaders/ (WGSL shaders)
+// Reference: internal/gpu/tilecompute/ (CPU implementation)
+// Reference: internal/gpu/tilecompute/shaders/ (WGSL shaders)
 type VelloComputeDispatcher struct {
 	mu sync.RWMutex
 

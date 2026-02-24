@@ -7,7 +7,7 @@
 // This file implements fill-only flattening (offset=0). Stroke expansion
 // (parallel curves, caps, joins) is not yet ported.
 
-package velloport
+package tilecompute
 
 import "math"
 

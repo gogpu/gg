@@ -3,7 +3,7 @@
 //
 // draw_leaf.wgsl — Parallel prefix scan of DrawMonoid + draw info extraction.
 //
-// CPU reference: velloport/draw_leaf.go drawLeafScan()
+// CPU reference: tilecompute/draw_leaf.go drawLeafScan()
 // Two-level scan (same pattern as pathtag_scan) producing exclusive prefix
 // sums of DrawMonoid for each draw object. Additionally extracts per-draw
 // info: for DrawTagColor (0x44), copies the packed RGBA from draw data to

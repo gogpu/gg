@@ -3,7 +3,7 @@
 //
 // coarse.wgsl — Per-Tile Command List (PTCL) generation.
 //
-// CPU reference: velloport/coarse.go generatePTCLs(), emitDrawToTiles()
+// CPU reference: tilecompute/coarse.go generatePTCLs(), emitDrawToTiles()
 // For each draw object, determines which tiles it covers based on the path's
 // bounding box and writes PTCL commands (CmdFill, CmdSolid, CmdColor) to
 // each affected tile's command stream.

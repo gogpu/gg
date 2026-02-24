@@ -3,7 +3,7 @@
 //
 // path_count.wgsl — DDA tile walk, backdrop computation, and segment counting.
 //
-// CPU reference: velloport/path_count.go pathCountMain()
+// CPU reference: tilecompute/path_count.go pathCountMain()
 // Each thread processes one LineSoup segment. It performs a DDA walk across the
 // tile grid, computing which tiles the segment crosses, updating backdrop values
 // (winding number contributions) and counting segments per tile.

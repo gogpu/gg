@@ -4,7 +4,7 @@
 // Direct port of vello_shaders/src/cpu/path_tiling.rs
 // Variable names match Rust originals for cross-reference.
 
-package velloport
+package tilecompute
 
 // pathTilingMain is a direct port of path_tiling_main from path_tiling.rs.
 // Stage 2: Segment clipping to tile boundaries + yEdge computation.

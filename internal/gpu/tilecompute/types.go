@@ -1,7 +1,7 @@
 // Copyright 2026 The gogpu Authors
 // SPDX-License-Identifier: BSD-3-Clause
 
-package velloport
+package tilecompute
 
 // Tile dimensions (matching Vello TILE_WIDTH/TILE_HEIGHT).
 const (

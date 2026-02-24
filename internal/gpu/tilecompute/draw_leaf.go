@@ -7,7 +7,7 @@
 // Reference: vello_shaders/src/cpu/draw_reduce.rs, draw_leaf.rs
 // Variable names match Rust/WGSL originals for cross-reference.
 
-package velloport
+package tilecompute
 
 // drawReduceWG is the workgroup size for draw tag reduce.
 const drawReduceWG = 256

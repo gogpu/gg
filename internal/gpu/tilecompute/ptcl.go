@@ -9,7 +9,7 @@
 //
 // Reference: vello_shaders/src/shared/ptcl.rs
 
-package velloport
+package tilecompute
 
 import "math"
 

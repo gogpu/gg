@@ -4,7 +4,7 @@
 // Port of vello_shaders/src/cpu/euler.rs — Euler Spiral math for curve flattening.
 // Original: Copyright 2023 the Vello Authors, Apache-2.0 OR MIT OR Unlicense.
 
-package velloport
+package tilecompute
 
 import "math"
 
