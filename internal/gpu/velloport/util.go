@@ -31,6 +31,10 @@ func (v vec2) toArray() [2]float32    { return [2]float32{v.x, v.y} }
 func (v vec2) add(o vec2) vec2        { return vec2{v.x + o.x, v.y + o.y} }
 func (v vec2) sub(o vec2) vec2        { return vec2{v.x - o.x, v.y - o.y} }
 func (v vec2) mul(s float32) vec2     { return vec2{v.x * s, v.y * s} }
+func (v vec2) dot(o vec2) float32     { return v.x*o.x + v.y*o.y }
+func (v vec2) lengthSq() float32      { return v.dot(v) }
+func (v vec2) length() float32        { return float32(math.Hypot(float64(v.x), float64(v.y))) }
+func (v vec2) atan2() float32         { return float32(math.Atan2(float64(v.y), float64(v.x))) }
 
 // span matches Vello's cpu::util::span.
 // span(a, b) = max(ceil(max(a,b)) - floor(min(a,b)), 1)
@@ -95,6 +99,17 @@ func clamp32(x, lo, hi float32) float32 {
 
 func copysign32(x, y float32) float32 {
 	return float32(math.Copysign(float64(x), float64(y)))
+}
+
+func sin32(x float32) float32 { return float32(math.Sin(float64(x))) }
+func cos32(x float32) float32 { return float32(math.Cos(float64(x))) }
+
+func pow32(base float32, exp int) float32 {
+	result := float32(1.0)
+	for range exp {
+		result *= base
+	}
+	return result
 }
 
 // signum32 matches Rust's f32::signum exactly:
