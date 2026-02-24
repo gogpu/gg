@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gogpu/gg/internal/gpu/tilecompute"
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/scene"
 )
@@ -292,5 +293,330 @@ func TestVelloAgainstUpstream(t *testing.T) {
 					"(our TileRasterizer vs Vello upstream reference)", diffPercent, tc.Threshold)
 			}
 		})
+	}
+}
+
+// =============================================================================
+// Vello Compute Pipeline Golden Tests (GPU vs CPU)
+// =============================================================================
+//
+// These tests compare GPU compute pipeline output (VelloAccelerator) against
+// CPU reference output (tilecompute.RasterizeScenePTCL). Both implementations
+// share the same algorithm, so pixel-identical results are expected (within
+// floating-point rounding tolerance).
+//
+// Tests are skipped when no GPU is available (e.g., in CI without hardware).
+
+// computeGoldenTest defines a GPU vs CPU golden test case.
+type computeGoldenTest struct {
+	Name      string
+	Width     int
+	Height    int
+	BgColor   [4]uint8
+	Paths     []tilecompute.PathDef
+	Threshold float64 // Maximum acceptable percent of different pixels.
+}
+
+// computeGoldenTests returns test cases for GPU compute vs CPU comparison.
+func computeGoldenTests() []computeGoldenTest {
+	return []computeGoldenTest{
+		{
+			Name:    "compute_green_triangle",
+			Width:   100,
+			Height:  100,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    computeTriangleLines(5, 5, 95, 50, 5, 95),
+					Color:    [4]uint8{0, 255, 0, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 0.0, // GPU and CPU must be pixel-identical for straight lines.
+		},
+		{
+			Name:    "compute_blue_square",
+			Width:   64,
+			Height:  64,
+			BgColor: [4]uint8{0, 0, 0, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    computeSquareLines(10, 10, 54, 54),
+					Color:    [4]uint8{0, 0, 255, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 0.0, // Axis-aligned rectangle: exact match expected.
+		},
+		{
+			Name:    "compute_red_circle",
+			Width:   100,
+			Height:  100,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    tilecompute.FlattenFill(computeCircleCubics(50, 50, 40)),
+					Color:    [4]uint8{255, 0, 0, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 0.5, // Floating-point rounding differences in curve segments.
+		},
+		{
+			Name:    "compute_star_nonzero",
+			Width:   100,
+			Height:  100,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    computeStarLines(),
+					Color:    [4]uint8{128, 0, 0, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 0.5, // Complex self-intersections: minor rounding diffs.
+		},
+		{
+			Name:    "compute_star_evenodd",
+			Width:   100,
+			Height:  100,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    computeStarLines(),
+					Color:    [4]uint8{128, 0, 0, 255},
+					FillRule: tilecompute.FillRuleEvenOdd,
+				},
+			},
+			Threshold: 0.5, // Even-odd fill with self-intersections.
+		},
+		{
+			Name:    "compute_multipath",
+			Width:   100,
+			Height:  100,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    tilecompute.FlattenFill(computeCircleCubics(30, 50, 20)),
+					Color:    [4]uint8{255, 0, 0, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+				{
+					Lines:    tilecompute.FlattenFill(computeCircleCubics(70, 50, 20)),
+					Color:    [4]uint8{0, 0, 255, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 0.5, // Two non-overlapping circles.
+		},
+		{
+			Name:    "compute_overlapping_semitransparent",
+			Width:   80,
+			Height:  80,
+			BgColor: [4]uint8{255, 255, 255, 255},
+			Paths: []tilecompute.PathDef{
+				{
+					Lines:    computeSquareLines(10, 10, 50, 50),
+					Color:    [4]uint8{0, 0, 255, 255},
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+				{
+					Lines:    tilecompute.FlattenFill(computeCircleCubics(40, 40, 25)),
+					Color:    [4]uint8{255, 0, 0, 128}, // 50% opacity red over blue.
+					FillRule: tilecompute.FillRuleNonZero,
+				},
+			},
+			Threshold: 1.0, // Blending of semitransparent layers: rounding tolerance.
+		},
+	}
+}
+
+// TestVelloComputeGolden compares GPU compute pipeline output against the CPU
+// reference implementation (tilecompute.RasterizeScenePTCL). Both run the same
+// 8-stage Vello algorithm, so output should be pixel-identical or very close.
+func TestVelloComputeGolden(t *testing.T) {
+	// Initialize GPU.
+	accel := &VelloAccelerator{}
+	if err := accel.initGPU(); err != nil {
+		t.Skipf("GPU not available: %v", err)
+	}
+	defer accel.Close()
+
+	if !accel.CanCompute() {
+		t.Skip("compute pipeline not available")
+	}
+
+	tests := computeGoldenTests()
+
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			// CPU reference via RasterizeScenePTCL.
+			rast := tilecompute.NewRasterizer(tc.Width, tc.Height)
+			cpuImg := rast.RasterizeScenePTCL(tc.BgColor, tc.Paths)
+
+			// GPU compute.
+			gpuImg, err := accel.RenderSceneCompute(
+				tc.Width, tc.Height, tc.BgColor, tc.Paths,
+			)
+			if err != nil {
+				t.Fatalf("GPU render failed: %v", err)
+			}
+
+			// Compare.
+			diffPercent, diffCount := compareImages(gpuImg, cpuImg)
+			t.Logf("GPU vs CPU: %d diff pixels (%.2f%%), threshold: %.2f%%",
+				diffCount, diffPercent, tc.Threshold)
+
+			// Save images for inspection.
+			saveComputeDiffImage(t, tc.Name, gpuImg, cpuImg)
+
+			if diffPercent > tc.Threshold {
+				t.Errorf("GPU-CPU diff %.2f%% exceeds threshold %.2f%%",
+					diffPercent, tc.Threshold)
+			}
+		})
+	}
+}
+
+// TestVelloComputeSmoke is a minimal smoke test that validates the compute
+// pipeline can render a single triangle and produce non-zero output.
+func TestVelloComputeSmoke(t *testing.T) {
+	accel := &VelloAccelerator{}
+	if err := accel.initGPU(); err != nil {
+		t.Skipf("GPU not available: %v", err)
+	}
+	defer accel.Close()
+
+	if !accel.CanCompute() {
+		t.Skip("compute pipeline not available")
+	}
+
+	paths := []tilecompute.PathDef{
+		{
+			Lines:    computeTriangleLines(2, 2, 18, 10, 2, 18),
+			Color:    [4]uint8{0, 255, 0, 255},
+			FillRule: tilecompute.FillRuleNonZero,
+		},
+	}
+
+	gpuImg, err := accel.RenderSceneCompute(20, 20, [4]uint8{255, 255, 255, 255}, paths)
+	if err != nil {
+		t.Fatalf("GPU render failed: %v", err)
+	}
+
+	// Verify the image is not all-white (triangle should have green pixels).
+	nonWhiteCount := 0
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			c := gpuImg.RGBAAt(x, y)
+			if c.R != 255 || c.G != 255 || c.B != 255 {
+				nonWhiteCount++
+			}
+		}
+	}
+
+	t.Logf("Non-white pixels: %d / 400", nonWhiteCount)
+	if nonWhiteCount == 0 {
+		t.Errorf("smoke test: GPU produced an all-white image; expected green triangle pixels")
+	}
+}
+
+// =============================================================================
+// Compute test helpers
+// =============================================================================
+
+// computeTriangleLines creates a triangle as LineSoup segments.
+func computeTriangleLines(x0, y0, x1, y1, x2, y2 float32) []tilecompute.LineSoup {
+	return []tilecompute.LineSoup{
+		{PathIx: 0, P0: [2]float32{x0, y0}, P1: [2]float32{x1, y1}},
+		{PathIx: 0, P0: [2]float32{x1, y1}, P1: [2]float32{x2, y2}},
+		{PathIx: 0, P0: [2]float32{x2, y2}, P1: [2]float32{x0, y0}},
+	}
+}
+
+// computeSquareLines creates an axis-aligned rectangle as LineSoup segments.
+func computeSquareLines(x0, y0, x1, y1 float32) []tilecompute.LineSoup {
+	return []tilecompute.LineSoup{
+		{PathIx: 0, P0: [2]float32{x0, y0}, P1: [2]float32{x1, y0}},
+		{PathIx: 0, P0: [2]float32{x1, y0}, P1: [2]float32{x1, y1}},
+		{PathIx: 0, P0: [2]float32{x1, y1}, P1: [2]float32{x0, y1}},
+		{PathIx: 0, P0: [2]float32{x0, y1}, P1: [2]float32{x0, y0}},
+	}
+}
+
+// computeCircleCubics returns a circle as 4 cubic Bezier curves.
+func computeCircleCubics(cx, cy, r float32) []tilecompute.CubicBezier {
+	const kappa float32 = 0.5522847498
+	k := r * kappa
+	return []tilecompute.CubicBezier{
+		{P0: [2]float32{cx + r, cy}, P1: [2]float32{cx + r, cy + k}, P2: [2]float32{cx + k, cy + r}, P3: [2]float32{cx, cy + r}},
+		{P0: [2]float32{cx, cy + r}, P1: [2]float32{cx - k, cy + r}, P2: [2]float32{cx - r, cy + k}, P3: [2]float32{cx - r, cy}},
+		{P0: [2]float32{cx - r, cy}, P1: [2]float32{cx - r, cy - k}, P2: [2]float32{cx - k, cy - r}, P3: [2]float32{cx, cy - r}},
+		{P0: [2]float32{cx, cy - r}, P1: [2]float32{cx + k, cy - r}, P2: [2]float32{cx + r, cy - k}, P3: [2]float32{cx + r, cy}},
+	}
+}
+
+// computeStarLines creates a 5-point star (crossed line star) as LineSoup.
+func computeStarLines() []tilecompute.LineSoup {
+	vertices := [][2]float32{
+		{50, 10}, {75, 90}, {10, 40}, {90, 40}, {25, 90},
+	}
+	n := len(vertices)
+	lines := make([]tilecompute.LineSoup, 0, n)
+	for i := 0; i < n; i++ {
+		p0 := vertices[i]
+		p1 := vertices[(i+1)%n]
+		lines = append(lines, tilecompute.LineSoup{
+			PathIx: 0,
+			P0:     p0,
+			P1:     p1,
+		})
+	}
+	return lines
+}
+
+// saveComputeDiffImage saves GPU output, CPU reference, and diff images
+// to the tmp directory for visual inspection.
+func saveComputeDiffImage(t *testing.T, name string, gpuImg, cpuImg *image.RGBA) {
+	t.Helper()
+	tmpDir := filepath.Join("..", "..", "tmp")
+	_ = os.MkdirAll(tmpDir, 0o755)
+
+	// Save GPU output.
+	gpuPath := filepath.Join(tmpDir, "compute_gpu_"+name+".png")
+	if f, err := os.Create(gpuPath); err == nil {
+		_ = png.Encode(f, gpuImg)
+		_ = f.Close()
+		t.Logf("GPU output saved: %s", gpuPath)
+	}
+
+	// Save CPU reference.
+	cpuPath := filepath.Join(tmpDir, "compute_cpu_"+name+".png")
+	if f, err := os.Create(cpuPath); err == nil {
+		_ = png.Encode(f, cpuImg)
+		_ = f.Close()
+		t.Logf("CPU reference saved: %s", cpuPath)
+	}
+
+	// Save diff image.
+	diffImg := image.NewRGBA(gpuImg.Bounds())
+	for y := gpuImg.Bounds().Min.Y; y < gpuImg.Bounds().Max.Y; y++ {
+		for x := gpuImg.Bounds().Min.X; x < gpuImg.Bounds().Max.X; x++ {
+			v := gpuImg.RGBAAt(x, y)
+			g := cpuImg.RGBAAt(x, y)
+			if v.R != g.R || v.G != g.G || v.B != g.B || v.A != g.A {
+				diffImg.Set(x, y, color.RGBA{R: 255, G: 0, B: 0, A: 255})
+			} else {
+				gray := uint8((uint32(v.R) + uint32(v.G) + uint32(v.B)) / 3)
+				diffImg.Set(x, y, color.RGBA{R: gray, G: gray, B: gray, A: 255})
+			}
+		}
+	}
+
+	diffPath := filepath.Join(tmpDir, "compute_diff_"+name+".png")
+	if f, err := os.Create(diffPath); err == nil {
+		_ = png.Encode(f, diffImg)
+		_ = f.Close()
+		t.Logf("Diff image saved: %s", diffPath)
 	}
 }
