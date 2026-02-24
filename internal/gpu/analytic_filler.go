@@ -454,7 +454,7 @@ func (af *AnalyticFiller) coverageToRuns() {
 		if alpha != currentAlpha {
 			if currentAlpha > 0 {
 				runLen := i - runStart
-				af.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+				af.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
 			}
 			currentAlpha = alpha
 			runStart = i
@@ -464,7 +464,7 @@ func (af *AnalyticFiller) coverageToRuns() {
 	// Emit final run
 	if currentAlpha > 0 {
 		runLen := af.width - runStart
-		af.alphaRuns.Add(runStart, currentAlpha, runLen-1, 0)
+		af.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
 	}
 }
 
