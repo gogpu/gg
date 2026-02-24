@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg/internal/raster"
-	"github.com/gogpu/gg/scene"
 )
 
 // goldenTest defines a test case with parameters matching an upstream Vello scene.
@@ -153,18 +152,6 @@ func circleCubics(cx, cy, r float32) []CubicBezier {
 	}
 }
 
-// pairsToLineSoup converts explicit line segment pairs to LineSoup.
-func pairsToLineSoup(pairs [][2][2]float32) []LineSoup {
-	lines := make([]LineSoup, 0, len(pairs))
-	for _, p := range pairs {
-		if p[0][0] == p[1][0] && p[0][1] == p[1][1] {
-			continue
-		}
-		lines = append(lines, LineSoup{PathIx: 0, P0: p[0], P1: p[1]})
-	}
-	return lines
-}
-
 // polygonToLineSoup generates LineSoup from polygon vertices directly.
 func polygonToLineSoup(vertices [][2]float32) []LineSoup {
 	n := len(vertices)
@@ -181,24 +168,6 @@ func polygonToLineSoup(vertices [][2]float32) []LineSoup {
 		lines = append(lines, LineSoup{PathIx: 0, P0: p0, P1: p1})
 	}
 	return lines
-}
-
-// scenePathAdapter wraps scene.Path to implement raster.PathLike.
-type scenePathAdapter struct{ path *scene.Path }
-
-func (a *scenePathAdapter) IsEmpty() bool     { return a.path.IsEmpty() }
-func (a *scenePathAdapter) Points() []float32 { return a.path.Points() }
-func (a *scenePathAdapter) Verbs() []raster.PathVerb {
-	sv := a.path.Verbs()
-	rv := make([]raster.PathVerb, len(sv))
-	for i, v := range sv {
-		rv[i] = raster.PathVerb(v)
-	}
-	return rv
-}
-
-func buildEdgesFromScenePath(eb *raster.EdgeBuilder, p *scene.Path) {
-	eb.BuildFromPath(&scenePathAdapter{path: p}, raster.IdentityTransform{})
 }
 
 func gpuPipelineGoldenPath(name string) string {
@@ -226,6 +195,11 @@ func loadGoldenFile(t *testing.T, path string) *image.RGBA {
 	return rgba
 }
 
+// colorToArray converts color.RGBA to [4]uint8 for the rasterizer API.
+func colorToArray(c color.RGBA) [4]uint8 {
+	return [4]uint8{c.R, c.G, c.B, c.A}
+}
+
 func renderWithVelloPort(tc goldenTest) *image.RGBA {
 	var lines []LineSoup
 
@@ -242,29 +216,14 @@ func renderWithVelloPort(tc goldenTest) *image.RGBA {
 	}
 
 	r := NewRasterizer(tc.Width, tc.Height)
-	alphas := r.Rasterize(lines, tc.FillRule)
-
-	img := image.NewRGBA(image.Rect(0, 0, tc.Width, tc.Height))
-	fc := tc.FillColor
-	bg := tc.BgColor
-	for y := 0; y < tc.Height; y++ {
-		for x := 0; x < tc.Width; x++ {
-			alpha := alphas[y*tc.Width+x]
-			if alpha <= 0 {
-				img.Set(x, y, bg)
-				continue
-			}
-			if alpha > 1.0 {
-				alpha = 1.0
-			}
-			a := alpha
-			cr := uint8(float32(fc.R)*a + float32(bg.R)*(1-a) + 0.5)
-			cg := uint8(float32(fc.G)*a + float32(bg.G)*(1-a) + 0.5)
-			cb := uint8(float32(fc.B)*a + float32(bg.B)*(1-a) + 0.5)
-			img.Set(x, y, color.RGBA{R: cr, G: cg, B: cb, A: 255})
-		}
-	}
-	return img
+	return r.RasterizeScene(
+		colorToArray(tc.BgColor),
+		[]PathDef{{
+			Lines:    lines,
+			Color:    colorToArray(tc.FillColor),
+			FillRule: tc.FillRule,
+		}},
+	)
 }
 
 func compareImages(img1, img2 *image.RGBA) (diffPercent float64, diffCount int) {
@@ -381,4 +340,116 @@ func TestVelloPortVsGPUPipelineSmoke(t *testing.T) {
 			}
 		})
 	}
+}
+
+// savePNG writes an image to the tmp directory for visual inspection.
+func savePNG(t *testing.T, img *image.RGBA, name string) {
+	t.Helper()
+	tmpDir := filepath.Join("..", "..", "..", "tmp")
+	_ = os.MkdirAll(tmpDir, 0o755)
+	path := filepath.Join(tmpDir, name+".png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Logf("failed to save PNG %s: %v", path, err)
+		return
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Logf("failed to encode PNG %s: %v", path, err)
+		return
+	}
+	t.Logf("Saved: %s", path)
+}
+
+// TestVelloPortMultiPath verifies multi-path compositing via RasterizeScene.
+// Two non-overlapping circles (red and blue) on a white background.
+func TestVelloPortMultiPath(t *testing.T) {
+	r := NewRasterizer(100, 100)
+	white := [4]uint8{255, 255, 255, 255}
+
+	// Red circle at (30, 50), radius 20
+	redCircle := PathDef{
+		Lines:    FlattenFill(circleCubics(30, 50, 20)),
+		Color:    [4]uint8{255, 0, 0, 255},
+		FillRule: FillRuleNonZero,
+	}
+
+	// Blue circle at (70, 50), radius 20
+	blueCircle := PathDef{
+		Lines:    FlattenFill(circleCubics(70, 50, 20)),
+		Color:    [4]uint8{0, 0, 255, 255},
+		FillRule: FillRuleNonZero,
+	}
+
+	img := r.RasterizeScene(white, []PathDef{redCircle, blueCircle})
+
+	// Check: center of red circle should be solid red
+	c := img.RGBAAt(30, 50)
+	if c.R < 250 || c.G > 5 || c.B > 5 {
+		t.Errorf("center of red circle: got (%d,%d,%d,%d), want ~(255,0,0,255)", c.R, c.G, c.B, c.A)
+	}
+
+	// Check: center of blue circle should be solid blue
+	c = img.RGBAAt(70, 50)
+	if c.R > 5 || c.G > 5 || c.B < 250 {
+		t.Errorf("center of blue circle: got (%d,%d,%d,%d), want ~(0,0,255,255)", c.R, c.G, c.B, c.A)
+	}
+
+	// Check: background corner should be white
+	c = img.RGBAAt(0, 0)
+	if c.R != 255 || c.G != 255 || c.B != 255 {
+		t.Errorf("background: got (%d,%d,%d,%d), want (255,255,255,255)", c.R, c.G, c.B, c.A)
+	}
+
+	// Save for visual inspection
+	savePNG(t, img, "multipath_two_circles")
+}
+
+// TestVelloPortMultiPathOverlapping verifies compositing of overlapping shapes.
+// A blue square partially covered by a semi-transparent green circle.
+func TestVelloPortMultiPathOverlapping(t *testing.T) {
+	r := NewRasterizer(100, 100)
+	white := [4]uint8{255, 255, 255, 255}
+
+	// Blue square (50x50 centered)
+	blueSquare := PathDef{
+		Lines: polygonToLineSoup([][2]float32{
+			{25, 25}, {75, 25}, {75, 75}, {25, 75},
+		}),
+		Color:    [4]uint8{0, 0, 255, 255},
+		FillRule: FillRuleNonZero,
+	}
+
+	// Semi-transparent red circle overlapping
+	redCircle := PathDef{
+		Lines:    FlattenFill(circleCubics(50, 50, 30)),
+		Color:    [4]uint8{255, 0, 0, 128}, // 50% opacity
+		FillRule: FillRuleNonZero,
+	}
+
+	img := r.RasterizeScene(white, []PathDef{blueSquare, redCircle})
+
+	// Check: center pixel should be a blend of red over blue
+	// Blue square fully covers center: (0,0,255,255)
+	// Then semi-transparent red (alpha=128/255 ~= 0.502) composited over it
+	// At the center, coverage alpha from rasterizer is ~1.0 for a large circle
+	// srcA = 1.0 * 128/255 = 0.502
+	// srcR = 255/255 * 0.502 = 0.502
+	// outR = 0.502 + 0*(1-0.502) = 0.502 -> 128
+	// outB = 0 + 255/255*(1-0.502) = 0.498 -> 127
+	c := img.RGBAAt(50, 50)
+	if c.R < 120 || c.R > 135 {
+		t.Errorf("overlap center R: got %d, want ~128", c.R)
+	}
+	if c.B < 120 || c.B > 135 {
+		t.Errorf("overlap center B: got %d, want ~127", c.B)
+	}
+
+	// Check: outside both shapes should be white
+	c = img.RGBAAt(0, 0)
+	if c.R != 255 || c.G != 255 || c.B != 255 {
+		t.Errorf("background: got (%d,%d,%d,%d), want (255,255,255,255)", c.R, c.G, c.B, c.A)
+	}
+
+	savePNG(t, img, "multipath_overlapping")
 }

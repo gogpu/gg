@@ -59,3 +59,11 @@ const (
 	FillRuleNonZero FillRule = iota
 	FillRuleEvenOdd
 )
+
+// PathDef defines a single path for multi-path rendering.
+// Color is in straight (non-premultiplied) RGBA format.
+type PathDef struct {
+	Lines    []LineSoup
+	Color    [4]uint8 // RGBA (straight alpha)
+	FillRule FillRule
+}

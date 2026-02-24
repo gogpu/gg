@@ -6,7 +6,11 @@
 
 package velloport
 
-import "math"
+import (
+	"image"
+	"image/color"
+	"math"
+)
 
 // Rasterizer runs the complete Vello CPU rasterization pipeline.
 type Rasterizer struct {
@@ -154,6 +158,55 @@ func (r *Rasterizer) Rasterize(lines []LineSoup, fillRule FillRule) []float32 {
 	}
 
 	return result
+}
+
+// RasterizeScene renders multiple paths with compositing onto a single image.
+// Paths are composited in order (painter's algorithm, back-to-front) using
+// premultiplied source-over blending. Each path is independently rasterized
+// through the full Vello pipeline, then composited onto the output.
+// Returns the final composited RGBA image.
+func (r *Rasterizer) RasterizeScene(bgColor [4]uint8, paths []PathDef) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+
+	// Fill background
+	bg := color.RGBA{R: bgColor[0], G: bgColor[1], B: bgColor[2], A: bgColor[3]}
+	for y := 0; y < r.height; y++ {
+		for x := 0; x < r.width; x++ {
+			img.SetRGBA(x, y, bg)
+		}
+	}
+
+	// Composite each path in order (painter's algorithm)
+	for _, pd := range paths {
+		if len(pd.Lines) == 0 {
+			continue
+		}
+
+		// Run the existing 5-stage pipeline to get alpha values
+		alphas := r.Rasterize(pd.Lines, pd.FillRule)
+
+		// Composite path over current image
+		for y := 0; y < r.height; y++ {
+			for x := 0; x < r.width; x++ {
+				alpha := alphas[y*r.width+x]
+				if alpha <= 0 {
+					continue
+				}
+
+				cur := img.RGBAAt(x, y)
+				dst := [4]uint8{cur.R, cur.G, cur.B, cur.A}
+				blended := blendSourceOver(pd.Color, alpha, dst)
+				img.SetRGBA(x, y, color.RGBA{
+					R: blended[0],
+					G: blended[1],
+					B: blended[2],
+					A: blended[3],
+				})
+			}
+		}
+	}
+
+	return img
 }
 
 // computePath computes the Path struct and tile grid dimensions from lines.
