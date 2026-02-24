@@ -19,16 +19,18 @@
 
 ---
 
-## Current State: v0.29.4
+## Current State: v0.29.5
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
-- Four-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text)
+- Five-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute)
+- Vello 8-stage compute pipeline for full-scene GPU rasterization
 - GPU MSDF text pipeline (resolution-independent anti-aliased text)
 - GPU stroke rendering (stroke-expand-then-fill via convex polygon renderer)
 - RenderDirect zero-copy GPU surface rendering
 - Analytic anti-aliasing (Vello tile-based AA)
 - GPUAccelerator interface with transparent CPU fallback
+- PipelineMode (Auto/RenderPass/Compute) for pipeline selection
 - Recording System for vector export (PDF, SVG)
 - GGCanvas integration for gogpu windowed rendering (auto-registration)
 - Porter-Duff compositing for correct GPU readback
@@ -36,16 +38,10 @@
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
 
-**New in v0.29.4:**
-- scene.Renderer delegates rasterization to gg.SoftwareRenderer (#124)
-- Analytic AA, full curve support, premultiplied alpha compositing in scene rendering
-- sync.Pool-based per-tile SoftwareRenderer/Pixmap reuse
-- Background preservation (no more clear(tile.Data) destruction)
-- 11 new pixel-level tests for scene.Renderer
-
-**New in v0.29.3:**
-- wgpu v0.16.12 (Vulkan debug object naming)
-- gogpu v0.20.3 (examples/gogpu_integration)
+**New in v0.29.5:**
+- AdvanceX drift fix for edge expansion (#95)
+- coverageToRuns maxValue bug fix (#95)
+- wgpu v0.16.13, gogpu v0.20.4
 
 ---
 
@@ -82,7 +78,18 @@
 - [x] Background preservation (no more tile data destruction)
 - [x] Full curve support in scene strokes (CubicTo, QuadTo)
 
-### v0.29.0 — GPU Text Rendering
+### v0.30.0 — Vello Compute Pipeline (In Progress)
+- [x] 8-stage compute pipeline (pathtag → fine) ported from vello
+- [x] 8 WGSL compute shaders with hal-based GPU dispatch
+- [x] tilecompute CPU reference implementation (RasterizeScenePTCL)
+- [x] Scene encoding: PathDef → EncodeScene → PackScene → flat u32 buffer
+- [x] Euler spiral curve flattening (Levien's algorithm)
+- [x] PipelineMode API (Auto/RenderPass/Compute)
+- [x] GPU vs CPU golden tests (7 scenes)
+- [ ] VelloAccelerator integration with GPUAccelerator interface
+- [ ] Auto-selection heuristics for PipelineModeAuto
+
+### v0.29.0 — GPU Text Rendering ✅ Released
 - [x] MSDF text pipeline (Tier 4 in GPURenderSession)
 - [x] WGSL MSDF fragment shader (median + smoothstep)
 - [x] Persistent text vertex/index/uniform buffers
@@ -128,7 +135,9 @@
       SoftwareRenderer                GPUAccelerator
       (always available)              (opt-in via gpu/)
               │                             │
-    internal/raster              internal/gpu (four-tier)
+    internal/raster              internal/gpu (five-tier)
+                                 ├── Tiers 1-4 (render pass)
+                                 └── Tier 5 (compute pipeline)
 ```
 
 ---
@@ -137,7 +146,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.29.4** | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
+| **v0.29.5** | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
+| v0.29.4 | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
 | v0.29.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
 | v0.29.2 | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
 | v0.29.1 | 2026-02 | wgpu v0.16.10, naga v0.14.2 |

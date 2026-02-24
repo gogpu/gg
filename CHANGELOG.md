@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Vello compute pipeline (Tier 5)** — Port of vello's 8-stage GPU compute
+  architecture for full-scene parallel rasterization. 8 WGSL compute shaders
+  (pathtag_reduce, pathtag_scan, draw_reduce, draw_leaf, path_count, backdrop,
+  coarse, fine) dispatched via wgpu HAL. 16×16 tiles, 256 threads per workgroup.
+- **tilecompute CPU reference** — Complete CPU implementation of the 8-stage
+  pipeline (`RasterizeScenePTCL`) for golden test comparison and CPU fallback.
+  Includes scene encoding (`EncodeScene`/`PackScene`), Euler spiral curve
+  flattening, path tag/draw monoid prefix scans, per-tile segment counting,
+  backdrop accumulation, coarse PTCL generation, and fine per-pixel rasterization.
+- **PipelineMode API** — `PipelineModeAuto`, `PipelineModeRenderPass`,
+  `PipelineModeCompute` for selecting between render-pass (Tiers 1–4) and
+  compute (Tier 5) GPU pipelines.
+- **GPU vs CPU golden tests** — 7 test scenes (triangle, square, circle,
+  star nonzero/evenodd, multipath, overlapping semitransparent) comparing
+  GPU compute output against CPU reference pixel-by-pixel.
+
 ## [0.29.5] - 2026-02-24
 
 ### Fixed
