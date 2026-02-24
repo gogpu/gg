@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.5] - 2026-02-24
+
+### Fixed
+
+- **AdvanceX drift causing edge expansion** ([#95](https://github.com/gogpu/gg/issues/95)) —
+  scanline-to-scanline AdvanceX() accumulated floating-point error, causing triangle/polygon
+  edges to progressively expand toward the bottom of shapes. Replaced with direct per-scanline
+  X computation from edge endpoints.
+- **coverageToRuns maxValue bug** ([#95](https://github.com/gogpu/gg/issues/95)) —
+  when merging adjacent alpha runs, the merged run used the sum of coverage values instead of
+  the maximum, causing vertex pixels to receive incorrect partial coverage (darker than expected).
+  Added 4 regression tests for vertex pixel accuracy.
+
+### Dependencies
+
+- wgpu v0.16.12 → v0.16.13 (VK_EXT_debug_utils fix)
+- gogpu v0.20.3 → v0.20.4 (examples/gogpu_integration)
+
 ## [0.29.4] - 2026-02-23
 
 ### Fixed
