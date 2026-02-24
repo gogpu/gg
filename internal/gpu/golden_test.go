@@ -48,6 +48,24 @@ type VelloGoldenTest struct {
 // rendering pipeline (GPU compute) with BLACK background and are not directly
 // comparable to our TileRasterizer (CPU fine rasterizer port). Sparse strip
 // tests use WHITE background and match our implementation approach.
+//
+// Known differences between our port and Vello upstream:
+//   - Circle: ~3.6% — curve flattening tolerance/algorithm differs (kurbo vs EdgeBuilder)
+//   - Triangle: ~3.2% — vertex artifact at (5,5) from backdrop/yEdge interaction
+//   - Star NZ/EO: ~6-9% — horizontal band at y=40 from segment handling at coincident vertices
+//
+// These artifacts are documented in:
+//   - docs/dev/research/VELLO_BACKDROP_PROBLEM.md
+//   - docs/dev/research/VELLO_BUGFIX_REPORT.md
+//   - docs/dev/research/VELLO_CIRCLE_BOTTOM_BUG.md
+//   - docs/research/VELLO_UNCONDITIONAL_YEDGE_EXPERIMENT.md
+//
+// Root causes: our VelloLine→binSegments→addSegmentToTile pipeline differs from
+// Vello's integrated path_count→path_tiling→fine pipeline in DDA walk, segment
+// clipping, and backdrop propagation. See GitHub branches:
+//
+//	feat/vello-tile-rasterizer (15+ fix attempts)
+//	feat/vello-tile-rasterizer-v2 (clean rewrite)
 func VelloUpstreamTests() []VelloGoldenTest {
 	return []VelloGoldenTest{
 		{
@@ -56,7 +74,7 @@ func VelloUpstreamTests() []VelloGoldenTest {
 			Height:    100,
 			FillColor: color.RGBA{R: 0, G: 255, B: 0, A: 255}, // css::LIME
 			FillRule:  raster.FillRuleNonZero,
-			Threshold: 5.0, // Curve approximation differences
+			Threshold: 5.0, // Curve flattening tolerance differences (kurbo vs EdgeBuilder)
 			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Circle::new((50., 50.), 45.)
 				path := scene.NewPath()
@@ -71,7 +89,7 @@ func VelloUpstreamTests() []VelloGoldenTest {
 			Height:    100,
 			FillColor: color.RGBA{R: 0, G: 255, B: 0, A: 255}, // css::LIME
 			FillRule:  raster.FillRuleNonZero,
-			Threshold: 5.0, // AA edge differences from curve flattening tolerance
+			Threshold: 5.0, // Known: vertex artifact at (5,5) from backdrop/yEdge
 			BuildPath: func(eb *raster.EdgeBuilder) {
 				// move_to(5, 5), line_to(95, 50), line_to(5, 95), close
 				path := scene.NewPath()
@@ -89,7 +107,7 @@ func VelloUpstreamTests() []VelloGoldenTest {
 			Height:    100,
 			FillColor: color.RGBA{R: 128, G: 0, B: 0, A: 255}, // css::MAROON
 			FillRule:  raster.FillRuleNonZero,
-			Threshold: 10.0, // Self-intersecting star: winding accumulation differs at edges
+			Threshold: 10.0, // Known: horizontal band at y=40 from coincident vertex handling
 			BuildPath: func(eb *raster.EdgeBuilder) {
 				// crossed_line_star: 5-point star
 				path := scene.NewPath()
@@ -110,7 +128,7 @@ func VelloUpstreamTests() []VelloGoldenTest {
 			Height:    100,
 			FillColor: color.RGBA{R: 128, G: 0, B: 0, A: 255}, // css::MAROON
 			FillRule:  raster.FillRuleEvenOdd,
-			Threshold: 10.0, // Self-intersecting star: EvenOdd winding differs at edges
+			Threshold: 10.0, // Known: horizontal band at y=40 + interior differences
 			BuildPath: func(eb *raster.EdgeBuilder) {
 				// Same crossed_line_star, but EvenOdd fill
 				path := scene.NewPath()
@@ -279,8 +297,12 @@ func TestVelloAgainstUpstream(t *testing.T) {
 			t.Logf("Scene: %s, Size: %dx%d, Diff: %d pixels (%.2f%%), Threshold: %.2f%%",
 				tc.Name, tc.Width, tc.Height, diffCount, diffPercent, tc.Threshold)
 
-			if diffPercent > tc.Threshold {
+			// Always save output + diff for visual inspection
+			if os.Getenv("SAVE_DIFFS") == "1" || diffPercent > tc.Threshold {
 				saveDiffImage(t, tc.Name, ours, reference)
+			}
+
+			if diffPercent > tc.Threshold {
 				t.Errorf("FAIL: %.2f%% pixel difference exceeds threshold %.2f%% "+
 					"(our TileRasterizer vs Vello upstream reference)", diffPercent, tc.Threshold)
 			}

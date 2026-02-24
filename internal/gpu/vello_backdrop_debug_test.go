@@ -77,7 +77,6 @@ func TestBackdropDebug(t *testing.T) {
 	idx := 11*tr.tilesX + 6
 	tile := &tr.tiles[idx]
 	fmt.Printf("Backdrop (after prefix sum): %d\n", tile.Backdrop)
-	fmt.Printf("IsProblemTile: %v\n", tile.IsProblemTile)
 	for i, seg := range tile.Segments {
 		dx := seg.Point1[0] - seg.Point0[0]
 		dy := seg.Point1[1] - seg.Point0[1]
@@ -91,8 +90,8 @@ func TestBackdropDebug(t *testing.T) {
 		idx := 11*tr.tilesX + tx
 		tile := &tr.tiles[idx]
 		if len(tile.Segments) > 0 || tile.Backdrop != 0 {
-			fmt.Printf("  Tile (%d, 11): backdrop=%d, segs=%d, problem=%v\n",
-				tx, tile.Backdrop, len(tile.Segments), tile.IsProblemTile)
+			fmt.Printf("  Tile (%d, 11): backdrop=%d, segs=%d\n",
+				tx, tile.Backdrop, len(tile.Segments))
 		}
 	}
 
