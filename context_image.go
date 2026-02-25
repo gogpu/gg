@@ -199,10 +199,22 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 	// This is a zero-copy operation - ImageBuf wraps the pixmap's data
 	dstImg := c.pixmapToImageBuf(c.pixmap)
 
+	// Compute a scaling transform that maps dst rect coordinates to src rect
+	// coordinates. Without this, DrawImage uses identity (1:1 pixel mapping)
+	// which clips the source when dst is larger than src.
+	var transform *intImage.Affine
+	if dstW > 0 && dstH > 0 && srcRect.Width > 0 && srcRect.Height > 0 {
+		scaleX := float64(dstW) / float64(srcRect.Width)
+		scaleY := float64(dstH) / float64(srcRect.Height)
+		t := intImage.Scale(scaleX, scaleY)
+		transform = &t
+	}
+
 	// Prepare draw parameters
 	params := intImage.DrawParams{
 		SrcRect:   &srcRect,
 		DstRect:   dstRect,
+		Transform: transform,
 		Interp:    opts.Interpolation,
 		Opacity:   opts.Opacity,
 		BlendMode: opts.BlendMode,
