@@ -36,14 +36,17 @@ func (c *Context) DrawString(s string, x, y float64) {
 		return
 	}
 
+	// Apply current transformation matrix to the text position.
+	p := c.matrix.TransformPoint(Pt(x, y))
+
 	// Try GPU text rendering first.
-	if c.tryGPUText(s, x, y) {
+	if c.tryGPUText(s, p.X, p.Y) {
 		return
 	}
 
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()
-	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
+	text.Draw(c.pixmap, s, c.face, p.X, p.Y, c.currentColor())
 }
 
 // tryGPUText attempts to render text via the GPU MSDF pipeline.
@@ -79,21 +82,22 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 		return
 	}
 
-	// Measure the text
+	// Measure the text and calculate offset based on anchor.
 	w, h := text.Measure(s, c.face)
-
-	// Calculate offset based on anchor
 	x -= w * ax
 	y += h * ay // Note: y is baseline, so we adjust upward for top alignment
 
+	// Apply current transformation matrix to the adjusted position.
+	p := c.matrix.TransformPoint(Pt(x, y))
+
 	// Try GPU text rendering first.
-	if c.tryGPUText(s, x, y) {
+	if c.tryGPUText(s, p.X, p.Y) {
 		return
 	}
 
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()
-	text.Draw(c.pixmap, s, c.face, x, y, c.currentColor())
+	text.Draw(c.pixmap, s, c.face, p.X, p.Y, c.currentColor())
 }
 
 // MeasureString returns the dimensions of text in pixels.
