@@ -148,7 +148,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.30.0** | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
+| **v0.30.1** | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
+| v0.30.0 | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
 | v0.29.5 | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
 | v0.29.4 | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
 | v0.29.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
