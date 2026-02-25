@@ -116,7 +116,10 @@ fn write_path(
 ) {
     if n_segs != 0u {
         // Allocate segment slots — returns the starting index in segments[].
-        var seg_ix = atomicAdd(&bump.segments, n_segs);
+        // WORKAROUND: split declaration from atomicAdd to avoid naga SPIR-V bug
+        // where "var x = atomicOp()" fails with "atomic result expression not found".
+        var seg_ix = 0u;
+        seg_ix = atomicAdd(&bump.segments, n_segs);
 
         // Write inverted index back to tiles. path_tiling will read this
         // as ~tile.segment_count_or_ix to recover seg_ix.
