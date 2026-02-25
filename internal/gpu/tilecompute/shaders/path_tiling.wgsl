@@ -17,9 +17,20 @@
 // written by the coarse stage. It uses seg_start = ~tile.segment_count_or_ix
 // to determine WHERE to write each PathSegment in the segments buffer.
 //
-// NOTE: Uses select() for conditional value assignments to avoid the naga
-// SPIR-V backend bug where stores inside if/else blocks may not persist.
-// Uses var for function call results to avoid naga inlining bug.
+// WORKAROUND STATUS (2026-02-25):
+// This shader uses two workarounds for naga SPIR-V backend bugs:
+//
+// 1. select() instead of if/else for conditional assignments (NAGA-SPV-007).
+//    Root cause: prologue pre-computes var inits using stale local variables.
+//    Fix applied in naga/wgsl/lower.go (init splitting), verified via SPIR-V
+//    disassembly. However, runtime still shows 12.5% pixel diff — an unknown
+//    residual issue persists. Workaround remains until NAGA-SPV-008 is resolved.
+//    See: naga/docs/dev/kanban/0-backlog/NAGA-SPV-008-runtime-residual-prologue.md
+//
+// 2. let-chain (no vec2 var reassignment) to avoid silently dropped stores.
+//    Also related to NAGA-SPV-007 investigation.
+//
+// Removal tracked in: gg/docs/dev/kanban/0-backlog/GG-COMPUTE-002-remove-path-tiling-workaround.md
 
 // --- Shared types ---
 

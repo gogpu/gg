@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	canvasWidth  = 64
-	canvasHeight = 64
+	canvasWidth  = 400
+	canvasHeight = 300
 
 	diffThreshold = 1.0 // Maximum acceptable diff percentage.
 )
@@ -48,8 +48,8 @@ func main() {
 	// Enable debug logging to see GPU initialization details.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	// Start simple: one rectangle for debugging.
-	paths := buildSimpleRect()
+	// Full demo scene — 6 paths with triangles, circles, rects, star, transparency.
+	paths := buildDemoScene()
 
 	tilesX := (canvasWidth + tilecompute.TileWidth - 1) / tilecompute.TileWidth
 	tilesY := (canvasHeight + tilecompute.TileHeight - 1) / tilecompute.TileHeight
@@ -108,18 +108,31 @@ func main() {
 	fmt.Printf("  Pixel diff: %d / %d (%.2f%%)\n", diffCount, totalPixels, diffPercent)
 	fmt.Printf("  Status: %s (threshold: %.1f%%)\n", status, diffThreshold)
 
-	// Show first diff pixels for debugging.
-	shown := 0
-	for y := 0; y < canvasHeight && shown < 8; y++ {
-		for x := 0; x < canvasWidth && shown < 8; x++ {
-			ca := cpuImg.RGBAAt(x, y)
-			cb := gpuImg.RGBAAt(x, y)
-			if ca.R != cb.R || ca.G != cb.G || ca.B != cb.B || ca.A != cb.A {
-				fmt.Printf("  diff[%d] (%d,%d) CPU=(%d,%d,%d,%d) GPU=(%d,%d,%d,%d)\n",
-					shown, x, y, ca.R, ca.G, ca.B, ca.A, cb.R, cb.G, cb.B, cb.A)
-				shown++
-			}
+	// Dump specific diagnostic pixels.
+	type probe struct {
+		x, y int
+		desc string
+	}
+	probes := []probe{
+		{230, 80, "blue rect interior"},
+		{250, 160, "blue rect + purple circle"},
+		{250, 200, "purple circle + white rect"},
+		{260, 220, "purple + white overlap"},
+		{250, 250, "purple circle only"},
+		{100, 200, "star EvenOdd"},
+		{80, 160, "triangle interior"},
+		{340, 100, "red circle interior"},
+	}
+	fmt.Println("  Diagnostic pixels:")
+	for _, p := range probes {
+		ca := cpuImg.RGBAAt(p.x, p.y)
+		cb := gpuImg.RGBAAt(p.x, p.y)
+		match := "OK"
+		if ca.R != cb.R || ca.G != cb.G || ca.B != cb.B || ca.A != cb.A {
+			match = "DIFF"
 		}
+		fmt.Printf("    (%3d,%3d) %-35s CPU=(%3d,%3d,%3d,%3d) GPU=(%3d,%3d,%3d,%3d) %s\n",
+			p.x, p.y, p.desc, ca.R, ca.G, ca.B, ca.A, cb.R, cb.G, cb.B, cb.A, match)
 	}
 	fmt.Println()
 
@@ -275,14 +288,20 @@ func triangleLines(x0, y0, x1, y1, x2, y2 float32) []tilecompute.LineSoup {
 	}
 }
 
-// buildSimpleRect creates the simplest possible scene: one blue rectangle.
-// Rectangle at (16, 16) to (48, 48) — aligns to tile boundaries for easy debugging.
-// 4 lines, 1 path, covers tiles (1,1) to (3,3) — 2x2 = 4 tiles.
+// buildSimpleRect creates a test scene for debugging.
 func buildSimpleRect() []tilecompute.PathDef {
 	return []tilecompute.PathDef{
+		// Test: rect NOT aligned to tile boundaries (edges at non-multiple-of-16).
+		// Aligned rect (16,16)→(48,48) = 0% diff.
+		// Non-aligned rect shows extra filled tile on GPU.
 		{
 			Lines:    rectLines(16, 16, 48, 48),
 			Color:    [4]uint8{30, 60, 220, 255},
+			FillRule: tilecompute.FillRuleNonZero,
+		},
+		{
+			Lines:    rectLines(8, 8, 24, 56),
+			Color:    [4]uint8{220, 30, 30, 200},
 			FillRule: tilecompute.FillRuleNonZero,
 		},
 	}

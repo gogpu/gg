@@ -811,20 +811,27 @@ func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, con
 						"seg_count", segCount, "even_odd", evenOdd,
 						"seg_index", segIdx, "backdrop", backdrop,
 						"next_cmd", nextCmd, "rgba", fmt.Sprintf("0x%08X", rgba))
-					// Dump segment data.
-					if segBytes != nil && segCount > 0 && segIdx < 200 {
-						segOff := uint64(segIdx) * 20
-						if segOff+20 <= uint64(len(segBytes)) {
-							sp0x := math.Float32frombits(le.Uint32(segBytes[segOff : segOff+4]))
-							sp0y := math.Float32frombits(le.Uint32(segBytes[segOff+4 : segOff+8]))
-							sp1x := math.Float32frombits(le.Uint32(segBytes[segOff+8 : segOff+12]))
-							sp1y := math.Float32frombits(le.Uint32(segBytes[segOff+12 : segOff+16]))
-							yEdge := math.Float32frombits(le.Uint32(segBytes[segOff+16 : segOff+20]))
-							slogger().Debug("vello-diag: Segment for tile",
-								"seg_ix", segIdx,
-								"p0", fmt.Sprintf("(%.3f, %.3f)", sp0x, sp0y),
-								"p1", fmt.Sprintf("(%.3f, %.3f)", sp1x, sp1y),
-								"y_edge", fmt.Sprintf("%.3f", yEdge))
+					// Dump ALL segments for this tile.
+					if segBytes != nil && segCount > 0 {
+						for si := uint32(0); si < segCount; si++ {
+							sIdx := segIdx + si
+							if sIdx >= 200 {
+								break
+							}
+							segOff := uint64(sIdx) * 20
+							if segOff+20 <= uint64(len(segBytes)) {
+								sp0x := math.Float32frombits(le.Uint32(segBytes[segOff : segOff+4]))
+								sp0y := math.Float32frombits(le.Uint32(segBytes[segOff+4 : segOff+8]))
+								sp1x := math.Float32frombits(le.Uint32(segBytes[segOff+8 : segOff+12]))
+								sp1y := math.Float32frombits(le.Uint32(segBytes[segOff+12 : segOff+16]))
+								yEdge := math.Float32frombits(le.Uint32(segBytes[segOff+16 : segOff+20]))
+								slogger().Debug("vello-diag: Segment for tile",
+									"tile_xy", fmt.Sprintf("(%d,%d)", t%config.WidthInTiles, t/config.WidthInTiles),
+									"seg_ix", sIdx,
+									"p0", fmt.Sprintf("(%.3f, %.3f)", sp0x, sp0y),
+									"p1", fmt.Sprintf("(%.3f, %.3f)", sp1x, sp1y),
+									"y_edge", fmt.Sprintf("%.3f", yEdge))
+							}
 						}
 					}
 				} else {
