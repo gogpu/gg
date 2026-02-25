@@ -186,26 +186,36 @@ fn main(
 
     let tiles_start = path.tiles;
 
+    // DEBUG: count active threads via bump._pad0.
+    atomicAdd(&bump._pad0, 1u);
+
     // Iterate over tiles in this path's bounding box.
-    for (var ty = 0i; ty < bbox_h; ty = ty + 1) {
-        for (var tx = 0i; tx < bbox_w; tx = tx + 1) {
-            let tile_ix = tiles_start + u32(ty * bbox_w + tx);
-            let tile = tiles[tile_ix];
-            let n_segs = tile.segment_count_or_ix;
+    // WORKAROUND: Use flat loop instead of nested for-loops to avoid naga
+    // SPIR-V codegen bug where nested for-loop outer iteration stops after
+    // first pass (only ty=0 row is processed).
+    let total_tiles_count = bbox_w * bbox_h;
+    for (var i = 0i; i < total_tiles_count; i = i + 1) {
+        let ty = i / bbox_w;
+        let tx = i - ty * bbox_w;
+        let tile_ix = tiles_start + u32(i);
+        let tile = tiles[tile_ix];
+        let n_segs = tile.segment_count_or_ix;
 
-            let global_tx = i32(path.bbox_x0) + tx;
-            let global_ty = i32(path.bbox_y0) + ty;
-            if global_tx < 0 || global_tx >= i32(config.width_in_tiles) ||
-               global_ty < 0 || global_ty >= i32(config.height_in_tiles) {
-                continue;
-            }
+        let global_tx = i32(path.bbox_x0) + tx;
+        let global_ty = i32(path.bbox_y0) + ty;
+        if global_tx < 0 || global_tx >= i32(config.width_in_tiles) ||
+           global_ty < 0 || global_ty >= i32(config.height_in_tiles) {
+            continue;
+        }
 
-            let global_tile_idx = u32(global_ty) * config.width_in_tiles + u32(global_tx);
+        let global_tile_idx = u32(global_ty) * config.width_in_tiles + u32(global_tx);
 
-            if n_segs > 0u || tile.backdrop != 0 {
-                write_path(global_tile_idx, tile_ix, n_segs, tile.backdrop, even_odd);
-                write_ptcl_color(global_tile_idx, rgba);
-            }
+        // DEBUG: count ALL tiles visited.
+        atomicAdd(&bump._pad1, 1u);
+
+        if n_segs > 0u || tile.backdrop != 0 {
+            write_path(global_tile_idx, tile_ix, n_segs, tile.backdrop, even_odd);
+            write_ptcl_color(global_tile_idx, rgba);
         }
     }
 }

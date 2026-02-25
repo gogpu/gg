@@ -85,12 +85,21 @@ fn main(
     let tiles_base = path.tiles;
 
     // For each row, accumulate backdrop left-to-right.
-    for (var y = 0i; y < bbox_h; y = y + 1) {
-        var sum = 0i;
-        for (var x = 0i; x < bbox_w; x = x + 1) {
-            let idx = tiles_base + u32(y * bbox_w + x);
-            sum = sum + tiles[idx].backdrop;
-            tiles[idx].backdrop = sum;
+    // WORKAROUND: avoid nested for-loops (naga SPIR-V codegen bug —
+    // outer loop stops after first iteration). Use row-at-a-time with
+    // manual row tracking.
+    var row_y = 0i;
+    var sum = 0i;
+    let total_tiles_count = bbox_w * bbox_h;
+    for (var i = 0i; i < total_tiles_count; i = i + 1) {
+        let cur_y = i / bbox_w;
+        // Reset sum at the start of each new row.
+        if cur_y != row_y {
+            row_y = cur_y;
+            sum = 0i;
         }
+        let idx = tiles_base + u32(i);
+        sum = sum + tiles[idx].backdrop;
+        tiles[idx].backdrop = sum;
     }
 }
