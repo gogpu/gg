@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DrawString not affected by Transform** ([#129](https://github.com/gogpu/gg/issues/129)) —
+  `DrawString` and `DrawStringAnchored` now apply `c.matrix.TransformPoint()` to the text
+  position before rendering, consistent with `MoveTo`, `LineTo`, and other drawing methods.
+- **DrawImageEx missing scaling transform** ([#130](https://github.com/gogpu/gg/issues/130)) —
+  `DrawImageEx` now computes a scaling transform that maps dst rect coordinates to src rect
+  coordinates. Without this, images were clipped to source size when the destination was larger.
 - **fine.wgsl y_edge** — select() workaround for naga SPIR-V codegen bug
   that caused incorrect edge coverage in fine rasterization stage.
 - **coarse.wgsl Z-order** — per-tile iteration instead of per-draw-object
