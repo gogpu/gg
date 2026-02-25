@@ -224,6 +224,31 @@ linters:
         linters:
           - revive        # var-naming: package name shadows stdlib path
 
+      # Vello compute pipeline port - 1:1 translation from Rust/WGSL (v0.30.0)
+      # Algorithmic complexity is inherent to GPU compute pipeline stages
+      - path: internal/gpu/tilecompute/.*\.go
+        linters:
+          - gocognit     # GPU pipeline stages are algorithmically complex
+          - gocyclo      # Same — ported GPU algorithms
+          - cyclop        # Same — complex control flow in GPU stages
+          - nestif        # Deep nesting inherent to tile walk algorithms
+          - funlen        # GPU stages are verbose
+          - maintidx      # GPU pipeline stages have inherently low maintainability index
+          - gocritic      # Ported patterns (ifElseChain, badCond for degenerate checks)
+          - nolintlint    # Stale directives from porting
+
+      # Vello GPU accelerator and compute dispatcher (v0.30.0)
+      # Complex diagnostic logging and buffer management for 9-stage pipeline
+      - path: internal/gpu/vello_accelerator\.go
+        linters:
+          - gocognit     # Diagnostic logging inspects all 9 pipeline stages
+          - gocyclo      # Same — complex diagnostic function
+          - cyclop        # Same — complex cyclomatic complexity
+          - funlen        # logPipelineDiagnostics inspects all pipeline buffers
+          - maintidx      # Same — diagnostic function has many branches
+          - nestif        # Buffer readback error handling requires deep nesting
+          - unparam       # numPaths reserved for future per-path diagnostics
+
       # GPU compute shaders - similar initialization patterns (Phase 6)
       # Each rasterizer has structurally similar but functionally different code
       - path: internal/gpu/gpu_.*.go

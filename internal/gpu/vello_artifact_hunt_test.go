@@ -1,7 +1,7 @@
 //go:build !nogpu
 
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 package gpu
 
@@ -71,7 +71,6 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 	buildCircle(eb3)
 	tr2.binSegments(eb3, 4.0)
 	tr2.computeBackdropPrefixSum() // Must match Fill() order!
-	tr2.markProblemTiles()         // Mark problem tiles for analysis
 
 	fmt.Println("=== TILE ANALYSIS: Finding problematic tile characteristics ===")
 	fmt.Println()
@@ -214,9 +213,8 @@ func TestIdentifyProblematicTiles(t *testing.T) {
 			idx := ts.tileY*tr2.tilesX + ts.tileX
 			tile := tr2.tiles[idx]
 
-			fmt.Printf("  Tile (%d,%d): backdrop=%d, segs=%d, IsProblemTile=%v, IsBottomProblem=%v\n",
-				ts.tileX, ts.tileY, ts.backdrop, ts.numSegments,
-				tile.IsProblemTile, tile.IsBottomProblem)
+			fmt.Printf("  Tile (%d,%d): backdrop=%d, segs=%d\n",
+				ts.tileX, ts.tileY, ts.backdrop, ts.numSegments)
 			for i, seg := range tile.Segments {
 				dx := seg.Point1[0] - seg.Point0[0]
 				dy := seg.Point1[1] - seg.Point0[1]

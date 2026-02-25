@@ -5,7 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.30.0] - 2026-02-25
+
+### Added
+
+- **Vello compute pipeline (Tier 5)** — Port of vello's 9-stage GPU compute
+  architecture for full-scene parallel rasterization. 9 WGSL compute shaders
+  (pathtag_reduce, pathtag_scan, draw_reduce, draw_leaf, path_count, backdrop,
+  coarse, path_tiling, fine) dispatched via wgpu HAL. 16×16 tiles, 256 threads
+  per workgroup.
+- **tilecompute CPU reference** — Complete CPU implementation of the 9-stage
+  pipeline (`RasterizeScenePTCL`) for golden test comparison and CPU fallback.
+  Includes scene encoding (`EncodeScene`/`PackScene`), Euler spiral curve
+  flattening, path tag/draw monoid prefix scans, per-tile segment counting,
+  backdrop accumulation, coarse PTCL generation, path_tiling segment clipping,
+  and fine per-pixel rasterization.
+- **PipelineMode API** — `PipelineModeAuto`, `PipelineModeRenderPass`,
+  `PipelineModeCompute` for selecting between render-pass (Tiers 1–4) and
+  compute (Tier 5) GPU pipelines.
+- **GPU vs CPU golden tests** — 7 test scenes (triangle, square, circle,
+  star nonzero/evenodd, multipath, overlapping semitransparent) comparing
+  GPU compute output against CPU reference pixel-by-pixel.
+
+### Fixed
+
+- **fine.wgsl y_edge** — select() workaround for naga SPIR-V codegen bug
+  that caused incorrect edge coverage in fine rasterization stage.
+- **coarse.wgsl Z-order** — per-tile iteration instead of per-draw-object
+  ensures correct front-to-back ordering in PTCL generation.
+
+### Dependencies
+
+- naga v0.14.2 → v0.14.3 (5 SPIR-V backend bug fixes)
+- wgpu v0.16.13 → v0.16.14 (Vulkan null surface handle guard)
 
 ## [0.29.5] - 2026-02-24
 
@@ -1813,7 +1845,15 @@ Key benefits:
 - Scanline rasterization engine
 - fogleman/gg API compatibility layer
 
-[Unreleased]: https://github.com/gogpu/gg/compare/v0.28.4...HEAD
+[0.30.0]: https://github.com/gogpu/gg/compare/v0.29.5...v0.30.0
+[0.29.5]: https://github.com/gogpu/gg/compare/v0.29.4...v0.29.5
+[0.29.4]: https://github.com/gogpu/gg/compare/v0.29.3...v0.29.4
+[0.29.3]: https://github.com/gogpu/gg/compare/v0.29.2...v0.29.3
+[0.29.2]: https://github.com/gogpu/gg/compare/v0.29.1...v0.29.2
+[0.29.1]: https://github.com/gogpu/gg/compare/v0.29.0...v0.29.1
+[0.29.0]: https://github.com/gogpu/gg/compare/v0.28.6...v0.29.0
+[0.28.6]: https://github.com/gogpu/gg/compare/v0.28.5...v0.28.6
+[0.28.5]: https://github.com/gogpu/gg/compare/v0.28.4...v0.28.5
 [0.28.4]: https://github.com/gogpu/gg/compare/v0.28.3...v0.28.4
 [0.28.3]: https://github.com/gogpu/gg/compare/v0.28.2...v0.28.3
 [0.28.2]: https://github.com/gogpu/gg/compare/v0.28.1...v0.28.2

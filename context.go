@@ -41,6 +41,9 @@ type Context struct {
 	mask      *Mask   // Current alpha mask
 	maskStack []*Mask // Mask stack for Push/Pop
 
+	// Pipeline mode
+	pipelineMode PipelineMode // GPU pipeline selection mode
+
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
 }
@@ -85,6 +88,7 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		matrix:         Identity(),
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
+		pipelineMode:   options.pipelineMode,
 	}
 }
 
@@ -118,6 +122,7 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 		matrix:         Identity(),
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
+		pipelineMode:   options.pipelineMode,
 	}
 }
 
@@ -150,6 +155,17 @@ func (c *Context) Close() error {
 	c.mask = nil
 
 	return nil
+}
+
+// SetPipelineMode sets the GPU rendering pipeline mode.
+// See PipelineMode for available modes.
+func (c *Context) SetPipelineMode(mode PipelineMode) {
+	c.pipelineMode = mode
+}
+
+// PipelineMode returns the current pipeline mode.
+func (c *Context) PipelineMode() PipelineMode {
+	return c.pipelineMode
 }
 
 // Width returns the width of the context.

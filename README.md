@@ -38,7 +38,7 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, four-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text), Vello analytic AA, CPU fallback |
+| **Rendering** | Immediate and retained mode, five-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
@@ -107,7 +107,7 @@ defer dc.Close()
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with
-a four-tier rendering pipeline:
+a five-tier rendering pipeline:
 
 | Tier | Method | Best For |
 |------|--------|----------|
@@ -115,6 +115,10 @@ a four-tier rendering pipeline:
 | **Convex** | Direct vertex emission | Convex polygons, single draw call |
 | **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
 | **MSDF Text** | Multi-channel Signed Distance Field | Resolution-independent anti-aliased text |
+| **Compute** | 8-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
+
+Tiers 1–4 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
+via `PipelineMode` (Auto/RenderPass/Compute).
 
 When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 
@@ -168,8 +172,8 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
               │                             │
     internal/raster              ┌──────────┼──────────┐
                                  │          │          │
-                               SDF      Convex   Stencil+Cover
-                            (Tier 1)   (Tier 2)    (Tier 3)
+                           Render Pass   MSDF Text   Compute
+                          (Tiers 1-3)   (Tier 4)   (Tier 5)
 ```
 
 ### Rendering Structure
@@ -177,7 +181,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 | Component | Location | Description |
 |-----------|----------|-------------|
 | **CPU Raster** | `internal/raster` | Core analytic AA rasterizer (Vello-based) |
-| **GPU Accelerator** | `internal/gpu` | Three-tier GPU pipeline (SDF, Convex, Stencil+Cover) |
+| **GPU Accelerator** | `internal/gpu` | Five-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute) |
 | **GPU Registration** | `gpu/` | Public opt-in via `import _ "github.com/gogpu/gg/gpu"` |
 | **Software** | Root `gg` package | Default CPU renderer |
 

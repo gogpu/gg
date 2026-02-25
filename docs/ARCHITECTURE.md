@@ -24,7 +24,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
              │  CPU Raster │             │    GPU      │
              │  (default)  │             │ Accelerator │
              └──────┬──────┘             └──────┬──────┘
-                    │                           │ (optional, 4 tiers)
+                    │                           │ (optional, 5 tiers)
              ┌──────▼──────┐             ┌──────▼──────┐
              │  internal/  │             │  internal/  │
              │   raster    │             │    gpu      │
@@ -42,7 +42,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
                                             wgpu/hal
 ```
 
-## GPU Accelerator (v0.26.0+)
+## GPU Accelerator (v0.26.0+, Compute v0.30.0)
 
 GPU acceleration is opt-in via the `GPUAccelerator` interface:
 
@@ -69,10 +69,10 @@ Optional extension interfaces for gogpu integration:
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
 - **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
 
-### Four-Tier GPU Rendering
+### Five-Tier GPU Rendering
 
 The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
-dispatches shapes and text to four rendering tiers within a single render pass:
+dispatches shapes and text to five rendering tiers:
 
 | Tier | Name | Content | Technique |
 |------|------|---------|-----------|
@@ -80,9 +80,12 @@ dispatches shapes and text to four rendering tiers within a single render pass:
 | **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
 | **4** | MSDF Text | Text glyphs | Multi-channel SDF with median+smoothstep shader |
+| **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
 
-This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio):
-one render pass, multiple pipeline switches.
+Tiers 1–4 use a render-pass pipeline (one render pass, multiple pipeline switches).
+Tier 5 uses a compute-only pipeline (8 dispatch stages, no render pass).
+
+This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 
 Key design:
 - `RegisterAccelerator()` for opt-in GPU
@@ -91,7 +94,56 @@ Key design:
 - Shape detection (`DetectShape`) auto-identifies circles, rects, rounded rects from path data
 - `Flush()` dispatches batched GPU operations in a single pass
 - Two render modes: offscreen (readback to CPU) and surface (zero-copy to window)
+- `PipelineMode` (Auto/RenderPass/Compute) selects the appropriate pipeline
 - CPU raster always available as fallback
+
+### Vello Compute Pipeline (Tier 5, v0.30.0)
+
+The compute pipeline is a port of [vello](https://github.com/linebender/vello)'s
+9-stage GPU compute architecture to Go. It processes entire scenes (many paths)
+in parallel on the GPU using compute shaders.
+
+#### 9-Stage Pipeline
+
+```
+Scene → [1] pathtag_reduce → [2] pathtag_scan → [3] draw_reduce → [4] draw_leaf
+                                                                        │
+Output ← [9] fine ← [8] path_tiling ← [7] coarse ← [6] backdrop ← [5] path_count
+```
+
+| Stage | Shader | Purpose |
+|-------|--------|---------|
+| 1 | `pathtag_reduce.wgsl` | Parallel reduction of path tag monoids |
+| 2 | `pathtag_scan.wgsl` | Prefix scan producing cumulative offsets |
+| 3 | `draw_reduce.wgsl` | Parallel reduction of draw monoids |
+| 4 | `draw_leaf.wgsl` | Prefix scan + draw info extraction |
+| 5 | `path_count.wgsl` | Per-tile segment counting + line flattening |
+| 6 | `backdrop.wgsl` | Left-to-right backdrop prefix sum per row |
+| 7 | `coarse.wgsl` | Per-tile command list (PTCL) generation |
+| 8 | `path_tiling.wgsl` | Segment clipping and tile assignment |
+| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 256 threads) |
+
+#### PipelineMode Selection
+
+`PipelineMode` controls which GPU pipeline is used:
+
+| Mode | Behavior |
+|------|----------|
+| `PipelineModeAuto` | Auto-select based on scene complexity heuristics |
+| `PipelineModeRenderPass` | Force render-pass pipeline (Tiers 1–4) |
+| `PipelineModeCompute` | Force compute pipeline (Tier 5) |
+
+In Auto mode, the compute pipeline is preferred for scenes with many paths,
+while the render-pass pipeline is preferred for simple scenes with few shapes.
+
+#### CPU Reference Implementation
+
+The `tilecompute/` package contains a complete CPU reference implementation
+of the 9-stage pipeline. `RasterizeScenePTCL()` runs the full pipeline on
+CPU, producing identical output to the GPU compute shaders. This enables:
+- Golden tests (GPU vs CPU pixel comparison)
+- Debugging shader correctness
+- CPU-only fallback when no GPU is available
 
 ## Package Structure
 
@@ -138,7 +190,7 @@ gg/
 │   │   ├── path_geometry.go    # Y-monotonic curve chopping
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
-│   ├── gpu/                # GPU rendering pipeline (four-tier)
+│   ├── gpu/                # GPU rendering pipeline (five-tier)
 │   │   ├── backend.go      # GPU backend implementation
 │   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
@@ -156,13 +208,39 @@ gg/
 │   │   ├── coarse.go       # Coarse rasterization pass
 │   │   ├── fine.go         # Fine rasterization pass
 │   │   ├── pipeline.go     # Render pipeline management
+│   │   ├── pipeline_mode.go    # PipelineMode (Auto/RenderPass/Compute)
 │   │   ├── pipeline_cache_core.go  # PipelineCache (FNV-1a)
 │   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
 │   │   ├── buffer.go       # Buffer with async mapping
 │   │   ├── text_pipeline.go    # MSDF text rendering pipeline (Tier 4)
+│   │   ├── vello_accelerator.go  # VelloAccelerator (Tier 5 compute integration)
+│   │   ├── vello_compute.go     # VelloComputeDispatcher (hal-based GPU dispatch)
 │   │   ├── scene_bridge.go # Scene to native bridge
-│   │   └── shaders/        # WGSL shaders
+│   │   ├── golden_test.go  # GPU vs CPU golden comparison tests
+│   │   │
+│   │   ├── tilecompute/    # Vello compute pipeline CPU reference
+│   │   │   ├── types.go         # PathDef, LineSoup, Path, Tile, PathSegment
+│   │   │   ├── scene_encode.go  # EncodeScene, PackScene (scene → flat buffer)
+│   │   │   ├── flatten.go       # Euler spiral curve flattening
+│   │   │   ├── pathtag.go       # Path tag monoid reduce/scan
+│   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + info extraction
+│   │   │   ├── path_count.go    # Per-tile segment counting
+│   │   │   ├── rasterizer.go    # RasterizeScenePTCL (full 9-stage CPU pipeline)
+│   │   │   ├── coarse.go        # Coarse rasterization + PTCL generation
+│   │   │   ├── fine.go          # Fine per-pixel rasterization
+│   │   │   └── shaders/         # WGSL compute shaders (9 stages)
+│   │   │       ├── pathtag_reduce.wgsl
+│   │   │       ├── pathtag_scan.wgsl
+│   │   │       ├── draw_reduce.wgsl
+│   │   │       ├── draw_leaf.wgsl
+│   │   │       ├── path_count.wgsl
+│   │   │       ├── backdrop.wgsl
+│   │   │       ├── coarse.wgsl
+│   │   │       ├── path_tiling.wgsl
+│   │   │       └── fine.wgsl
+│   │   │
+│   │   └── shaders/        # WGSL render-pass shaders
 │   │       ├── sdf_render.wgsl    # SDF shape rendering (Tier 1)
 │   │       ├── convex.wgsl        # Convex polygon fill (Tier 2a)
 │   │       ├── stencil_fill.wgsl  # Stencil fill pass (Tier 2b)
@@ -432,7 +510,8 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 |---------|--------|----------------|
 | **Scene Delegation** | Qt/Skia/Vello/Flutter | Scene orchestrates tiles, SoftwareRenderer rasterizes |
 | **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
-| **Four-Tier Rendering** | Skia Ganesh/Impeller | SDF, convex, stencil+cover, MSDF text in one render pass |
+| **Five-Tier Rendering** | Skia Ganesh/Impeller/Vello | SDF, convex, stencil+cover, MSDF text (render pass) + compute pipeline |
+| **8-Stage Compute** | vello | pathtag→draw→path_count→backdrop→coarse→fine GPU compute |
 | **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |
 | **Stencil-Then-Cover** | GPU Gems 3, NV_path_rendering | Winding via stencil buffer, then cover fill |
 | **Fan Tessellation** | Skia Ganesh | Convex path to triangle fan for GPU |

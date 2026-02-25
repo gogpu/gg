@@ -231,3 +231,12 @@ func SetAcceleratorSurfaceTarget(view any, width, height uint32) {
 		sta.SetSurfaceTarget(view, width, height)
 	}
 }
+
+// ComputePipelineAware is an optional interface for accelerators that support
+// the Vello-style compute pipeline. When the accelerator implements this interface
+// and PipelineMode is Auto or Compute, the framework uses the compute pipeline
+// for complex scenes instead of the render pass pipeline.
+type ComputePipelineAware interface {
+	// CanCompute reports whether the compute pipeline is available and ready.
+	CanCompute() bool
+}
