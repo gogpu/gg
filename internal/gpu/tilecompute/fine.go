@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Direct port of fill_path from vello_shaders/src/cpu/fine.rs (lines 51-109).
 // Variable names match Rust originals for cross-reference.

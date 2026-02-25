@@ -19,12 +19,12 @@
 
 ---
 
-## Current State: v0.29.5
+## Current State: v0.30.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
 - Five-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute)
-- Vello 8-stage compute pipeline for full-scene GPU rasterization
+- Vello 9-stage compute pipeline for full-scene GPU rasterization
 - GPU MSDF text pipeline (resolution-independent anti-aliased text)
 - GPU stroke rendering (stroke-expand-then-fill via convex polygon renderer)
 - RenderDirect zero-copy GPU surface rendering
@@ -38,10 +38,12 @@
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
 
-**New in v0.29.5:**
-- AdvanceX drift fix for edge expansion (#95)
-- coverageToRuns maxValue bug fix (#95)
-- wgpu v0.16.13, gogpu v0.20.4
+**New in v0.30.0:**
+- Vello 9-stage GPU compute pipeline (pathtag → fine)
+- tilecompute CPU reference implementation
+- PipelineMode API (Auto/RenderPass/Compute)
+- GPU vs CPU golden tests (7 scenes, 0% pixel diff)
+- naga v0.14.3, wgpu v0.16.14
 
 ---
 
@@ -78,14 +80,14 @@
 - [x] Background preservation (no more tile data destruction)
 - [x] Full curve support in scene strokes (CubicTo, QuadTo)
 
-### v0.30.0 — Vello Compute Pipeline (In Progress)
-- [x] 8-stage compute pipeline (pathtag → fine) ported from vello
-- [x] 8 WGSL compute shaders with hal-based GPU dispatch
+### v0.30.0 — Vello Compute Pipeline ✅ Released
+- [x] 9-stage compute pipeline (pathtag → path_tiling → fine) ported from vello
+- [x] 9 WGSL compute shaders with hal-based GPU dispatch
 - [x] tilecompute CPU reference implementation (RasterizeScenePTCL)
 - [x] Scene encoding: PathDef → EncodeScene → PackScene → flat u32 buffer
 - [x] Euler spiral curve flattening (Levien's algorithm)
 - [x] PipelineMode API (Auto/RenderPass/Compute)
-- [x] GPU vs CPU golden tests (7 scenes)
+- [x] GPU vs CPU golden tests (7 scenes, 0% pixel diff)
 - [ ] VelloAccelerator integration with GPUAccelerator interface
 - [ ] Auto-selection heuristics for PipelineModeAuto
 
@@ -146,7 +148,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.29.5** | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
+| **v0.30.0** | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
+| v0.29.5 | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
 | v0.29.4 | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
 | v0.29.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
 | v0.29.2 | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |

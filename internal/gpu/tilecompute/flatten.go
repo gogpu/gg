@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Port of vello_shaders/src/cpu/flatten.rs — Euler Spiral based curve flattening.
 // Original: Copyright 2023 the Vello Authors, Apache-2.0 OR MIT OR Unlicense.

@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 //
 // pathtag_reduce.wgsl — Parallel reduction of PathMonoid over path tag words.
 //

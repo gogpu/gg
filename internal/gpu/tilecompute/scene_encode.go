@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Scene encoding for the Vello CPU pipeline.
 // Converts structured scene data (paths, colors, transforms) into flat buffers

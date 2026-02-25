@@ -24,7 +24,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
              │  CPU Raster │             │    GPU      │
              │  (default)  │             │ Accelerator │
              └──────┬──────┘             └──────┬──────┘
-                    │                           │ (optional, 4 tiers)
+                    │                           │ (optional, 5 tiers)
              ┌──────▼──────┐             ┌──────▼──────┐
              │  internal/  │             │  internal/  │
              │   raster    │             │    gpu      │
@@ -69,10 +69,10 @@ Optional extension interfaces for gogpu integration:
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
 - **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
 
-### Four-Tier GPU Rendering
+### Five-Tier GPU Rendering
 
 The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
-dispatches shapes and text to four rendering tiers within a single render pass:
+dispatches shapes and text to five rendering tiers:
 
 | Tier | Name | Content | Technique |
 |------|------|---------|-----------|
@@ -80,7 +80,7 @@ dispatches shapes and text to four rendering tiers within a single render pass:
 | **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
 | **4** | MSDF Text | Text glyphs | Multi-channel SDF with median+smoothstep shader |
-| **5** | Compute | Full scenes (many paths) | Vello-style 8-stage compute pipeline (GPU or CPU fallback) |
+| **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
 
 Tiers 1–4 use a render-pass pipeline (one render pass, multiple pipeline switches).
 Tier 5 uses a compute-only pipeline (8 dispatch stages, no render pass).
@@ -100,15 +100,15 @@ Key design:
 ### Vello Compute Pipeline (Tier 5, v0.30.0)
 
 The compute pipeline is a port of [vello](https://github.com/linebender/vello)'s
-8-stage GPU compute architecture to Go. It processes entire scenes (many paths)
+9-stage GPU compute architecture to Go. It processes entire scenes (many paths)
 in parallel on the GPU using compute shaders.
 
-#### 8-Stage Pipeline
+#### 9-Stage Pipeline
 
 ```
 Scene → [1] pathtag_reduce → [2] pathtag_scan → [3] draw_reduce → [4] draw_leaf
                                                                         │
-Output ← [8] fine ← [7] coarse ← [6] backdrop ← [5] path_count ───────┘
+Output ← [9] fine ← [8] path_tiling ← [7] coarse ← [6] backdrop ← [5] path_count
 ```
 
 | Stage | Shader | Purpose |
@@ -120,7 +120,8 @@ Output ← [8] fine ← [7] coarse ← [6] backdrop ← [5] path_count ───
 | 5 | `path_count.wgsl` | Per-tile segment counting + line flattening |
 | 6 | `backdrop.wgsl` | Left-to-right backdrop prefix sum per row |
 | 7 | `coarse.wgsl` | Per-tile command list (PTCL) generation |
-| 8 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 256 threads) |
+| 8 | `path_tiling.wgsl` | Segment clipping and tile assignment |
+| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 256 threads) |
 
 #### PipelineMode Selection
 
@@ -138,7 +139,7 @@ while the render-pass pipeline is preferred for simple scenes with few shapes.
 #### CPU Reference Implementation
 
 The `tilecompute/` package contains a complete CPU reference implementation
-of the 8-stage pipeline. `RasterizeScenePTCL()` runs the full pipeline on
+of the 9-stage pipeline. `RasterizeScenePTCL()` runs the full pipeline on
 CPU, producing identical output to the GPU compute shaders. This enables:
 - Golden tests (GPU vs CPU pixel comparison)
 - Debugging shader correctness
@@ -225,10 +226,10 @@ gg/
 │   │   │   ├── pathtag.go       # Path tag monoid reduce/scan
 │   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + info extraction
 │   │   │   ├── path_count.go    # Per-tile segment counting
-│   │   │   ├── rasterizer.go    # RasterizeScenePTCL (full 8-stage CPU pipeline)
+│   │   │   ├── rasterizer.go    # RasterizeScenePTCL (full 9-stage CPU pipeline)
 │   │   │   ├── coarse.go        # Coarse rasterization + PTCL generation
 │   │   │   ├── fine.go          # Fine per-pixel rasterization
-│   │   │   └── shaders/         # WGSL compute shaders (8 stages)
+│   │   │   └── shaders/         # WGSL compute shaders (9 stages)
 │   │   │       ├── pathtag_reduce.wgsl
 │   │   │       ├── pathtag_scan.wgsl
 │   │   │       ├── draw_reduce.wgsl
@@ -236,6 +237,7 @@ gg/
 │   │   │       ├── path_count.wgsl
 │   │   │       ├── backdrop.wgsl
 │   │   │       ├── coarse.wgsl
+│   │   │       ├── path_tiling.wgsl
 │   │   │       └── fine.wgsl
 │   │   │
 │   │   └── shaders/        # WGSL render-pass shaders

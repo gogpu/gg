@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 //
 // draw_leaf.wgsl — Parallel prefix scan of DrawMonoid + draw info extraction.
 //

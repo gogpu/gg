@@ -1,7 +1,7 @@
 //go:build !nogpu
 
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Package gpu provides CPU-based rendering with Vello-style analytic AA.
 //

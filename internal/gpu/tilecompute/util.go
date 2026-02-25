@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Package tilecompute is a direct 1:1 port of Vello's CPU rasterization pipeline.
 // Variable names and logic match the Rust originals for easy cross-reference.

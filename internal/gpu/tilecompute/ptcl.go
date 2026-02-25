@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // PTCL (Per-Tile Command List) command types and encoding.
 // Port of Vello vello_shaders/src/shared/ptcl.rs.

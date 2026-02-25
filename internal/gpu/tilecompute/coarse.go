@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Coarse rasterization: tile allocation, path processing, and PTCL generation.
 // This combines Vello pipeline stages 11-18 into a single sequential CPU pass.

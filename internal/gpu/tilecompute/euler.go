@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Port of vello_shaders/src/cpu/euler.rs — Euler Spiral math for curve flattening.
 // Original: Copyright 2023 the Vello Authors, Apache-2.0 OR MIT OR Unlicense.
@@ -194,24 +194,6 @@ const (
 	quadB2     float32 = -0.156
 	quadC2     float32 = 0.16145779359520596
 )
-
-func espcIntApprox(x float32) float32 {
-	y := abs32(x)
-	var a float32
-	if y < espcBreak1 {
-		a = sin32(sinScale*y) * (1.0 / sinScale)
-	} else if y < espcBreak2 {
-		v := y - 1.0
-		a = float32(math.Sqrt(8.0)/3.0)*v*float32(math.Sqrt(float64(abs32(v)))) + math.Pi/4.0
-	} else {
-		qa, qb, qc := quadA1, quadB1, quadC1
-		if y >= espcBreak3 {
-			qa, qb, qc = quadA2, quadB2, quadC2
-		}
-		a = qa*y*y + qb*y + qc
-	}
-	return copysign32(a, x)
-}
 
 func espcIntInvApprox(x float32) float32 {
 	y := abs32(x)

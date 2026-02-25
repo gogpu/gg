@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Compositing helpers for multi-path rendering.
 // Implements premultiplied source-over blending matching Vello's fine.rs.

@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 //
 // path_tiling.wgsl — Clip line segments to tile boundaries + yEdge computation.
 //

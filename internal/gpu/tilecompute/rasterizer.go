@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Rasterizer ties together all Vello CPU pipeline stages into a single API.
 // This is NOT part of the Vello source — it's our integration layer.

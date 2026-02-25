@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 //
 // pathtag_scan.wgsl — Parallel prefix scan of PathMonoid over path tag words.
 //

@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Direct port of vello_shaders/src/cpu/path_count.rs
 // Variable names match Rust originals for cross-reference.

@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Port of draw_reduce.wgsl and draw_leaf.wgsl from Vello.
 // Computes DrawMonoid prefix sums over encoded draw tags and extracts draw info.

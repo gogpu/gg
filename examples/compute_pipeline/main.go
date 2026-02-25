@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 //go:build !nogpu
 
@@ -285,25 +285,6 @@ func triangleLines(x0, y0, x1, y1, x2, y2 float32) []tilecompute.LineSoup {
 		{PathIx: 0, P0: [2]float32{x0, y0}, P1: [2]float32{x1, y1}},
 		{PathIx: 0, P0: [2]float32{x1, y1}, P1: [2]float32{x2, y2}},
 		{PathIx: 0, P0: [2]float32{x2, y2}, P1: [2]float32{x0, y0}},
-	}
-}
-
-// buildSimpleRect creates a test scene for debugging.
-func buildSimpleRect() []tilecompute.PathDef {
-	return []tilecompute.PathDef{
-		// Test: rect NOT aligned to tile boundaries (edges at non-multiple-of-16).
-		// Aligned rect (16,16)→(48,48) = 0% diff.
-		// Non-aligned rect shows extra filled tile on GPU.
-		{
-			Lines:    rectLines(16, 16, 48, 48),
-			Color:    [4]uint8{30, 60, 220, 255},
-			FillRule: tilecompute.FillRuleNonZero,
-		},
-		{
-			Lines:    rectLines(8, 8, 24, 56),
-			Color:    [4]uint8{220, 30, 30, 200},
-			FillRule: tilecompute.FillRuleNonZero,
-		},
 	}
 }
 

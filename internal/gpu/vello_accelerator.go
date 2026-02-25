@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 //go:build !nogpu
 
@@ -759,7 +759,6 @@ func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, con
 			"fill_cmds", fillCmds,
 			"solid_cmds", solidCmds,
 			"color_cmds", colorCmds)
-
 	}
 
 	// Check Segments: sample first few for non-zero data.

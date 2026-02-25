@@ -1,5 +1,5 @@
 // Copyright 2026 The gogpu Authors
-// SPDX-License-Identifier: BSD-3-Clause
+// SPDX-License-Identifier: MIT
 
 // Port of pathtag_reduce.wgsl and pathtag_scan.wgsl from Vello.
 // Computes PathMonoid prefix sums over encoded path tags.
