@@ -1106,7 +1106,7 @@ func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config Vell
 		{VelloStageDrawLeaf, config.NumDrawObj},
 		{VelloStagePathCount, config.NumLines},
 		{VelloStageBackdrop, config.NumPaths},
-		{VelloStageCoarse, config.NumDrawObj},
+		{VelloStageCoarse, totalTiles},
 		{VelloStagePathTiling, pathTilingElements},
 		{VelloStageFine, totalTiles},
 	}

@@ -6,9 +6,9 @@
 // CPU reference: tilecompute/coarse.go generatePTCLs(), emitDrawToTiles()
 // GPU reference: vello_shaders/shader/coarse.wgsl write_path()
 //
-// For each draw object, determines which tiles it covers based on the path's
-// bounding box, allocates segment slots via atomicAdd, and writes PTCL commands
-// (CmdFill, CmdSolid, CmdColor) to each affected tile's command stream.
+// Each thread processes one TILE and iterates over all draw objects in Z-order.
+// This guarantees PTCL commands are written in correct compositing order
+// (path 0 first, path 1 second, etc.) without race conditions.
 //
 // CRITICAL: This shader performs segment allocation (atomicAdd on bump.segments)
 // and writes inverted indices (~seg_ix) back to tiles. The subsequent path_tiling
@@ -82,11 +82,6 @@ const DRAWTAG_COLOR: u32 = 0x44u;
 const PTCL_MAX_PER_TILE: u32 = 1024u;
 
 // --- Bindings ---
-//
-// Compared to the previous version:
-// - tiles is now read_write (coarse writes inverted indices)
-// - bump added for segment allocation (atomicAdd)
-// - path_total_segs, path_seg_base, segments REMOVED (not needed here)
 
 @group(0) @binding(0) var<uniform> config: Config;
 @group(0) @binding(1) var<storage, read> scene: array<u32>;
@@ -99,124 +94,97 @@ const PTCL_MAX_PER_TILE: u32 = 1024u;
 @group(0) @binding(8) var<storage, read> path_styles: array<u32>;
 @group(0) @binding(9) var<storage, read_write> bump: BumpAlloc;
 
-// --- Helper: write_path — allocate segments + write PTCL fill/solid ---
-//
-// This is the key function from Vello's coarse.wgsl write_path().
-// It reads the RAW segment count from tile.segment_count_or_ix (written by
-// path_count), allocates segment slots via atomicAdd, writes the inverted
-// index (~seg_ix) back to the tile, and emits a PTCL CmdFill command.
-//
-// After this function, path_tiling reads ~seg_ix from tiles to know where
-// to write clipped PathSegment data.
-fn write_path(
-    global_tile_idx: u32,
-    tile_ix: u32,
-    n_segs: u32,
-    backdrop: i32,
-    even_odd: bool,
-) {
-    if n_segs != 0u {
-        // Allocate segment slots — returns the starting index in segments[].
-        // WORKAROUND: split declaration from atomicAdd to avoid naga SPIR-V bug
-        // where "var x = atomicOp()" fails with "atomic result expression not found".
-        var seg_ix = 0u;
-        seg_ix = atomicAdd(&bump.segments, n_segs);
-
-        // Write inverted index back to tiles. path_tiling will read this
-        // as ~tile.segment_count_or_ix to recover seg_ix.
-        tiles[tile_ix].segment_count_or_ix = ~seg_ix;
-
-        // Emit CmdFill to PTCL.
-        var even_odd_flag = select(0u, 1u, even_odd);
-        let offset = atomicAdd(&tile_ptcl_offsets[global_tile_idx], 4u);
-        let base = global_tile_idx * PTCL_MAX_PER_TILE + offset;
-        ptcl[base] = CMD_FILL;
-        ptcl[base + 1u] = (n_segs << 1u) | even_odd_flag;
-        ptcl[base + 2u] = seg_ix;
-        ptcl[base + 3u] = bitcast<u32>(backdrop);
-    } else {
-        // No segments but non-zero backdrop → fully covered tile.
-        let offset = atomicAdd(&tile_ptcl_offsets[global_tile_idx], 1u);
-        let base = global_tile_idx * PTCL_MAX_PER_TILE + offset;
-        ptcl[base] = CMD_SOLID;
-    }
-}
-
-// --- Helper: write PTCL commands ---
-
-fn write_ptcl_color(global_tile_idx: u32, rgba: u32) {
-    let offset = atomicAdd(&tile_ptcl_offsets[global_tile_idx], 2u);
-    let base = global_tile_idx * PTCL_MAX_PER_TILE + offset;
-    ptcl[base] = CMD_COLOR;
-    ptcl[base + 1u] = rgba;
-}
-
 // --- Main entry point ---
-// Each thread handles one draw object.
+// One thread per global tile. Iterates draw objects in Z-order.
+// Dispatch: ceil(total_tiles / 256) workgroups.
 
 @compute @workgroup_size(256, 1, 1)
 fn main(
     @builtin(global_invocation_id) global_id: vec3<u32>,
 ) {
-    let draw_ix = global_id.x;
-    if draw_ix >= config.n_drawobj {
+    let tile_idx = global_id.x;
+    let total_tiles = config.width_in_tiles * config.height_in_tiles;
+    if tile_idx >= total_tiles {
         return;
     }
 
-    let tag = scene[config.drawtag_base + draw_ix];
-    if tag != DRAWTAG_COLOR {
-        return;
-    }
+    let tile_x = tile_idx % config.width_in_tiles;
+    let tile_y = tile_idx / config.width_in_tiles;
 
-    let dm = draw_monoids[draw_ix];
-    let path_ix = dm.path_ix;
-    if path_ix >= config.n_path {
-        return;
-    }
+    // Local PTCL write offset — no atomics needed, one thread per tile.
+    var ptcl_offset = 0u;
 
-    let path = paths[path_ix];
-    let bbox_w = i32(path.bbox_x1) - i32(path.bbox_x0);
-    let bbox_h = i32(path.bbox_y1) - i32(path.bbox_y0);
-    if bbox_w <= 0 || bbox_h <= 0 {
-        return;
-    }
-
-    // Resolve draw parameters.
-    let rgba = info[dm.info_offset];
-    let even_odd = (path_styles[path_ix] & 0x02u) != 0u;
-
-    let tiles_start = path.tiles;
-
-    // DEBUG: count active threads via bump._pad0.
-    atomicAdd(&bump._pad0, 1u);
-
-    // Iterate over tiles in this path's bounding box.
-    // WORKAROUND: Use flat loop instead of nested for-loops to avoid naga
-    // SPIR-V codegen bug where nested for-loop outer iteration stops after
-    // first pass (only ty=0 row is processed).
-    let total_tiles_count = bbox_w * bbox_h;
-    for (var i = 0i; i < total_tiles_count; i = i + 1) {
-        let ty = i / bbox_w;
-        let tx = i - ty * bbox_w;
-        let tile_ix = tiles_start + u32(i);
-        let tile = tiles[tile_ix];
-        let n_segs = tile.segment_count_or_ix;
-
-        let global_tx = i32(path.bbox_x0) + tx;
-        let global_ty = i32(path.bbox_y0) + ty;
-        if global_tx < 0 || global_tx >= i32(config.width_in_tiles) ||
-           global_ty < 0 || global_ty >= i32(config.height_in_tiles) {
+    // Iterate all draw objects in Z-order (path 0 first, path 1 second, ...).
+    for (var draw_ix = 0u; draw_ix < config.n_drawobj; draw_ix = draw_ix + 1u) {
+        let tag = scene[config.drawtag_base + draw_ix];
+        if tag != DRAWTAG_COLOR {
             continue;
         }
 
-        let global_tile_idx = u32(global_ty) * config.width_in_tiles + u32(global_tx);
-
-        // DEBUG: count ALL tiles visited.
-        atomicAdd(&bump._pad1, 1u);
-
-        if n_segs > 0u || tile.backdrop != 0 {
-            write_path(global_tile_idx, tile_ix, n_segs, tile.backdrop, even_odd);
-            write_ptcl_color(global_tile_idx, rgba);
+        let dm = draw_monoids[draw_ix];
+        let path_ix = dm.path_ix;
+        if path_ix >= config.n_path {
+            continue;
         }
+
+        let path = paths[path_ix];
+
+        // Check if this tile is within the path's bounding box.
+        if tile_x < path.bbox_x0 || tile_x >= path.bbox_x1 ||
+           tile_y < path.bbox_y0 || tile_y >= path.bbox_y1 {
+            continue;
+        }
+
+        // Compute local tile index within the path's tile grid.
+        let bbox_w = path.bbox_x1 - path.bbox_x0;
+        let local_x = tile_x - path.bbox_x0;
+        let local_y = tile_y - path.bbox_y0;
+        let local_ix = local_y * bbox_w + local_x;
+        let tile_ix = path.tiles + local_ix;
+
+        let tile = tiles[tile_ix];
+        let n_segs = tile.segment_count_or_ix;
+
+        if n_segs == 0u && tile.backdrop == 0 {
+            continue;
+        }
+
+        // Resolve draw parameters.
+        let rgba = info[dm.info_offset];
+        let even_odd = (path_styles[path_ix] & 0x02u) != 0u;
+
+        // Write PTCL fill or solid command.
+        if n_segs != 0u {
+            // Allocate segment slots (global atomic — multiple tiles run in parallel).
+            var seg_ix = 0u;
+            seg_ix = atomicAdd(&bump.segments, n_segs);
+
+            // Write inverted index back to tiles. path_tiling reads ~tile.segment_count_or_ix.
+            tiles[tile_ix].segment_count_or_ix = ~seg_ix;
+
+            // Emit CmdFill.
+            let even_odd_flag = select(0u, 1u, even_odd);
+            let base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+            ptcl[base] = CMD_FILL;
+            ptcl[base + 1u] = (n_segs << 1u) | even_odd_flag;
+            ptcl[base + 2u] = seg_ix;
+            ptcl[base + 3u] = bitcast<u32>(tile.backdrop);
+            ptcl_offset = ptcl_offset + 4u;
+        } else {
+            // No segments but non-zero backdrop → fully covered tile.
+            let base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+            ptcl[base] = CMD_SOLID;
+            ptcl_offset = ptcl_offset + 1u;
+        }
+
+        // Write CmdColor.
+        let color_base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+        ptcl[color_base] = CMD_COLOR;
+        ptcl[color_base + 1u] = rgba;
+        ptcl_offset = ptcl_offset + 2u;
     }
+
+    // CMD_END is implicit (PTCL buffer initialized to zeros).
+    // Store final offset for diagnostics.
+    atomicStore(&tile_ptcl_offsets[tile_idx], ptcl_offset);
 }
