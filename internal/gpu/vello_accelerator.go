@@ -286,7 +286,7 @@ func (a *VelloAccelerator) dispatchComputeScene(
 	widthInTiles := uint32((width + tilecompute.TileWidth - 1) / tilecompute.TileWidth)
 	heightInTiles := uint32((height + tilecompute.TileHeight - 1) / tilecompute.TileHeight)
 
-	pathsU32, pathStylesU32, _ := buildPathMetadata(
+	pathsU32, pathStylesU32, totalPathTiles := buildPathMetadata(
 		paths, allLines, width, height, widthInTiles, heightInTiles,
 	)
 
@@ -309,29 +309,37 @@ func (a *VelloAccelerator) dispatchComputeScene(
 	}
 
 	// Step 6: Allocate GPU buffers.
-	bufs, err := a.dispatcher.AllocateBuffers(config, scene.Data, linesU32, pathsU32, numLines)
+	bufs, err := a.dispatcher.AllocateBuffers(config, scene.Data, linesU32, pathsU32, numLines, totalPathTiles)
 	if err != nil {
 		return nil, fmt.Errorf("vello-compute: allocate buffers: %w", err)
 	}
 	defer a.dispatcher.DestroyBuffers(bufs)
 
-	// Step 7: Upload per-path auxiliary data.
+	// Step 7: Upload scene data, line segments, and path metadata to GPU.
+	a.queue.WriteBuffer(bufs.Scene, 0, uint32SliceToBytes(scene.Data))
+	a.queue.WriteBuffer(bufs.Lines, 0, uint32SliceToBytes(linesU32))
+	a.queue.WriteBuffer(bufs.Paths, 0, uint32SliceToBytes(pathsU32))
+
+	// Step 8: Upload per-path auxiliary data.
 	numPaths := int(scene.Layout.NumPaths)
 	a.uploadPathAuxData(bufs, numPaths, pathStylesU32)
 
-	// Step 8: Dispatch all 8 stages.
+	// Step 9: Dispatch all 8 stages.
 	if err := a.dispatcher.Dispatch(bufs, config); err != nil {
 		return nil, fmt.Errorf("vello-compute: dispatch: %w", err)
 	}
 
-	// Step 9: Readback output pixels.
+	// Step 9b: Diagnostic readback — verify intermediate buffers have data.
+	a.logPipelineDiagnostics(bufs, config, totalPathTiles)
+
+	// Step 10: Readback output pixels.
 	outputSize := uint64(width) * uint64(height) * 4
 	resultBytes, err := a.readbackBuffer(bufs.Output, outputSize)
 	if err != nil {
 		return nil, fmt.Errorf("vello-compute: readback: %w", err)
 	}
 
-	// Step 10: Convert packed premultiplied RGBA u32 to image.RGBA.
+	// Step 11: Convert packed premultiplied RGBA u32 to image.RGBA.
 	img := unpackPixels(resultBytes, width, height)
 
 	slogger().Debug("vello-compute: scene rendered",
@@ -342,17 +350,19 @@ func (a *VelloAccelerator) dispatchComputeScene(
 }
 
 // buildPathMetadata computes per-path bounding boxes, tile offsets, and styles.
-// Returns (pathsU32, pathStylesU32, tilesOffsetByPath).
+// Returns (pathsU32, pathStylesU32, totalPathTiles).
+// totalPathTiles is the sum of per-path tile counts (bboxW*bboxH), which is
+// the required size of the flat Tiles buffer. This is NOT the same as
+// widthInTiles*heightInTiles (the global tile grid).
 func buildPathMetadata(
 	paths []tilecompute.PathDef,
 	allLines []tilecompute.LineSoup,
 	widthPx, heightPx int,
 	widthInTiles, heightInTiles uint32,
-) (pathsU32 []uint32, pathStylesU32 []uint32, tilesOffsetByPath []uint32) {
+) (pathsU32 []uint32, pathStylesU32 []uint32, totalPathTiles uint32) {
 	numPaths := len(paths)
 	pathsU32 = make([]uint32, numPaths*5)
 	pathStylesU32 = make([]uint32, numPaths)
-	tilesOffsetByPath = make([]uint32, numPaths)
 
 	// Group lines by PathIx to compute per-path bounding boxes.
 	linesByPath := make([][]tilecompute.LineSoup, numPaths)
@@ -383,7 +393,6 @@ func buildPathMetadata(
 		pathsU32[off+3] = bboxY1
 		pathsU32[off+4] = currentTileOffset
 
-		tilesOffsetByPath[pathIx] = currentTileOffset
 		bboxW := bboxX1 - bboxX0
 		bboxH := bboxY1 - bboxY0
 		currentTileOffset += bboxW * bboxH
@@ -396,7 +405,8 @@ func buildPathMetadata(
 		pathStylesU32[pathIx] = styleFlags
 	}
 
-	return pathsU32, pathStylesU32, tilesOffsetByPath
+	totalPathTiles = currentTileOffset
+	return pathsU32, pathStylesU32, totalPathTiles
 }
 
 // computePathBBox computes a bounding box in tile coordinates from lines.
@@ -456,20 +466,13 @@ func computePathBBox(
 	return [4]uint32{bboxX0, bboxY0, bboxX1, bboxY1}
 }
 
-// uploadPathAuxData uploads per-path auxiliary buffers: pathTotalSegs, pathSegBase,
-// and pathStyles. PathTotalSegs and pathSegBase are initialized to zero (filled by
-// the path_count stage on GPU). PathStyles contains fill rule flags.
+// uploadPathAuxData uploads per-path auxiliary buffers: pathStyles.
+// PathStyles contains fill rule flags (bit 1 = even-odd).
 func (a *VelloAccelerator) uploadPathAuxData(
 	bufs *VelloComputeBuffers,
 	numPaths int,
 	pathStylesU32 []uint32,
 ) {
-	// PathTotalSegs and PathSegBase are zero-initialized by the GPU allocator.
-	// Write zeros explicitly to ensure correct state.
-	zeros := make([]byte, numPaths*4)
-	a.queue.WriteBuffer(bufs.PathTotalSegs, 0, zeros)
-	a.queue.WriteBuffer(bufs.PathSegBase, 0, zeros)
-
 	// Write path styles.
 	stylesBytes := make([]byte, len(pathStylesU32)*4)
 	for i, v := range pathStylesU32 {
@@ -579,6 +582,155 @@ func unpackPixels(data []byte, width, height int) *image.RGBA {
 	}
 
 	return img
+}
+
+// logPipelineDiagnostics reads back key intermediate buffers and logs their state.
+// This detects silent pipeline failures (e.g., all-zero output from a broken stage).
+func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, config VelloComputeConfig, totalPathTiles uint32) {
+	le := binary.LittleEndian
+
+	// Dump config for debugging.
+	slogger().Debug("vello-diag: Config",
+		"width_in_tiles", config.WidthInTiles,
+		"height_in_tiles", config.HeightInTiles,
+		"target", fmt.Sprintf("%dx%d", config.TargetWidth, config.TargetHeight),
+		"n_drawobj", config.NumDrawObj,
+		"n_path", config.NumPaths,
+		"n_lines", config.NumLines,
+		"pathtag_base", config.PathTagBase,
+		"pathdata_base", config.PathDataBase,
+		"drawtag_base", config.DrawTagBase,
+		"drawdata_base", config.DrawDataBase,
+		"transform_base", config.TransformBase,
+		"style_base", config.StyleBase)
+
+	// Check Lines: verify data was uploaded.
+	linesSize := uint64(config.NumLines) * 5 * 4 // 5 u32 per LineSoup
+	if linesSize > 0 {
+		linesBytes, lErr := a.readbackBuffer(bufs.Lines, linesSize)
+		if lErr != nil {
+			slogger().Warn("vello-diag: cannot read Lines", "error", lErr)
+		} else {
+			nonZero := 0
+			for i := 0; i < len(linesBytes); i += 4 {
+				if le.Uint32(linesBytes[i:i+4]) != 0 {
+					nonZero++
+				}
+			}
+			slogger().Debug("vello-diag: Lines buffer",
+				"n_lines", config.NumLines,
+				"total_words", len(linesBytes)/4,
+				"non_zero_words", nonZero)
+			if nonZero == 0 {
+				slogger().Warn("vello-diag: Lines buffer is ALL ZEROS — data not uploaded?")
+			}
+			// Dump first line for inspection.
+			if config.NumLines > 0 && len(linesBytes) >= 20 {
+				pathIx := le.Uint32(linesBytes[0:4])
+				p0x := math.Float32frombits(le.Uint32(linesBytes[4:8]))
+				p0y := math.Float32frombits(le.Uint32(linesBytes[8:12]))
+				p1x := math.Float32frombits(le.Uint32(linesBytes[12:16]))
+				p1y := math.Float32frombits(le.Uint32(linesBytes[16:20]))
+				slogger().Debug("vello-diag: Lines[0]",
+					"path_ix", pathIx,
+					"p0", fmt.Sprintf("(%.1f, %.1f)", p0x, p0y),
+					"p1", fmt.Sprintf("(%.1f, %.1f)", p1x, p1y))
+			}
+		}
+	}
+
+	// Check Paths: verify bboxes are valid.
+	pathsSize := uint64(config.NumPaths) * 5 * 4 // 5 u32 per Path
+	if pathsSize > 0 {
+		pathsBytes, pErr := a.readbackBuffer(bufs.Paths, pathsSize)
+		if pErr != nil {
+			slogger().Warn("vello-diag: cannot read Paths", "error", pErr)
+		} else {
+			for i := uint32(0); i < config.NumPaths && i < 3; i++ {
+				off := i * 20
+				x0 := le.Uint32(pathsBytes[off : off+4])
+				y0 := le.Uint32(pathsBytes[off+4 : off+8])
+				x1 := le.Uint32(pathsBytes[off+8 : off+12])
+				y1 := le.Uint32(pathsBytes[off+12 : off+16])
+				tiles := le.Uint32(pathsBytes[off+16 : off+20])
+				slogger().Debug("vello-diag: Paths",
+					"path", i,
+					"bbox", fmt.Sprintf("[%d,%d,%d,%d]", x0, y0, x1, y1),
+					"tiles_offset", tiles)
+			}
+		}
+	}
+
+	// Check BumpAlloc: seg_counts should be > 0 if path_count produced segments.
+	bumpBytes, err := a.readbackBuffer(bufs.BumpAlloc, 16)
+	if err != nil {
+		slogger().Warn("vello-diag: cannot read BumpAlloc", "error", err)
+	} else {
+		segCounts := le.Uint32(bumpBytes[0:4])
+		slogger().Debug("vello-diag: BumpAlloc", "seg_counts", segCounts)
+		if segCounts == 0 {
+			slogger().Warn("vello-diag: path_count produced ZERO segments — tiles will be empty")
+		}
+	}
+
+	// Check Tiles: sample per-path tiles for non-zero backdrop/segment_count.
+	// Tiles buffer uses per-path allocation (totalPathTiles), NOT global tile grid.
+	tileReadSize := uint64(totalPathTiles) * 8 // 2 u32 per tile
+	tilesBytes, err := a.readbackBuffer(bufs.Tiles, tileReadSize)
+	if err != nil {
+		slogger().Warn("vello-diag: cannot read Tiles", "error", err)
+	} else {
+		nonZeroBackdrop := 0
+		nonZeroSegCount := 0
+		for i := uint32(0); i < totalPathTiles; i++ {
+			off := i * 8
+			backdrop := int32(le.Uint32(tilesBytes[off : off+4]))
+			segCount := le.Uint32(tilesBytes[off+4 : off+8])
+			if backdrop != 0 {
+				nonZeroBackdrop++
+			}
+			if segCount != 0 {
+				nonZeroSegCount++
+			}
+		}
+		slogger().Debug("vello-diag: Tiles",
+			"total_path_tiles", totalPathTiles,
+			"non_zero_backdrop", nonZeroBackdrop,
+			"non_zero_seg_count", nonZeroSegCount)
+		if nonZeroBackdrop == 0 && nonZeroSegCount == 0 {
+			slogger().Warn("vello-diag: ALL tiles are zero — path_count or backdrop stage failed")
+		}
+	}
+
+	// Check output: count non-zero pixels.
+	outputSize := uint64(config.TargetWidth) * uint64(config.TargetHeight) * 4
+	outBytes, err := a.readbackBuffer(bufs.Output, outputSize)
+	if err != nil {
+		slogger().Warn("vello-diag: cannot read Output", "error", err)
+	} else {
+		nonZeroPixels := 0
+		totalPixels := int(config.TargetWidth) * int(config.TargetHeight)
+		for i := 0; i < totalPixels; i++ {
+			if le.Uint32(outBytes[i*4:i*4+4]) != 0 {
+				nonZeroPixels++
+			}
+		}
+		slogger().Debug("vello-diag: Output",
+			"total_pixels", totalPixels,
+			"non_zero_pixels", nonZeroPixels)
+		if nonZeroPixels == 0 {
+			slogger().Warn("vello-diag: output is ALL ZEROS — fine stage produced no visible pixels")
+		}
+	}
+}
+
+// uint32SliceToBytes converts a []uint32 to []byte in little-endian format.
+func uint32SliceToBytes(data []uint32) []byte {
+	buf := make([]byte, len(data)*4)
+	for i, v := range data {
+		binary.LittleEndian.PutUint32(buf[i*4:(i+1)*4], v)
+	}
+	return buf
 }
 
 // clampF clamps a float32 value to the range [lo, hi].

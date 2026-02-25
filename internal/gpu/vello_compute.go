@@ -48,6 +48,9 @@ var shaderBackdrop string
 //go:embed tilecompute/shaders/coarse.wgsl
 var shaderVelloCoarse string
 
+//go:embed tilecompute/shaders/path_tiling.wgsl
+var shaderPathTiling string
+
 //go:embed tilecompute/shaders/fine.wgsl
 var shaderVelloFine string
 
@@ -106,8 +109,15 @@ const (
 	VelloStageBackdrop
 
 	// VelloStageCoarse generates Per-Tile Command Lists (PTCL) for each tile.
-	// Input: draw_monoids + info + paths + tiles. Output: ptcl.
+	// It also allocates segment slots via atomicAdd and writes inverted indices
+	// to tiles for path_tiling to consume.
+	// Input: draw_monoids + info + paths + tiles + bump. Output: ptcl + tiles (inverted indices).
 	VelloStageCoarse
+
+	// VelloStagePathTiling clips line segments to tile boundaries and writes PathSegment data.
+	// Reads inverted indices (~seg_ix) from tiles (written by coarse) to know where to write.
+	// Input: bump + seg_counts + lines + paths + tiles. Output: segments.
+	VelloStagePathTiling
 
 	// VelloStageFine performs per-pixel rasterization driven by PTCL command streams.
 	// Input: ptcl + segments + tiles. Output: output pixel buffer.
@@ -134,6 +144,8 @@ func (s VelloComputeStage) String() string {
 		return "backdrop"
 	case VelloStageCoarse:
 		return "coarse"
+	case VelloStagePathTiling:
+		return "path_tiling"
 	case VelloStageFine:
 		return "fine"
 	default:
@@ -305,16 +317,6 @@ type VelloComputeBuffers struct {
 	// Written by coarse.
 	TilePTCLOffsets hal.Buffer
 
-	// PathTotalSegs holds total segment counts per path.
-	// Size: n_paths * sizeof(u32).
-	// Read by coarse.
-	PathTotalSegs hal.Buffer
-
-	// PathSegBase holds global segment base offset per path.
-	// Size: n_paths * sizeof(u32).
-	// Read by coarse.
-	PathSegBase hal.Buffer
-
 	// PathStyles holds style flags per path (bit 1 = even-odd fill rule).
 	// Size: n_paths * sizeof(u32).
 	// Read by coarse.
@@ -399,6 +401,7 @@ func NewVelloComputeDispatcher(device hal.Device, queue hal.Queue) *VelloCompute
 		VelloStagePathCount:     shaderPathCount,
 		VelloStageBackdrop:      shaderBackdrop,
 		VelloStageCoarse:        shaderVelloCoarse,
+		VelloStagePathTiling:    shaderPathTiling,
 		VelloStageFine:          shaderVelloFine,
 	}
 
@@ -488,24 +491,37 @@ func stageBindGroupLayoutEntries(stage VelloComputeStage) []gputypes.BindGroupLa
 		}
 
 	case VelloStageCoarse:
-		// @binding(0)  uniform config
-		// @binding(1)  storage(read) scene
-		// @binding(2)  storage(read) draw_monoids
-		// @binding(3)  storage(read) info
-		// @binding(4)  storage(read) paths
-		// @binding(5)  storage(read) tiles
-		// @binding(6)  storage(read) segments
-		// @binding(7)  storage(read_write) ptcl
-		// @binding(8)  storage(read_write) tile_ptcl_offsets
-		// @binding(9)  storage(read) path_total_segs
-		// @binding(10) storage(read) path_seg_base
-		// @binding(11) storage(read) path_styles
+		// @binding(0) uniform config
+		// @binding(1) storage(read) scene
+		// @binding(2) storage(read) draw_monoids
+		// @binding(3) storage(read) info
+		// @binding(4) storage(read) paths
+		// @binding(5) storage(read_write) tiles       -- coarse writes inverted indices
+		// @binding(6) storage(read_write) ptcl
+		// @binding(7) storage(read_write) tile_ptcl_offsets
+		// @binding(8) storage(read) path_styles
+		// @binding(9) storage(read_write) bump        -- atomicAdd for segment allocation
 		return []gputypes.BindGroupLayoutEntry{
 			configUniform,
 			storageRO(1), storageRO(2), storageRO(3),
-			storageRO(4), storageRO(5), storageRO(6),
-			storageRW(7), storageRW(8),
-			storageRO(9), storageRO(10), storageRO(11),
+			storageRO(4), storageRW(5),
+			storageRW(6), storageRW(7),
+			storageRO(8), storageRW(9),
+		}
+
+	case VelloStagePathTiling:
+		// @binding(0) uniform config
+		// @binding(1) storage(read_write) bump        -- reads seg_counts
+		// @binding(2) storage(read) seg_counts
+		// @binding(3) storage(read) lines
+		// @binding(4) storage(read) paths
+		// @binding(5) storage(read) tiles             -- reads inverted indices from coarse
+		// @binding(6) storage(read_write) segments    -- writes PathSegment data
+		return []gputypes.BindGroupLayoutEntry{
+			configUniform,
+			storageRW(1), storageRO(2),
+			storageRO(3), storageRO(4), storageRO(5),
+			storageRW(6),
 		}
 
 	case VelloStageFine:
@@ -705,17 +721,17 @@ type velloBufSizes struct {
 	ptcl            uint64
 	bumpAlloc       uint64
 	tilePTCLOffsets uint64
-	pathTotalSegs   uint64
-	pathSegBase     uint64
 	pathStyles      uint64
 	output          uint64
 }
 
 // computeBufferSizes calculates byte sizes for all Vello pipeline buffers.
+// totalPathTiles is the sum of per-path tile counts (bboxW*bboxH), used for the
+// Tiles buffer. This is different from WidthInTiles*HeightInTiles (the global grid).
 func (d *VelloComputeDispatcher) computeBufferSizes(
 	config VelloComputeConfig,
 	sceneWords, lineWords, pathWords int,
-	numLines uint32,
+	numLines, totalPathTiles uint32,
 ) velloBufSizes {
 	// Number of path tag words.
 	nTagWords := uint32(0)
@@ -725,7 +741,9 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 
 	nPathtagWG := d.ComputeWorkgroupCount(VelloStagePathtagReduce, nTagWords)
 	nDrawWG := d.ComputeWorkgroupCount(VelloStageDrawReduce, config.NumDrawObj)
-	totalTiles := config.WidthInTiles * config.HeightInTiles
+	// globalTiles is the number of tiles in the render target grid.
+	// Used for PTCL, TilePTCLOffsets, and Fine stage dispatch.
+	globalTiles := config.WidthInTiles * config.HeightInTiles
 
 	// Struct sizes in bytes (must match WGSL struct layouts).
 	const (
@@ -749,14 +767,12 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 		info:            uint64(config.NumDrawObj) * 4,
 		lines:           uint64(lineWords) * 4,
 		paths:           uint64(pathWords) * 4,
-		tiles:           uint64(totalTiles) * tileSize,
+		tiles:           uint64(totalPathTiles) * tileSize, // per-path tile allocation, NOT global grid
 		segCounts:       estimatedSegments * segmentCountSize,
 		segments:        estimatedSegments * pathSegmentSize,
-		ptcl:            uint64(totalTiles) * velloPTCLMaxPerTile * 4,
+		ptcl:            uint64(globalTiles) * velloPTCLMaxPerTile * 4,
 		bumpAlloc:       16,
-		tilePTCLOffsets: uint64(totalTiles) * 4,
-		pathTotalSegs:   uint64(config.NumPaths) * 4,
-		pathSegBase:     uint64(config.NumPaths) * 4,
+		tilePTCLOffsets: uint64(globalTiles) * 4,
 		pathStyles:      uint64(config.NumPaths) * 4,
 		output:          uint64(config.TargetWidth) * uint64(config.TargetHeight) * 4,
 	}
@@ -784,6 +800,9 @@ func (d *VelloComputeDispatcher) createVelloBuffer(label string, size uint64, us
 //   - lines: flattened LineSoup data as a flat u32 slice.
 //   - paths: per-path metadata as a flat u32 slice.
 //   - numLines: total number of line segments.
+//   - totalPathTiles: sum of per-path tile counts (bboxW*bboxH for each path).
+//     This determines the Tiles buffer size and is NOT the same as
+//     widthInTiles*heightInTiles (the global tile grid).
 //
 // The caller must call DestroyBuffers when the buffers are no longer needed.
 func (d *VelloComputeDispatcher) AllocateBuffers(
@@ -792,6 +811,7 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 	lines []uint32,
 	paths []uint32,
 	numLines uint32,
+	totalPathTiles uint32,
 ) (*VelloComputeBuffers, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -800,42 +820,48 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 		return nil, fmt.Errorf("vello compute: dispatcher not initialized, call Init() first")
 	}
 
-	sz := d.computeBufferSizes(config, len(sceneData), len(lines), len(paths), numLines)
+	sz := d.computeBufferSizes(config, len(sceneData), len(lines), len(paths), numLines, totalPathTiles)
 	bufs := &VelloComputeBuffers{}
 
-	storageGPU := gputypes.BufferUsageStorage
+	// Buffer usage flags:
+	// - storageZero: GPU-side storage that must be zero-initialized (atomics, accumulators).
+	// - storageCPU:  GPU storage with CPU write access (scene data uploads).
+	// - storageGPU:  GPU-only storage (intermediate results, overwritten by shaders).
+	// - uniformCPU:  Uniform buffer with CPU write access (config).
+	// - storageOut:  GPU storage with CPU read access (output readback).
+	storageZero := gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst
 	storageCPU := gputypes.BufferUsageStorage | gputypes.BufferUsageCopyDst
+	storageGPU := gputypes.BufferUsageStorage
 	uniformCPU := gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst
 	storageOut := gputypes.BufferUsageStorage | gputypes.BufferUsageCopySrc
 
-	// bufSpec maps a label and size to a target pointer and usage flags.
+	// bufSpec maps a label and size to a target pointer, usage flags, and zero-init flag.
 	type bufSpec struct {
-		target *hal.Buffer
-		label  string
-		size   uint64
-		usage  gputypes.BufferUsage
+		target   *hal.Buffer
+		label    string
+		size     uint64
+		usage    gputypes.BufferUsage
+		zeroInit bool // Must be zero-filled before dispatch (atomics, PTCL).
 	}
 
 	specs := []bufSpec{
-		{&bufs.Config, "vello_config", sz.config, uniformCPU},
-		{&bufs.Scene, "vello_scene", sz.scene, storageCPU},
-		{&bufs.Reduced, "vello_reduced", sz.reduced, storageGPU},
-		{&bufs.TagMonoids, "vello_tag_monoids", sz.tagMonoids, storageGPU},
-		{&bufs.DrawReduced, "vello_draw_reduced", sz.drawReduced, storageGPU},
-		{&bufs.DrawMonoids, "vello_draw_monoids", sz.drawMonoids, storageGPU},
-		{&bufs.Info, "vello_info", sz.info, storageGPU},
-		{&bufs.Lines, "vello_lines", sz.lines, storageCPU},
-		{&bufs.Paths, "vello_paths", sz.paths, storageCPU},
-		{&bufs.Tiles, "vello_tiles", sz.tiles, storageGPU},
-		{&bufs.SegCounts, "vello_seg_counts", sz.segCounts, storageGPU},
-		{&bufs.Segments, "vello_segments", sz.segments, storageGPU},
-		{&bufs.PTCL, "vello_ptcl", sz.ptcl, storageGPU},
-		{&bufs.BumpAlloc, "vello_bump_alloc", sz.bumpAlloc, storageGPU},
-		{&bufs.TilePTCLOffsets, "vello_tile_ptcl_offsets", sz.tilePTCLOffsets, storageGPU},
-		{&bufs.PathTotalSegs, "vello_path_total_segs", sz.pathTotalSegs, storageCPU},
-		{&bufs.PathSegBase, "vello_path_seg_base", sz.pathSegBase, storageCPU},
-		{&bufs.PathStyles, "vello_path_styles", sz.pathStyles, storageCPU},
-		{&bufs.Output, "vello_output", sz.output, storageOut},
+		{&bufs.Config, "vello_config", sz.config, uniformCPU, false},
+		{&bufs.Scene, "vello_scene", sz.scene, storageCPU, false},
+		{&bufs.Reduced, "vello_reduced", sz.reduced, storageGPU, false},
+		{&bufs.TagMonoids, "vello_tag_monoids", sz.tagMonoids, storageGPU, false},
+		{&bufs.DrawReduced, "vello_draw_reduced", sz.drawReduced, storageGPU, false},
+		{&bufs.DrawMonoids, "vello_draw_monoids", sz.drawMonoids, storageGPU, false},
+		{&bufs.Info, "vello_info", sz.info, storageGPU, false},
+		{&bufs.Lines, "vello_lines", sz.lines, storageCPU | gputypes.BufferUsageCopySrc, false},
+		{&bufs.Paths, "vello_paths", sz.paths, storageCPU | gputypes.BufferUsageCopySrc, false},
+		{&bufs.Tiles, "vello_tiles", sz.tiles, storageZero | gputypes.BufferUsageCopySrc, true}, // atomicAdd in path_count
+		{&bufs.SegCounts, "vello_seg_counts", sz.segCounts, storageGPU, false}, // written by path_count
+		{&bufs.Segments, "vello_segments", sz.segments, storageGPU, false},     // written by coarse
+		{&bufs.PTCL, "vello_ptcl", sz.ptcl, storageZero, true},                // CMD_END=0 sentinel
+		{&bufs.BumpAlloc, "vello_bump_alloc", sz.bumpAlloc, storageZero | gputypes.BufferUsageCopySrc, true}, // atomicAdd in path_count
+		{&bufs.TilePTCLOffsets, "vello_tile_ptcl_offsets", sz.tilePTCLOffsets, storageZero, true}, // coarse write positions
+		{&bufs.PathStyles, "vello_path_styles", sz.pathStyles, storageCPU, false},
+		{&bufs.Output, "vello_output", sz.output, storageOut, false},
 	}
 
 	for _, s := range specs {
@@ -845,11 +871,20 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 			return nil, fmt.Errorf("vello compute: create %s buffer: %w", s.label, err)
 		}
 		*s.target = buf
+
+		// Zero-fill buffers that use atomics or require sentinel values.
+		if s.zeroInit && s.size > 0 {
+			zeros := make([]byte, s.size)
+			d.queue.WriteBuffer(buf, 0, zeros)
+		}
 	}
 
+	globalTiles := config.WidthInTiles * config.HeightInTiles
 	slogger().Debug("vello compute: buffers allocated",
 		"target", fmt.Sprintf("%dx%d", config.TargetWidth, config.TargetHeight),
-		"tiles", fmt.Sprintf("%dx%d", config.WidthInTiles, config.HeightInTiles),
+		"tile_grid", fmt.Sprintf("%dx%d=%d", config.WidthInTiles, config.HeightInTiles, globalTiles),
+		"total_path_tiles", totalPathTiles,
+		"tiles_buf_bytes", sz.tiles,
 		"scene_bytes", sz.scene,
 		"output_bytes", sz.output)
 
@@ -884,8 +919,6 @@ func (d *VelloComputeDispatcher) DestroyBuffers(bufs *VelloComputeBuffers) {
 	destroyBuf(bufs.PTCL)
 	destroyBuf(bufs.BumpAlloc)
 	destroyBuf(bufs.TilePTCLOffsets)
-	destroyBuf(bufs.PathTotalSegs)
-	destroyBuf(bufs.PathSegBase)
 	destroyBuf(bufs.PathStyles)
 	destroyBuf(bufs.Output)
 
@@ -964,12 +997,21 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 			entry(3, bufs.Info),
 			entry(4, bufs.Paths),
 			entry(5, bufs.Tiles),
+			entry(6, bufs.PTCL),
+			entry(7, bufs.TilePTCLOffsets),
+			entry(8, bufs.PathStyles),
+			entry(9, bufs.BumpAlloc),
+		}
+
+	case VelloStagePathTiling:
+		return []gputypes.BindGroupEntry{
+			entry(0, bufs.Config),
+			entry(1, bufs.BumpAlloc),
+			entry(2, bufs.SegCounts),
+			entry(3, bufs.Lines),
+			entry(4, bufs.Paths),
+			entry(5, bufs.Tiles),
 			entry(6, bufs.Segments),
-			entry(7, bufs.PTCL),
-			entry(8, bufs.TilePTCLOffsets),
-			entry(9, bufs.PathTotalSegs),
-			entry(10, bufs.PathSegBase),
-			entry(11, bufs.PathStyles),
 		}
 
 	case VelloStageFine:
@@ -1007,7 +1049,7 @@ func (r *dispatchResources) cleanup() {
 	}
 }
 
-// Dispatch runs the complete 8-stage compute pipeline.
+// Dispatch runs the complete 9-stage compute pipeline.
 //
 // Each stage dispatches the appropriate shader with the correct buffer
 // bindings and workgroup counts. The stages must execute in order because
@@ -1018,10 +1060,11 @@ func (r *dispatchResources) cleanup() {
 //  2. pathtag_scan:   scene + reduced -> tag_monoids (ceil(n_tag_words / 256) workgroups)
 //  3. draw_reduce:    scene -> draw_reduced (ceil(n_drawobj / 256) workgroups)
 //  4. draw_leaf:      scene + draw_reduced -> draw_monoids + info (ceil(n_drawobj / 256) workgroups)
-//  5. path_count:     lines + paths -> tiles (ceil(n_lines / 256) workgroups)
+//  5. path_count:     lines + paths -> tiles + seg_counts (ceil(n_lines / 256) workgroups)
 //  6. backdrop:       paths + tiles -> tiles (n_paths workgroups)
-//  7. coarse:         draw_monoids + info + paths + tiles -> ptcl (ceil(n_drawobj / 256) workgroups)
-//  8. fine:           ptcl + segments + tiles -> output (width_in_tiles * height_in_tiles workgroups)
+//  7. coarse:         draw_monoids + paths + tiles + bump -> ptcl + tiles (ceil(n_drawobj / 256) wg)
+//  8. path_tiling:    seg_counts + lines + paths + tiles -> segments (ceil(n_lines*4 / 256) wg)
+//  9. fine:           ptcl + segments -> output (width_in_tiles * height_in_tiles workgroups)
 //
 // Returns an error if any stage fails or if the dispatcher is not initialized.
 func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config VelloComputeConfig) error {
@@ -1047,6 +1090,11 @@ func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config Vell
 
 	totalTiles := config.WidthInTiles * config.HeightInTiles
 
+	// path_tiling element count: use estimated segment count (n_lines * 4).
+	// The shader itself checks against atomicLoad(&bump.seg_counts) and
+	// returns early for excess threads, so over-dispatching is safe.
+	pathTilingElements := config.NumLines * 4
+
 	stages := [VelloStageCount]stageDispatch{
 		{VelloStagePathtagReduce, nTagWords},
 		{VelloStagePathtagScan, nTagWords},
@@ -1055,6 +1103,7 @@ func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config Vell
 		{VelloStagePathCount, config.NumLines},
 		{VelloStageBackdrop, config.NumPaths},
 		{VelloStageCoarse, config.NumDrawObj},
+		{VelloStagePathTiling, pathTilingElements},
 		{VelloStageFine, totalTiles},
 	}
 
