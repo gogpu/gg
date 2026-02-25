@@ -13,9 +13,7 @@
 // This shader uses atomics for tile backdrop and segment_count updates because
 // multiple threads (lines) may touch the same tile concurrently.
 //
-// NOTE: This shader uses select() for ALL conditional value assignments instead
-// of if/else + var. This avoids a naga SPIR-V backend limitation where stores
-// inside if/else blocks may not persist at the merge point.
+// Pipeline order: flatten → path_count → backdrop → coarse → path_tiling → fine
 
 // --- Shared types ---
 
@@ -87,6 +85,12 @@ const ROBUST_EPSILON: f32 = 2e-7;
 @group(0) @binding(4) var<storage, read_write> seg_counts: array<SegmentCount>;
 @group(0) @binding(5) var<storage, read_write> bump: BumpAlloc;
 
+// --- Helper functions ---
+
+fn span(a: f32, b: f32) -> u32 {
+    return u32(max(ceil(max(a, b)) - floor(min(a, b)), 1.0));
+}
+
 // --- Main entry point ---
 
 @compute @workgroup_size(256, 1, 1)
@@ -101,17 +105,13 @@ fn main(
     let p0 = vec2<f32>(line.p0x, line.p0y);
     let p1 = vec2<f32>(line.p1x, line.p1y);
 
-    // Use select() to avoid naga SPIR-V bug with if/else var stores.
     let is_down = p1.y >= p0.y;
     let xy0 = select(p1, p0, is_down);
     let xy1 = select(p0, p1, is_down);
     let s0 = xy0 * TILE_SCALE;
     let s1 = xy1 * TILE_SCALE;
-    // WORKAROUND: span() inlined to avoid naga SPIR-V bug where the second
-    // call to the same function gets its result lost during inlining.
-    // span(a,b) = max(ceil(max(a,b)) - floor(min(a,b)), 1)
-    var count_x = u32(max(ceil(max(s0.x, s1.x)) - floor(min(s0.x, s1.x)), 1.0)) - 1u;
-    var count = count_x + u32(max(ceil(max(s0.y, s1.y)) - floor(min(s0.y, s1.y)), 1.0));
+    var count_x = span(s0.x, s1.x) - 1u;
+    var count = count_x + span(s0.y, s1.y);
 
     let dx = abs(s1.x - s0.x);
     let dy = s1.y - s0.y;
