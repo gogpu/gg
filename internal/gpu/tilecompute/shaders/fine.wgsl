@@ -101,13 +101,12 @@ fn fill_path(
         let dy = y0 - y1;
 
         // fine.go line 209: y_edge contribution
-        var y_edge_val = 0.0;
-        if delta_x > 0.0 {
-            y_edge_val = clamp(py - seg.y_edge + 1.0, 0.0, 1.0);
-        } else if delta_x < 0.0 {
-            y_edge_val = -clamp(py - seg.y_edge + 1.0, 0.0, 1.0);
-        }
-        // Handle +0.0 and -0.0: if delta_x == 0, y_edge_val stays 0.
+        // WORKAROUND: use select() instead of if/else to avoid naga SPIR-V
+        // codegen bug where var stores inside if/else blocks may not persist.
+        let ye_clamp = clamp(py - seg.y_edge + 1.0, 0.0, 1.0);
+        let y_edge_pos = select(0.0, ye_clamp, delta_x > 0.0);
+        let y_edge_neg = select(0.0, -ye_clamp, delta_x < 0.0);
+        let y_edge_val = y_edge_pos + y_edge_neg;
 
         if dy != 0.0 {
             let vec_y_recip = 1.0 / delta_y;
