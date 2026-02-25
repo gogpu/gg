@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	canvasWidth  = 400
-	canvasHeight = 300
+	canvasWidth  = 64
+	canvasHeight = 64
 
 	diffThreshold = 1.0 // Maximum acceptable diff percentage.
 )
@@ -48,11 +48,12 @@ func main() {
 	// Enable debug logging to see GPU initialization details.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	paths := buildDemoScene()
+	// Start simple: one rectangle for debugging.
+	paths := buildSimpleRect()
 
 	tilesX := (canvasWidth + tilecompute.TileWidth - 1) / tilecompute.TileWidth
 	tilesY := (canvasHeight + tilecompute.TileHeight - 1) / tilecompute.TileHeight
-	fmt.Printf("Scene: %d paths (triangle, square, circle, star, transparent overlay, small rect)\n", len(paths))
+	fmt.Printf("Scene: %d path(s)\n", len(paths))
 	fmt.Printf("Canvas: %dx%d (%dx%d tiles)\n\n", canvasWidth, canvasHeight, tilesX, tilesY)
 
 	// CPU render.
@@ -106,6 +107,20 @@ func main() {
 	fmt.Println("Comparison:")
 	fmt.Printf("  Pixel diff: %d / %d (%.2f%%)\n", diffCount, totalPixels, diffPercent)
 	fmt.Printf("  Status: %s (threshold: %.1f%%)\n", status, diffThreshold)
+
+	// Show first diff pixels for debugging.
+	shown := 0
+	for y := 0; y < canvasHeight && shown < 8; y++ {
+		for x := 0; x < canvasWidth && shown < 8; x++ {
+			ca := cpuImg.RGBAAt(x, y)
+			cb := gpuImg.RGBAAt(x, y)
+			if ca.R != cb.R || ca.G != cb.G || ca.B != cb.B || ca.A != cb.A {
+				fmt.Printf("  diff[%d] (%d,%d) CPU=(%d,%d,%d,%d) GPU=(%d,%d,%d,%d)\n",
+					shown, x, y, ca.R, ca.G, ca.B, ca.A, cb.R, cb.G, cb.B, cb.A)
+				shown++
+			}
+		}
+	}
 	fmt.Println()
 
 	triptych := buildTriptych(cpuImg, gpuImg)
@@ -257,6 +272,19 @@ func triangleLines(x0, y0, x1, y1, x2, y2 float32) []tilecompute.LineSoup {
 		{PathIx: 0, P0: [2]float32{x0, y0}, P1: [2]float32{x1, y1}},
 		{PathIx: 0, P0: [2]float32{x1, y1}, P1: [2]float32{x2, y2}},
 		{PathIx: 0, P0: [2]float32{x2, y2}, P1: [2]float32{x0, y0}},
+	}
+}
+
+// buildSimpleRect creates the simplest possible scene: one blue rectangle.
+// Rectangle at (16, 16) to (48, 48) — aligns to tile boundaries for easy debugging.
+// 4 lines, 1 path, covers tiles (1,1) to (3,3) — 2x2 = 4 tiles.
+func buildSimpleRect() []tilecompute.PathDef {
+	return []tilecompute.PathDef{
+		{
+			Lines:    rectLines(16, 16, 48, 48),
+			Color:    [4]uint8{30, 60, 220, 255},
+			FillRule: tilecompute.FillRuleNonZero,
+		},
 	}
 }
 

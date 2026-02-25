@@ -55,6 +55,7 @@ struct Config {
     transform_base: u32,
     style_base: u32,
     n_lines: u32,
+    bg_color: u32,
 }
 
 struct SegmentCount {
@@ -86,13 +87,6 @@ const ROBUST_EPSILON: f32 = 2e-7;
 @group(0) @binding(4) var<storage, read_write> seg_counts: array<SegmentCount>;
 @group(0) @binding(5) var<storage, read_write> bump: BumpAlloc;
 
-// --- Helper functions ---
-
-// span computes max(ceil(max(a,b)) - floor(min(a,b)), 1).
-fn span(a: f32, b: f32) -> u32 {
-    return u32(max(ceil(max(a, b)) - floor(min(a, b)), 1.0));
-}
-
 // --- Main entry point ---
 
 @compute @workgroup_size(256, 1, 1)
@@ -113,10 +107,11 @@ fn main(
     let xy1 = select(p0, p1, is_down);
     let s0 = xy0 * TILE_SCALE;
     let s1 = xy1 * TILE_SCALE;
-    // WORKAROUND: use var instead of let for function call results to avoid
-    // naga SPIR-V inlining bug where the second span() call result is lost.
-    var count_x = span(s0.x, s1.x) - 1u;
-    var count = count_x + span(s0.y, s1.y);
+    // WORKAROUND: span() inlined to avoid naga SPIR-V bug where the second
+    // call to the same function gets its result lost during inlining.
+    // span(a,b) = max(ceil(max(a,b)) - floor(min(a,b)), 1)
+    var count_x = u32(max(ceil(max(s0.x, s1.x)) - floor(min(s0.x, s1.x)), 1.0)) - 1u;
+    var count = count_x + u32(max(ceil(max(s0.y, s1.y)) - floor(min(s0.y, s1.y)), 1.0));
 
     let dx = abs(s1.x - s0.x);
     let dy = s1.y - s0.y;

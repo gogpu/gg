@@ -47,6 +47,7 @@ struct Config {
     transform_base: u32,
     style_base: u32,
     n_lines: u32,
+    bg_color: u32,
 }
 
 // --- Bindings ---

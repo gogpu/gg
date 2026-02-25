@@ -306,6 +306,7 @@ func (a *VelloAccelerator) dispatchComputeScene(
 		TransformBase: scene.Layout.TransformBase,
 		StyleBase:     scene.Layout.StyleBase,
 		NumLines:      numLines,
+		BgColor:       uint32(bgColor[0]) | uint32(bgColor[1])<<8 | uint32(bgColor[2])<<16 | uint32(bgColor[3])<<24,
 	}
 
 	// Step 6: Allocate GPU buffers.
@@ -639,37 +640,205 @@ func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, con
 		}
 	}
 
-	// Check Paths: verify bboxes are valid.
+	// Check Paths: verify bboxes are valid (ALL paths, not just first 3).
 	pathsSize := uint64(config.NumPaths) * 5 * 4 // 5 u32 per Path
 	if pathsSize > 0 {
 		pathsBytes, pErr := a.readbackBuffer(bufs.Paths, pathsSize)
 		if pErr != nil {
 			slogger().Warn("vello-diag: cannot read Paths", "error", pErr)
 		} else {
-			for i := uint32(0); i < config.NumPaths && i < 3; i++ {
+			for i := uint32(0); i < config.NumPaths; i++ {
 				off := i * 20
 				x0 := le.Uint32(pathsBytes[off : off+4])
 				y0 := le.Uint32(pathsBytes[off+4 : off+8])
 				x1 := le.Uint32(pathsBytes[off+8 : off+12])
 				y1 := le.Uint32(pathsBytes[off+12 : off+16])
-				tiles := le.Uint32(pathsBytes[off+16 : off+20])
+				tilesOff := le.Uint32(pathsBytes[off+16 : off+20])
 				slogger().Debug("vello-diag: Paths",
 					"path", i,
 					"bbox", fmt.Sprintf("[%d,%d,%d,%d]", x0, y0, x1, y1),
-					"tiles_offset", tiles)
+					"tiles_offset", tilesOff)
 			}
 		}
 	}
 
+	// Check DrawMonoids: verify draw_ix → path_ix mapping.
+	dmSize := uint64(config.NumDrawObj) * 4 * 4 // 4 u32 per DrawMonoid
+	dmBytes, dmErr := a.readbackBuffer(bufs.DrawMonoids, dmSize)
+	if dmErr != nil {
+		slogger().Warn("vello-diag: cannot read DrawMonoids", "error", dmErr)
+	} else {
+		for i := uint32(0); i < config.NumDrawObj; i++ {
+			off := i * 16
+			pathIx := le.Uint32(dmBytes[off : off+4])
+			clipIx := le.Uint32(dmBytes[off+4 : off+8])
+			sceneOff := le.Uint32(dmBytes[off+8 : off+12])
+			infoOff := le.Uint32(dmBytes[off+12 : off+16])
+			slogger().Debug("vello-diag: DrawMonoid",
+				"draw", i,
+				"path_ix", pathIx,
+				"clip_ix", clipIx,
+				"scene_offset", sceneOff,
+				"info_offset", infoOff)
+		}
+	}
+
+	// Check Scene draw tags: verify all draws are DRAWTAG_COLOR (0x44).
+	sceneTagsOff := uint64(config.DrawTagBase) * 4
+	sceneTagsSize := uint64(config.NumDrawObj) * 4
+	sceneBytes, scErr := a.readbackBuffer(bufs.Scene, sceneTagsOff+sceneTagsSize)
+	if scErr != nil {
+		slogger().Warn("vello-diag: cannot read Scene tags", "error", scErr)
+	} else {
+		for i := uint32(0); i < config.NumDrawObj; i++ {
+			off := sceneTagsOff + uint64(i)*4
+			tag := le.Uint32(sceneBytes[off : off+4])
+			slogger().Debug("vello-diag: DrawTag",
+				"draw", i,
+				"tag", fmt.Sprintf("0x%02X", tag),
+				"is_color", tag == 0x44)
+		}
+	}
+
 	// Check BumpAlloc: seg_counts should be > 0 if path_count produced segments.
+	// segments should be > 0 if coarse allocated segment slots.
 	bumpBytes, err := a.readbackBuffer(bufs.BumpAlloc, 16)
 	if err != nil {
 		slogger().Warn("vello-diag: cannot read BumpAlloc", "error", err)
 	} else {
 		segCounts := le.Uint32(bumpBytes[0:4])
-		slogger().Debug("vello-diag: BumpAlloc", "seg_counts", segCounts)
+		segAlloc := le.Uint32(bumpBytes[4:8])
+		dbgActiveThreads := le.Uint32(bumpBytes[8:12])
+		dbgTilesVisited := le.Uint32(bumpBytes[12:16])
+		slogger().Debug("vello-diag: BumpAlloc",
+			"seg_counts", segCounts,
+			"segments_allocated", segAlloc,
+			"coarse_active_threads", dbgActiveThreads,
+			"coarse_tiles_visited", dbgTilesVisited)
 		if segCounts == 0 {
 			slogger().Warn("vello-diag: path_count produced ZERO segments — tiles will be empty")
+		}
+		if segAlloc == 0 && segCounts > 0 {
+			slogger().Warn("vello-diag: coarse allocated ZERO segments — write_path not working?")
+		}
+	}
+
+	// Check PTCL: read first word of each tile's PTCL stream.
+	// Each tile's stream starts at tile_ix * PTCL_MAX_PER_TILE.
+	globalTiles := config.WidthInTiles * config.HeightInTiles
+	ptclFullSize := uint64(globalTiles) * velloPTCLMaxPerTile * 4
+	ptclBytes, ptclErr := a.readbackBuffer(bufs.PTCL, ptclFullSize)
+	if ptclErr != nil {
+		slogger().Warn("vello-diag: cannot read PTCL", "error", ptclErr)
+	} else {
+		nonZeroCmds := 0
+		fillCmds := 0
+		solidCmds := 0
+		colorCmds := 0
+		for t := uint32(0); t < globalTiles; t++ {
+			byteBase := uint64(t) * velloPTCLMaxPerTile * 4
+			if byteBase+4 > uint64(len(ptclBytes)) {
+				break
+			}
+			cmd := le.Uint32(ptclBytes[byteBase : byteBase+4])
+			if cmd != 0 {
+				nonZeroCmds++
+			}
+			if cmd == 1 {
+				fillCmds++
+			}
+			if cmd == 3 {
+				solidCmds++
+			}
+			if cmd == 5 {
+				colorCmds++
+			}
+		}
+		slogger().Debug("vello-diag: PTCL",
+			"tiles_with_cmds", nonZeroCmds,
+			"fill_cmds", fillCmds,
+			"solid_cmds", solidCmds,
+			"color_cmds", colorCmds)
+
+	}
+
+	// Check Segments: sample first few for non-zero data.
+	segSampleSize := uint64(200) * 5 * 4 // first 200 segments * 5 f32
+	segBytes, segErr := a.readbackBuffer(bufs.Segments, segSampleSize)
+	if segErr != nil {
+		slogger().Warn("vello-diag: cannot read Segments", "error", segErr)
+	} else {
+		nonZeroSegs := 0
+		maxSegs := len(segBytes) / 20
+		for i := 0; i < maxSegs; i++ {
+			off := i * 20
+			p0x := le.Uint32(segBytes[off : off+4])
+			p0y := le.Uint32(segBytes[off+4 : off+8])
+			if p0x != 0 || p0y != 0 {
+				nonZeroSegs++
+			}
+		}
+		slogger().Debug("vello-diag: Segments",
+			"sampled", maxSegs,
+			"non_zero", nonZeroSegs)
+	}
+
+	// Dump first PTCL tile with CMD_FILL for detailed inspection.
+	if ptclBytes != nil {
+		for t := uint32(0); t < globalTiles; t++ {
+			byteBase := uint64(t) * velloPTCLMaxPerTile * 4
+			if byteBase+24 > uint64(len(ptclBytes)) {
+				break
+			}
+			cmd0 := le.Uint32(ptclBytes[byteBase : byteBase+4])
+			if cmd0 == 1 || cmd0 == 3 { // CMD_FILL or CMD_SOLID
+				cmdName := "SOLID"
+				if cmd0 == 1 {
+					cmdName = "FILL"
+					packed := le.Uint32(ptclBytes[byteBase+4 : byteBase+8])
+					segIdx := le.Uint32(ptclBytes[byteBase+8 : byteBase+12])
+					backdrop := int32(le.Uint32(ptclBytes[byteBase+12 : byteBase+16]))
+					segCount := packed >> 1
+					evenOdd := packed & 1
+					// Read CMD_COLOR after FILL payload (4 words).
+					colorBase := byteBase + 16
+					nextCmd := le.Uint32(ptclBytes[colorBase : colorBase+4])
+					rgba := le.Uint32(ptclBytes[colorBase+4 : colorBase+8])
+					slogger().Debug("vello-diag: PTCL detail",
+						"global_tile", t,
+						"tile_xy", fmt.Sprintf("(%d,%d)", t%config.WidthInTiles, t/config.WidthInTiles),
+						"cmd", cmdName,
+						"seg_count", segCount, "even_odd", evenOdd,
+						"seg_index", segIdx, "backdrop", backdrop,
+						"next_cmd", nextCmd, "rgba", fmt.Sprintf("0x%08X", rgba))
+					// Dump segment data.
+					if segBytes != nil && segCount > 0 && segIdx < 200 {
+						segOff := uint64(segIdx) * 20
+						if segOff+20 <= uint64(len(segBytes)) {
+							sp0x := math.Float32frombits(le.Uint32(segBytes[segOff : segOff+4]))
+							sp0y := math.Float32frombits(le.Uint32(segBytes[segOff+4 : segOff+8]))
+							sp1x := math.Float32frombits(le.Uint32(segBytes[segOff+8 : segOff+12]))
+							sp1y := math.Float32frombits(le.Uint32(segBytes[segOff+12 : segOff+16]))
+							yEdge := math.Float32frombits(le.Uint32(segBytes[segOff+16 : segOff+20]))
+							slogger().Debug("vello-diag: Segment for tile",
+								"seg_ix", segIdx,
+								"p0", fmt.Sprintf("(%.3f, %.3f)", sp0x, sp0y),
+								"p1", fmt.Sprintf("(%.3f, %.3f)", sp1x, sp1y),
+								"y_edge", fmt.Sprintf("%.3f", yEdge))
+						}
+					}
+				} else {
+					// CMD_SOLID: read CMD_COLOR after SOLID (1 word).
+					colorBase := byteBase + 4
+					nextCmd := le.Uint32(ptclBytes[colorBase : colorBase+4])
+					rgba := le.Uint32(ptclBytes[colorBase+4 : colorBase+8])
+					slogger().Debug("vello-diag: PTCL detail",
+						"global_tile", t,
+						"tile_xy", fmt.Sprintf("(%d,%d)", t%config.WidthInTiles, t/config.WidthInTiles),
+						"cmd", cmdName,
+						"next_cmd", nextCmd, "rgba", fmt.Sprintf("0x%08X", rgba))
+				}
+			}
 		}
 	}
 
@@ -682,6 +851,7 @@ func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, con
 	} else {
 		nonZeroBackdrop := 0
 		nonZeroSegCount := 0
+		totalSegSum := uint32(0)
 		for i := uint32(0); i < totalPathTiles; i++ {
 			off := i * 8
 			backdrop := int32(le.Uint32(tilesBytes[off : off+4]))
@@ -691,14 +861,49 @@ func (a *VelloAccelerator) logPipelineDiagnostics(bufs *VelloComputeBuffers, con
 			}
 			if segCount != 0 {
 				nonZeroSegCount++
+				totalSegSum += segCount
 			}
 		}
 		slogger().Debug("vello-diag: Tiles",
 			"total_path_tiles", totalPathTiles,
 			"non_zero_backdrop", nonZeroBackdrop,
-			"non_zero_seg_count", nonZeroSegCount)
+			"non_zero_seg_count", nonZeroSegCount,
+			"total_seg_sum", totalSegSum)
 		if nonZeroBackdrop == 0 && nonZeroSegCount == 0 {
 			slogger().Warn("vello-diag: ALL tiles are zero — path_count or backdrop stage failed")
+		}
+
+		// Dump ALL tiles (up to 100) for small scenes, or first 10 non-zero for large.
+		maxDump := uint32(100)
+		if totalPathTiles <= maxDump {
+			// Small scene: dump every tile.
+			for i := uint32(0); i < totalPathTiles; i++ {
+				off := i * 8
+				backdrop := int32(le.Uint32(tilesBytes[off : off+4]))
+				segCount := le.Uint32(tilesBytes[off+4 : off+8])
+				isInverted := int32(segCount) < 0
+				slogger().Debug("vello-diag: Tile",
+					"ix", i,
+					"backdrop", backdrop,
+					"seg_or_ix", segCount,
+					"inverted", isInverted)
+			}
+		} else {
+			dumped := 0
+			for i := uint32(0); i < totalPathTiles && dumped < 10; i++ {
+				off := i * 8
+				backdrop := int32(le.Uint32(tilesBytes[off : off+4]))
+				segCount := le.Uint32(tilesBytes[off+4 : off+8])
+				if segCount != 0 || backdrop != 0 {
+					isInverted := int32(segCount) < 0
+					slogger().Debug("vello-diag: Tile sample",
+						"tile_ix", i,
+						"backdrop", backdrop,
+						"seg_count_or_ix", segCount,
+						"is_inverted_idx", isInverted)
+					dumped++
+				}
+			}
 		}
 	}
 

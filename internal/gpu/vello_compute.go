@@ -205,12 +205,15 @@ type VelloComputeConfig struct {
 
 	// NumLines is the total number of flattened line segments.
 	NumLines uint32
+
+	// BgColor is the background color packed as RGBA u32 (R in low byte).
+	BgColor uint32
 }
 
 // sizeInBytes returns the byte size of VelloComputeConfig.
-// 14 fields * 4 bytes = 56 bytes.
+// 15 fields * 4 bytes = 60 bytes.
 func (c VelloComputeConfig) sizeInBytes() uint64 {
-	return 14 * 4 // 56 bytes
+	return 15 * 4 // 60 bytes
 }
 
 // toBytes serializes VelloComputeConfig to a byte slice in little-endian format.
@@ -232,6 +235,7 @@ func (c VelloComputeConfig) toBytes() []byte {
 	le.PutUint32(buf[44:48], c.TransformBase)
 	le.PutUint32(buf[48:52], c.StyleBase)
 	le.PutUint32(buf[52:56], c.NumLines)
+	le.PutUint32(buf[56:60], c.BgColor)
 	return buf
 }
 
@@ -854,12 +858,12 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 		{&bufs.Info, "vello_info", sz.info, storageGPU, false},
 		{&bufs.Lines, "vello_lines", sz.lines, storageCPU | gputypes.BufferUsageCopySrc, false},
 		{&bufs.Paths, "vello_paths", sz.paths, storageCPU | gputypes.BufferUsageCopySrc, false},
-		{&bufs.Tiles, "vello_tiles", sz.tiles, storageZero | gputypes.BufferUsageCopySrc, true}, // atomicAdd in path_count
-		{&bufs.SegCounts, "vello_seg_counts", sz.segCounts, storageGPU, false}, // written by path_count
-		{&bufs.Segments, "vello_segments", sz.segments, storageGPU, false},     // written by coarse
-		{&bufs.PTCL, "vello_ptcl", sz.ptcl, storageZero, true},                // CMD_END=0 sentinel
+		{&bufs.Tiles, "vello_tiles", sz.tiles, storageZero | gputypes.BufferUsageCopySrc, true},              // atomicAdd in path_count
+		{&bufs.SegCounts, "vello_seg_counts", sz.segCounts, storageGPU, false},                               // written by path_count
+		{&bufs.Segments, "vello_segments", sz.segments, storageGPU, false},                                   // written by coarse
+		{&bufs.PTCL, "vello_ptcl", sz.ptcl, storageZero, true},                                               // CMD_END=0 sentinel
 		{&bufs.BumpAlloc, "vello_bump_alloc", sz.bumpAlloc, storageZero | gputypes.BufferUsageCopySrc, true}, // atomicAdd in path_count
-		{&bufs.TilePTCLOffsets, "vello_tile_ptcl_offsets", sz.tilePTCLOffsets, storageZero, true}, // coarse write positions
+		{&bufs.TilePTCLOffsets, "vello_tile_ptcl_offsets", sz.tilePTCLOffsets, storageZero, true},            // coarse write positions
 		{&bufs.PathStyles, "vello_path_styles", sz.pathStyles, storageCPU, false},
 		{&bufs.Output, "vello_output", sz.output, storageOut, false},
 	}

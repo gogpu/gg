@@ -43,6 +43,7 @@ struct Config {
     transform_base: u32,
     style_base: u32,
     n_lines: u32,
+    bg_color: u32,
 }
 
 // --- Constants ---
@@ -165,9 +166,12 @@ fn main(
     let global_x = tile_x * TILE_WIDTH + local_x;
     let global_y = tile_y * TILE_HEIGHT + local_y;
 
-    // Initialize pixel color to transparent black (premultiplied).
-    // Background should be composited by the host or a separate clear pass.
-    var rgba = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    // Initialize pixel color to background color (matching CPU reference fine.go:28-31).
+    let bg_r = f32(config.bg_color & 0xffu) / 255.0;
+    let bg_g = f32((config.bg_color >> 8u) & 0xffu) / 255.0;
+    let bg_b = f32((config.bg_color >> 16u) & 0xffu) / 255.0;
+    let bg_a = f32((config.bg_color >> 24u) & 0xffu) / 255.0;
+    var rgba = vec4<f32>(bg_r * bg_a, bg_g * bg_a, bg_b * bg_a, bg_a);
 
     // Working area (coverage) for this pixel.
     var area = 0.0;
