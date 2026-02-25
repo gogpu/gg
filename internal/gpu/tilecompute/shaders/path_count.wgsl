@@ -4,12 +4,18 @@
 // path_count.wgsl — DDA tile walk, backdrop computation, and segment counting.
 //
 // CPU reference: tilecompute/path_count.go pathCountMain()
+// GPU reference: vello_shaders/shader/path_count.wgsl
+//
 // Each thread processes one LineSoup segment. It performs a DDA walk across the
 // tile grid, computing which tiles the segment crosses, updating backdrop values
 // (winding number contributions) and counting segments per tile.
 //
 // This shader uses atomics for tile backdrop and segment_count updates because
 // multiple threads (lines) may touch the same tile concurrently.
+//
+// NOTE: This shader uses select() for ALL conditional value assignments instead
+// of if/else + var. This avoids a naga SPIR-V backend limitation where stores
+// inside if/else blocks may not persist at the merge point.
 
 // --- Shared types ---
 
@@ -58,6 +64,9 @@ struct SegmentCount {
 
 struct BumpAlloc {
     seg_counts: atomic<u32>,
+    segments: atomic<u32>,
+    _pad0: atomic<u32>,
+    _pad1: atomic<u32>,
 }
 
 // --- Constants ---
@@ -81,20 +90,7 @@ const ROBUST_EPSILON: f32 = 2e-7;
 
 // span computes max(ceil(max(a,b)) - floor(min(a,b)), 1).
 fn span(a: f32, b: f32) -> u32 {
-    let mx = max(a, b);
-    let mn = min(a, b);
-    var result = ceil(mx) - floor(mn);
-    if result < 1.0 {
-        result = 1.0;
-    }
-    return u32(result);
-}
-
-fn copysign_f32(mag: f32, sgn: f32) -> f32 {
-    if sgn >= 0.0 {
-        return abs(mag);
-    }
-    return -abs(mag);
+    return u32(max(ceil(max(a, b)) - floor(min(a, b)), 1.0));
 }
 
 // --- Main entry point ---
@@ -107,26 +103,20 @@ fn main(
     if line_ix >= config.n_lines {
         return;
     }
-
     let line = lines[line_ix];
     let p0 = vec2<f32>(line.p0x, line.p0y);
     let p1 = vec2<f32>(line.p1x, line.p1y);
 
+    // Use select() to avoid naga SPIR-V bug with if/else var stores.
     let is_down = p1.y >= p0.y;
-    var xy0: vec2<f32>;
-    var xy1: vec2<f32>;
-    if is_down {
-        xy0 = p0;
-        xy1 = p1;
-    } else {
-        xy0 = p1;
-        xy1 = p0;
-    }
-
+    let xy0 = select(p1, p0, is_down);
+    let xy1 = select(p0, p1, is_down);
     let s0 = xy0 * TILE_SCALE;
     let s1 = xy1 * TILE_SCALE;
-    let count_x = span(s0.x, s1.x) - 1u;
-    let count = count_x + span(s0.y, s1.y);
+    // WORKAROUND: use var instead of let for function call results to avoid
+    // naga SPIR-V inlining bug where the second span() call result is lost.
+    var count_x = span(s0.x, s1.x) - 1u;
+    var count = count_x + span(s0.y, s1.y);
 
     let dx = abs(s1.x - s0.x);
     let dy = s1.y - s0.y;
@@ -136,39 +126,22 @@ fn main(
     if dy == 0.0 && floor(s0.y) == s0.y {
         return;
     }
-
     let idxdy = 1.0 / (dx + dy);
     var a = dx * idxdy;
     let is_positive_slope = s1.x >= s0.x;
-    var sign_val: f32;
-    if is_positive_slope {
-        sign_val = 1.0;
-    } else {
-        sign_val = -1.0;
-    }
-
-    let xt0 = floor(s0.x * sign_val);
-    let c = s0.x * sign_val - xt0;
+    let x_sign = select(-1.0, 1.0, is_positive_slope);
+    let xt0 = floor(s0.x * x_sign);
+    let c = s0.x * x_sign - xt0;
     let y0 = floor(s0.y);
-    var ytop: f32;
-    if s0.y == s1.y {
-        ytop = ceil(s0.y);
-    } else {
-        ytop = y0 + 1.0;
-    }
+    let ytop = select(y0 + 1.0, ceil(s0.y), s0.y == s1.y);
 
     let b = min((dy * c + dx * (ytop - s0.y)) * idxdy, ONE_MINUS_ULP);
-    let robust_err = floor(a * f32(count - 1u) + b) - f32(count_x);
+    let robust_err = floor(a * (f32(count) - 1.0) + b) - f32(count_x);
     if robust_err != 0.0 {
-        a = a - copysign_f32(ROBUST_EPSILON, robust_err);
+        a -= ROBUST_EPSILON * sign(robust_err);
     }
 
-    var x0: f32;
-    if is_positive_slope {
-        x0 = xt0 * sign_val;
-    } else {
-        x0 = xt0 * sign_val - 1.0;
-    }
+    let x0 = xt0 * x_sign + select(-1.0, 0.0, is_positive_slope);
 
     let path = paths[line.path_ix];
     let bbox = vec4<i32>(i32(path.bbox_x0), i32(path.bbox_y0), i32(path.bbox_x1), i32(path.bbox_y1));
@@ -177,7 +150,6 @@ fn main(
     if s0.y >= f32(bbox.w) || s1.y < f32(bbox.y) || xmin >= f32(bbox.z) || stride == 0 {
         return;
     }
-
     // Clip line to bounding box in "i" space.
     var imin = 0u;
     if s0.y < f32(bbox.y) {
@@ -196,12 +168,7 @@ fn main(
         imax = u32(imaxf);
     }
 
-    var delta: i32;
-    if is_down {
-        delta = -1;
-    } else {
-        delta = 1;
-    }
+    let delta = select(1, -1, is_down);
     var ymin_i = 0i;
     var ymax_i = 0i;
 
@@ -210,45 +177,34 @@ fn main(
         ymax_i = i32(ceil(s1.y));
         imax = imin;
     } else {
-        var fudge = 0.0;
-        if !is_positive_slope {
-            fudge = 1.0;
-        }
+        let fudge = select(1.0, 0.0, is_positive_slope);
         if xmin < f32(bbox.x) {
-            let f_val = round((sign_val * (f32(bbox.x) - x0) - b + fudge) / a);
-            let cond = (x0 + sign_val * floor(a * f_val + b) < f32(bbox.x)) == is_positive_slope;
-            var f_adj = f_val;
-            if cond {
-                f_adj = f_val + 1.0;
+            var f_val = round((x_sign * (f32(bbox.x) - x0) - b + fudge) / a);
+            if (x0 + x_sign * floor(a * f_val + b) < f32(bbox.x)) == is_positive_slope {
+                f_val = f_val + 1.0;
             }
-            let ynext = i32(y0 + f_adj - floor(a * f_adj + b) + 1.0);
+            let ynext = i32(y0 + f_val - floor(a * f_val + b) + 1.0);
             if is_positive_slope {
-                if u32(f_adj) > imin {
-                    var y_off = 0.0;
-                    if y0 != s0.y {
-                        y_off = 1.0;
-                    }
-                    ymin_i = i32(y0 + y_off);
+                if u32(f_val) > imin {
+                    ymin_i = i32(y0 + select(1.0, 0.0, y0 == s0.y));
                     ymax_i = ynext;
-                    imin = u32(f_adj);
+                    imin = u32(f_val);
                 }
-            } else if u32(f_adj) < imax {
+            } else if u32(f_val) < imax {
                 ymin_i = ynext;
                 ymax_i = i32(ceil(s1.y));
-                imax = u32(f_adj);
+                imax = u32(f_val);
             }
         }
         if max(s0.x, s1.x) > f32(bbox.z) {
-            let f_val = round((sign_val * (f32(bbox.z) - x0) - b + fudge) / a);
-            let cond = (x0 + sign_val * floor(a * f_val + b) < f32(bbox.z)) == is_positive_slope;
-            var f_adj = f_val;
-            if cond {
-                f_adj = f_val + 1.0;
+            var f_val = round((x_sign * (f32(bbox.z) - x0) - b + fudge) / a);
+            if (x0 + x_sign * floor(a * f_val + b) < f32(bbox.z)) == is_positive_slope {
+                f_val = f_val + 1.0;
             }
             if is_positive_slope {
-                imax = min(imax, u32(f_adj));
+                imax = min(imax, u32(f_val));
             } else {
-                imin = max(imin, u32(f_adj));
+                imin = max(imin, u32(f_val));
             }
         }
     }
@@ -271,22 +227,17 @@ fn main(
     let seg_base = atomicAdd(&bump.seg_counts, n_segs);
 
     // DDA walk.
-    var last_z = floor(a * f32(imin - 1u) + b);
+    var last_z = floor(a * (f32(imin) - 1.0) + b);
 
     for (var i = imin; i < imax; i = i + 1u) {
         let zf = a * f32(i) + b;
         let z = floor(zf);
         let y_val = i32(y0 + f32(i) - z);
-        let x_val = i32(x0 + sign_val * z);
+        let x_val = i32(x0 + x_sign * z);
         let base_idx = i32(path.tiles) + (y_val - bbox.y) * stride - bbox.x;
 
         // Top edge detection: did segment enter from the top of this tile?
-        var top_edge: bool;
-        if i == 0u {
-            top_edge = y0 == s0.y;
-        } else {
-            top_edge = last_z == z;
-        }
+        let top_edge = select(last_z == z, y0 == s0.y, i == 0u);
         if top_edge && x_val + 1 < bbox.z {
             let x_bump = max(x_val + 1, bbox.x);
             atomicAdd(&tiles[base_idx + x_bump].backdrop, delta);
