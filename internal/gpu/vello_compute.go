@@ -758,8 +758,12 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 		segmentCountSize = 2 * 4 // SegmentCount: 2 u32 fields = 8 bytes
 	)
 
-	// Estimate segment count as 4x the number of lines (heuristic).
-	estimatedSegments := uint64(numLines) * 4
+	// Maximum tiles a single line can cross: widthInTiles + heightInTiles
+	// (DDA property from computational geometry). This replaces the incorrect
+	// "numLines * 4" heuristic that caused GPU buffer overflows for scenes
+	// with few long diagonal lines (e.g., 3-line triangle crossing 23 tiles).
+	maxTileCrossings := uint64(config.WidthInTiles + config.HeightInTiles)
+	estimatedSegments := uint64(numLines) * maxTileCrossings
 
 	return velloBufSizes{
 		config:          config.sizeInBytes(),

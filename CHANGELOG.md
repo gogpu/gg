@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FontSource.Face()` now panics with clear message instead of cryptic SIGSEGV when called on nil receiver ([#134](https://github.com/gogpu/gg/issues/134))
 - `BuiltinShaper` now skips control characters (U+0000..U+001F) instead of rendering them as missing glyph boxes ([#134](https://github.com/gogpu/gg/issues/134))
 - `WrapText` now respects hard line breaks (`\n`, `\r\n`, `\r`) — paragraphs are split before wrapping, matching `LayoutText` behavior ([#134](https://github.com/gogpu/gg/issues/134))
+- **Vello compute GPU buffer overflow** — `computeBufferSizes` used `numLines * 4` heuristic for segment buffer allocation, which overflowed for scenes with long diagonal lines (e.g., a 3-line triangle needed 23 segment slots but only 12 were allocated). Replaced with DDA upper bound `numLines * (widthInTiles + heightInTiles)` ([#135](https://github.com/gogpu/gg/issues/135))
 
 ### Dependencies
 
