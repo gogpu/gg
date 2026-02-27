@@ -10,8 +10,8 @@ var _ color.Color = RGBA{}
 
 func TestRGBA_ColorInterface(t *testing.T) {
 	tests := []struct {
-		name string
-		c    RGBA
+		name                       string
+		c                          RGBA
 		wantR, wantG, wantB, wantA uint32
 	}{
 		{

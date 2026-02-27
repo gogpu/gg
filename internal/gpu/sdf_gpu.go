@@ -25,6 +25,10 @@ import (
 // pass. Shapes submitted via FillShape/StrokeShape and paths via FillPath are
 // accumulated and rendered together on Flush().
 //
+// When PipelineMode is set to Compute (or Auto selects Compute based on scene
+// complexity), the accelerator delegates to an internal VelloAccelerator that
+// uses the 9-stage compute pipeline instead of render passes.
+//
 // This unified approach matches enterprise 2D engines (Skia Ganesh/Graphite,
 // Flutter Impeller, Gio): one render pass with pipeline switching, shared
 // MSAA + stencil textures, single submit + fence wait, single readback.
@@ -71,11 +75,18 @@ type SDFAccelerator struct {
 	cpuFallback    gg.SDFAccelerator
 	gpuReady       bool
 	externalDevice bool // true when using shared device (don't destroy on Close)
+
+	// Pipeline mode routing: VelloAccelerator for compute, scene stats for Auto.
+	velloAccel   *VelloAccelerator // Internal compute accelerator (Tier 5)
+	pipelineMode gg.PipelineMode   // Current pipeline mode (from Context)
+	sceneStats   gg.SceneStats     // Accumulated per-frame stats for Auto selection
 }
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
+var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
+var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
 
 // Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
@@ -83,6 +94,32 @@ func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
 // CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0
+}
+
+// SetPipelineMode sets the pipeline mode for subsequent operations.
+// When set to Compute, FillPath/StrokePath/FillShape/StrokeShape are delegated
+// to the internal VelloAccelerator. When set to Auto, the accelerator uses
+// scene statistics to choose the best pipeline on Flush.
+func (a *SDFAccelerator) SetPipelineMode(mode gg.PipelineMode) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pipelineMode = mode
+}
+
+// CanCompute reports whether the compute pipeline is available and ready.
+// Returns true when the internal VelloAccelerator is initialized and its
+// compute dispatcher is ready.
+func (a *SDFAccelerator) CanCompute() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.velloAccel != nil && a.velloAccel.CanCompute()
+}
+
+// SceneStats returns the accumulated scene statistics for the current frame.
+func (a *SDFAccelerator) SceneStats() gg.SceneStats {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sceneStats
 }
 
 // Init registers the accelerator. GPU device initialization is deferred
@@ -104,6 +141,11 @@ func (a *SDFAccelerator) Close() {
 	a.pendingTextBatches = nil
 	a.textEngine = nil
 	a.pendingTarget = nil
+	a.sceneStats = gg.SceneStats{}
+	if a.velloAccel != nil {
+		a.velloAccel.Close()
+		a.velloAccel = nil
+	}
 	if a.session != nil {
 		// Destroy the text pipeline before the session. The session does not
 		// own pipelines (Destroy says "owned by the caller"), but the text
@@ -217,6 +259,10 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
+
+	// Initialize internal VelloAccelerator with the shared device for compute routing.
+	a.initVelloAccelerator(device, queue)
+
 	slogger().Debug("switched to shared GPU device")
 	return nil
 }
@@ -264,6 +310,9 @@ func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string,
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Track text scene stats.
+	a.sceneStats.TextCount++
+
 	if !a.gpuReady {
 		return gg.ErrFallbackToCPU
 	}
@@ -302,6 +351,9 @@ func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string,
 //   - Otherwise, it is tessellated into fan triangles and queued as a
 //     StencilPathCommand (Tier 2b: stencil-then-cover).
 //
+// When PipelineMode is Compute and the compute pipeline is available, the path
+// is delegated to the internal VelloAccelerator instead.
+//
 // Rendering is deferred until Flush() so all commands can be combined in a
 // single render pass. Returns ErrFallbackToCPU if the GPU is not ready.
 func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
@@ -309,6 +361,15 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 	defer a.mu.Unlock()
 	if !a.gpuReady {
 		return gg.ErrFallbackToCPU
+	}
+
+	// Track scene stats for Auto pipeline selection.
+	a.sceneStats.PathCount++
+	a.sceneStats.ShapeCount++
+
+	// If in Compute mode and compute is available, delegate to VelloAccelerator.
+	if a.pipelineMode == gg.PipelineModeCompute && a.velloAccel != nil && a.velloAccel.CanCompute() {
+		return a.velloAccel.FillPath(target, path, paint)
 	}
 
 	// If target changed, flush previous batch first.
@@ -417,9 +478,24 @@ func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
 // StrokePath renders a stroked path on the GPU by expanding the stroke into a
 // filled outline and routing it through the fill pipeline (convex fast-path or
 // stencil-then-cover). Dashed strokes fall back to CPU rendering.
+//
+// When PipelineMode is Compute and the compute pipeline is available, the
+// stroke is delegated to the internal VelloAccelerator.
 func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	if paint.IsDashed() {
 		return gg.ErrFallbackToCPU
+	}
+
+	// Track scene stats for Auto pipeline selection.
+	a.mu.Lock()
+	a.sceneStats.PathCount++
+	a.sceneStats.ShapeCount++
+	computeMode := a.pipelineMode == gg.PipelineModeCompute && a.velloAccel != nil && a.velloAccel.CanCompute()
+	a.mu.Unlock()
+
+	// If in Compute mode and compute is available, delegate to VelloAccelerator.
+	if computeMode {
+		return a.velloAccel.StrokePath(target, path, paint)
 	}
 
 	ggElems := path.Elements()
@@ -487,32 +563,81 @@ func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, pa
 
 // FillShape accumulates a filled shape for batch dispatch.
 // The actual GPU work happens on Flush().
+//
+// When PipelineMode is Compute and the compute pipeline is available, the
+// shape is delegated to the internal VelloAccelerator.
 func (a *SDFAccelerator) FillShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Track scene stats.
+	a.sceneStats.ShapeCount++
+
 	if !a.gpuReady {
 		return a.cpuFallback.FillShape(target, shape, paint)
 	}
+
+	// If in Compute mode, delegate to VelloAccelerator.
+	if a.pipelineMode == gg.PipelineModeCompute && a.velloAccel != nil && a.velloAccel.CanCompute() {
+		return a.velloAccel.FillShape(target, shape, paint)
+	}
+
 	return a.queueShape(target, shape, paint, false)
 }
 
 // StrokeShape accumulates a stroked shape for batch dispatch.
 // The actual GPU work happens on Flush().
+//
+// When PipelineMode is Compute and the compute pipeline is available, the
+// shape is delegated to the internal VelloAccelerator.
 func (a *SDFAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Track scene stats.
+	a.sceneStats.ShapeCount++
+
 	if !a.gpuReady {
 		return a.cpuFallback.StrokeShape(target, shape, paint)
 	}
+
+	// If in Compute mode, delegate to VelloAccelerator.
+	if a.pipelineMode == gg.PipelineModeCompute && a.velloAccel != nil && a.velloAccel.CanCompute() {
+		return a.velloAccel.StrokeShape(target, shape, paint)
+	}
+
 	return a.queueShape(target, shape, paint, true)
 }
 
 // Flush dispatches all pending commands (SDF shapes + convex polygons +
 // stencil paths) via the unified render session. All commands are rendered
 // in a single render pass. Returns nil if there are no pending commands.
+//
+// When PipelineMode is Compute (or Auto selects Compute), pending operations
+// that were accumulated in the internal VelloAccelerator are flushed through
+// the 9-stage compute pipeline instead.
 func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Determine effective mode for this flush.
+	effectiveMode := a.effectivePipelineMode()
+
+	// Reset scene stats for the next frame.
+	a.sceneStats = gg.SceneStats{}
+
+	// If VelloAccelerator has pending paths, flush them.
+	// This happens when mode is Compute or Auto selected Compute.
+	if a.velloAccel != nil && a.velloAccel.PendingCount() > 0 {
+		if effectiveMode == gg.PipelineModeCompute {
+			// Flush VelloAccelerator first (compute pipeline).
+			if err := a.velloAccel.Flush(target); err != nil {
+				slogger().Debug("vello compute flush failed, render-pass fallback", "err", err)
+				// Compute failed — don't also try render pass (data was consumed by Vello).
+			}
+		}
+	}
+
 	return a.flushLocked(target)
 }
 
@@ -721,8 +846,48 @@ func (a *SDFAccelerator) initGPU() error {
 	a.session.SetStencilRenderer(a.stencilRenderer)
 
 	a.gpuReady = true
+
+	// Initialize internal VelloAccelerator for compute routing.
+	a.initVelloAccelerator(a.device, a.queue)
+
 	slogger().Info("GPU accelerator initialized", "adapter", selected.Info.Name)
 	return nil
+}
+
+// initVelloAccelerator creates the internal VelloAccelerator and sets its
+// device from the provided HAL device/queue. This is called lazily from
+// SetDeviceProvider or initGPU. Failures are non-fatal — compute just
+// won't be available.
+func (a *SDFAccelerator) initVelloAccelerator(device hal.Device, queue hal.Queue) {
+	va := &VelloAccelerator{}
+	va.device = device
+	va.queue = queue
+	va.externalDevice = true
+	va.gpuReady = true
+
+	// Create dispatcher with the provided device/queue.
+	dispatcher := NewVelloComputeDispatcher(device, queue)
+	if err := dispatcher.Init(); err != nil {
+		slogger().Debug("VelloAccelerator init: compute pipeline unavailable", "error", err)
+		// Still keep the VelloAccelerator for accumulation — CanCompute() returns false.
+		a.velloAccel = va
+		return
+	}
+	va.dispatcher = dispatcher
+	a.velloAccel = va
+	slogger().Debug("VelloAccelerator initialized for compute routing")
+}
+
+// effectivePipelineMode determines the actual pipeline mode for the current
+// frame based on the configured mode, scene statistics, and GPU capabilities.
+// Must be called with a.mu held.
+func (a *SDFAccelerator) effectivePipelineMode() gg.PipelineMode {
+	mode := a.pipelineMode
+	if mode == gg.PipelineModeAuto {
+		hasCompute := a.velloAccel != nil && a.velloAccel.CanCompute()
+		mode = gg.SelectPipeline(a.sceneStats, hasCompute)
+	}
+	return mode
 }
 
 func getColorFromPaint(paint *gg.Paint) gg.RGBA {
