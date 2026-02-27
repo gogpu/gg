@@ -47,7 +47,7 @@
 - Tier 5 scene accumulation in VelloAccelerator (GG-COMPUTE-008)
 - PipelineMode wiring to rendering cascade (GG-COMPUTE-006)
 - Removed 2 naga shader workarounds (span() inlining, vec2 let-chain)
-- wgpu v0.17.1
+- wgpu v0.18.0
 
 ---
 
@@ -152,7 +152,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.31.0** | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.17.1 |
+| **v0.31.0** | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
 | v0.30.2 | 2026-02 | Vello buffer overflow fix, WrapText hard line breaks, wgpu v0.16.17 |
 | v0.30.1 | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
 | v0.30.0 | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |

@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 
-- wgpu v0.16.17 → v0.17.1
+- wgpu v0.16.17 → v0.18.0
 
 ## [0.30.2] - 2026-02-27
 
