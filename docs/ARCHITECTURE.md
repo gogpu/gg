@@ -511,7 +511,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Scene Delegation** | Qt/Skia/Vello/Flutter | Scene orchestrates tiles, SoftwareRenderer rasterizes |
 | **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
 | **Five-Tier Rendering** | Skia Ganesh/Impeller/Vello | SDF, convex, stencil+cover, MSDF text (render pass) + compute pipeline |
-| **8-Stage Compute** | vello | pathtag→draw→path_count→backdrop→coarse→fine GPU compute |
+| **9-Stage Compute** | vello | pathtag→draw→path_count→backdrop→coarse→path_tiling→fine GPU compute |
 | **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |
 | **Stencil-Then-Cover** | GPU Gems 3, NV_path_rendering | Winding via stencil buffer, then cover fill |
 | **Fan Tessellation** | Skia Ganesh | Convex path to triangle fan for GPU |

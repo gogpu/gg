@@ -45,4 +45,4 @@ GPU tiers. Press **Space** to pause (0% CPU idle) and resume (VSync ~60fps).
 |------------|-----------------|
 | Go | 1.25+ |
 | gogpu | v0.20.6+ |
-| gg | v0.30.1+ |
+| gg | v0.31.0+ |

@@ -115,7 +115,7 @@ a five-tier rendering pipeline:
 | **Convex** | Direct vertex emission | Convex polygons, single draw call |
 | **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
 | **MSDF Text** | Multi-channel Signed Distance Field | Resolution-independent anti-aliased text |
-| **Compute** | 8-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
+| **Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
 
 Tiers 1–4 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
 via `PipelineMode` (Auto/RenderPass/Compute).
@@ -250,7 +250,8 @@ s.SetFillColor(color.RGBA{B: 255, A: 200})
 s.Circle(250, 200, 100)
 s.Fill()
 
-renderer := scene.NewRenderer(800, 600)
+renderer := render.NewSoftwareRenderer()
+target := render.NewPixmapTarget(800, 600)
 renderer.Render(target, s)
 ```
 
