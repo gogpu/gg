@@ -196,8 +196,8 @@ fn main(
     // naga SPIR-V codegen bug where vec2 var stores are silently dropped.
     // Also uses select() instead of if/else to avoid naga store-at-merge-point bug.
 
-    let dy_full = xy1_raw.y - xy0_raw.y;
-    let dx_full = xy1_raw.x - xy0_raw.x;
+    let dy_full = xy1.y - xy0.y;
+    let dx_full = xy1.x - xy0.x;
     let safe_dy = select(dy_full, 1.0, abs(dy_full) < EPSILON);
     let safe_dx = select(dx_full, 1.0, abs(dx_full) < EPSILON);
 
@@ -208,7 +208,7 @@ fn main(
     let is_top_edge = z == z_prev_val;
 
     let xt_top = clamp(
-        xy0_raw.x + dx_full * (tile_y_f - xy0_raw.y) / safe_dy,
+        xy0.x + dx_full * (tile_y_f - xy0.y) / safe_dy,
         tile_x_f + 1e-3, tile_x1_f
     );
     let top_edge_x = xt_top;
@@ -216,7 +216,7 @@ fn main(
 
     let x_clip_top = select(tile_x1_f, tile_x_f, is_positive_slope);
     let yt_top = clamp(
-        xy0_raw.y + dy_full * (x_clip_top - xy0_raw.x) / safe_dx,
+        xy0.y + dy_full * (x_clip_top - xy0.x) / safe_dx,
         tile_y_f + 1e-3, tile_y1_f
     );
     let side_edge_x = x_clip_top;
@@ -226,8 +226,8 @@ fn main(
     let clip_top_x = select(side_edge_x, top_edge_x, is_top_edge);
     let clip_top_y = select(side_edge_y, top_edge_y, is_top_edge);
     // Apply only if this segment needs top clipping.
-    let xy0_x = select(xy0_raw.x, clip_top_x, do_top);
-    let xy0_y = select(xy0_raw.y, clip_top_y, do_top);
+    let xy0_x = select(xy0.x, clip_top_x, do_top);
+    let xy0_y = select(xy0.y, clip_top_y, do_top);
 
     // --- Bottom clipping (uses top-clipped xy0) ---
     let do_bottom = seg_within_line < count - 1u;
@@ -235,8 +235,8 @@ fn main(
     z_next_val = floor(a * (f32(seg_within_line) + 1.0) + b);
     let is_bottom_edge = z == z_next_val;
 
-    let dy_bc = xy1_raw.y - xy0_y;
-    let dx_bc = xy1_raw.x - xy0_x;
+    let dy_bc = xy1.y - xy0_y;
+    let dx_bc = xy1.x - xy0_x;
     let safe_dy_bc = select(dy_bc, 1.0, abs(dy_bc) < EPSILON);
     let safe_dx_bc = select(dx_bc, 1.0, abs(dx_bc) < EPSILON);
 
@@ -257,8 +257,8 @@ fn main(
 
     let clip_bot_x = select(side_bot_x, bot_edge_x, is_bottom_edge);
     let clip_bot_y = select(side_bot_y, bot_edge_y, is_bottom_edge);
-    let xy1_x = select(xy1_raw.x, clip_bot_x, do_bottom);
-    let xy1_y = select(xy1_raw.y, clip_bot_y, do_bottom);
+    let xy1_x = select(xy1.x, clip_bot_x, do_bottom);
+    let xy1_y = select(xy1.y, clip_bot_y, do_bottom);
 
     // --- Tile-local coordinates ---
     let p0x = xy0_x - tile_x_f;
