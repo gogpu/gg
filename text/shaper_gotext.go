@@ -59,9 +59,10 @@ func NewGoTextShaper() *GoTextShaper {
 
 // Shape implements the Shaper interface.
 // It converts text into positioned glyphs using HarfBuzz shaping via go-text/typesetting.
+// The font size is obtained from face.Size().
 // This produces higher-quality output than BuiltinShaper for text that benefits
 // from kerning, ligatures, or complex script shaping.
-func (s *GoTextShaper) Shape(text string, face Face, size float64) []ShapedGlyph {
+func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 	if text == "" || face == nil {
 		return nil
 	}
@@ -85,6 +86,7 @@ func (s *GoTextShaper) Shape(text string, face Face, size float64) []ShapedGlyph
 	// thread-safe *Font and initializes glyph caches.
 	goTextFace := font.NewFace(goTextFont)
 
+	size := face.Size()
 	runes := []rune(text)
 
 	// Convert our Direction to go-text's di.Direction.

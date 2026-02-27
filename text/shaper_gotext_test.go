@@ -31,7 +31,7 @@ func TestGoTextShaper_BasicLatin(t *testing.T) {
 	face, _ := goTextTestFace(t)
 	shaper := NewGoTextShaper()
 
-	result := shaper.Shape("Hello", face, 16.0)
+	result := shaper.Shape("Hello", face)
 	if len(result) != 5 {
 		t.Fatalf("Shape(\"Hello\"): got %d glyphs, want 5", len(result))
 	}
@@ -71,7 +71,7 @@ func TestGoTextShaper_VariousText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shaper.Shape(tt.text, face, 16.0)
+			result := shaper.Shape(tt.text, face)
 			if len(result) != tt.wantLen {
 				t.Errorf("Shape(%q): got %d glyphs, want %d", tt.text, len(result), tt.wantLen)
 			}
@@ -94,8 +94,8 @@ func TestGoTextShaper_Kerning(t *testing.T) {
 	shaper := NewGoTextShaper()
 
 	// Shape "A" and "V" separately to get individual advances.
-	glyphsA := shaper.Shape("A", face, 16.0)
-	glyphsV := shaper.Shape("V", face, 16.0)
+	glyphsA := shaper.Shape("A", face)
+	glyphsV := shaper.Shape("V", face)
 	if len(glyphsA) != 1 || len(glyphsV) != 1 {
 		t.Fatalf("expected 1 glyph each for A and V, got %d and %d",
 			len(glyphsA), len(glyphsV))
@@ -104,7 +104,7 @@ func TestGoTextShaper_Kerning(t *testing.T) {
 	individualWidth := glyphsA[0].XAdvance + glyphsV[0].XAdvance
 
 	// Shape "AV" together -- kerning should tighten the pair.
-	glyphsAV := shaper.Shape("AV", face, 16.0)
+	glyphsAV := shaper.Shape("AV", face)
 	if len(glyphsAV) != 2 {
 		t.Fatalf("Shape(\"AV\"): got %d glyphs, want 2", len(glyphsAV))
 	}
@@ -140,7 +140,7 @@ func TestGoTextShaper_Ligatures(t *testing.T) {
 
 	text := "office"
 	runes := []rune(text)
-	result := shaper.Shape(text, face, 16.0)
+	result := shaper.Shape(text, face)
 
 	if len(result) == 0 {
 		t.Fatal("Shape(\"office\") returned no glyphs")
@@ -164,7 +164,7 @@ func TestGoTextShaper_EmptyText(t *testing.T) {
 	face, _ := goTextTestFace(t)
 	shaper := NewGoTextShaper()
 
-	result := shaper.Shape("", face, 16.0)
+	result := shaper.Shape("", face)
 	if result != nil {
 		t.Errorf("Shape(\"\") = %v, want nil", result)
 	}
@@ -174,7 +174,7 @@ func TestGoTextShaper_EmptyText(t *testing.T) {
 func TestGoTextShaper_NilFace(t *testing.T) {
 	shaper := NewGoTextShaper()
 
-	result := shaper.Shape("Hello", nil, 16.0)
+	result := shaper.Shape("Hello", nil)
 	if result != nil {
 		t.Errorf("Shape with nil face = %v, want nil", result)
 	}
@@ -200,7 +200,7 @@ func TestGoTextShaper_SetShaper(t *testing.T) {
 	}
 
 	// Shape via the global Shape function.
-	result := Shape("Hello", face, 16.0)
+	result := Shape("Hello", face)
 	if len(result) != 5 {
 		t.Errorf("Shape(\"Hello\") via global: got %d glyphs, want 5", len(result))
 	}
@@ -222,8 +222,8 @@ func TestGoTextShaper_VsBuiltinShaper(t *testing.T) {
 
 	text := "Hello World"
 
-	goTextResult := goTextShaper.Shape(text, face, 16.0)
-	builtinResult := builtinShaper.Shape(text, face, 16.0)
+	goTextResult := goTextShaper.Shape(text, face)
+	builtinResult := builtinShaper.Shape(text, face)
 
 	// Both should produce the same number of glyphs for simple Latin.
 	if len(goTextResult) != len(builtinResult) {
@@ -273,7 +273,7 @@ func TestGoTextShaper_DifferentSizes(t *testing.T) {
 
 	for _, size := range sizes {
 		face := source.Face(size)
-		result := shaper.Shape("Hello", face, size)
+		result := shaper.Shape("Hello", face)
 		if len(result) != 5 {
 			t.Errorf("size %f: got %d glyphs, want 5", size, len(result))
 			continue
@@ -302,7 +302,7 @@ func TestGoTextShaper_Concurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
-				result := shaper.Shape("Hello World", face, 16.0)
+				result := shaper.Shape("Hello World", face)
 				if len(result) != 11 {
 					errors <- "wrong glyph count"
 				}
@@ -335,13 +335,13 @@ func TestGoTextShaper_FaceCache(t *testing.T) {
 	face := source.Face(16.0)
 
 	// First call should parse the font and cache it.
-	result1 := shaper.Shape("A", face, 16.0)
+	result1 := shaper.Shape("A", face)
 	if len(result1) != 1 {
 		t.Fatalf("first Shape(\"A\"): got %d glyphs, want 1", len(result1))
 	}
 
 	// Second call should use the cached font face.
-	result2 := shaper.Shape("A", face, 16.0)
+	result2 := shaper.Shape("A", face)
 	if len(result2) != 1 {
 		t.Fatalf("second Shape(\"A\"): got %d glyphs, want 1", len(result2))
 	}
@@ -363,7 +363,7 @@ func TestGoTextShaper_ClearCache(t *testing.T) {
 	shaper := NewGoTextShaper()
 
 	// Populate cache.
-	_ = shaper.Shape("A", face, 16.0)
+	_ = shaper.Shape("A", face)
 
 	shaper.mu.RLock()
 	cacheLen := len(shaper.fontCache)
@@ -383,7 +383,7 @@ func TestGoTextShaper_ClearCache(t *testing.T) {
 	}
 
 	// Shaping should still work (re-parses font).
-	result := shaper.Shape("A", face, 16.0)
+	result := shaper.Shape("A", face)
 	if len(result) != 1 {
 		t.Errorf("Shape after ClearCache: got %d glyphs, want 1", len(result))
 	}
@@ -397,7 +397,7 @@ func TestGoTextShaper_RemoveSource(t *testing.T) {
 	face := source.Face(16.0)
 
 	// Populate cache.
-	_ = shaper.Shape("A", face, 16.0)
+	_ = shaper.Shape("A", face)
 
 	shaper.mu.RLock()
 	cacheLen := len(shaper.fontCache)
@@ -423,7 +423,7 @@ func TestGoTextShaper_GlyphPositioning(t *testing.T) {
 	face, _ := goTextTestFace(t)
 	shaper := NewGoTextShaper()
 
-	result := shaper.Shape("ABC", face, 16.0)
+	result := shaper.Shape("ABC", face)
 	if len(result) < 3 {
 		t.Fatalf("Shape(\"ABC\"): got %d glyphs, want >= 3", len(result))
 	}
@@ -459,7 +459,7 @@ func TestGoTextShaper_WhitespaceHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shaper.Shape(tt.text, face, 16.0)
+			result := shaper.Shape(tt.text, face)
 			if len(result) != tt.wantLen {
 				t.Errorf("Shape(%q): got %d glyphs, want %d", tt.text, len(result), tt.wantLen)
 			}
@@ -472,7 +472,7 @@ func TestGoTextShaper_ClusterIndices(t *testing.T) {
 	face, _ := goTextTestFace(t)
 	shaper := NewGoTextShaper()
 
-	result := shaper.Shape("Hello", face, 16.0)
+	result := shaper.Shape("Hello", face)
 	if len(result) != 5 {
 		t.Fatalf("Shape(\"Hello\"): got %d glyphs, want 5", len(result))
 	}
@@ -591,13 +591,13 @@ func BenchmarkGoTextShape(b *testing.B) {
 	shaper := NewGoTextShaper()
 
 	// Warm the cache.
-	_ = shaper.Shape("warmup", face, 16.0)
+	_ = shaper.Shape("warmup", face)
 
 	text := "The quick brown fox jumps over the lazy dog"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = shaper.Shape(text, face, 16.0)
+		_ = shaper.Shape(text, face)
 	}
 }
 
@@ -615,13 +615,13 @@ func BenchmarkGoTextShapeShort(b *testing.B) {
 	shaper := NewGoTextShaper()
 
 	// Warm the cache.
-	_ = shaper.Shape("w", face, 16.0)
+	_ = shaper.Shape("w", face)
 
 	text := "Hello"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = shaper.Shape(text, face, 16.0)
+		_ = shaper.Shape(text, face)
 	}
 }
 
@@ -639,12 +639,12 @@ func BenchmarkGoTextShapeLong(b *testing.B) {
 	shaper := NewGoTextShaper()
 
 	// Warm the cache.
-	_ = shaper.Shape("w", face, 16.0)
+	_ = shaper.Shape("w", face)
 
 	text := "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = shaper.Shape(text, face, 16.0)
+		_ = shaper.Shape(text, face)
 	}
 }

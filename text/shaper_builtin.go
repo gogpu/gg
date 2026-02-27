@@ -13,6 +13,7 @@ type BuiltinShaper struct{}
 
 // Shape implements the Shaper interface.
 // It converts text to positioned glyphs using the font's glyph metrics.
+// The font size is obtained from face.Size().
 //
 // The shaping is simple left-to-right positioning without:
 //   - Ligature substitution (fi, fl, etc.)
@@ -21,7 +22,7 @@ type BuiltinShaper struct{}
 //   - Right-to-left reordering
 //
 // For these features, use a full shaper like go-text/typesetting.
-func (s *BuiltinShaper) Shape(text string, face Face, size float64) []ShapedGlyph {
+func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 	if text == "" || face == nil {
 		return nil
 	}
@@ -36,6 +37,7 @@ func (s *BuiltinShaper) Shape(text string, face Face, size float64) []ShapedGlyp
 		return nil
 	}
 
+	size := face.Size()
 	runes := []rune(text)
 	result := make([]ShapedGlyph, 0, len(runes))
 

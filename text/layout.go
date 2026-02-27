@@ -113,20 +113,22 @@ type Layout struct {
 // LayoutText performs text layout with the given options.
 // It segments text by direction/script, shapes each segment,
 // wraps lines if MaxWidth > 0, and positions lines with alignment.
+// The font size is obtained from face.Size().
 //
 // For cancellable layout, use LayoutTextWithContext.
-func LayoutText(text string, face Face, size float64, opts LayoutOptions) *Layout {
-	layout, _ := LayoutTextWithContext(context.Background(), text, face, size, opts)
+func LayoutText(text string, face Face, opts LayoutOptions) *Layout {
+	layout, _ := LayoutTextWithContext(context.Background(), text, face, opts)
 	return layout
 }
 
 // LayoutTextWithContext performs text layout with the given options and cancellation support.
 // It segments text by direction/script, shapes each segment,
 // wraps lines if MaxWidth > 0, and positions lines with alignment.
+// The font size is obtained from face.Size().
 //
 // The context can be used to cancel long-running layout operations.
 // When canceled, returns nil and ctx.Err().
-func LayoutTextWithContext(ctx context.Context, text string, face Face, size float64, opts LayoutOptions) (*Layout, error) {
+func LayoutTextWithContext(ctx context.Context, text string, face Face, opts LayoutOptions) (*Layout, error) {
 	if text == "" {
 		return &Layout{}, nil
 	}
@@ -168,7 +170,7 @@ func LayoutTextWithContext(ctx context.Context, text string, face Face, size flo
 			}
 		}
 
-		paraLines := layoutParagraph(para, face, size, opts, metrics)
+		paraLines := layoutParagraph(para, face, opts, metrics)
 
 		for j := range paraLines {
 			line := &paraLines[j]
@@ -213,8 +215,9 @@ func LayoutTextWithContext(ctx context.Context, text string, face Face, size flo
 }
 
 // LayoutTextSimple is a convenience wrapper with default options.
-func LayoutTextSimple(text string, face Face, size float64) *Layout {
-	return LayoutText(text, face, size, DefaultLayoutOptions())
+// The font size is obtained from face.Size().
+func LayoutTextSimple(text string, face Face) *Layout {
+	return LayoutText(text, face, DefaultLayoutOptions())
 }
 
 // splitParagraphs splits text by hard line breaks.
@@ -227,7 +230,7 @@ func splitParagraphs(text string) []string {
 }
 
 // layoutParagraph lays out a single paragraph (no hard breaks).
-func layoutParagraph(para string, face Face, size float64, opts LayoutOptions, metrics Metrics) []Line {
+func layoutParagraph(para string, face Face, opts LayoutOptions, metrics Metrics) []Line {
 	if para == "" {
 		// Empty paragraph still produces a line (for line height)
 		return []Line{{
@@ -248,7 +251,7 @@ func layoutParagraph(para string, face Face, size float64, opts LayoutOptions, m
 	}
 
 	// Shape each segment
-	runs := shapeSegments(segments, face, size, metrics)
+	runs := shapeSegments(segments, face, metrics)
 
 	// If no wrapping needed or WrapNone, return as single line
 	if opts.MaxWidth <= 0 || opts.WrapMode == WrapNone {
@@ -260,12 +263,13 @@ func layoutParagraph(para string, face Face, size float64, opts LayoutOptions, m
 }
 
 // shapeSegments shapes each segment and returns ShapedRuns.
-func shapeSegments(segments []Segment, face Face, size float64, metrics Metrics) []ShapedRun {
+func shapeSegments(segments []Segment, face Face, metrics Metrics) []ShapedRun {
 	runs := make([]ShapedRun, 0, len(segments))
+	size := face.Size()
 	var xOffset float64
 
 	for _, seg := range segments {
-		glyphs := Shape(seg.Text, face, size)
+		glyphs := Shape(seg.Text, face)
 		if len(glyphs) == 0 {
 			continue
 		}

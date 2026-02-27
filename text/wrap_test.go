@@ -301,7 +301,7 @@ func wrapTestFace(t *testing.T) Face {
 // TestWrapText_Empty tests wrapping empty text.
 func TestWrapText_Empty(t *testing.T) {
 	face := wrapTestFace(t)
-	results := WrapText("", face, 16.0, 100, WrapWord)
+	results := WrapText("", face, 100, WrapWord)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
@@ -316,7 +316,7 @@ func TestWrapText_NoWrap(t *testing.T) {
 	face := wrapTestFace(t)
 	text := "The quick brown fox jumps over the lazy dog"
 
-	results := WrapText(text, face, 16.0, 100, WrapNone)
+	results := WrapText(text, face, 100, WrapNone)
 
 	if len(results) != 1 {
 		t.Errorf("WrapNone should produce 1 line, got %d", len(results))
@@ -332,7 +332,7 @@ func TestWrapText_Word(t *testing.T) {
 	text := "hello world test"
 
 	// Use narrow width to force wrapping
-	results := WrapText(text, face, 16.0, 80, WrapWord)
+	results := WrapText(text, face, 80, WrapWord)
 
 	if len(results) < 2 {
 		t.Errorf("WrapWord should produce multiple lines, got %d", len(results))
@@ -357,7 +357,7 @@ func TestWrapText_Char(t *testing.T) {
 	text := "abcdefghij"
 
 	// Use very narrow width
-	results := WrapText(text, face, 16.0, 30, WrapChar)
+	results := WrapText(text, face, 30, WrapChar)
 
 	if len(results) < 2 {
 		t.Errorf("WrapChar with narrow width should produce multiple lines, got %d", len(results))
@@ -370,7 +370,7 @@ func TestWrapText_WordChar(t *testing.T) {
 	// Single long word that exceeds maxWidth
 	text := "supercalifragilisticexpialidocious"
 
-	results := WrapText(text, face, 16.0, 100, WrapWordChar)
+	results := WrapText(text, face, 100, WrapWordChar)
 
 	// Should break the long word since no word boundaries exist
 	if len(results) < 2 {
@@ -384,7 +384,7 @@ func TestWrapText_CJK(t *testing.T) {
 	// Chinese text
 	text := "\u4E2D\u6587\u6D4B\u8BD5\u6587\u672C"
 
-	results := WrapText(text, face, 16.0, 50, WrapWord)
+	results := WrapText(text, face, 50, WrapWord)
 
 	// CJK should allow breaking between any characters
 	if len(results) < 2 {
@@ -408,7 +408,7 @@ func TestMeasureText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.text, func(t *testing.T) {
-			width := MeasureText(tt.text, face, 16.0)
+			width := MeasureText(tt.text, face)
 			if tt.wantZero && width != 0 {
 				t.Errorf("MeasureText(%q) = %f, want 0", tt.text, width)
 			}
@@ -421,7 +421,7 @@ func TestMeasureText(t *testing.T) {
 
 // TestMeasureText_NilFace tests MeasureText with nil face.
 func TestMeasureText_NilFace(t *testing.T) {
-	width := MeasureText("hello", nil, 16.0)
+	width := MeasureText("hello", nil)
 	if width != 0 {
 		t.Errorf("MeasureText with nil face should return 0, got %f", width)
 	}
@@ -431,8 +431,8 @@ func TestMeasureText_NilFace(t *testing.T) {
 func TestMeasureText_Proportional(t *testing.T) {
 	face := wrapTestFace(t)
 
-	short := MeasureText("abc", face, 16.0)
-	long := MeasureText("abcdefg", face, 16.0)
+	short := MeasureText("abc", face)
+	long := MeasureText("abcdefg", face)
 
 	if long <= short {
 		t.Errorf("longer text width (%f) should be > shorter text width (%f)", long, short)
@@ -466,7 +466,7 @@ func TestLayoutText_WrapMode(t *testing.T) {
 				WrapMode:    tt.mode,
 			}
 
-			layout := LayoutText(text, face, 16.0, opts)
+			layout := LayoutText(text, face, opts)
 
 			if len(layout.Lines) < tt.minLines {
 				t.Errorf("expected at least %d lines with %s, got %d",
@@ -489,7 +489,7 @@ func TestLayoutText_WrapModeNone(t *testing.T) {
 		WrapMode:    WrapNone,
 	}
 
-	layout := LayoutText(text, face, 16.0, opts)
+	layout := LayoutText(text, face, opts)
 
 	if len(layout.Lines) != 1 {
 		t.Errorf("WrapNone should produce 1 line regardless of MaxWidth, got %d", len(layout.Lines))
@@ -535,7 +535,7 @@ func BenchmarkWrapText(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = WrapText(text, face, 16.0, 200, WrapWord)
+		_ = WrapText(text, face, 200, WrapWord)
 	}
 }
 
@@ -554,7 +554,7 @@ func BenchmarkMeasureText(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = MeasureText(text, face, 16.0)
+		_ = MeasureText(text, face)
 	}
 }
 
