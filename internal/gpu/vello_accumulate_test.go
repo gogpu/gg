@@ -6,6 +6,7 @@
 package gpu
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -61,7 +62,7 @@ func TestVelloAccelerator_FillPathRejectsWhenNotReady(t *testing.T) {
 	path.LineTo(10, 10)
 
 	err := a.FillPath(target, path, gg.NewPaint())
-	if err != gg.ErrFallbackToCPU {
+	if !errors.Is(err, gg.ErrFallbackToCPU) {
 		t.Errorf("expected ErrFallbackToCPU, got %v", err)
 	}
 }
@@ -124,7 +125,7 @@ func TestVelloAccelerator_FillShapeRejectsUnknown(t *testing.T) {
 
 	shape := gg.DetectedShape{Kind: gg.ShapeUnknown}
 	err := a.FillShape(target, shape, gg.NewPaint())
-	if err != gg.ErrFallbackToCPU {
+	if !errors.Is(err, gg.ErrFallbackToCPU) {
 		t.Errorf("expected ErrFallbackToCPU for unknown shape, got %v", err)
 	}
 }
@@ -173,7 +174,7 @@ func TestVelloAccelerator_FlushClearsPending(t *testing.T) {
 
 	// Flush without a real GPU — should fall back but still clear pending.
 	err := a.Flush(target)
-	if err != nil && err != gg.ErrFallbackToCPU {
+	if err != nil && !errors.Is(err, gg.ErrFallbackToCPU) {
 		t.Fatalf("Flush: expected nil or ErrFallbackToCPU, got %v", err)
 	}
 

@@ -221,29 +221,7 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	}
 
 	// Convert gg path elements to stroke package elements.
-	ggElems := path.Elements()
-	strokeElems := make([]stroke.PathElement, 0, len(ggElems))
-	for _, e := range ggElems {
-		switch el := e.(type) {
-		case gg.MoveTo:
-			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
-		case gg.LineTo:
-			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
-		case gg.QuadTo:
-			strokeElems = append(strokeElems, stroke.QuadTo{
-				Control: stroke.Point{X: el.Control.X, Y: el.Control.Y},
-				Point:   stroke.Point{X: el.Point.X, Y: el.Point.Y},
-			})
-		case gg.CubicTo:
-			strokeElems = append(strokeElems, stroke.CubicTo{
-				Control1: stroke.Point{X: el.Control1.X, Y: el.Control1.Y},
-				Control2: stroke.Point{X: el.Control2.X, Y: el.Control2.Y},
-				Point:    stroke.Point{X: el.Point.X, Y: el.Point.Y},
-			})
-		case gg.Close:
-			strokeElems = append(strokeElems, stroke.Close{})
-		}
-	}
+	strokeElems := convertPathToStrokeElements(path.Elements())
 
 	// Expand stroke to filled outline.
 	style := stroke.Stroke{

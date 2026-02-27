@@ -8,7 +8,16 @@ package gpu
 import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/gpu/tilecompute"
+	"github.com/gogpu/gg/internal/stroke"
 )
+
+// flushCubics flattens accumulated cubic beziers into line segments and appends them.
+func flushCubics(lines []tilecompute.LineSoup, cubics []tilecompute.CubicBezier) []tilecompute.LineSoup {
+	if len(cubics) > 0 {
+		lines = append(lines, tilecompute.FlattenFill(cubics)...)
+	}
+	return lines
+}
 
 // convertPathToPathDef converts a gg.Path with paint info to a tilecompute.PathDef.
 // It iterates path elements, flattens curves using Euler spiral subdivision,
@@ -37,12 +46,8 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 	for _, elem := range elements {
 		switch e := elem.(type) {
 		case gg.MoveTo:
-			// Flush any pending cubics before starting a new subpath.
-			if len(cubics) > 0 {
-				flatLines := tilecompute.FlattenFill(cubics)
-				lines = append(lines, flatLines...)
-				cubics = cubics[:0]
-			}
+			lines = flushCubics(lines, cubics)
+			cubics = cubics[:0]
 			current = [2]float32{float32(e.Point.X), float32(e.Point.Y)}
 			subpathStart = current
 			hasMoveTo = true
@@ -52,12 +57,8 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 				continue
 			}
 			pt := [2]float32{float32(e.Point.X), float32(e.Point.Y)}
-			// Skip zero-length lines.
 			if pt != current {
-				lines = append(lines, tilecompute.LineSoup{
-					P0: current,
-					P1: pt,
-				})
+				lines = append(lines, tilecompute.LineSoup{P0: current, P1: pt})
 			}
 			current = pt
 
@@ -65,23 +66,12 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			if !hasMoveTo {
 				continue
 			}
-			// Elevate quadratic to cubic:
-			// CP1 = P0 + 2/3 * (Control - P0)
-			// CP2 = Point + 2/3 * (Control - Point)
 			ctrl := [2]float32{float32(e.Control.X), float32(e.Control.Y)}
 			end := [2]float32{float32(e.Point.X), float32(e.Point.Y)}
-			cp1 := [2]float32{
-				current[0] + 2.0/3.0*(ctrl[0]-current[0]),
-				current[1] + 2.0/3.0*(ctrl[1]-current[1]),
-			}
-			cp2 := [2]float32{
-				end[0] + 2.0/3.0*(ctrl[0]-end[0]),
-				end[1] + 2.0/3.0*(ctrl[1]-end[1]),
-			}
 			cubics = append(cubics, tilecompute.CubicBezier{
 				P0: current,
-				P1: cp1,
-				P2: cp2,
+				P1: [2]float32{current[0] + 2.0/3.0*(ctrl[0]-current[0]), current[1] + 2.0/3.0*(ctrl[1]-current[1])},
+				P2: [2]float32{end[0] + 2.0/3.0*(ctrl[0]-end[0]), end[1] + 2.0/3.0*(ctrl[1]-end[1])},
 				P3: end,
 			})
 			current = end
@@ -90,40 +80,25 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			if !hasMoveTo {
 				continue
 			}
-			cp1 := [2]float32{float32(e.Control1.X), float32(e.Control1.Y)}
-			cp2 := [2]float32{float32(e.Control2.X), float32(e.Control2.Y)}
-			end := [2]float32{float32(e.Point.X), float32(e.Point.Y)}
 			cubics = append(cubics, tilecompute.CubicBezier{
 				P0: current,
-				P1: cp1,
-				P2: cp2,
-				P3: end,
+				P1: [2]float32{float32(e.Control1.X), float32(e.Control1.Y)},
+				P2: [2]float32{float32(e.Control2.X), float32(e.Control2.Y)},
+				P3: [2]float32{float32(e.Point.X), float32(e.Point.Y)},
 			})
-			current = end
+			current = [2]float32{float32(e.Point.X), float32(e.Point.Y)}
 
 		case gg.Close:
-			// Flush pending cubics.
-			if len(cubics) > 0 {
-				flatLines := tilecompute.FlattenFill(cubics)
-				lines = append(lines, flatLines...)
-				cubics = cubics[:0]
-			}
-			// Close the subpath with a line back to start.
+			lines = flushCubics(lines, cubics)
+			cubics = cubics[:0]
 			if hasMoveTo && current != subpathStart {
-				lines = append(lines, tilecompute.LineSoup{
-					P0: current,
-					P1: subpathStart,
-				})
+				lines = append(lines, tilecompute.LineSoup{P0: current, P1: subpathStart})
 			}
 			current = subpathStart
 		}
 	}
 
-	// Flush any remaining cubics (unclosed path).
-	if len(cubics) > 0 {
-		flatLines := tilecompute.FlattenFill(cubics)
-		lines = append(lines, flatLines...)
-	}
+	lines = flushCubics(lines, cubics)
 
 	// Extract color from paint.
 	color := extractColorU8(paint)
@@ -167,6 +142,33 @@ func clampU8(v float64) uint8 {
 		return 255
 	}
 	return uint8(x)
+}
+
+// convertPathToStrokeElements converts gg.Path elements to stroke package elements.
+func convertPathToStrokeElements(ggElems []gg.PathElement) []stroke.PathElement {
+	strokeElems := make([]stroke.PathElement, 0, len(ggElems))
+	for _, e := range ggElems {
+		switch el := e.(type) {
+		case gg.MoveTo:
+			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.LineTo:
+			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
+		case gg.QuadTo:
+			strokeElems = append(strokeElems, stroke.QuadTo{
+				Control: stroke.Point{X: el.Control.X, Y: el.Control.Y},
+				Point:   stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.CubicTo:
+			strokeElems = append(strokeElems, stroke.CubicTo{
+				Control1: stroke.Point{X: el.Control1.X, Y: el.Control1.Y},
+				Control2: stroke.Point{X: el.Control2.X, Y: el.Control2.Y},
+				Point:    stroke.Point{X: el.Point.X, Y: el.Point.Y},
+			})
+		case gg.Close:
+			strokeElems = append(strokeElems, stroke.Close{})
+		}
+	}
+	return strokeElems
 }
 
 // convertShapeToPathDef converts a detected shape (circle, rect, rrect, ellipse)

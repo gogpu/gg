@@ -49,7 +49,7 @@ func TestAlignConstants(t *testing.T) {
 	}
 
 	// Verify they can be used as Align type
-	var a Align = AlignCenter
+	a := AlignCenter
 	if a != text.AlignCenter {
 		t.Errorf("Align type alias not working: got %d", a)
 	}
