@@ -893,6 +893,56 @@ func BenchmarkRecorderSaveRestore(b *testing.B) {
 	}
 }
 
+func TestRecorderWordWrap_NoFont(t *testing.T) {
+	rec := NewRecorder(400, 200)
+
+	lines := rec.WordWrap("Hello world", 100)
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line without font, got %d", len(lines))
+	}
+	if lines[0] != "Hello world" {
+		t.Errorf("expected original string, got %q", lines[0])
+	}
+}
+
+func TestRecorderMeasureMultilineString_NoFont(t *testing.T) {
+	rec := NewRecorder(400, 200)
+
+	w, h := rec.MeasureMultilineString("Hello\nWorld", 1.0)
+	if w != 0 || h != 0 {
+		t.Errorf("no font: expected (0, 0), got (%f, %f)", w, h)
+	}
+}
+
+func TestRecorderDrawStringWrapped_NoFont(t *testing.T) {
+	rec := NewRecorder(400, 200)
+	rec.SetFontSize(16)
+
+	// Should not panic
+	rec.DrawStringWrapped("Hello World", 0, 0, 0, 0, 200, 1.0, 0) // AlignLeft = 0
+}
+
+func TestRecorderDrawStringWrapped_ProducesCommands(t *testing.T) {
+	rec := NewRecorder(400, 200)
+	rec.SetFontSize(16)
+
+	rec.DrawStringWrapped("Hello World", 0, 0, 0, 0, 200, 1.0, 0)
+
+	recording := rec.FinishRecording()
+
+	// Without a font face, the text won't wrap (single line), so we get 1 DrawText
+	hasDrawText := false
+	for _, cmd := range recording.Commands() {
+		if cmd.Type() == CmdDrawText {
+			hasDrawText = true
+			break
+		}
+	}
+	if !hasDrawText {
+		t.Error("DrawStringWrapped should produce at least one DrawTextCommand")
+	}
+}
+
 func BenchmarkRecorderComplexScene(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
