@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-02-27
+
+### Fixed
+
+- **Vulkan: rounded rectangle pixel corruption** — update wgpu v0.18.0 → v0.18.1 which fixes
+  buffer-to-image copy row stride calculation on non-power-of-2 width textures.
+  ([gogpu#96](https://github.com/gogpu/gogpu/discussions/96))
+
 ## [0.31.0] - 2026-02-27
 
 ### Breaking Changes

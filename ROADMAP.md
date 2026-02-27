@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.31.0
+## Current State: v0.31.1
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -37,6 +37,9 @@
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
+
+**New in v0.31.1:**
+- Fix Vulkan rounded rectangle pixel corruption — wgpu v0.18.1 (buffer-to-image copy row stride fix)
 
 **New in v0.31.0:**
 - Text API redesign: removed redundant `size` parameter (BREAKING)
