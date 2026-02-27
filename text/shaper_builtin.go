@@ -42,6 +42,12 @@ func (s *BuiltinShaper) Shape(text string, face Face, size float64) []ShapedGlyp
 	var x float64
 
 	for cluster, r := range runes {
+		// Skip control characters (U+0000..U+001F except tab U+0009)
+		// These have no visual representation and would render as □
+		if r < 0x20 && r != '\t' {
+			continue
+		}
+
 		// Get glyph index from font
 		gid := parsed.GlyphIndex(r)
 

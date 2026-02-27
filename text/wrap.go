@@ -1,6 +1,9 @@
 package text
 
-import "unicode"
+import (
+	"strings"
+	"unicode"
+)
 
 // WrapMode specifies how text is wrapped when it exceeds the maximum width.
 type WrapMode uint8
@@ -364,6 +367,7 @@ type WrapResult struct {
 }
 
 // WrapText wraps text to fit within maxWidth using the specified face and options.
+// Hard line breaks (\n, \r\n, \r) are respected — each paragraph is wrapped independently.
 // Returns a slice of wrapped line results.
 func WrapText(text string, face Face, size float64, maxWidth float64, mode WrapMode) []WrapResult {
 	if text == "" || maxWidth <= 0 {
@@ -374,9 +378,47 @@ func WrapText(text string, face Face, size float64, maxWidth float64, mode WrapM
 		return []WrapResult{{Text: text, Start: 0, End: len(text)}}
 	}
 
-	wrapInfo := newWrapTextInfo(text, mode)
+	// Normalize line endings and split into paragraphs
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	paragraphs := strings.Split(normalized, "\n")
+
+	results := make([]WrapResult, 0, len(paragraphs))
+	byteOffset := 0
+
+	for _, para := range paragraphs {
+		if para == "" {
+			// Empty paragraph (blank line) — preserve as empty line
+			results = append(results, WrapResult{
+				Text:  "",
+				Start: byteOffset,
+				End:   byteOffset,
+			})
+			byteOffset++ // skip the \n
+			continue
+		}
+
+		// Wrap this paragraph
+		paraResults := wrapParagraph(para, face, size, maxWidth, mode)
+
+		// Adjust byte offsets relative to original text
+		for i := range paraResults {
+			paraResults[i].Start += byteOffset
+			paraResults[i].End += byteOffset
+		}
+
+		results = append(results, paraResults...)
+		byteOffset += len(para) + 1 // +1 for the \n separator
+	}
+
+	return results
+}
+
+// wrapParagraph wraps a single paragraph (no hard line breaks) to fit within maxWidth.
+func wrapParagraph(para string, face Face, size float64, maxWidth float64, mode WrapMode) []WrapResult {
+	wrapInfo := newWrapTextInfo(para, mode)
 	if len(wrapInfo.runes) == 0 {
-		return []WrapResult{{Text: text, Start: 0, End: len(text)}}
+		return []WrapResult{{Text: para, Start: 0, End: len(para)}}
 	}
 
 	results := make([]WrapResult, 0, 4)

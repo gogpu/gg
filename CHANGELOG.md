@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.2] - 2026-02-27
+
+### Fixed
+
+- `FontSource.Face()` now panics with clear message instead of cryptic SIGSEGV when called on nil receiver ([#134](https://github.com/gogpu/gg/issues/134))
+- `BuiltinShaper` now skips control characters (U+0000..U+001F) instead of rendering them as missing glyph boxes ([#134](https://github.com/gogpu/gg/issues/134))
+- `WrapText` now respects hard line breaks (`\n`, `\r\n`, `\r`) — paragraphs are split before wrapping, matching `LayoutText` behavior ([#134](https://github.com/gogpu/gg/issues/134))
+- **Vello compute GPU buffer overflow** — `computeBufferSizes` used `numLines * 4` heuristic for segment buffer allocation, which overflowed for scenes with long diagonal lines (e.g., a 3-line triangle needed 23 segment slots but only 12 were allocated). Replaced with DDA upper bound `numLines * (widthInTiles + heightInTiles)` ([#135](https://github.com/gogpu/gg/issues/135))
+
+### Dependencies
+
+- wgpu v0.16.15 → v0.16.17 (load platform Vulkan surface creation functions — [gogpu#106](https://github.com/gogpu/gogpu/issues/106))
+
 ## [0.30.1] - 2026-02-25
 
 ### Dependencies
