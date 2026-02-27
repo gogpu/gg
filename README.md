@@ -27,7 +27,7 @@
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/34243cff-5434-411c-a17c-3e52a80f1d57" width="100%" autoplay loop muted playsinline>
-    Four-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text — all in a single render pass
+    Five-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline
   </video>
   <br>
   <sub>Four-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, and MSDF text in a single render pass.
