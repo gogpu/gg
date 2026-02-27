@@ -17,20 +17,18 @@
 // written by the coarse stage. It uses seg_start = ~tile.segment_count_or_ix
 // to determine WHERE to write each PathSegment in the segments buffer.
 //
-// WORKAROUND STATUS (2026-02-25):
-// This shader uses two workarounds for naga SPIR-V backend bugs:
+// WORKAROUND STATUS (2026-02-27):
+// This shader uses select() instead of if/else for conditional assignments
+// (NAGA-SPV-007). Root cause: prologue pre-computes var inits using stale
+// local variables. Fix applied in naga/wgsl/lower.go (init splitting),
+// verified via SPIR-V disassembly. However, runtime still shows 12.5% pixel
+// diff — an unknown residual issue persists. Workaround remains until
+// NAGA-SPV-008 is resolved.
+// See: naga/docs/dev/kanban/0-backlog/NAGA-SPV-008-runtime-residual-prologue.md
 //
-// 1. select() instead of if/else for conditional assignments (NAGA-SPV-007).
-//    Root cause: prologue pre-computes var inits using stale local variables.
-//    Fix applied in naga/wgsl/lower.go (init splitting), verified via SPIR-V
-//    disassembly. However, runtime still shows 12.5% pixel diff — an unknown
-//    residual issue persists. Workaround remains until NAGA-SPV-008 is resolved.
-//    See: naga/docs/dev/kanban/0-backlog/NAGA-SPV-008-runtime-residual-prologue.md
-//
-// 2. let-chain (no vec2 var reassignment) to avoid silently dropped stores.
-//    Also related to NAGA-SPV-007 investigation.
-//
-// Removal tracked in: gg/docs/dev/kanban/0-backlog/GG-COMPUTE-002-remove-path-tiling-workaround.md
+// Previously removed workarounds (verified safe to remove 2026-02-27):
+// - span() function inlining (naga function inlining bug — now fixed)
+// - let-chain for vec2 (var reassignment bug — now fixed)
 
 // --- Shared types ---
 
@@ -102,6 +100,12 @@ const ONE_MINUS_ULP: f32 = 0.99999994;
 const ROBUST_EPSILON: f32 = 2e-7;
 const EPSILON: f32 = 1e-6;
 
+// --- Helper functions ---
+
+fn span(a: f32, b: f32) -> u32 {
+    return u32(max(ceil(max(a, b)) - floor(min(a, b)), 1.0));
+}
+
 // --- Bindings ---
 //
 // Matches Vello path_tiling.wgsl binding layout.
@@ -133,18 +137,19 @@ fn main(
     let seg_within_line = counts & 0xffffu;
 
     // Recompute DDA parameters (identical to path_count).
-    // WORKAROUND: Use only let (no var reassignment for vec2) to avoid
-    // naga SPIR-V codegen bug where vec2 var reassignment is silently ignored.
     let p0 = vec2<f32>(line.p0x, line.p0y);
     let p1 = vec2<f32>(line.p1x, line.p1y);
     let is_down = p1.y >= p0.y;
-    let xy0_raw = select(p1, p0, is_down);
-    let xy1_raw = select(p0, p1, is_down);
-    let s0 = xy0_raw * TILE_SCALE;
-    let s1 = xy1_raw * TILE_SCALE;
-    // WORKAROUND: span() inlined to avoid naga SPIR-V function inlining bug.
-    var count_x = u32(max(ceil(max(s0.x, s1.x)) - floor(min(s0.x, s1.x)), 1.0)) - 1u;
-    var count = count_x + u32(max(ceil(max(s0.y, s1.y)) - floor(min(s0.y, s1.y)), 1.0));
+    var xy0 = p0;
+    var xy1 = p1;
+    if !is_down {
+        xy0 = p1;
+        xy1 = p0;
+    }
+    let s0 = xy0 * TILE_SCALE;
+    let s1 = xy1 * TILE_SCALE;
+    var count_x = span(s0.x, s1.x) - 1u;
+    var count = count_x + span(s0.y, s1.y);
 
     let dx = abs(s1.x - s0.x);
     let dy = s1.y - s0.y;
