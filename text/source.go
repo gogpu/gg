@@ -91,7 +91,11 @@ func NewFontSourceFromFile(path string, opts ...SourceOption) (*FontSource, erro
 // Multiple faces can be created from the same FontSource.
 //
 // Face is a lightweight object that shares caches with the FontSource.
+// Panics if s is nil (e.g. when NewFontSourceFromFile error was ignored).
 func (s *FontSource) Face(size float64, opts ...FaceOption) Face {
+	if s == nil {
+		panic("text: FontSource is nil — did you check the error from NewFontSourceFromFile?")
+	}
 	s.copyCheck()
 
 	// Apply face options
