@@ -96,8 +96,8 @@
 - [x] MSDF text pipeline (Tier 4 in GPURenderSession)
 - [x] WGSL MSDF fragment shader (median + smoothstep)
 - [x] Persistent text vertex/index/uniform buffers
-- [ ] Atlas generation from font glyphs
-- [ ] DrawString → GPU text batch integration
+- [x] Atlas generation from font glyphs
+- [x] DrawString → GPU text batch integration
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee

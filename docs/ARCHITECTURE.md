@@ -83,7 +83,7 @@ dispatches shapes and text to five rendering tiers:
 | **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
 
 Tiers 1–4 use a render-pass pipeline (one render pass, multiple pipeline switches).
-Tier 5 uses a compute-only pipeline (8 dispatch stages, no render pass).
+Tier 5 uses a compute-only pipeline (9 dispatch stages, no render pass).
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 

@@ -285,7 +285,7 @@ opts := text.LayoutOptions{
     WrapMode:  text.WrapWordChar,
     Alignment: text.AlignCenter,
 }
-layout := text.LayoutText("Long text...", face, 16, opts)
+layout := text.LayoutText("Long text...", face, opts)
 ```
 
 ### Color Emoji

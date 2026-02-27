@@ -6,8 +6,9 @@ gogpu/gg is currently in early development (v0.x.x).
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1.0 | :x:                |
+| 0.31.x  | :white_check_mark: |
+| 0.30.x  | :white_check_mark: |
+| < 0.30  | :x:                |
 
 ## Reporting a Vulnerability
 
