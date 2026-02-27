@@ -174,11 +174,17 @@ func LayoutTextWithContext(ctx context.Context, text string, face Face, size flo
 			line := &paraLines[j]
 
 			// Calculate baseline position: previous Y + line ascent
-			if len(layout.Lines) == 0 {
+			if len(layout.Lines) == 0 && j == 0 {
+				// Very first line of entire layout
 				y = line.Ascent
 			} else {
-				// Add spacing between lines
-				prevLine := &layout.Lines[len(layout.Lines)-1]
+				// Get previous line: from current paragraph or from layout.Lines
+				var prevLine *Line
+				if j > 0 {
+					prevLine = &paraLines[j-1]
+				} else {
+					prevLine = &layout.Lines[len(layout.Lines)-1]
+				}
 				lineGap := metrics.LineGap * opts.LineSpacing
 				y = prevLine.Y + prevLine.Descent + lineGap + line.Ascent
 			}
