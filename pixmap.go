@@ -63,6 +63,23 @@ func (p *Pixmap) SetPixel(x, y int, c RGBA) {
 	p.data[i+3] = uint8(clamp255(c.A * 255))
 }
 
+// SetPixelPremul sets a pixel using premultiplied RGBA uint8 values directly.
+// This skips the float-to-uint8 conversion, clamping, and premultiplication
+// overhead of SetPixel. Use this when colors are precomputed for batch operations.
+//
+// Values must already be in premultiplied alpha form and clamped to [0, 255].
+// Out-of-bounds coordinates are silently ignored.
+func (p *Pixmap) SetPixelPremul(x, y int, r, g, b, a uint8) {
+	if x < 0 || x >= p.width || y < 0 || y >= p.height {
+		return
+	}
+	i := (y*p.width + x) * 4
+	p.data[i+0] = r
+	p.data[i+1] = g
+	p.data[i+2] = b
+	p.data[i+3] = a
+}
+
 // GetPixel returns the color of a single pixel as straight (non-premultiplied) RGBA.
 // Internally the pixel is stored as premultiplied alpha; this method un-premultiplies.
 func (p *Pixmap) GetPixel(x, y int) RGBA {

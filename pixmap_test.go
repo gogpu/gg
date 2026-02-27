@@ -4,6 +4,115 @@ import (
 	"testing"
 )
 
+// TestSetPixelPremul tests the SetPixelPremul method.
+func TestSetPixelPremul(t *testing.T) {
+	pm := NewPixmap(10, 10)
+	pm.Clear(Transparent)
+
+	// Set a known premultiplied pixel
+	pm.SetPixelPremul(5, 5, 128, 64, 32, 255)
+
+	// Verify raw data directly
+	i := (5*10 + 5) * 4
+	data := pm.Data()
+	if data[i+0] != 128 || data[i+1] != 64 || data[i+2] != 32 || data[i+3] != 255 {
+		t.Errorf("raw data mismatch: got (%d, %d, %d, %d), want (128, 64, 32, 255)",
+			data[i+0], data[i+1], data[i+2], data[i+3])
+	}
+
+	// Verify via At() (returns premultiplied color.RGBA)
+	c := pm.At(5, 5)
+	r, g, b, a := c.RGBA()
+	// color.RGBA returns values scaled to 0-65535
+	if r != 128*257 || g != 64*257 || b != 32*257 || a != 255*257 {
+		t.Errorf("At() mismatch: got (%d, %d, %d, %d), want (%d, %d, %d, %d)",
+			r, g, b, a, 128*257, 64*257, 32*257, 255*257)
+	}
+}
+
+// TestSetPixelPremul_OutOfBounds verifies out-of-bounds coordinates are silently ignored.
+func TestSetPixelPremul_OutOfBounds(t *testing.T) {
+	pm := NewPixmap(10, 10)
+	pm.Clear(Black)
+
+	// Save original data
+	original := make([]uint8, len(pm.Data()))
+	copy(original, pm.Data())
+
+	// These should not panic and should not modify data
+	oob := []struct{ x, y int }{
+		{-1, 5}, {10, 5}, {5, -1}, {5, 10},
+		{-100, -100}, {100, 100},
+	}
+	for _, c := range oob {
+		pm.SetPixelPremul(c.x, c.y, 255, 0, 0, 255)
+	}
+
+	// Data should be unchanged
+	for i, v := range pm.Data() {
+		if v != original[i] {
+			t.Fatalf("out-of-bounds write modified data at index %d: got %d, want %d", i, v, original[i])
+		}
+	}
+}
+
+// TestSetPixelPremul_ConsistentWithSetPixel verifies that SetPixelPremul produces
+// the same result as SetPixel for an opaque color.
+func TestSetPixelPremul_ConsistentWithSetPixel(t *testing.T) {
+	pm1 := NewPixmap(10, 10)
+	pm2 := NewPixmap(10, 10)
+
+	// SetPixel with opaque red: R=1, G=0, B=0, A=1 → premul (255, 0, 0, 255)
+	pm1.SetPixel(3, 7, Red)
+	pm2.SetPixelPremul(3, 7, 255, 0, 0, 255)
+
+	i := (7*10 + 3) * 4
+	d1 := pm1.Data()
+	d2 := pm2.Data()
+	if d1[i] != d2[i] || d1[i+1] != d2[i+1] || d1[i+2] != d2[i+2] || d1[i+3] != d2[i+3] {
+		t.Errorf("SetPixel(%d,%d,%d,%d) != SetPixelPremul(%d,%d,%d,%d)",
+			d1[i], d1[i+1], d1[i+2], d1[i+3],
+			d2[i], d2[i+1], d2[i+2], d2[i+3])
+	}
+}
+
+// TestSetPixelPremul_SemiTransparent verifies premultiplied semi-transparent values.
+func TestSetPixelPremul_SemiTransparent(t *testing.T) {
+	pm := NewPixmap(10, 10)
+
+	// 50% transparent red: premultiplied = (128, 0, 0, 128)
+	pm.SetPixelPremul(0, 0, 128, 0, 0, 128)
+
+	// GetPixel un-premultiplies: R=128/128=1.0, A=128/255≈0.502
+	c := pm.GetPixel(0, 0)
+	tolerance := 0.01
+	if abs(c.R-1.0) > tolerance {
+		t.Errorf("R: got %.4f, want 1.0", c.R)
+	}
+	if abs(c.G-0.0) > tolerance {
+		t.Errorf("G: got %.4f, want 0.0", c.G)
+	}
+	if abs(c.B-0.0) > tolerance {
+		t.Errorf("B: got %.4f, want 0.0", c.B)
+	}
+	if abs(c.A-128.0/255.0) > tolerance {
+		t.Errorf("A: got %.4f, want %.4f", c.A, 128.0/255.0)
+	}
+}
+
+// TestSetPixelPremul_ZeroAlpha verifies fully transparent pixel.
+func TestSetPixelPremul_ZeroAlpha(t *testing.T) {
+	pm := NewPixmap(10, 10)
+	pm.Clear(White)
+
+	pm.SetPixelPremul(0, 0, 0, 0, 0, 0)
+
+	c := pm.GetPixel(0, 0)
+	if c.A != 0 {
+		t.Errorf("expected zero alpha, got %.4f", c.A)
+	}
+}
+
 // TestPixmapFillSpan tests the FillSpan method with various span sizes.
 func TestPixmapFillSpan(t *testing.T) {
 	tests := []struct {
