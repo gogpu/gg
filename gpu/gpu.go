@@ -20,10 +20,15 @@ import (
 )
 
 func init() {
+	// GPU accelerator (SDF shapes: circles, rounded rects)
 	accel := &gpuimpl.SDFAccelerator{}
 	if err := gg.RegisterAccelerator(accel); err != nil {
 		gg.Logger().Warn("GPU accelerator not available", "err", err)
 	}
+
+	// Coverage filler: SparseStrips (4x4 tiles, SIMD-optimized for CPU)
+	// Alternative: &gpuimpl.TileComputeFiller{} (16x16 tiles, GPU workgroup-optimized)
+	gg.RegisterCoverageFiller(&gpuimpl.SparseStripsFiller{})
 }
 
 // SetDeviceProvider configures the GPU accelerator to use a shared GPU device

@@ -76,9 +76,36 @@ func convertGGPathToCorePath(p *Path) raster.PathLike {
 	return raster.NewScenePathAdapter(len(verbs) == 0, verbs, points)
 }
 
+// coverageFillerThreshold is the path element count above which the
+// CoverageFiller (tile-based) is preferred over the AnalyticFiller (scanline).
+// Below this threshold, AnalyticFiller wins due to zero tile overhead.
+const coverageFillerThreshold = 64
+
 // Fill implements Renderer.Fill using analytic anti-aliasing.
+// For complex paths (> coverageFillerThreshold elements), it auto-selects the
+// registered CoverageFiller (tile-based rasterizer) when available.
 func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Reset the edge builder and filler
+	// Try CoverageFiller for complex paths (SparseStrips / TileCompute)
+	if filler := GetCoverageFiller(); filler != nil && len(p.Elements()) > coverageFillerThreshold {
+		fillRule := FillRuleNonZero
+		if paint.FillRule == FillRuleEvenOdd {
+			fillRule = FillRuleEvenOdd
+		}
+		if color, ok := solidColorFromPaint(paint); ok {
+			filler.FillCoverage(p, r.width, r.height, fillRule,
+				func(x, y int, coverage uint8) {
+					r.blendCoverageSolid(pixmap, x, y, coverage, color)
+				})
+		} else {
+			filler.FillCoverage(p, r.width, r.height, fillRule,
+				func(x, y int, coverage uint8) {
+					r.blendCoveragePaint(pixmap, x, y, coverage, paint)
+				})
+		}
+		return nil
+	}
+
+	// AnalyticFiller path (scanline) — simple paths or no CoverageFiller registered
 	r.edgeBuilder.Reset()
 	r.analyticFiller.Reset()
 
@@ -110,6 +137,66 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 
 	return nil
+}
+
+// blendCoverageSolid blends a single pixel with solid color and coverage.
+// Uses premultiplied source-over compositing.
+func (r *SoftwareRenderer) blendCoverageSolid(pixmap *Pixmap, x, y int, coverage uint8, color RGBA) {
+	if x < 0 || x >= pixmap.Width() || y < 0 || y >= pixmap.Height() {
+		return
+	}
+
+	if coverage == 255 && color.A == 1.0 {
+		pixmap.SetPixel(x, y, color)
+		return
+	}
+
+	srcAlpha := color.A * float64(coverage) / 255.0
+	invSrcAlpha := 1.0 - srcAlpha
+
+	srcR := color.R * srcAlpha
+	srcG := color.G * srcAlpha
+	srcB := color.B * srcAlpha
+
+	dstR, dstG, dstB, dstA := pixmap.getPremul(x, y)
+
+	pixmap.setPremul(x, y,
+		srcR+dstR*invSrcAlpha,
+		srcG+dstG*invSrcAlpha,
+		srcB+dstB*invSrcAlpha,
+		srcAlpha+dstA*invSrcAlpha,
+	)
+}
+
+// blendCoveragePaint blends a single pixel with paint-sampled color and coverage.
+// Uses premultiplied source-over compositing.
+func (r *SoftwareRenderer) blendCoveragePaint(pixmap *Pixmap, x, y int, coverage uint8, paint *Paint) {
+	if x < 0 || x >= pixmap.Width() || y < 0 || y >= pixmap.Height() {
+		return
+	}
+
+	color := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+
+	if coverage == 255 && color.A == 1.0 {
+		pixmap.SetPixel(x, y, color)
+		return
+	}
+
+	srcAlpha := color.A * float64(coverage) / 255.0
+	invSrcAlpha := 1.0 - srcAlpha
+
+	srcR := color.R * srcAlpha
+	srcG := color.G * srcAlpha
+	srcB := color.B * srcAlpha
+
+	dstR, dstG, dstB, dstA := pixmap.getPremul(x, y)
+
+	pixmap.setPremul(x, y,
+		srcR+dstR*invSrcAlpha,
+		srcG+dstG*invSrcAlpha,
+		srcB+dstB*invSrcAlpha,
+		srcAlpha+dstA*invSrcAlpha,
+	)
 }
 
 // solidColorFromPaint returns the solid color if paint is solid.
