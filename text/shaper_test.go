@@ -26,7 +26,7 @@ func builtinTestFace(t *testing.T) Face {
 func TestBuiltinShapeEmpty(t *testing.T) {
 	face := builtinTestFace(t)
 
-	result := Shape("", face, 16.0)
+	result := Shape("", face)
 	if result != nil {
 		t.Errorf("Shape(\"\") = %v, want nil", result)
 	}
@@ -53,7 +53,7 @@ func TestBuiltinShapeLatinText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := Shape(tt.text, face, 16.0)
+			result := Shape(tt.text, face)
 
 			if len(result) != tt.wantLen {
 				t.Errorf("len(Shape(%q)) = %d, want %d", tt.text, len(result), tt.wantLen)
@@ -87,7 +87,7 @@ func TestBuiltinShapeCyrillic(t *testing.T) {
 
 	// Go Regular font supports Cyrillic
 	text := "Hello" // Using Latin as Go Regular may not have full Cyrillic
-	result := Shape(text, face, 16.0)
+	result := Shape(text, face)
 
 	if len(result) != 5 {
 		t.Errorf("len(Shape(%q)) = %d, want 5", text, len(result))
@@ -112,7 +112,7 @@ func TestBuiltinShapeCJK(t *testing.T) {
 	// Note: Go Regular font may not have CJK glyphs
 	// We just test that shaping completes without panic
 	text := "ABC123" // Use ASCII that definitely exists
-	result := Shape(text, face, 16.0)
+	result := Shape(text, face)
 
 	if len(result) != 6 {
 		t.Errorf("len(Shape(%q)) = %d, want 6", text, len(result))
@@ -170,7 +170,7 @@ func TestGetShaper(t *testing.T) {
 
 // TestShapeNilFace tests shaping with nil face.
 func TestShapeNilFace(t *testing.T) {
-	result := Shape("Hello", nil, 16.0)
+	result := Shape("Hello", nil)
 	if result != nil {
 		t.Errorf("Shape with nil face should return nil, got %v", result)
 	}
@@ -181,7 +181,7 @@ func TestBuiltinShaperDirectly(t *testing.T) {
 	face := builtinTestFace(t)
 	shaper := &BuiltinShaper{}
 
-	result := shaper.Shape("Test", face, 16.0)
+	result := shaper.Shape("Test", face)
 	if len(result) != 4 {
 		t.Errorf("len(BuiltinShaper.Shape(\"Test\")) = %d, want 4", len(result))
 	}
@@ -191,7 +191,7 @@ func TestBuiltinShaperDirectly(t *testing.T) {
 func TestShapedGlyphFields(t *testing.T) {
 	face := builtinTestFace(t)
 
-	result := Shape("AB", face, 16.0)
+	result := Shape("AB", face)
 	if len(result) != 2 {
 		t.Fatalf("len(Shape(\"AB\")) = %d, want 2", len(result))
 	}
@@ -233,7 +233,7 @@ func TestShapeDifferentSizes(t *testing.T) {
 
 	for _, size := range sizes {
 		face := source.Face(size)
-		result := Shape("Hello", face, size)
+		result := Shape("Hello", face)
 
 		if len(result) != 5 {
 			t.Errorf("size %f: len(Shape) = %d, want 5", size, len(result))
@@ -264,7 +264,7 @@ func TestBuiltinShaperConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				result := Shape("Hello World", face, 16.0)
+				result := Shape("Hello World", face)
 				if len(result) != 11 {
 					errors <- nil // Signal error (can't use t.Error in goroutine)
 				}
@@ -289,7 +289,7 @@ type mockShaper struct {
 	glyphs []ShapedGlyph
 }
 
-func (m *mockShaper) Shape(string, Face, float64) []ShapedGlyph {
+func (m *mockShaper) Shape(string, Face) []ShapedGlyph {
 	return m.glyphs
 }
 
@@ -310,7 +310,7 @@ func TestCustomShaperIntegration(t *testing.T) {
 
 	// Shape should return custom glyphs regardless of input
 	face := builtinTestFace(t)
-	result := Shape("anything", face, 16.0)
+	result := Shape("anything", face)
 
 	if len(result) != 2 {
 		t.Fatalf("custom shaper should return 2 glyphs, got %d", len(result))
@@ -336,7 +336,7 @@ func BenchmarkBuiltinShape(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = Shape(text, face, 16.0)
+		_ = Shape(text, face)
 	}
 }
 
@@ -355,7 +355,7 @@ func BenchmarkBuiltinShapeShort(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = Shape(text, face, 16.0)
+		_ = Shape(text, face)
 	}
 }
 
@@ -374,6 +374,6 @@ func BenchmarkBuiltinShapeLong(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = Shape(text, face, 16.0)
+		_ = Shape(text, face)
 	}
 }

@@ -220,7 +220,7 @@ func (r *TextRenderer) RenderText(str string, face text.Face) ([]*RenderedGlyph,
 	}
 
 	// Shape the text
-	shaped := text.Shape(str, face, face.Size())
+	shaped := text.Shape(str, face)
 	if len(shaped) == 0 {
 		return nil, nil
 	}
@@ -252,7 +252,7 @@ func (r *TextRenderer) RenderTextToScene(s *Scene, str string, face text.Face, x
 	}
 
 	// Shape the text
-	shaped := text.Shape(str, face, face.Size())
+	shaped := text.Shape(str, face)
 	if len(shaped) == 0 {
 		return nil
 	}

@@ -39,8 +39,8 @@ func drawGradientBackground(dc *gg.Context, w, h int) {
 	steps := 100
 	for i := 0; i < steps; i++ {
 		t := float64(i) / float64(steps)
-		color := gg.RGB(0.1+t*0.4, 0.2+t*0.3, 0.4+t*0.2)
-		dc.SetColor(color.Color())
+		c := gg.RGB(0.1+t*0.4, 0.2+t*0.3, 0.4+t*0.2)
+		dc.SetColor(c)
 		y := float64(h) * t
 		dc.DrawRectangle(0, y, float64(w), float64(h)/float64(steps)+1)
 		_ = dc.Fill()
@@ -86,8 +86,8 @@ func drawTransformDemo(dc *gg.Context) {
 
 		// Color based on rotation
 		hue := float64(i) * 45
-		color := gg.HSL(hue, 0.8, 0.6)
-		dc.SetColor(color.Color())
+		c := gg.HSL(hue, 0.8, 0.6)
+		dc.SetColor(c)
 
 		dc.DrawRectangle(-30, -30, 60, 60)
 		_ = dc.Fill()

@@ -368,8 +368,9 @@ type WrapResult struct {
 
 // WrapText wraps text to fit within maxWidth using the specified face and options.
 // Hard line breaks (\n, \r\n, \r) are respected — each paragraph is wrapped independently.
+// The font size is obtained from face.Size().
 // Returns a slice of wrapped line results.
-func WrapText(text string, face Face, size float64, maxWidth float64, mode WrapMode) []WrapResult {
+func WrapText(text string, face Face, maxWidth float64, mode WrapMode) []WrapResult {
 	if text == "" || maxWidth <= 0 {
 		return []WrapResult{{Text: text, Start: 0, End: len(text)}}
 	}
@@ -399,7 +400,7 @@ func WrapText(text string, face Face, size float64, maxWidth float64, mode WrapM
 		}
 
 		// Wrap this paragraph
-		paraResults := wrapParagraph(para, face, size, maxWidth, mode)
+		paraResults := wrapParagraph(para, face, maxWidth, mode)
 
 		// Adjust byte offsets relative to original text
 		for i := range paraResults {
@@ -415,7 +416,7 @@ func WrapText(text string, face Face, size float64, maxWidth float64, mode WrapM
 }
 
 // wrapParagraph wraps a single paragraph (no hard line breaks) to fit within maxWidth.
-func wrapParagraph(para string, face Face, size float64, maxWidth float64, mode WrapMode) []WrapResult {
+func wrapParagraph(para string, face Face, maxWidth float64, mode WrapMode) []WrapResult {
 	wrapInfo := newWrapTextInfo(para, mode)
 	if len(wrapInfo.runes) == 0 {
 		return []WrapResult{{Text: para, Start: 0, End: len(para)}}
@@ -426,7 +427,7 @@ func wrapParagraph(para string, face Face, size float64, maxWidth float64, mode 
 
 	for lineStart < len(wrapInfo.runes) {
 		// Find the end of this line
-		lineEnd := findLineEnd(wrapInfo, lineStart, face, size, maxWidth, mode)
+		lineEnd := findLineEnd(wrapInfo, lineStart, face, maxWidth, mode)
 
 		// Create result
 		startByte := wrapInfo.runeToByteOffset(lineStart)
@@ -449,7 +450,7 @@ func wrapParagraph(para string, face Face, size float64, maxWidth float64, mode 
 }
 
 // findLineEnd finds the end rune index for a line starting at lineStart.
-func findLineEnd(w *wrapTextInfo, lineStart int, face Face, size, maxWidth float64, mode WrapMode) int {
+func findLineEnd(w *wrapTextInfo, lineStart int, face Face, maxWidth float64, mode WrapMode) int {
 	if lineStart >= len(w.runes) {
 		return lineStart
 	}
@@ -465,7 +466,7 @@ func findLineEnd(w *wrapTextInfo, lineStart int, face Face, size, maxWidth float
 		}
 
 		// Measure the current rune
-		runeWidth := measureRune(w.runes[i], face, size)
+		runeWidth := measureRune(w.runes[i], face)
 		newWidth := width + runeWidth
 
 		// Track break opportunities
@@ -510,9 +511,9 @@ func calculateLineBreakPosition(w *wrapTextInfo, pos, lineStart, lastBreakPoint 
 }
 
 // measureRune measures the advance width of a single rune.
-func measureRune(r rune, face Face, size float64) float64 {
+func measureRune(r rune, face Face) float64 {
 	// Use shaping for accurate measurement
-	glyphs := Shape(string(r), face, size)
+	glyphs := Shape(string(r), face)
 	if len(glyphs) == 0 {
 		return 0
 	}
@@ -525,12 +526,13 @@ func measureRune(r rune, face Face, size float64) float64 {
 }
 
 // MeasureText measures the total advance width of text.
-func MeasureText(text string, face Face, size float64) float64 {
+// The font size is obtained from face.Size().
+func MeasureText(text string, face Face) float64 {
 	if text == "" || face == nil {
 		return 0
 	}
 
-	glyphs := Shape(text, face, size)
+	glyphs := Shape(text, face)
 	var width float64
 	for i := range glyphs {
 		width += glyphs[i].XAdvance

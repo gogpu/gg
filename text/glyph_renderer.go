@@ -431,7 +431,7 @@ func (tr *TextRenderer) ShapeAndRender(text string) ([]*GlyphOutline, error) {
 	}
 
 	// Shape the text
-	glyphs := Shape(text, tr.defaultFace, tr.defaultSize)
+	glyphs := Shape(text, tr.defaultFace)
 	if len(glyphs) == 0 {
 		return nil, nil
 	}
@@ -457,7 +457,7 @@ func (tr *TextRenderer) ShapeAndRenderAt(text string, x, y float64) ([]*GlyphOut
 	}
 
 	// Shape the text
-	glyphs := Shape(text, tr.defaultFace, tr.defaultSize)
+	glyphs := Shape(text, tr.defaultFace)
 	if len(glyphs) == 0 {
 		return nil, nil
 	}

@@ -1,6 +1,6 @@
 # text — GPU Text Pipeline for gg
 
-**Status:** v0.13.0 (Released)
+**Status:** v0.14.0 (Released as part of gg v0.31.0)
 
 This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2, go-text/typesetting, and vello.
 
@@ -50,7 +50,7 @@ Bidi/Script  Cache    Lines    ┌────┴────┐
 
 ### Shaping Cache (v0.10.0)
 - **16-shard LRU** — Concurrent access without lock contention
-- **16K total entries** — 1024 per shard
+- **4K total entries** — 256 per shard
 - **Zero-allocation hot path** — Pre-allocated result storage
 
 ## Usage
@@ -78,7 +78,7 @@ dc.DrawString("Hello, GoGPU!", 100, 100)
 
 ```go
 // Shape text to positioned glyphs
-glyphs := text.Shape("Hello", face, 24)
+glyphs := text.Shape("Hello", face)
 for _, g := range glyphs {
     fmt.Printf("GID=%d X=%.1f Y=%.1f\n", g.GID, g.X, g.Y)
 }
@@ -109,7 +109,7 @@ opts := text.LayoutOptions{
     Direction:   text.DirectionLTR,
     WrapMode:    text.WrapWordChar, // Word-first, char fallback (default)
 }
-layout := text.LayoutText(longText, face, 16, opts)
+layout := text.LayoutText(longText, face, opts)
 
 // Access lines
 for _, line := range layout.Lines {
@@ -118,7 +118,7 @@ for _, line := range layout.Lines {
 }
 
 // Simple layout (no wrapping)
-layout = text.LayoutTextSimple("Hello\nWorld", face, 16)
+layout = text.LayoutTextSimple("Hello\nWorld", face)
 ```
 
 ### Text Wrapping Modes
@@ -140,13 +140,13 @@ opts.WrapMode = text.WrapChar
 opts.WrapMode = text.WrapNone
 
 // Standalone wrapping API
-results := text.WrapText("Hello World", face, 16, 100, text.WrapWordChar)
+results := text.WrapText("Hello World", face, 100, text.WrapWordChar)
 for _, r := range results {
     fmt.Printf("Line: '%s' (%d-%d)\n", r.Text, r.Start, r.End)
 }
 
 // Measure text width
-width := text.MeasureText("Hello World", face, 16)
+width := text.MeasureText("Hello World", face)
 ```
 
 ### GoTextShaper (HarfBuzz-level shaping)
@@ -158,7 +158,7 @@ text.SetShaper(shaper)
 defer text.SetShaper(nil) // Reset to BuiltinShaper
 
 // Shape text — now uses go-text/typesetting HarfBuzz engine
-glyphs := text.Shape("Hello", face, 24)
+glyphs := text.Shape("Hello", face)
 ```
 
 GoTextShaper is safe for concurrent use and caches parsed font data internally.
@@ -171,7 +171,7 @@ type MyShaper struct {
     // ...
 }
 
-func (s *MyShaper) Shape(text string, face text.Face, size float64) []text.ShapedGlyph {
+func (s *MyShaper) Shape(text string, face text.Face) []text.ShapedGlyph {
     // Custom shaping logic
 }
 
@@ -259,7 +259,13 @@ Emoji and color font support.
 
 ## Versions
 
-### v0.13.0 (Current)
+### v0.14.0 (Current — part of gg v0.31.0)
+- [x] **BREAKING: Removed `size` parameter** — `Shape()`, `LayoutText()`, `WrapText()`, `MeasureText()` now derive size from `face.Size()`
+- [x] **Shaper interface simplified** — `Shape(text, face)` instead of `Shape(text, face, size)`
+- [x] **LayoutText Y positions fixed** — Lines now have correct cumulative Y positions
+- [x] **Hard line breaks in WrapText** — `\n`, `\r\n`, `\r` respected in wrapping
+
+### v0.13.0
 - [x] **WrapMode enum** — WrapWordChar, WrapNone, WrapWord, WrapChar
 - [x] **BreakClass** — UAX #14 simplified line breaking
 - [x] **WrapText()** — Standalone wrapping API

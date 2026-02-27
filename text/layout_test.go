@@ -26,7 +26,7 @@ func layoutTestFace(t *testing.T) Face {
 func TestLayoutText_Empty(t *testing.T) {
 	face := layoutTestFace(t)
 
-	layout := LayoutText("", face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText("", face, DefaultLayoutOptions())
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil for empty string")
@@ -44,7 +44,7 @@ func TestLayoutText_Empty(t *testing.T) {
 
 // TestLayoutText_NilFace tests layout with nil face.
 func TestLayoutText_NilFace(t *testing.T) {
-	layout := LayoutText("Hello", nil, 16.0, DefaultLayoutOptions())
+	layout := LayoutText("Hello", nil, DefaultLayoutOptions())
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil for nil face")
@@ -59,7 +59,7 @@ func TestLayoutText_SingleLine(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Hello World"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil")
@@ -102,7 +102,7 @@ func TestLayoutText_MultiLine(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Line One\nLine Two\nLine Three"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil")
@@ -132,7 +132,7 @@ func TestLayoutText_WindowsLineEndings(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Line One\r\nLine Two"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 2 {
 		t.Errorf("expected 2 lines for CRLF text, got %d", len(layout.Lines))
@@ -144,7 +144,7 @@ func TestLayoutText_MacLineEndings(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Line One\rLine Two"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 2 {
 		t.Errorf("expected 2 lines for CR text, got %d", len(layout.Lines))
@@ -156,7 +156,7 @@ func TestLayoutText_EmptyLines(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Line One\n\nLine Three"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 3 {
 		t.Errorf("expected 3 lines (including empty), got %d", len(layout.Lines))
@@ -238,7 +238,7 @@ func TestLayoutText_Alignment(t *testing.T) {
 				Direction:   DirectionLTR,
 			}
 
-			layout := LayoutText(text, face, 16.0, opts)
+			layout := LayoutText(text, face, opts)
 
 			if len(layout.Lines) != 1 {
 				t.Fatalf("expected 1 line, got %d", len(layout.Lines))
@@ -286,7 +286,7 @@ func TestLayoutText_MaxWidth(t *testing.T) {
 		Direction:   DirectionLTR,
 	}
 
-	layout := LayoutText(text, face, 16.0, opts)
+	layout := LayoutText(text, face, opts)
 
 	if len(layout.Lines) <= 1 {
 		t.Errorf("expected multiple lines with MaxWidth=100, got %d", len(layout.Lines))
@@ -313,7 +313,7 @@ func TestLayoutText_NoWrap(t *testing.T) {
 		Direction:   DirectionLTR,
 	}
 
-	layout := LayoutText(text, face, 16.0, opts)
+	layout := LayoutText(text, face, opts)
 
 	if len(layout.Lines) != 1 {
 		t.Errorf("expected 1 line without wrapping, got %d", len(layout.Lines))
@@ -344,7 +344,7 @@ func TestLayoutText_Bidi(t *testing.T) {
 				Direction:   tt.dir,
 			}
 
-			layout := LayoutText(tt.text, face, 16.0, opts)
+			layout := LayoutText(tt.text, face, opts)
 
 			if layout == nil {
 				t.Fatal("LayoutText returned nil")
@@ -372,7 +372,7 @@ func TestLayoutText_LineSpacing(t *testing.T) {
 		LineSpacing: 1.0,
 		Alignment:   AlignLeft,
 	}
-	layout1 := LayoutText(text, face, 16.0, opts1)
+	layout1 := LayoutText(text, face, opts1)
 
 	// Layout with 1.5x spacing
 	opts2 := LayoutOptions{
@@ -380,7 +380,7 @@ func TestLayoutText_LineSpacing(t *testing.T) {
 		LineSpacing: 1.5,
 		Alignment:   AlignLeft,
 	}
-	layout2 := LayoutText(text, face, 16.0, opts2)
+	layout2 := LayoutText(text, face, opts2)
 
 	if layout2.Height <= layout1.Height {
 		t.Errorf("1.5x line spacing height (%f) should be greater than 1.0x (%f)",
@@ -401,8 +401,8 @@ func TestLayoutText_ZeroLineSpacing(t *testing.T) {
 
 	optsDefault := DefaultLayoutOptions()
 
-	layoutZero := LayoutText(text, face, 16.0, optsZero)
-	layoutDefault := LayoutText(text, face, 16.0, optsDefault)
+	layoutZero := LayoutText(text, face, optsZero)
+	layoutDefault := LayoutText(text, face, optsDefault)
 
 	// Heights should be equal since 0 defaults to 1.0
 	if layoutZero.Height != layoutDefault.Height {
@@ -416,7 +416,7 @@ func TestLayoutTextSimple(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Hello World"
 
-	layout := LayoutTextSimple(text, face, 16.0)
+	layout := LayoutTextSimple(text, face)
 
 	if layout == nil {
 		t.Fatal("LayoutTextSimple returned nil")
@@ -464,7 +464,7 @@ func TestLayoutText_GlyphPositions(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "ABCDEFG"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(layout.Lines))
@@ -491,7 +491,7 @@ func TestLayoutText_Runs(t *testing.T) {
 	face := layoutTestFace(t)
 	text := "Hello World"
 
-	layout := LayoutText(text, face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText(text, face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(layout.Lines))
@@ -533,7 +533,7 @@ func TestLayoutText_LongText(t *testing.T) {
 		Alignment:   AlignLeft,
 	}
 
-	layout := LayoutText(text, face, 16.0, opts)
+	layout := LayoutText(text, face, opts)
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil")
@@ -554,7 +554,7 @@ func TestLayoutText_LongText(t *testing.T) {
 func TestLayoutText_SingleCharacter(t *testing.T) {
 	face := layoutTestFace(t)
 
-	layout := LayoutText("A", face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText("A", face, DefaultLayoutOptions())
 
 	if len(layout.Lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(layout.Lines))
@@ -568,7 +568,7 @@ func TestLayoutText_SingleCharacter(t *testing.T) {
 func TestLayoutText_Whitespace(t *testing.T) {
 	face := layoutTestFace(t)
 
-	layout := LayoutText("   ", face, 16.0, DefaultLayoutOptions())
+	layout := LayoutText("   ", face, DefaultLayoutOptions())
 
 	if layout == nil {
 		t.Fatal("LayoutText returned nil")
@@ -659,7 +659,7 @@ func TestLayoutText_DifferentSizes(t *testing.T) {
 
 	for _, size := range sizes {
 		face := source.Face(size)
-		layout := LayoutText(text, face, size, DefaultLayoutOptions())
+		layout := LayoutText(text, face, DefaultLayoutOptions())
 
 		if len(layout.Lines) != 1 {
 			t.Errorf("size %f: expected 1 line, got %d", size, len(layout.Lines))
@@ -724,7 +724,7 @@ func BenchmarkLayoutText(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = LayoutText(text, face, 16.0, opts)
+		_ = LayoutText(text, face, opts)
 	}
 }
 
@@ -744,7 +744,7 @@ func BenchmarkLayoutText_MultiLine(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = LayoutText(text, face, 16.0, opts)
+		_ = LayoutText(text, face, opts)
 	}
 }
 
@@ -769,6 +769,74 @@ func BenchmarkLayoutText_Wrapped(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = LayoutText(text, face, 16.0, opts)
+		_ = LayoutText(text, face, opts)
+	}
+}
+
+// TestLayoutText_WrappedLineYPositions verifies that wrapped lines within a
+// single paragraph get sequential (increasing) Y positions, not all the same Y.
+// Regression test for #138: all wrapped lines had identical Y = line.Ascent.
+func TestLayoutText_WrappedLineYPositions(t *testing.T) {
+	face := layoutTestFace(t)
+
+	// Long text that will wrap into multiple lines at narrow width
+	text := "The quick brown fox jumps over the lazy dog and keeps running around the park"
+
+	opts := LayoutOptions{
+		MaxWidth:    100,
+		LineSpacing: 1.0,
+		Alignment:   AlignLeft,
+		Direction:   DirectionLTR,
+	}
+
+	layout := LayoutText(text, face, opts)
+
+	if len(layout.Lines) < 3 {
+		t.Fatalf("expected at least 3 wrapped lines, got %d", len(layout.Lines))
+	}
+
+	// Each line Y must be strictly greater than previous
+	for i := 1; i < len(layout.Lines); i++ {
+		if layout.Lines[i].Y <= layout.Lines[i-1].Y {
+			t.Errorf("line %d Y=%f should be > line %d Y=%f",
+				i, layout.Lines[i].Y, i-1, layout.Lines[i-1].Y)
+		}
+	}
+
+	// Height must account for all lines, not just the first
+	expectedMinHeight := layout.Lines[len(layout.Lines)-1].Y
+	if layout.Height < expectedMinHeight {
+		t.Errorf("layout.Height=%f too small, last line Y=%f",
+			layout.Height, expectedMinHeight)
+	}
+}
+
+// TestLayoutText_WrappedMultiParagraphY verifies Y positions across both
+// wrapped lines within a paragraph and across paragraph boundaries.
+func TestLayoutText_WrappedMultiParagraphY(t *testing.T) {
+	face := layoutTestFace(t)
+
+	// Two paragraphs, each will wrap
+	text := "The quick brown fox jumps over the lazy dog\nThe lazy dog sleeps under the old oak tree"
+
+	opts := LayoutOptions{
+		MaxWidth:    120,
+		LineSpacing: 1.0,
+		Alignment:   AlignLeft,
+		Direction:   DirectionLTR,
+	}
+
+	layout := LayoutText(text, face, opts)
+
+	if len(layout.Lines) < 4 {
+		t.Fatalf("expected at least 4 lines (2 paragraphs wrapped), got %d", len(layout.Lines))
+	}
+
+	// ALL lines must have strictly increasing Y
+	for i := 1; i < len(layout.Lines); i++ {
+		if layout.Lines[i].Y <= layout.Lines[i-1].Y {
+			t.Errorf("line %d Y=%f should be > line %d Y=%f",
+				i, layout.Lines[i].Y, i-1, layout.Lines[i-1].Y)
+		}
 	}
 }

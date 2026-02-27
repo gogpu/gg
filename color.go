@@ -11,7 +11,21 @@ type RGBA struct {
 	R, G, B, A float64
 }
 
+// RGBA implements the color.Color interface.
+// Returns premultiplied alpha values scaled to [0, 65535] as required by the interface.
+// This allows gg.RGBA to be used directly with dc.SetColor(gg.Black).
+func (c RGBA) RGBA() (r, g, b, a uint32) {
+	a = uint32(clamp65535(c.A * 65535))
+	r = uint32(clamp65535(c.R * c.A * 65535))
+	g = uint32(clamp65535(c.G * c.A * 65535))
+	b = uint32(clamp65535(c.B * c.A * 65535))
+	return
+}
+
 // Color converts RGBA to the standard color.Color interface.
+//
+// Deprecated: gg.RGBA now implements color.Color directly.
+// Use the value itself instead of calling .Color().
 func (c RGBA) Color() color.Color {
 	return color.NRGBA{
 		R: uint8(clamp255(c.R * 255)),
@@ -139,6 +153,17 @@ func (c RGBA) Lerp(other RGBA, t float64) RGBA {
 		B: c.B + (other.B-c.B)*t,
 		A: c.A + (other.A-c.A)*t,
 	}
+}
+
+// clamp65535 restricts a value to [0, 65535] range.
+func clamp65535(x float64) float64 {
+	if x < 0 {
+		return 0
+	}
+	if x > 65535 {
+		return 65535
+	}
+	return x
 }
 
 // clamp255 restricts a value to [0, 255] range.

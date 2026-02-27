@@ -7,9 +7,10 @@ import "sync"
 //   - BuiltinShaper: Uses golang.org/x/image/font for Latin, Cyrillic, Greek, CJK
 //   - HarfBuzz-compatible: Use SetShaper() with a go-text/typesetting implementation
 type Shaper interface {
-	// Shape converts text into positioned glyphs using the given face and size.
+	// Shape converts text into positioned glyphs using the given face.
+	// The font size is obtained from face.Size().
 	// The returned ShapedGlyph slice is ready for GPU rendering.
-	Shape(text string, face Face, size float64) []ShapedGlyph
+	Shape(text string, face Face) []ShapedGlyph
 }
 
 var (
@@ -41,7 +42,8 @@ func GetShaper() Shaper {
 }
 
 // Shape is a convenience function that uses the global shaper.
-// It converts text to positioned glyphs using the given face and size.
-func Shape(text string, face Face, size float64) []ShapedGlyph {
-	return GetShaper().Shape(text, face, size)
+// It converts text to positioned glyphs using the given face.
+// The font size is obtained from face.Size().
+func Shape(text string, face Face) []ShapedGlyph {
+	return GetShaper().Shape(text, face)
 }

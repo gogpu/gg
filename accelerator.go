@@ -240,3 +240,20 @@ type ComputePipelineAware interface {
 	// CanCompute reports whether the compute pipeline is available and ready.
 	CanCompute() bool
 }
+
+// PipelineModeAware is an optional interface for accelerators that support
+// pipeline mode selection (render pass vs compute). When the registered
+// accelerator implements this interface, the Context propagates pipeline mode
+// changes so the accelerator can route operations accordingly.
+type PipelineModeAware interface {
+	// SetPipelineMode sets the pipeline mode for subsequent operations.
+	SetPipelineMode(mode PipelineMode)
+}
+
+// SceneStatsTracker is an optional interface for accelerators that track
+// per-frame scene statistics for auto pipeline selection. The Context
+// does not call these methods directly — the accelerator uses them internally.
+type SceneStatsTracker interface {
+	// SceneStats returns the accumulated scene statistics for the current frame.
+	SceneStats() SceneStats
+}

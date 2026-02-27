@@ -16,6 +16,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/gpu/tilecompute"
+	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 
@@ -42,8 +43,10 @@ type VelloAccelerator struct {
 
 	dispatcher *VelloComputeDispatcher
 
-	// TODO: scene encoding accumulation
-	// pendingScene *tilecompute.SceneEncoding
+	// Scene accumulation for Tier 5 compute pipeline.
+	// Paths are accumulated via FillPath/StrokePath/FillShape and dispatched on Flush.
+	pendingPaths  []tilecompute.PathDef
+	pendingTarget *gg.GPURenderTarget // target for the pending scene (nil if empty)
 
 	gpuReady       bool
 	externalDevice bool // true when using shared device (don't destroy on Close)
@@ -70,6 +73,9 @@ func (a *VelloAccelerator) Init() error {
 func (a *VelloAccelerator) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	a.pendingPaths = nil
+	a.pendingTarget = nil
 
 	if a.dispatcher != nil {
 		a.dispatcher.Close()
@@ -102,9 +108,9 @@ func (a *VelloAccelerator) SetLogger(l *slog.Logger) {
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
-// The Vello compute pipeline operates at scene level, not per-shape.
+// The Vello compute pipeline supports fill, stroke, and full scene rendering.
 func (a *VelloAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	return op&gg.AccelScene != 0
+	return op&(gg.AccelScene|gg.AccelFill|gg.AccelStroke|gg.AccelCircleSDF|gg.AccelRRectSDF) != 0
 }
 
 // CanCompute reports whether the compute pipeline is available and ready.
@@ -171,40 +177,264 @@ func (a *VelloAccelerator) SetDeviceProvider(provider any) error {
 	return nil
 }
 
-// FillPath returns ErrFallbackToCPU. The Vello compute pipeline operates at
-// scene level; individual path operations are not supported in Phase 1.
-// In Phase 2, paths will be accumulated into a scene encoding.
-func (a *VelloAccelerator) FillPath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
-}
+// FillPath converts a path to a PathDef and accumulates it for the next Flush.
+// The actual GPU dispatch happens when Flush is called. Returns ErrFallbackToCPU
+// if the GPU is not ready or the path is empty.
+func (a *VelloAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	if path == nil || len(path.Elements()) == 0 {
+		return nil
+	}
 
-// StrokePath returns ErrFallbackToCPU. The Vello compute pipeline operates at
-// scene level; individual path operations are not supported in Phase 1.
-// In Phase 2, paths will be accumulated into a scene encoding.
-func (a *VelloAccelerator) StrokePath(_ gg.GPURenderTarget, _ *gg.Path, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
-}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
-// FillShape returns ErrFallbackToCPU. The Vello compute pipeline operates at
-// scene level; individual shape operations are not supported in Phase 1.
-// In Phase 2, shapes will be accumulated into a scene encoding.
-func (a *VelloAccelerator) FillShape(_ gg.GPURenderTarget, _ gg.DetectedShape, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
-}
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
 
-// StrokeShape returns ErrFallbackToCPU. The Vello compute pipeline operates at
-// scene level; individual shape operations are not supported in Phase 1.
-// In Phase 2, shapes will be accumulated into a scene encoding.
-func (a *VelloAccelerator) StrokeShape(_ gg.GPURenderTarget, _ gg.DetectedShape, _ *gg.Paint) error {
-	return gg.ErrFallbackToCPU
-}
+	// If target changed, flush previous scene first.
+	if a.pendingTarget != nil && !velloSameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
+	}
 
-// Flush dispatches any pending GPU operations to the target pixel buffer.
-// In Phase 1, there is no scene accumulation, so Flush is a no-op.
-// In Phase 2, this will pack the accumulated scene encoding and dispatch
-// the 8-stage compute pipeline via VelloComputeDispatcher.
-func (a *VelloAccelerator) Flush(_ gg.GPURenderTarget) error {
+	pathDef := convertPathToPathDef(path, paint)
+	if len(pathDef.Lines) == 0 {
+		return nil
+	}
+
+	a.pendingPaths = append(a.pendingPaths, pathDef)
+	targetCopy := target
+	a.pendingTarget = &targetCopy
 	return nil
+}
+
+// StrokePath expands the stroke to a filled outline and accumulates the result
+// for the next Flush. Dashed strokes fall back to CPU rendering.
+func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	if path == nil || len(path.Elements()) == 0 {
+		return nil
+	}
+	if paint != nil && paint.IsDashed() {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Convert gg path elements to stroke package elements.
+	strokeElems := convertPathToStrokeElements(path.Elements())
+
+	// Expand stroke to filled outline.
+	style := stroke.Stroke{
+		Width:      paint.EffectiveLineWidth(),
+		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
+		Join:       stroke.LineJoin(paint.EffectiveLineJoin()),
+		MiterLimit: paint.EffectiveMiterLimit(),
+	}
+	expander := stroke.NewStrokeExpander(style)
+	expanded := expander.Expand(strokeElems)
+	if len(expanded) == 0 {
+		return nil
+	}
+
+	// Build a gg.Path from the expanded outline.
+	fillPath := gg.NewPath()
+	for _, e := range expanded {
+		switch el := e.(type) {
+		case stroke.MoveTo:
+			fillPath.MoveTo(el.Point.X, el.Point.Y)
+		case stroke.LineTo:
+			fillPath.LineTo(el.Point.X, el.Point.Y)
+		case stroke.QuadTo:
+			fillPath.QuadraticTo(el.Control.X, el.Control.Y, el.Point.X, el.Point.Y)
+		case stroke.CubicTo:
+			fillPath.CubicTo(el.Control1.X, el.Control1.Y, el.Control2.X, el.Control2.Y, el.Point.X, el.Point.Y)
+		case stroke.Close:
+			fillPath.Close()
+		}
+	}
+
+	// Route through FillPath (accumulates into pending scene).
+	return a.FillPath(target, fillPath, paint)
+}
+
+// FillShape converts a detected shape to a path and accumulates it for the next Flush.
+// Returns ErrFallbackToCPU for unknown shapes or if the GPU is not ready.
+func (a *VelloAccelerator) FillShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
+	if shape.Kind == gg.ShapeUnknown {
+		return gg.ErrFallbackToCPU
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
+
+	// If target changed, flush previous scene first.
+	if a.pendingTarget != nil && !velloSameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	pathDef := convertShapeToPathDef(shape, paint)
+	if len(pathDef.Lines) == 0 {
+		return gg.ErrFallbackToCPU
+	}
+
+	a.pendingPaths = append(a.pendingPaths, pathDef)
+	targetCopy := target
+	a.pendingTarget = &targetCopy
+	return nil
+}
+
+// StrokeShape converts a detected shape to a path, expands the stroke, and
+// accumulates the result for the next Flush. Returns ErrFallbackToCPU for
+// unknown shapes or if the GPU is not ready.
+func (a *VelloAccelerator) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
+	if shape.Kind == gg.ShapeUnknown {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Build a gg.Path from the shape, then route through StrokePath.
+	path := gg.NewPath()
+	switch shape.Kind {
+	case gg.ShapeCircle:
+		path.Circle(shape.CenterX, shape.CenterY, shape.RadiusX)
+	case gg.ShapeEllipse:
+		path.Ellipse(shape.CenterX, shape.CenterY, shape.RadiusX, shape.RadiusY)
+	case gg.ShapeRect:
+		x := shape.CenterX - shape.Width/2
+		y := shape.CenterY - shape.Height/2
+		path.Rectangle(x, y, shape.Width, shape.Height)
+	case gg.ShapeRRect:
+		x := shape.CenterX - shape.Width/2
+		y := shape.CenterY - shape.Height/2
+		path.RoundedRectangle(x, y, shape.Width, shape.Height, shape.CornerRadius)
+	default:
+		return gg.ErrFallbackToCPU
+	}
+
+	return a.StrokePath(target, path, paint)
+}
+
+// Flush dispatches all accumulated paths through the 9-stage compute pipeline
+// and writes the result to the target pixel buffer. Returns nil if there are
+// no pending paths. After Flush, the accumulated scene is cleared.
+func (a *VelloAccelerator) Flush(target gg.GPURenderTarget) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.flushLocked(target)
+}
+
+// PendingCount returns the number of accumulated paths (for testing).
+func (a *VelloAccelerator) PendingCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.pendingPaths)
+}
+
+// flushLocked dispatches the accumulated scene. Must be called with a.mu held.
+func (a *VelloAccelerator) flushLocked(target gg.GPURenderTarget) error {
+	if len(a.pendingPaths) == 0 {
+		return nil
+	}
+
+	// Take ownership of pending data and reset.
+	paths := a.pendingPaths
+	a.pendingPaths = nil
+	a.pendingTarget = nil
+
+	// Lazy GPU initialization if no external device was provided.
+	if a.device == nil {
+		if err := a.initGPU(); err != nil {
+			slogger().Warn("vello-compute: GPU init failed, falling back to CPU", "err", err)
+			return gg.ErrFallbackToCPU
+		}
+	}
+
+	if a.dispatcher == nil || !a.dispatcher.initialized {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Dispatch the compute scene with a transparent background so that the
+	// result composites over the existing target content.
+	bgColor := [4]uint8{0, 0, 0, 0}
+	img, err := a.dispatchComputeScene(target.Width, target.Height, bgColor, paths)
+	if err != nil {
+		slogger().Warn("vello-compute: dispatch failed", "err", err)
+		return gg.ErrFallbackToCPU
+	}
+
+	// Composite the GPU result over the existing target pixels.
+	// The GPU produces premultiplied RGBA; the target is also premultiplied RGBA.
+	// We use source-over compositing so previously rendered CPU content is preserved.
+	compositeOver(target, img)
+
+	return nil
+}
+
+// compositeOver composites src (premultiplied RGBA image) over the target pixel buffer
+// using Porter-Duff source-over: dst' = src + dst * (1 - src.A).
+// Both target.Data and src are premultiplied RGBA, 4 bytes per pixel.
+func compositeOver(target gg.GPURenderTarget, src *image.RGBA) {
+	w := target.Width
+	h := target.Height
+	if w > src.Bounds().Dx() {
+		w = src.Bounds().Dx()
+	}
+	if h > src.Bounds().Dy() {
+		h = src.Bounds().Dy()
+	}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			srcOff := src.PixOffset(x, y)
+			sR := src.Pix[srcOff]
+			sG := src.Pix[srcOff+1]
+			sB := src.Pix[srcOff+2]
+			sA := src.Pix[srcOff+3]
+
+			// Skip fully transparent source pixels.
+			if sA == 0 {
+				continue
+			}
+
+			dstOff := y*target.Stride + x*4
+			if dstOff+3 >= len(target.Data) {
+				continue
+			}
+
+			// Fully opaque source pixel: overwrite.
+			if sA == 255 {
+				target.Data[dstOff] = sR
+				target.Data[dstOff+1] = sG
+				target.Data[dstOff+2] = sB
+				target.Data[dstOff+3] = sA
+				continue
+			}
+
+			// Source-over: dst' = src + dst * (1 - src.A)
+			// All values are premultiplied.
+			invA := 255 - uint16(sA)
+			dR := target.Data[dstOff]
+			dG := target.Data[dstOff+1]
+			dB := target.Data[dstOff+2]
+			dA := target.Data[dstOff+3]
+
+			target.Data[dstOff] = sR + uint8((uint16(dR)*invA+127)/255)
+			target.Data[dstOff+1] = sG + uint8((uint16(dG)*invA+127)/255)
+			target.Data[dstOff+2] = sB + uint8((uint16(dB)*invA+127)/255)
+			target.Data[dstOff+3] = sA + uint8((uint16(dA)*invA+127)/255)
+		}
+	}
+}
+
+// velloSameTarget checks if two render targets point to the same pixel buffer.
+func velloSameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
+	return a.Width == b.Width && a.Height == b.Height &&
+		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
 }
 
 // RenderSceneCompute renders paths through the GPU compute pipeline.

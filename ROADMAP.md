@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.30.0
+## Current State: v0.31.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -38,12 +38,16 @@
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
 
-**New in v0.30.0:**
-- Vello 9-stage GPU compute pipeline (pathtag → fine)
-- tilecompute CPU reference implementation
-- PipelineMode API (Auto/RenderPass/Compute)
-- GPU vs CPU golden tests (7 scenes, 0% pixel diff)
-- naga v0.14.3, wgpu v0.16.14
+**New in v0.31.0:**
+- Text API redesign: removed redundant `size` parameter (BREAKING)
+- DrawStringWrapped, MeasureMultilineString, WordWrap (fogleman/gg compat)
+- gg.RGBA implements color.Color interface
+- Pixmap.SetPixelPremul for direct premultiplied writes
+- LayoutText wrapped line Y positions fixed
+- Tier 5 scene accumulation in VelloAccelerator (GG-COMPUTE-008)
+- PipelineMode wiring to rendering cascade (GG-COMPUTE-006)
+- Removed 2 naga shader workarounds (span() inlining, vec2 let-chain)
+- wgpu v0.18.0
 
 ---
 
@@ -95,8 +99,8 @@
 - [x] MSDF text pipeline (Tier 4 in GPURenderSession)
 - [x] WGSL MSDF fragment shader (median + smoothstep)
 - [x] Persistent text vertex/index/uniform buffers
-- [ ] Atlas generation from font glyphs
-- [ ] DrawString → GPU text batch integration
+- [x] Atlas generation from font glyphs
+- [x] DrawString → GPU text batch integration
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee
@@ -148,7 +152,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.30.1** | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
+| **v0.31.0** | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
+| v0.30.2 | 2026-02 | Vello buffer overflow fix, WrapText hard line breaks, wgpu v0.16.17 |
+| v0.30.1 | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
 | v0.30.0 | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
 | v0.29.5 | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
 | v0.29.4 | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |

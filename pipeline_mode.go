@@ -41,7 +41,7 @@ type SceneStats struct {
 	OverlapFactor float64 // Estimated overlap ratio [0, 1]
 }
 
-// selectPipeline chooses the best pipeline based on scene statistics
+// SelectPipeline chooses the best pipeline based on scene statistics
 // and GPU capabilities.
 //
 // Heuristics:
@@ -51,7 +51,7 @@ type SceneStats struct {
 //     (massively parallel tile-based processing)
 //   - Text-heavy: RenderPass (MSDF Text tier is specialized)
 //   - Default for medium complexity: Compute
-func selectPipeline(stats SceneStats, hasComputeSupport bool) PipelineMode {
+func SelectPipeline(stats SceneStats, hasComputeSupport bool) PipelineMode {
 	if !hasComputeSupport {
 		return PipelineModeRenderPass
 	}

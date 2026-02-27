@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2026-02-27
+
+### Breaking Changes
+
+- **`text.Shape()` signature changed** — Removed redundant `size float64` parameter. Size is now obtained from `face.Size()`. All callers must update: `Shape(text, face, size)` → `Shape(text, face)`. This affects `Shape`, `LayoutText`, `LayoutTextWithContext`, `LayoutTextSimple`, `WrapText`, `MeasureText`, and the `Shaper` interface. ([#138](https://github.com/gogpu/gg/issues/138))
+
+### Added
+
+- **`DrawStringWrapped()`** — Wraps text to width and draws with alignment and anchoring. Compatible with fogleman/gg's `DrawStringWrapped`. Supports `AlignLeft`, `AlignCenter`, `AlignRight`. ([#138](https://github.com/gogpu/gg/issues/138))
+- **`MeasureMultilineString()`** — Measures text containing newlines with configurable line spacing. Compatible with fogleman/gg. ([#138](https://github.com/gogpu/gg/issues/138))
+- **`WordWrap()`** — Wraps text at word boundaries, returns `[]string`. Compatible with fogleman/gg. ([#138](https://github.com/gogpu/gg/issues/138))
+- **`Align` type + constants** — `gg.AlignLeft`, `gg.AlignCenter`, `gg.AlignRight` re-exported from `text.Alignment` for convenience. ([#138](https://github.com/gogpu/gg/issues/138))
+- **`gg.RGBA` implements `color.Color`** — Added `RGBA()` method returning premultiplied uint32 values for stdlib compatibility. ([#138](https://github.com/gogpu/gg/issues/138))
+- **`Pixmap.SetPixelPremul()`** — Direct premultiplied RGBA pixel write without alpha conversion overhead. ([#114](https://github.com/gogpu/gg/issues/114))
+- **Recording mirror** — `DrawStringWrapped`, `MeasureMultilineString`, `WordWrap` mirrored on `recording.Recorder` for vector export.
+
+### GPU Pipeline
+
+- **Tier 5 scene accumulation (GG-COMPUTE-008)** — `VelloAccelerator` now accumulates `PathDef`s during `FillPath`/`StrokePath` and dispatches via compute pipeline on `Flush`. Path conversion (gg.Path → tilecompute.PathDef) with Euler spiral curve flattening.
+- **PipelineMode wiring (GG-COMPUTE-006)** — `Context.SetPipelineMode()` propagates to GPU accelerator. `SDFAccelerator` holds internal `VelloAccelerator` and routes to compute pipeline when `PipelineModeCompute` is active. `SelectPipeline()` heuristics exported.
+- **Removed 2 naga workarounds from `path_tiling.wgsl`** — Inline `span()` replaced with function call, `let`-chain replaced with `var` reassignment. Validated by golden tests. 3 workarounds remain due to active naga SPIR-V bugs ([#139](https://github.com/gogpu/gg/issues/139)).
+
+### Fixed
+
+- **`LayoutText` wrapped line Y positions** — Lines all had Y=0 instead of cumulative vertical positions. Each line now has correct Y = previous Y + descent + line gap + current ascent. ([#138](https://github.com/gogpu/gg/issues/138))
+- Resolved all golangci-lint issues (errorlint, gocognit, staticcheck, dupl).
+
+### Dependencies
+
+- wgpu v0.16.17 → v0.18.0
+
 ## [0.30.2] - 2026-02-27
 
 ### Fixed

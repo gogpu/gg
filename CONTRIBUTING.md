@@ -62,7 +62,7 @@ gg follows **Rust-inspired 2D graphics patterns**:
 | **Type Safety** | Sealed interfaces, explicit types, no interface{} |
 | **Production-Ready** | Enterprise-grade error handling, 70%+ coverage |
 
-Reference libraries: [vello](https://github.com/linebender/vello), [tiny-skia](https://github.com/nicotine-scx/tiny-skia), [kurbo](https://github.com/linebender/kurbo)
+Reference libraries: [vello](https://github.com/linebender/vello), [tiny-skia](https://github.com/RazrFalcon/tiny-skia), [kurbo](https://github.com/linebender/kurbo)
 
 ## Code Style
 
@@ -175,7 +175,7 @@ When opening an issue, please include:
 
 - **Go version:** `go version`
 - **OS and architecture:** e.g., Windows 11 x64, macOS 14 ARM64
-- **gg version:** e.g., v0.13.0
+- **gg version:** e.g., v0.31.0
 - **Minimal reproduction:** Code snippet or repository link
 - **Expected vs actual behavior**
 - **Error messages and stack traces**

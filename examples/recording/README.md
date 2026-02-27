@@ -50,7 +50,7 @@ Output: `output.png`, `output.svg`
 ```go
 rec := recording.NewRecorder(width, height)
 // Draw using familiar API...
-r := rec.Finish()
+r := rec.FinishRecording()
 ```
 
 ### Playback

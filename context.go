@@ -159,8 +159,17 @@ func (c *Context) Close() error {
 
 // SetPipelineMode sets the GPU rendering pipeline mode.
 // See PipelineMode for available modes.
+//
+// If the registered accelerator implements PipelineModeAware, the mode is
+// propagated so the accelerator can route operations to the correct pipeline
+// (render pass vs compute).
 func (c *Context) SetPipelineMode(mode PipelineMode) {
 	c.pipelineMode = mode
+	if a := Accelerator(); a != nil {
+		if pma, ok := a.(PipelineModeAware); ok {
+			pma.SetPipelineMode(mode)
+		}
+	}
 }
 
 // PipelineMode returns the current pipeline mode.
@@ -808,6 +817,14 @@ func (c *Context) tryGPUStroke() error {
 }
 
 // tryGPUOp attempts GPU rendering using shape-specific SDF first, then general path.
+//
+// When PipelineModeCompute is active and the accelerator supports compute,
+// all operations are routed directly to the path function (which accumulates
+// for the compute pipeline). Shape detection is skipped because the compute
+// pipeline handles all shapes uniformly.
+//
+// When PipelineModeRenderPass is active (or Auto selects RenderPass), the
+// existing tier-based approach is used: shape SDF first, then general path.
 func (c *Context) tryGPUOp(
 	a GPUAccelerator,
 	shapeFn func(GPURenderTarget, DetectedShape, *Paint) error,
@@ -815,6 +832,18 @@ func (c *Context) tryGPUOp(
 	pathAccel AcceleratedOp,
 ) error {
 	target := c.gpuRenderTarget()
+
+	// When explicitly in Compute mode, skip shape detection and route
+	// all operations directly to the path function. The accelerator's
+	// FillPath/StrokePath accumulates into the compute scene.
+	if c.pipelineMode == PipelineModeCompute {
+		if cpa, ok := a.(ComputePipelineAware); ok && cpa.CanCompute() {
+			if a.CanAccelerate(pathAccel) {
+				return pathFn(target, c.path, c.paint)
+			}
+		}
+		// Compute requested but not available — fall through to render pass.
+	}
 
 	// Try shape-specific SDF first for higher quality output.
 	shape := DetectShape(c.path)

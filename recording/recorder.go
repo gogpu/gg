@@ -3,6 +3,7 @@ package recording
 import (
 	"image"
 	"math"
+	"strings"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
@@ -1001,6 +1002,94 @@ func (r *Recorder) MeasureString(s string) (w, h float64) {
 		return
 	}
 	return text.Measure(s, r.fontFace)
+}
+
+// WordWrap wraps text to fit within the given width using word boundaries.
+// Uses the current font face for text measurement.
+// If no font face is set, returns the input string as a single-element slice.
+func (r *Recorder) WordWrap(s string, w float64) []string {
+	if r.fontFace == nil {
+		return []string{s}
+	}
+	results := text.WrapText(s, r.fontFace, w, text.WrapWord)
+	lines := make([]string, len(results))
+	for i, res := range results {
+		lines[i] = res.Text
+	}
+	return lines
+}
+
+// MeasureMultilineString measures text that may contain newlines.
+// Returns (width, height) where width is the maximum line width.
+// If no font face is set, returns (0, 0).
+func (r *Recorder) MeasureMultilineString(s string, lineSpacing float64) (width, height float64) {
+	if r.fontFace == nil {
+		return 0, 0
+	}
+	lines := recorderSplitLines(s)
+	fh := r.fontFace.Metrics().LineHeight()
+	for _, line := range lines {
+		lw, _ := text.Measure(line, r.fontFace)
+		if lw > width {
+			width = lw
+		}
+	}
+	n := float64(len(lines))
+	height = n*fh*lineSpacing - (lineSpacing-1)*fh
+	return
+}
+
+// DrawStringWrapped wraps text to the given width and draws it with alignment.
+// Each wrapped line is recorded as a separate DrawText command.
+func (r *Recorder) DrawStringWrapped(s string, x, y, ax, ay, width, lineSpacing float64, align text.Alignment) {
+	lines := r.WordWrap(s, width)
+	if len(lines) == 0 {
+		return
+	}
+
+	var fh float64
+	if r.fontFace != nil {
+		fh = r.fontFace.Metrics().LineHeight()
+	} else {
+		fh = r.fontSize * 1.2
+	}
+
+	// Total height (same formula as MeasureMultilineString)
+	n := float64(len(lines))
+	h := n*fh*lineSpacing - (lineSpacing-1)*fh
+
+	// Adjust starting position by anchor
+	x -= ax * width
+	y -= ay * h
+
+	// Adjust x base for alignment
+	switch align {
+	case text.AlignCenter:
+		x += width / 2
+	case text.AlignRight:
+		x += width
+	}
+
+	for _, line := range lines {
+		drawX := x
+		switch align {
+		case text.AlignCenter:
+			lw, _ := r.MeasureString(line)
+			drawX = x - lw/2
+		case text.AlignRight:
+			lw, _ := r.MeasureString(line)
+			drawX = x - lw
+		}
+		r.DrawString(line, drawX, y)
+		y += fh * lineSpacing
+	}
+}
+
+// recorderSplitLines splits text by line breaks, normalizing \r\n and \r to \n.
+func recorderSplitLines(s string) []string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.Split(s, "\n")
 }
 
 // --------------------------------------------------------------------------
