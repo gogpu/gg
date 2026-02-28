@@ -124,11 +124,14 @@ type SurfaceTargetAware interface {
 // convex polygons, and stencil-then-cover paths. The MSDF approach provides
 // resolution-independent, crisp text at any scale.
 type GPUTextAccelerator interface {
-	// DrawText renders text at position (x, y) where y is the baseline.
-	// The face provides font metrics and glyph iteration.
-	// Color is the text color in RGBA.
+	// DrawText renders text at position (x, y) in user space where y is the
+	// baseline. The face provides font metrics and glyph iteration. Color is
+	// the text color in RGBA. The matrix parameter is the context's current
+	// transformation matrix (CTM), which the GPU pipeline composes into the
+	// vertex shader uniform so that Scale, Rotate, and Skew transforms
+	// affect text rendering, not just position.
 	// Returns ErrFallbackToCPU if GPU text rendering is not available.
-	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA) error
+	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA, matrix Matrix) error
 }
 
 var (

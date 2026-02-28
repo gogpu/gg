@@ -132,3 +132,74 @@ func (m Matrix) ScaleFactor() float64 {
 	}
 	return sy
 }
+
+// IsTranslationOnly reports whether the matrix is identity or pure translation
+// (no scale, rotation, or skew). The 2x2 linear portion must be the identity.
+//
+// This is equivalent to IsTranslation but named for clarity in the text
+// rendering pipeline where the distinction between "translation only" and
+// "scale only" determines the rasterization algorithm.
+func (m Matrix) IsTranslationOnly() bool {
+	return m.A == 1 && m.B == 0 && m.D == 0 && m.E == 1
+}
+
+// IsScaleOnly reports whether the matrix has only scale (and possibly translation),
+// with no rotation or skew. The off-diagonal elements of the 2x2 linear portion
+// must be zero.
+//
+// Note that this returns true for identity and pure translation matrices as well,
+// since those are special cases of scale (with scale factors of 1).
+func (m Matrix) IsScaleOnly() bool {
+	return m.B == 0 && m.D == 0
+}
+
+// MaxScaleFactor returns the maximum axis scale factor of the transformation.
+// This is the largest singular value of the 2x2 linear portion of the matrix,
+// representing the maximum stretch in any direction.
+//
+// For a pure scale matrix Scale(sx, sy), returns max(|sx|, |sy|).
+// For a rotation matrix, returns 1.0 (rotation preserves lengths).
+// For general matrices (with rotation and/or skew), computes the spectral norm
+// via the eigenvalues of M^T * M.
+//
+// This matches the approach used by Skia (SkMatrix::getMaxScale) and
+// Cairo (_cairo_matrix_compute_basis_scale_factors).
+//
+// Returns 0 if the matrix is degenerate (zero area).
+func (m Matrix) MaxScaleFactor() float64 {
+	// For scale-only matrices (no rotation/skew), use the fast path.
+	if m.B == 0 && m.D == 0 {
+		sx := math.Abs(m.A)
+		sy := math.Abs(m.E)
+		if sx > sy {
+			return sx
+		}
+		return sy
+	}
+
+	// General case: compute max singular value via eigenvalues of M^T * M.
+	//
+	// For the 2x2 matrix [A B; D E]:
+	//   M^T * M = [A*A+D*D  A*B+D*E]
+	//             [A*B+D*E  B*B+E*E]
+	//
+	// The eigenvalues of a symmetric 2x2 matrix [p q; q r] are:
+	//   lambda = (p + r +/- sqrt((p - r)^2 + 4*q^2)) / 2
+	//
+	// The max singular value = sqrt(max eigenvalue).
+	p := m.A*m.A + m.D*m.D
+	r := m.B*m.B + m.E*m.E
+	q := m.A*m.B + m.D*m.E
+
+	sum := p + r
+	diff := p - r
+	disc := math.Sqrt(diff*diff + 4*q*q)
+
+	// Max eigenvalue of M^T * M.
+	maxEigen := (sum + disc) / 2
+
+	if maxEigen <= 0 {
+		return 0
+	}
+	return math.Sqrt(maxEigen)
+}

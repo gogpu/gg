@@ -40,6 +40,8 @@ func (c *Context) Font() text.Face {
 //
 // If a GPU accelerator is registered and supports text rendering (implements
 // GPUTextAccelerator), the text is rendered via the GPU MSDF pipeline.
+// The CTM (Current Transform Matrix) is passed to the GPU so that Scale,
+// Rotate, and Skew transforms affect text rendering, not just position.
 // Otherwise, the software freetype renderer is used as fallback.
 //
 // The baseline is the line on which most letters sit. Characters with
@@ -49,13 +51,15 @@ func (c *Context) DrawString(s string, x, y float64) {
 		return
 	}
 
-	// Apply current transformation matrix to the text position.
-	p := c.matrix.TransformPoint(Pt(x, y))
-
-	// Try GPU text rendering first.
-	if c.tryGPUText(s, p.X, p.Y) {
+	// Try GPU text rendering first with user-space coordinates.
+	// The GPU pipeline receives the CTM and applies it in the vertex shader,
+	// so positions are passed in user space (not pre-transformed).
+	if c.tryGPUText(s, x, y) {
 		return
 	}
+
+	// CPU fallback: apply CTM to position only.
+	p := c.matrix.TransformPoint(Pt(x, y))
 
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()
@@ -63,6 +67,9 @@ func (c *Context) DrawString(s string, x, y float64) {
 }
 
 // tryGPUText attempts to render text via the GPU MSDF pipeline.
+// The x, y coordinates are in user space (not pre-transformed by the CTM).
+// The CTM is passed to the GPU pipeline so it can apply the full transform
+// in the vertex shader, enabling correct scaling, rotation, and skew of text.
 // Returns true if GPU text rendering was successful (queued for batch render).
 func (c *Context) tryGPUText(s string, x, y float64) bool {
 	a := Accelerator()
@@ -78,7 +85,7 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	}
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
-	err := ta.DrawText(target, c.face, s, x, y, col)
+	err := ta.DrawText(target, c.face, s, x, y, col, c.matrix)
 	return err == nil
 }
 
@@ -100,13 +107,14 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	x -= w * ax
 	y += h * ay // Note: y is baseline, so we adjust upward for top alignment
 
-	// Apply current transformation matrix to the adjusted position.
-	p := c.matrix.TransformPoint(Pt(x, y))
-
-	// Try GPU text rendering first.
-	if c.tryGPUText(s, p.X, p.Y) {
+	// Try GPU text rendering first with user-space coordinates.
+	// The CTM is applied in the vertex shader.
+	if c.tryGPUText(s, x, y) {
 		return
 	}
+
+	// CPU fallback: apply CTM to position only.
+	p := c.matrix.TransformPoint(Pt(x, y))
 
 	// Flush pending GPU shapes so they don't overwrite text.
 	c.flushGPUAccelerator()
