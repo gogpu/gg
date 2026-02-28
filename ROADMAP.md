@@ -19,10 +19,11 @@
 
 ---
 
-## Current State: v0.31.1
+## Current State: v0.32.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
+- **Smart multi-engine rasterizer** — 5 algorithms with per-path auto-selection
 - Five-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute)
 - Vello 9-stage compute pipeline for full-scene GPU rasterization
 - GPU MSDF text pipeline (resolution-independent anti-aliased text)
@@ -31,6 +32,7 @@
 - Analytic anti-aliasing (Vello tile-based AA)
 - GPUAccelerator interface with transparent CPU fallback
 - PipelineMode (Auto/RenderPass/Compute) for pipeline selection
+- RasterizerMode (Auto/Analytic/SparseStrips/TileCompute/SDF) for algorithm override
 - Recording System for vector export (PDF, SVG)
 - GGCanvas integration for gogpu windowed rendering (auto-registration)
 - Porter-Duff compositing for correct GPU readback
@@ -38,23 +40,32 @@
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
 
-**New in v0.31.1:**
-- Fix Vulkan rounded rectangle pixel corruption — wgpu v0.18.1 (buffer-to-image copy row stride fix)
+**New in v0.32.0:**
+- Smart rasterizer selection — adaptive threshold `max(32, 2048/sqrt(bboxArea))` per-path
+- CoverageFiller interface — SparseStripsFiller (4×4) + TileComputeFiller (16×16)
+- AdaptiveFiller — auto-selects between 4×4 and 16×16 tiles
+- RasterizerMode API — per-context force override for debugging/benchmarking
+- ForceableFiller + ForceSDFAware interfaces
+- `gg/raster/` package — CPU-only tile registration
+- SDF minimum size check (16px threshold)
 
-**New in v0.31.0:**
-- Text API redesign: removed redundant `size` parameter (BREAKING)
-- DrawStringWrapped, MeasureMultilineString, WordWrap (fogleman/gg compat)
-- gg.RGBA implements color.Color interface
-- Pixmap.SetPixelPremul for direct premultiplied writes
-- LayoutText wrapped line Y positions fixed
-- Tier 5 scene accumulation in VelloAccelerator (GG-COMPUTE-008)
-- PipelineMode wiring to rendering cascade (GG-COMPUTE-006)
-- Removed 2 naga shader workarounds (span() inlining, vec2 let-chain)
-- wgpu v0.18.0
+**Previous:**
+- v0.31.1: Vulkan rounded rectangle pixel fix (wgpu v0.18.1)
+- v0.31.0: Text API redesign, DrawStringWrapped, Tier 5 accumulation, PipelineMode wiring
 
 ---
 
 ## Upcoming
+
+### v0.32.0 — Smart Multi-Engine Rasterizer ✅ Released
+- [x] CoverageFiller interface with registration pattern
+- [x] SparseStripsFiller (4×4 tiles) + TileComputeFiller (16×16 tiles)
+- [x] AdaptiveFiller auto-selection (segment count + canvas area)
+- [x] Adaptive threshold formula per-path
+- [x] RasterizerMode API (Auto/Analytic/SparseStrips/TileCompute/SDF)
+- [x] ForceableFiller + ForceSDFAware interfaces
+- [x] `gg/raster/` CPU-only tile registration package
+- [x] SDF minimum size check (16px)
 
 ### v0.25.0 — Rendering Quality ✅ Released
 - [x] Vello tile-based analytic AA rasterizer
@@ -155,7 +166,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.31.0** | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
+| **v0.32.0** | 2026-02 | Smart multi-engine rasterizer (5 algorithms), adaptive threshold, RasterizerMode API, gg/raster/ package |
+| v0.31.1 | 2026-02 | Vulkan rounded rectangle pixel fix (wgpu v0.18.1) |
+| v0.31.0 | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
 | v0.30.2 | 2026-02 | Vello buffer overflow fix, WrapText hard line breaks, wgpu v0.16.17 |
 | v0.30.1 | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
 | v0.30.0 | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
