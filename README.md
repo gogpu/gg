@@ -44,6 +44,7 @@
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
+| **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute) |
 | **Performance** | Tile-based parallel rendering, LRU caching |
 
 ---
@@ -181,9 +182,11 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 | Component | Location | Description |
 |-----------|----------|-------------|
 | **CPU Raster** | `internal/raster` | Core analytic AA rasterizer (Vello-based) |
+| **Tile Rasterizers** | `internal/gpu` | SparseStrips (4×4) + TileCompute (16×16) with adaptive selection |
 | **GPU Accelerator** | `internal/gpu` | Five-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute) |
-| **GPU Registration** | `gpu/` | Public opt-in via `import _ "github.com/gogpu/gg/gpu"` |
-| **Software** | Root `gg` package | Default CPU renderer |
+| **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
+| **Tiles Only** | `raster/` | Opt-in via `import _ "github.com/gogpu/gg/raster"` (CPU-only tiles) |
+| **Software** | Root `gg` package | Default CPU renderer with smart algorithm selection |
 
 ---
 
