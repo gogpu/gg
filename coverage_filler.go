@@ -47,3 +47,15 @@ func GetCoverageFiller() CoverageFiller {
 	coverageMu.RUnlock()
 	return f
 }
+
+// ForceableFiller is an optional interface for CoverageFillers that support
+// forced algorithm selection. When the user sets RasterizerSparseStrips or
+// RasterizerTileCompute mode, the renderer uses SparseFiller() or ComputeFiller()
+// instead of the adaptive auto-selection.
+type ForceableFiller interface {
+	CoverageFiller
+	// SparseFiller returns the SparseStrips (4x4 tiles) filler component.
+	SparseFiller() CoverageFiller
+	// ComputeFiller returns the TileCompute (16x16 tiles) filler component.
+	ComputeFiller() CoverageFiller
+}

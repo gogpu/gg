@@ -19,6 +19,11 @@ type SoftwareRenderer struct {
 
 	// Dimensions
 	width, height int
+
+	// rasterizerMode is set by Context before calling Fill/Stroke
+	// to support forced algorithm selection (RasterizerSparseStrips, etc.).
+	// Reset to RasterizerAuto after each call.
+	rasterizerMode RasterizerMode
 }
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
@@ -76,36 +81,167 @@ func convertGGPathToCorePath(p *Path) raster.PathLike {
 	return raster.NewScenePathAdapter(len(verbs) == 0, verbs, points)
 }
 
-// coverageFillerThreshold is the path element count above which the
-// CoverageFiller (tile-based) is preferred over the AnalyticFiller (scanline).
-// Below this threshold, AnalyticFiller wins due to zero tile overhead.
-const coverageFillerThreshold = 64
+const (
+	// bboxMinDimension is the minimum bounding box dimension (px) for tile-based
+	// rasterization. Below this, tile setup overhead exceeds scanline cost because
+	// tiles are 4x4 or 16x16 px and the overhead of grid allocation dominates.
+	bboxMinDimension = 32
 
-// Fill implements Renderer.Fill using analytic anti-aliasing.
-// For complex paths (> coverageFillerThreshold elements), it auto-selects the
-// registered CoverageFiller (tile-based rasterizer) when available.
-func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
-	// Try CoverageFiller for complex paths (SparseStrips / TileCompute)
-	if filler := GetCoverageFiller(); filler != nil && len(p.Elements()) > coverageFillerThreshold {
-		fillRule := FillRuleNonZero
-		if paint.FillRule == FillRuleEvenOdd {
-			fillRule = FillRuleEvenOdd
-		}
-		if color, ok := solidColorFromPaint(paint); ok {
-			filler.FillCoverage(p, r.width, r.height, fillRule,
-				func(x, y int, coverage uint8) {
-					r.blendCoverageSolid(pixmap, x, y, coverage, color)
-				})
-		} else {
-			filler.FillCoverage(p, r.width, r.height, fillRule,
-				func(x, y int, coverage uint8) {
-					r.blendCoveragePaint(pixmap, x, y, coverage, paint)
-				})
-		}
-		return nil
+	// minElementThreshold is the absolute minimum element count for CoverageFiller.
+	// Paths with fewer elements are always cheaper with scanline rasterization
+	// since the per-pixel work scales linearly with edge crossings.
+	minElementThreshold = 32
+
+	// maxElementThreshold caps the adaptive threshold for tiny bounding boxes.
+	// Even extremely complex paths in a small area are better handled by scanline
+	// because the total pixel count is low.
+	maxElementThreshold = 256
+)
+
+// adaptiveThreshold computes the element count threshold for switching from
+// AnalyticFiller to CoverageFiller based on bounding box area.
+// Larger bounding boxes lower the threshold because scanline cost grows with
+// width (O(width * edges)) while tile-based cost grows with fill area.
+// The formula 2048/sqrt(area) produces: 100x100 -> 20, 50x50 -> 29, 200x200 -> 10.
+// Results are clamped to [minElementThreshold, maxElementThreshold].
+func adaptiveThreshold(bboxArea float64) int {
+	if bboxArea <= 0 {
+		return maxElementThreshold
+	}
+	threshold := int(2048.0 / math.Sqrt(bboxArea))
+	if threshold < minElementThreshold {
+		return minElementThreshold
+	}
+	if threshold > maxElementThreshold {
+		return maxElementThreshold
+	}
+	return threshold
+}
+
+// pathBounds computes the axis-aligned bounding box of a path by iterating
+// over all path elements. Returns (minX, minY, maxX, maxY).
+// For an empty path, returns (0, 0, 0, 0).
+func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
+	elems := p.Elements()
+	if len(elems) == 0 {
+		return 0, 0, 0, 0
 	}
 
-	// AnalyticFiller path (scanline) — simple paths or no CoverageFiller registered
+	minX = math.MaxFloat64
+	minY = math.MaxFloat64
+	maxX = -math.MaxFloat64
+	maxY = -math.MaxFloat64
+
+	expandPt := func(x, y float64) {
+		if x < minX {
+			minX = x
+		}
+		if x > maxX {
+			maxX = x
+		}
+		if y < minY {
+			minY = y
+		}
+		if y > maxY {
+			maxY = y
+		}
+	}
+
+	for _, elem := range elems {
+		switch e := elem.(type) {
+		case MoveTo:
+			expandPt(e.Point.X, e.Point.Y)
+		case LineTo:
+			expandPt(e.Point.X, e.Point.Y)
+		case QuadTo:
+			expandPt(e.Control.X, e.Control.Y)
+			expandPt(e.Point.X, e.Point.Y)
+		case CubicTo:
+			expandPt(e.Control1.X, e.Control1.Y)
+			expandPt(e.Control2.X, e.Control2.Y)
+			expandPt(e.Point.X, e.Point.Y)
+		}
+	}
+
+	return minX, minY, maxX, maxY
+}
+
+// shouldUseTileRasterizer returns true if the path is complex enough to
+// benefit from tile-based rasterization. It checks element count against
+// an adaptive threshold derived from the bounding box area.
+func shouldUseTileRasterizer(p *Path) bool {
+	nElems := len(p.Elements())
+	if nElems <= 0 {
+		return false
+	}
+
+	x1, y1, x2, y2 := pathBounds(p)
+	bboxW := x2 - x1
+	bboxH := y2 - y1
+
+	// Skip tile rasterization for shapes smaller than a single tile group.
+	if bboxW < bboxMinDimension || bboxH < bboxMinDimension {
+		return false
+	}
+	return nElems > adaptiveThreshold(bboxW*bboxH)
+}
+
+// fillWithCoverageFiller rasterizes the path using the tile-based CoverageFiller
+// and composites the result onto the pixmap.
+func (r *SoftwareRenderer) fillWithCoverageFiller(
+	pixmap *Pixmap, p *Path, paint *Paint, filler CoverageFiller,
+) {
+	fillRule := FillRuleNonZero
+	if paint.FillRule == FillRuleEvenOdd {
+		fillRule = FillRuleEvenOdd
+	}
+	if color, ok := solidColorFromPaint(paint); ok {
+		filler.FillCoverage(p, r.width, r.height, fillRule,
+			func(x, y int, coverage uint8) {
+				r.blendCoverageSolid(pixmap, x, y, coverage, color)
+			})
+	} else {
+		filler.FillCoverage(p, r.width, r.height, fillRule,
+			func(x, y int, coverage uint8) {
+				r.blendCoveragePaint(pixmap, x, y, coverage, paint)
+			})
+	}
+}
+
+// Fill implements Renderer.Fill using analytic anti-aliasing.
+// For complex paths, it auto-selects the registered CoverageFiller (tile-based
+// rasterizer) when available, using an adaptive threshold based on both path
+// element count and bounding box area.
+//
+// When rasterizerMode is set (via Context.SetRasterizerMode), the forced
+// algorithm is used instead of auto-selection.
+func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// Force mode: specific algorithm without auto-selection.
+	switch r.rasterizerMode {
+	case RasterizerAnalytic:
+		// Skip CoverageFiller entirely → always use AnalyticFiller below.
+
+	case RasterizerSparseStrips:
+		if filler := r.forcedFiller(RasterizerSparseStrips); filler != nil {
+			r.fillWithCoverageFiller(pixmap, p, paint, filler)
+			return nil
+		}
+
+	case RasterizerTileCompute:
+		if filler := r.forcedFiller(RasterizerTileCompute); filler != nil {
+			r.fillWithCoverageFiller(pixmap, p, paint, filler)
+			return nil
+		}
+
+	default: // RasterizerAuto
+		// Auto-selection: use CoverageFiller for complex paths.
+		if filler := GetCoverageFiller(); filler != nil && shouldUseTileRasterizer(p) {
+			r.fillWithCoverageFiller(pixmap, p, paint, filler)
+			return nil
+		}
+	}
+
+	// AnalyticFiller path (scanline) — simple paths, forced analytic, or no filler
 	r.edgeBuilder.Reset()
 	r.analyticFiller.Reset()
 
@@ -197,6 +333,28 @@ func (r *SoftwareRenderer) blendCoveragePaint(pixmap *Pixmap, x, y int, coverage
 		srcB+dstB*invSrcAlpha,
 		srcAlpha+dstA*invSrcAlpha,
 	)
+}
+
+// forcedFiller returns the CoverageFiller for a forced rasterizer mode.
+// If the registered filler implements ForceableFiller, the specific sub-filler
+// (SparseStrips or TileCompute) is returned. Otherwise, the filler is used as-is.
+func (r *SoftwareRenderer) forcedFiller(mode RasterizerMode) CoverageFiller {
+	filler := GetCoverageFiller()
+	if filler == nil {
+		return nil
+	}
+	ff, ok := filler.(ForceableFiller)
+	if !ok {
+		return filler
+	}
+	switch mode {
+	case RasterizerSparseStrips:
+		return ff.SparseFiller()
+	case RasterizerTileCompute:
+		return ff.ComputeFiller()
+	default:
+		return filler
+	}
 }
 
 // solidColorFromPaint returns the solid color if paint is solid.

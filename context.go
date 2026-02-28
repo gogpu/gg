@@ -44,6 +44,9 @@ type Context struct {
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode
 
+	// Rasterizer mode
+	rasterizerMode RasterizerMode // CPU rasterizer selection mode
+
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
 }
@@ -175,6 +178,21 @@ func (c *Context) SetPipelineMode(mode PipelineMode) {
 // PipelineMode returns the current pipeline mode.
 func (c *Context) PipelineMode() PipelineMode {
 	return c.pipelineMode
+}
+
+// SetRasterizerMode sets the rasterization strategy for this context.
+// RasterizerAuto (default) uses intelligent auto-selection based on path
+// complexity, bounding box area, and shape type.
+// Other modes force a specific algorithm, bypassing auto-selection.
+//
+// The mode is per-Context — different contexts can use different strategies.
+func (c *Context) SetRasterizerMode(mode RasterizerMode) {
+	c.rasterizerMode = mode
+}
+
+// RasterizerMode returns the current rasterizer mode.
+func (c *Context) RasterizerMode() RasterizerMode {
+	return c.rasterizerMode
 }
 
 // Width returns the width of the context.
@@ -404,15 +422,10 @@ func (c *Context) NewSubPath() {
 // Fill fills the current path and clears it.
 // If a GPU accelerator is registered and supports the path, it is used first.
 // Otherwise, the software renderer handles the operation.
+// The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Fill() error {
-	if err := c.tryGPUFill(); err == nil {
-		c.path.Clear()
-		return nil
-	}
-	// Flush pending GPU shapes before CPU fallback.
-	c.flushGPUAccelerator()
-	err := c.renderer.Fill(c.pixmap, c.path, c.paint)
+	err := c.doFill()
 	c.path.Clear()
 	return err
 }
@@ -420,17 +433,10 @@ func (c *Context) Fill() error {
 // Stroke strokes the current path and clears it.
 // If a GPU accelerator is registered and supports the path, it is used first.
 // Otherwise, the software renderer handles the operation.
+// The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
-	// Set transform scale for renderer to determine effective stroke width
-	c.paint.TransformScale = c.matrix.ScaleFactor()
-	if err := c.tryGPUStroke(); err == nil {
-		c.path.Clear()
-		return nil
-	}
-	// Flush pending GPU shapes before CPU fallback.
-	c.flushGPUAccelerator()
-	err := c.renderer.Stroke(c.pixmap, c.path, c.paint)
+	err := c.doStroke()
 	c.path.Clear()
 	return err
 }
@@ -440,11 +446,7 @@ func (c *Context) Stroke() error {
 // Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) FillPreserve() error {
-	if err := c.tryGPUFill(); err == nil {
-		return nil
-	}
-	c.flushGPUAccelerator()
-	return c.renderer.Fill(c.pixmap, c.path, c.paint)
+	return c.doFill()
 }
 
 // StrokePreserve strokes the current path without clearing it.
@@ -452,13 +454,7 @@ func (c *Context) FillPreserve() error {
 // Otherwise, the software renderer handles the operation.
 // Returns an error if the rendering operation fails.
 func (c *Context) StrokePreserve() error {
-	// Set transform scale for renderer to determine effective stroke width
-	c.paint.TransformScale = c.matrix.ScaleFactor()
-	if err := c.tryGPUStroke(); err == nil {
-		return nil
-	}
-	c.flushGPUAccelerator()
-	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
+	return c.doStroke()
 }
 
 // Push saves the current state (transform, paint, clip, and mask).
@@ -870,5 +866,81 @@ func sdfAccelForShape(kind ShapeKind) AcceleratedOp {
 		return AccelRRectSDF
 	default:
 		return 0
+	}
+}
+
+// doFill performs the fill operation respecting the current RasterizerMode.
+func (c *Context) doFill() error {
+	mode := c.rasterizerMode
+	cpuMode := mode
+
+	// RasterizerSDF: try SDF without minimum size check.
+	if mode == RasterizerSDF {
+		c.setForceSDF(true)
+		err := c.tryGPUFill()
+		c.setForceSDF(false)
+		if err == nil {
+			return nil
+		}
+		// Non-SDF shape → auto CPU fallback.
+		cpuMode = RasterizerAuto
+	}
+
+	// RasterizerAuto: try GPU normally (SDF with size check).
+	if mode == RasterizerAuto {
+		if err := c.tryGPUFill(); err == nil {
+			return nil
+		}
+	}
+
+	// CPU path: flush pending GPU, apply mode to software renderer.
+	c.flushGPUAccelerator()
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.rasterizerMode = cpuMode
+		defer func() { sr.rasterizerMode = RasterizerAuto }()
+	}
+	return c.renderer.Fill(c.pixmap, c.path, c.paint)
+}
+
+// doStroke performs the stroke operation respecting the current RasterizerMode.
+func (c *Context) doStroke() error {
+	c.paint.TransformScale = c.matrix.ScaleFactor()
+	mode := c.rasterizerMode
+	cpuMode := mode
+
+	// RasterizerSDF: try SDF without minimum size check.
+	if mode == RasterizerSDF {
+		c.setForceSDF(true)
+		err := c.tryGPUStroke()
+		c.setForceSDF(false)
+		if err == nil {
+			return nil
+		}
+		cpuMode = RasterizerAuto
+	}
+
+	// RasterizerAuto: try GPU normally.
+	if mode == RasterizerAuto {
+		if err := c.tryGPUStroke(); err == nil {
+			return nil
+		}
+	}
+
+	c.flushGPUAccelerator()
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.rasterizerMode = cpuMode
+		defer func() { sr.rasterizerMode = RasterizerAuto }()
+	}
+	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
+}
+
+// setForceSDF enables/disables forced SDF on the registered accelerator.
+func (c *Context) setForceSDF(force bool) {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if f, ok := a.(ForceSDFAware); ok {
+		f.SetForceSDF(force)
 	}
 }
