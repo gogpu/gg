@@ -1,8 +1,11 @@
 package gg
 
 import (
+	"fmt"
+	"image/png"
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gogpu/gg/text"
@@ -576,4 +579,276 @@ func TestDrawStringCPU_CombinedTransform(t *testing.T) {
 	if pixels == 0 {
 		t.Error("Combined transform (translate+scale+rotate) produced no pixels")
 	}
+}
+
+// --------------------------------------------------------------------------
+// Golden test: 9 transform scenarios with visual output verification
+// --------------------------------------------------------------------------
+
+// getPixelPositions returns a set of (x,y) coordinates that have non-white pixels.
+func getPixelPositions(dc *Context) map[[2]int]struct{} {
+	positions := make(map[[2]int]struct{})
+	for y := 0; y < dc.height; y++ {
+		for x := 0; x < dc.width; x++ {
+			p := dc.pixmap.GetPixel(x, y)
+			if p.R < 0.99 || p.G < 0.99 || p.B < 0.99 {
+				positions[[2]int{x, y}] = struct{}{}
+			}
+		}
+	}
+	return positions
+}
+
+// positionsOverlap returns the fraction of positions in a that also exist in b.
+// Returns 0.0 if a is empty.
+func positionsOverlap(a, b map[[2]int]struct{}) float64 {
+	if len(a) == 0 {
+		return 0
+	}
+	shared := 0
+	for pos := range a {
+		if _, ok := b[pos]; ok {
+			shared++
+		}
+	}
+	return float64(shared) / float64(len(a))
+}
+
+// saveGoldenImage saves a context image to tmp/golden_text_transform_<name>.png.
+func saveGoldenImage(t *testing.T, name string, dc *Context) {
+	t.Helper()
+	tmpDir := "tmp"
+	_ = os.MkdirAll(tmpDir, 0o755)
+
+	path := filepath.Join(tmpDir, fmt.Sprintf("golden_text_transform_%s.png", name))
+	f, err := os.Create(path)
+	if err != nil {
+		t.Logf("Failed to create %s: %v", path, err)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	img := dc.pixmap.ToImage()
+	if err := png.Encode(f, img); err != nil {
+		t.Logf("Failed to encode PNG %s: %v", path, err)
+		return
+	}
+	t.Logf("Saved golden image: %s", path)
+}
+
+func TestTextTransformGolden(t *testing.T) {
+	fontPath := findSystemFont(t)
+	if fontPath == "" {
+		t.Skip("No system font available")
+	}
+
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	saveDiffs := os.Getenv("SAVE_DIFFS") == "1"
+
+	type scenario struct {
+		name         string
+		width        int     // canvas width (0 = default 200)
+		height       int     // canvas height (0 = default 100)
+		drawX        float64 // draw position X (0 = default 20)
+		drawY        float64 // draw position Y (0 = default 50)
+		transform    func(dc *Context)
+		expectedTier string // documentation only
+	}
+
+	const (
+		defaultWidth  = 200
+		defaultHeight = 100
+		defaultDrawX  = 20.0
+		defaultDrawY  = 50.0
+		fontSize      = 16
+		drawText      = "Test"
+	)
+
+	scenarios := []scenario{
+		{
+			name:         "Identity",
+			transform:    func(_ *Context) {}, // no transform
+			expectedTier: "Tier 0 (bitmap)",
+		},
+		{
+			name: "Translate",
+			transform: func(dc *Context) {
+				dc.Translate(50, 50)
+			},
+			expectedTier: "Tier 0 (bitmap)",
+		},
+		{
+			name: "UniformScale2x",
+			transform: func(dc *Context) {
+				dc.Scale(2, 2)
+			},
+			expectedTier: "Tier 1 (bitmap@2x)",
+		},
+		{
+			name: "UniformScaleDown",
+			transform: func(dc *Context) {
+				dc.Scale(0.5, 0.5)
+			},
+			expectedTier: "Tier 1 (bitmap@0.5x)",
+		},
+		{
+			name:   "LargeScale",
+			width:  800,
+			height: 600,
+			drawX:  5,
+			drawY:  10,
+			transform: func(dc *Context) {
+				dc.Scale(10, 10)
+			},
+			expectedTier: "Tier 2 (outlines, >256px)",
+		},
+		{
+			name:  "Rotate30",
+			width: 300, height: 200,
+			drawX: 0, drawY: 0,
+			transform: func(dc *Context) {
+				dc.Translate(100, 80)
+				dc.Rotate(math.Pi / 6)
+			},
+			expectedTier: "Tier 2 (outlines)",
+		},
+		{
+			name:  "Rotate45",
+			width: 300, height: 200,
+			drawX: 0, drawY: 0,
+			transform: func(dc *Context) {
+				dc.Translate(100, 80)
+				dc.Rotate(math.Pi / 4)
+			},
+			expectedTier: "Tier 2 (outlines)",
+		},
+		{
+			name: "NonUniformScale",
+			transform: func(dc *Context) {
+				dc.Scale(2, 1)
+			},
+			expectedTier: "Tier 2 (outlines)",
+		},
+		{
+			name: "Shear",
+			transform: func(dc *Context) {
+				dc.Shear(0.3, 0) // B=0.3 faux italic
+			},
+			expectedTier: "Tier 2 (outlines)",
+		},
+	}
+
+	// Render identity first to use as baseline for comparison.
+	var identityPixels int
+	var identityPositions map[[2]int]struct{}
+
+	results := make([]struct {
+		name      string
+		pixels    int
+		positions map[[2]int]struct{}
+	}, len(scenarios))
+
+	for i, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			w := sc.width
+			if w == 0 {
+				w = defaultWidth
+			}
+			h := sc.height
+			if h == 0 {
+				h = defaultHeight
+			}
+			dx := sc.drawX
+			if dx == 0 && sc.width == 0 {
+				dx = defaultDrawX
+			}
+			dy := sc.drawY
+			if dy == 0 && sc.height == 0 {
+				dy = defaultDrawY
+			}
+
+			dc := NewContext(w, h)
+			dc.ClearWithColor(White)
+			dc.SetFont(source.Face(fontSize))
+			dc.SetRGB(0, 0, 0)
+
+			dc.Push()
+			sc.transform(dc)
+			dc.DrawString(drawText, dx, dy)
+			dc.Pop()
+
+			pixels := countNonWhitePixels(dc, 0, 0, w, h)
+			positions := getPixelPositions(dc)
+
+			results[i].name = sc.name
+			results[i].pixels = pixels
+			results[i].positions = positions
+
+			// Capture identity baseline.
+			if i == 0 {
+				identityPixels = pixels
+				identityPositions = positions
+			}
+
+			// Assert: every scenario must produce visible text.
+			if pixels == 0 {
+				t.Errorf("scenario %q produced no visible pixels (expected tier: %s)", sc.name, sc.expectedTier)
+			}
+
+			if saveDiffs {
+				saveGoldenImage(t, sc.name, dc)
+			}
+		})
+	}
+
+	// Cross-scenario comparisons (scenarios vs identity).
+	// These run after all sub-tests have populated results.
+	t.Run("CrossComparisons", func(t *testing.T) {
+		if identityPixels == 0 {
+			t.Skip("Identity scenario produced no pixels; cannot compare")
+		}
+
+		// UniformScale2x (index 2): should produce MORE pixels than identity.
+		// Both use the same default canvas size.
+		if results[2].pixels > 0 && results[2].pixels <= identityPixels {
+			t.Errorf("UniformScale2x (%d pixels) should produce more pixels than Identity (%d pixels)",
+				results[2].pixels, identityPixels)
+		}
+
+		// UniformScaleDown (index 3): should produce FEWER pixels than identity.
+		// Both use the same default canvas size.
+		if results[3].pixels > 0 && results[3].pixels >= identityPixels {
+			t.Errorf("UniformScaleDown (%d pixels) should produce fewer pixels than Identity (%d pixels)",
+				results[3].pixels, identityPixels)
+		}
+
+		// For default-canvas scenarios (NonUniformScale=7, Shear=8):
+		// pixel positions should differ from identity (overlap < 90%).
+		// LargeScale(4), Rotate30(5), Rotate45(6) use different canvas sizes,
+		// so position overlap with identity is not meaningful.
+		for _, idx := range []int{7, 8} {
+			if len(results[idx].positions) == 0 {
+				continue // already reported as error in sub-test
+			}
+			overlap := positionsOverlap(results[idx].positions, identityPositions)
+			if overlap > 0.90 {
+				t.Errorf("scenario %q has %.1f%% pixel overlap with Identity (expected <90%% for a visible transform effect)",
+					results[idx].name, overlap*100)
+			}
+		}
+
+		// LargeScale (index 4): just verify it produced substantial ink
+		// (large text = many pixels). Canvas is 800x600.
+		if results[4].pixels > 0 && results[4].pixels < 500 {
+			t.Errorf("LargeScale produced only %d pixels; expected >500 for 10x scaled text", results[4].pixels)
+		}
+
+		// Rotate30 (index 5) and Rotate45 (index 6): verify they produced ink.
+		// They use a 300x200 canvas, so we just check non-zero (already done in sub-tests).
+	})
 }

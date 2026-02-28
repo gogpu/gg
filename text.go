@@ -335,24 +335,27 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 		gx := x + glyph.X
 
 		for _, seg := range outline.Segments {
+			// sfnt.LoadGlyph returns Y-down coordinates (screen convention):
+			// Y=0 at baseline, Y<0 above baseline, Y>0 below baseline.
+			// So we ADD outlineY to baseline (no flip needed).
 			switch seg.Op {
 			case text.OutlineOpMoveTo:
 				if hasContour {
 					path.Close()
 				}
-				path.MoveTo(gx+float64(seg.Points[0].X), y-float64(seg.Points[0].Y))
+				path.MoveTo(gx+float64(seg.Points[0].X), y+float64(seg.Points[0].Y))
 				hasContour = true
 			case text.OutlineOpLineTo:
-				path.LineTo(gx+float64(seg.Points[0].X), y-float64(seg.Points[0].Y))
+				path.LineTo(gx+float64(seg.Points[0].X), y+float64(seg.Points[0].Y))
 			case text.OutlineOpQuadTo:
 				path.QuadraticTo(
-					gx+float64(seg.Points[0].X), y-float64(seg.Points[0].Y),
-					gx+float64(seg.Points[1].X), y-float64(seg.Points[1].Y))
+					gx+float64(seg.Points[0].X), y+float64(seg.Points[0].Y),
+					gx+float64(seg.Points[1].X), y+float64(seg.Points[1].Y))
 			case text.OutlineOpCubicTo:
 				path.CubicTo(
-					gx+float64(seg.Points[0].X), y-float64(seg.Points[0].Y),
-					gx+float64(seg.Points[1].X), y-float64(seg.Points[1].Y),
-					gx+float64(seg.Points[2].X), y-float64(seg.Points[2].Y))
+					gx+float64(seg.Points[0].X), y+float64(seg.Points[0].Y),
+					gx+float64(seg.Points[1].X), y+float64(seg.Points[1].Y),
+					gx+float64(seg.Points[2].X), y+float64(seg.Points[2].Y))
 			}
 		}
 	}
