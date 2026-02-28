@@ -87,9 +87,16 @@ var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
 var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
+var _ gg.ForceSDFAware = (*SDFAccelerator)(nil)
 
 // Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
+
+// SetForceSDF propagates the force-SDF flag to the CPU fallback accelerator.
+// When enabled, the CPU fallback skips the minimum size check for SDF shapes.
+func (a *SDFAccelerator) SetForceSDF(force bool) {
+	a.cpuFallback.SetForceSDF(force)
+}
 
 // CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {

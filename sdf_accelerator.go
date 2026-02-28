@@ -2,6 +2,14 @@ package gg
 
 import "math"
 
+const (
+	// sdfMinSize is the minimum shape dimension (px) for CPU SDF rendering.
+	// Below this, AnalyticFiller's scanline approach is faster because the
+	// per-pixel SDF evaluation cost exceeds the benefit for tiny shapes where
+	// the total pixel count is low (e.g., a 10x10 circle = 100 pixels).
+	sdfMinSize = 16
+)
+
 // SDFAccelerator is a CPU-based SDF accelerator for simple geometric shapes.
 // It produces smoother circles and rounded rectangles than the default
 // area-based rasterizer by computing per-pixel signed distance fields.
@@ -10,10 +18,15 @@ import "math"
 // AccelCircleSDF and AccelRRectSDF operations. All other operations fall
 // back to the software renderer.
 //
+// Shapes smaller than sdfMinSize pixels in either dimension are rejected
+// (ErrFallbackToCPU) so AnalyticFiller handles them with lower overhead.
+//
 // Usage:
 //
 //	gg.RegisterAccelerator(&gg.SDFAccelerator{})
-type SDFAccelerator struct{}
+type SDFAccelerator struct {
+	forceSDF bool // bypass sdfMinSize check for RasterizerSDF mode
+}
 
 // Compile-time interface check.
 var _ GPUAccelerator = (*SDFAccelerator)(nil)
@@ -43,8 +56,20 @@ func (a *SDFAccelerator) StrokePath(_ GPURenderTarget, _ *Path, _ *Paint) error 
 	return ErrFallbackToCPU
 }
 
+// SetForceSDF enables or disables forced SDF mode.
+// When enabled, FillShape/StrokeShape skip the minimum size check,
+// allowing SDF rendering for shapes smaller than sdfMinSize.
+func (a *SDFAccelerator) SetForceSDF(force bool) {
+	a.forceSDF = force
+}
+
 // FillShape renders a filled shape using SDF.
+// Shapes smaller than sdfMinSize in either dimension fall back to CPU scanline,
+// unless forceSDF is enabled (RasterizerSDF mode).
 func (a *SDFAccelerator) FillShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
+	if !a.forceSDF && shapeTooSmallForSDF(shape) {
+		return ErrFallbackToCPU
+	}
 	switch shape.Kind {
 	case ShapeCircle:
 		return a.fillCircleSDF(target, shape, paint)
@@ -61,7 +86,12 @@ func (a *SDFAccelerator) FillShape(target GPURenderTarget, shape DetectedShape, 
 func (a *SDFAccelerator) Flush(_ GPURenderTarget) error { return nil }
 
 // StrokeShape renders a stroked shape using SDF.
+// Shapes smaller than sdfMinSize in either dimension fall back to CPU scanline,
+// unless forceSDF is enabled (RasterizerSDF mode).
 func (a *SDFAccelerator) StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
+	if !a.forceSDF && shapeTooSmallForSDF(shape) {
+		return ErrFallbackToCPU
+	}
 	switch shape.Kind {
 	case ShapeCircle:
 		return a.strokeCircleSDF(target, shape, paint)
@@ -72,6 +102,27 @@ func (a *SDFAccelerator) StrokeShape(target GPURenderTarget, shape DetectedShape
 	default:
 		return ErrFallbackToCPU
 	}
+}
+
+// shapeTooSmallForSDF returns true if the detected shape is smaller than
+// sdfMinSize in either dimension. Tiny shapes are cheaper to render with
+// the scanline AnalyticFiller because the total pixel count is low.
+func shapeTooSmallForSDF(shape DetectedShape) bool {
+	var w, h float64
+	switch shape.Kind {
+	case ShapeCircle:
+		w = 2 * shape.RadiusX
+		h = w
+	case ShapeEllipse:
+		w = 2 * shape.RadiusX
+		h = 2 * shape.RadiusY
+	case ShapeRect, ShapeRRect:
+		w = shape.Width
+		h = shape.Height
+	default:
+		return false // unknown shapes are rejected by caller
+	}
+	return w < sdfMinSize || h < sdfMinSize
 }
 
 // fillCircleSDF renders a filled circle using SDF coverage.

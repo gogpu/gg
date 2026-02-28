@@ -250,6 +250,14 @@ type PipelineModeAware interface {
 	SetPipelineMode(mode PipelineMode)
 }
 
+// ForceSDFAware is an optional interface for GPU accelerators that support
+// forced SDF rendering. When enabled, the accelerator bypasses the minimum
+// size check for SDF shapes, allowing RasterizerSDF mode to force SDF
+// rendering regardless of shape size.
+type ForceSDFAware interface {
+	SetForceSDF(force bool)
+}
+
 // SceneStatsTracker is an optional interface for accelerators that track
 // per-frame scene statistics for auto pipeline selection. The Context
 // does not call these methods directly — the accelerator uses them internally.

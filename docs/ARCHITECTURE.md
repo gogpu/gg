@@ -145,24 +145,122 @@ CPU, producing identical output to the GPU compute shaders. This enables:
 - Debugging shader correctness
 - CPU-only fallback when no GPU is available
 
+## Smart Rasterizer Selection (v0.32.0)
+
+gg uses multi-factor auto-selection to choose the optimal rasterization algorithm per-path.
+Five algorithms are available, each optimal for different scenarios:
+
+| Algorithm | Tile Size | Optimal For | Implementation |
+|-----------|-----------|-------------|----------------|
+| **AnalyticFiller** | — (scanline) | Simple paths, small shapes | `internal/raster/analytic_filler.go` |
+| **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads | `internal/gpu/sparse_strips_filler.go` |
+| **TileCompute** | 16×16 | Extreme complexity (10K+ segments) | `internal/gpu/tilecompute_filler.go` |
+| **SDFAccelerator** | — (per-pixel) | Geometric shapes (circles, rrects) | `sdf_accelerator.go` |
+| **Vello PTCL** | 16×16 | Full scenes (many paths, GPU compute) | `internal/gpu/vello_accelerator.go` |
+
+### Auto-Selection Flow
+
+```
+Context.Fill()
+    │
+    ├── RasterizerMode == SDF? → force SDF on accelerator → try GPU
+    ├── RasterizerMode == Auto? → try GPU accelerator (SDF/Stencil/Compute)
+    │
+    └── SoftwareRenderer.Fill()
+         │
+         ├── RasterizerMode == Analytic? → AnalyticFiller (scanline)
+         ├── RasterizerMode == SparseStrips? → forced SparseStrips (4×4)
+         ├── RasterizerMode == TileCompute? → forced TileCompute (16×16)
+         │
+         └── RasterizerMode == Auto?
+              │
+              ├── bbox < 32px? → AnalyticFiller (tile overhead exceeds benefit)
+              ├── elements > adaptiveThreshold(bboxArea)? → CoverageFiller
+              │    └── AdaptiveFiller auto-selects:
+              │         ├── segments > 10K AND area > 2MP → TileCompute (16×16)
+              │         └── otherwise → SparseStrips (4×4)
+              └── otherwise → AnalyticFiller (scanline)
+```
+
+### Adaptive Threshold Formula
+
+```
+threshold = clamp(2048 / sqrt(bboxArea), 32, 256)
+```
+
+| Bounding Box | Threshold | Rationale |
+|-------------|-----------|-----------|
+| 50×50 px | 29 elements | Small area — scanline is cheap |
+| 100×100 px | 20 elements | Medium — tile rasterizer starts winning |
+| 200×200 px | 10 elements | Large — tile overhead amortized |
+| 500×500 px | 4 elements | Very large — almost always tile |
+
+### CoverageFiller Interface
+
+```go
+// CoverageFiller is a tile-based coverage rasterizer for complex paths.
+type CoverageFiller interface {
+    FillCoverage(path *Path, width, height int, fillRule FillRule,
+        callback func(x, y int, coverage uint8))
+}
+
+// ForceableFiller allows forced algorithm selection.
+type ForceableFiller interface {
+    CoverageFiller
+    SparseFiller() CoverageFiller   // 4×4 tiles
+    ComputeFiller() CoverageFiller  // 16×16 tiles
+}
+```
+
+Registration follows the same pattern as `GPUAccelerator`:
+- `RegisterCoverageFiller()` / `GetCoverageFiller()` — registration pair
+- `gg/gpu/` registers `AdaptiveFiller` (auto 4×4 vs 16×16)
+- `gg/raster/` registers `AdaptiveFiller` independently (CPU-only, no GPU deps)
+
+### RasterizerMode API
+
+Per-context force override for debugging, benchmarking, and known workloads:
+
+```go
+dc := gg.NewContext(800, 600)
+
+dc.SetRasterizerMode(gg.RasterizerSparseStrips) // force 4×4 tiles
+dc.SetRasterizerMode(gg.RasterizerSDF)          // force SDF for shapes
+dc.SetRasterizerMode(gg.RasterizerAuto)          // restore auto-selection
+```
+
+| Mode | Behavior |
+|------|----------|
+| `RasterizerAuto` | Multi-factor auto-selection (default) |
+| `RasterizerAnalytic` | Force scanline, bypass tile rasterizer |
+| `RasterizerSparseStrips` | Force 4×4 tiles via `ForceableFiller` |
+| `RasterizerTileCompute` | Force 16×16 tiles via `ForceableFiller` |
+| `RasterizerSDF` | Force SDF for shapes, bypass min-size check |
+
 ## Package Structure
 
 ```
 gg/
 ├── context.go              # Canvas-like drawing context
-├── software.go             # SoftwareRenderer (uses internal/raster directly)
+├── software.go             # SoftwareRenderer (adaptive threshold + force mode)
 ├── accelerator.go          # GPUAccelerator interface + registration
+├── coverage_filler.go      # CoverageFiller + ForceableFiller interfaces
+├── rasterizer_mode.go      # RasterizerMode type (Auto/Analytic/SparseStrips/TileCompute/SDF)
 ├── sdf.go                  # CPU SDF coverage functions (circles, ellipses, rects)
-├── sdf_accelerator.go      # SDFAccelerator (CPU-based SDF for simple shapes)
+├── sdf_accelerator.go      # SDFAccelerator (CPU-based SDF, ForceSDFAware)
 ├── shape_detect.go         # DetectShape: auto-detect circles/rects/rrects from paths
+├── pipeline_mode.go        # PipelineMode (Auto/RenderPass/Compute)
 ├── options.go              # Configuration options
 ├── path.go                 # Vector path operations
 ├── paint.go                # Fill and stroke styles
 ├── pixmap.go               # Pixel buffer operations
 ├── text.go                 # Text rendering
 │
-├── gpu/                    # PUBLIC opt-in GPU registration (blank import)
-│   └── gpu.go              # init() registers internal/gpu accelerator
+├── gpu/                    # PUBLIC opt-in: GPU accelerator + tile rasterizer
+│   └── gpu.go              # init() registers SDFAccelerator + AdaptiveFiller
+│
+├── raster/                 # PUBLIC opt-in: tile rasterizer only (no GPU)
+│   └── raster.go           # init() registers AdaptiveFiller (CPU-only)
 │
 ├── integration/
 │   └── ggcanvas/           # gogpu integration (Canvas for windowed rendering)
@@ -190,10 +288,13 @@ gg/
 │   │   ├── path_geometry.go    # Y-monotonic curve chopping
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
-│   ├── gpu/                # GPU rendering pipeline (five-tier)
+│   ├── gpu/                # GPU rendering pipeline (five-tier) + tile rasterizers
 │   │   ├── backend.go      # GPU backend implementation
-│   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL)
+│   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL, ForceSDFAware)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
+│   │   ├── adaptive_filler.go    # AdaptiveFiller (auto 4×4 vs 16×16 tiles)
+│   │   ├── sparse_strips_filler.go  # SparseStripsFiller (4×4 tiles, CoverageFiller)
+│   │   ├── tilecompute_filler.go    # TileComputeFiller (16×16 tiles, CoverageFiller)
 │   │   ├── convex_renderer.go  # Convex polygon renderer (Tier 2a)
 │   │   ├── convexity.go    # Convexity detection algorithm
 │   │   ├── stencil_renderer.go # Stencil+Cover renderer (Tier 2b)
@@ -525,6 +626,9 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Fixed-Point Math** | Skia | FDot6/FDot16 sub-pixel precision |
 | **Trapezoidal Coverage** | vello | Exact per-pixel AA calculation |
 | **Tile Rasterization** | vello | 16x16 tile binning + DDA |
+| **Multi-Engine Rasterizer** | coregex/gg | Adaptive algorithm selection per-path (analytic/4×4/16×16/SDF) |
+| **Adaptive Threshold** | gg | `2048/sqrt(bboxArea)` — scales threshold with shape size |
+| **CoverageFiller Registration** | accelerator.go pattern | Tile rasterizer registration via `RegisterCoverageFiller()` |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |

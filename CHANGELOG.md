@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-02-28
+
+### Added
+
+- **Smart rasterizer selection** — Multi-factor auto-selection of rasterization
+  algorithm per-path. Adaptive threshold formula `max(32, 2048/sqrt(bboxArea))`
+  considers path complexity and bounding box area. BBox precheck: paths < 32px
+  always use scanline. Five algorithms: AnalyticFiller (scanline), SparseStrips
+  (4×4 tiles), TileCompute (16×16 tiles), SDFAccelerator (per-pixel SDF),
+  Vello PTCL (GPU compute).
+- **`CoverageFiller` interface** — Tile-based coverage rasterizer interface with
+  `RegisterCoverageFiller()` / `GetCoverageFiller()` registration pattern
+  (mirrors `GPUAccelerator`). `ForceableFiller` extension interface exposes
+  `SparseFiller()` / `ComputeFiller()` for forced algorithm selection.
+- **`AdaptiveFiller`** — Auto-selects between SparseStrips (4×4) and TileCompute
+  (16×16) based on estimated segment count (10K threshold) and canvas area (2MP).
+- **`RasterizerMode` API** — Per-context force override: `RasterizerAuto`,
+  `RasterizerAnalytic`, `RasterizerSparseStrips`, `RasterizerTileCompute`,
+  `RasterizerSDF`. Use `Context.SetRasterizerMode()` for debugging, benchmarking,
+  or known workloads.
+- **`ForceSDFAware` interface** — Optional GPU accelerator interface for forced
+  SDF rendering. `SetForceSDF(true)` bypasses the 16px minimum size check.
+- **`gg/raster/` package** — CPU-only tile rasterizer registration via blank
+  import `import _ "github.com/gogpu/gg/raster"`. Independent of GPU packages.
+- **SDF minimum size** — Shapes smaller than 16px skip SDF rendering (unless
+  `RasterizerSDF` mode is forced) to avoid overhead on tiny shapes.
+
 ## [0.31.1] - 2026-02-27
 
 ### Fixed
