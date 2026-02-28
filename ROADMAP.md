@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.32.0
+## Current State: v0.32.1
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - Canvas API, Text, Images, Clipping, Layers
@@ -39,6 +39,11 @@
 - Premultiplied alpha pipeline for correct compositing
 - HarfBuzz-level text shaping via GoTextShaper
 - Structured logging via log/slog
+- **Transform-aware CPU text** — 3-tier hybrid decision tree (Skia/Cairo/Vello patterns)
+
+**New in v0.32.1:**
+- CPU text transform support (TEXT-002) — `DrawString` respects full CTM
+- GPU MSDF text transform support (TEXT-001, #146)
 
 **New in v0.32.0:**
 - Smart rasterizer selection — adaptive threshold `max(32, 2048/sqrt(bboxArea))` per-path
@@ -56,6 +61,21 @@
 ---
 
 ## Upcoming
+
+### v0.33.0 — Text Transform Optimizations
+- [ ] Recording system CTM-aware text (separate task)
+- [ ] MeasureString with CTM (separate task)
+- [ ] Glyph outline cache optimization
+- [ ] Scaled Face cache with quantized sizes (Skia sk_relax pattern)
+
+### v0.32.1 — CPU Text Transform ✅ Released
+- [x] CPU hybrid text transform (TEXT-002): 3-tier decision tree (Skia/Cairo/Vello)
+- [x] Tier 0: Translation-only → bitmap fast path
+- [x] Tier 1: Uniform scale ≤256px → bitmap at device size (Strategy A)
+- [x] Tier 2: Rotation/shear/non-uniform/mirror → glyph outlines as paths (Strategy B)
+- [x] MultiFace graceful degradation
+- [x] Lazy OutlineExtractor on Context
+- [x] GPU MSDF text transform support (TEXT-001, #146)
 
 ### v0.32.0 — Smart Multi-Engine Rasterizer ✅ Released
 - [x] CoverageFiller interface with registration pattern
@@ -166,7 +186,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.32.0** | 2026-02 | Smart multi-engine rasterizer (5 algorithms), adaptive threshold, RasterizerMode API, gg/raster/ package |
+| **v0.32.1** | 2026-02 | CPU text transform (3-tier hybrid: Skia/Cairo/Vello), GPU MSDF text transform (#146) |
+| v0.32.0 | 2026-02 | Smart multi-engine rasterizer (5 algorithms), adaptive threshold, RasterizerMode API, gg/raster/ package |
 | v0.31.1 | 2026-02 | Vulkan rounded rectangle pixel fix (wgpu v0.18.1) |
 | v0.31.0 | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
 | v0.30.2 | 2026-02 | Vello buffer overflow fix, WrapText hard line breaks, wgpu v0.16.17 |

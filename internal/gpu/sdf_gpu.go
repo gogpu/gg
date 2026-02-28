@@ -307,8 +307,14 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 // into the atlas, and TextQuads are produced for the unified render pass.
 // Actual rendering is deferred to Flush().
 //
+// The matrix parameter is the context's current transformation matrix (CTM).
+// It is composed with the pixel-to-NDC ortho projection in the uniform
+// buffer so that Scale, Rotate, and Skew transforms affect text rendering.
+// Quad positions are computed in user space; the CTM is applied by the
+// vertex shader.
+//
 // Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
-func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA) error {
+func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
 		return gg.ErrFallbackToCPU
@@ -336,7 +342,7 @@ func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string,
 		}
 	}
 
-	batch, err := a.textEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height)
+	batch, err := a.textEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix)
 	if err != nil {
 		return gg.ErrFallbackToCPU
 	}

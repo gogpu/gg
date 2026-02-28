@@ -61,25 +61,30 @@ func NewGPUTextEngine() *GPUTextEngine {
 
 // LayoutText converts a text string with font face into a GPU-ready TextBatch.
 // The text is shaped into glyphs, each glyph's MSDF is generated and packed
-// into the atlas, and TextQuads are produced with pixel-space positions and
+// into the atlas, and TextQuads are produced with user-space positions and
 // atlas UV coordinates.
 //
 // Parameters:
 //   - face: font face (provides glyph iteration and metrics)
 //   - s: the string to render
-//   - x, y: baseline origin in pixel coordinates
+//   - x, y: baseline origin in user-space coordinates
 //   - color: text color as gg.RGBA
-//   - viewportW, viewportH: viewport dimensions for building the pixel-to-NDC transform
+//   - viewportW, viewportH: viewport dimensions for building the ortho projection
+//   - matrix: the context's current transformation matrix (CTM)
 //
-// The returned TextBatch contains quads in pixel coordinates. The Transform
-// field is set to a pixel-to-NDC matrix that the shader uses to convert
-// positions to clip space.
+// The returned TextBatch contains quads in user-space coordinates. The
+// Transform field is set to CTM x ortho_projection so the vertex shader
+// transforms positions from user space to clip space. This ensures that
+// Scale, Rotate, and Skew transforms applied to the drawing context affect
+// text rendering correctly. The MSDF fragment shader's fwidth() automatically
+// adapts to the composed transform for correct anti-aliasing.
 func (e *GPUTextEngine) LayoutText(
 	face text.Face,
 	s string,
 	x, y float64,
 	color gg.RGBA,
 	viewportW, viewportH int,
+	matrix gg.Matrix,
 ) (TextBatch, error) {
 	if face == nil || s == "" {
 		return TextBatch{}, nil
@@ -161,18 +166,31 @@ func (e *GPUTextEngine) LayoutText(
 		return TextBatch{}, nil
 	}
 
-	// Build pixel-to-NDC transform matrix.
-	// The MSDF text shader applies: clip_pos = transform * vec4(position, 0, 1)
-	// We need: ndc_x = x / w * 2 - 1, ndc_y = 1 - y / h * 2
-	// As a mat4x4 stored in the affine layout expected by makeTextUniform:
+	// Build the composed transform: CTM x ortho_projection.
+	//
+	// The ortho projection maps pixel coordinates to NDC [-1, 1]:
+	//   ndc_x = x / w * 2 - 1
+	//   ndc_y = 1 - y / h * 2
+	// As a 2D affine matrix:
 	//   A = 2/w, B = 0,    C = -1
 	//   D = 0,   E = -2/h, F = 1
+	//
+	// The CTM (context's current transformation matrix) is applied first
+	// to transform user-space positions to device pixels, then the ortho
+	// projection maps to NDC. The composition is: ortho x CTM.
+	//
+	// This enables Scale, Rotate, and Skew to affect text rendering.
+	// The fragment shader's fwidth() automatically adapts to the composed
+	// transform, producing correct screenPxRange for anti-aliasing at any
+	// scale/rotation.
 	vw := float64(viewportW)
 	vh := float64(viewportH)
-	transform := gg.Matrix{
+	ortho := gg.Matrix{
 		A: 2.0 / vw, B: 0, C: -1.0,
 		D: 0, E: -2.0 / vh, F: 1.0,
 	}
+	// Compose: ortho * CTM (CTM applied first to vertex, then ortho).
+	transform := ortho.Multiply(matrix)
 
 	return TextBatch{
 		Quads:      quads,

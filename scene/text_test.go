@@ -10,8 +10,8 @@ import (
 func TestDefaultTextRendererConfig(t *testing.T) {
 	config := DefaultTextRendererConfig()
 
-	if !config.FlipY {
-		t.Errorf("FlipY should be true by default")
+	if config.FlipY {
+		t.Errorf("FlipY should be false by default (sfnt returns Y-down)")
 	}
 	if !config.SubpixelPositioning {
 		t.Errorf("SubpixelPositioning should be true by default")
@@ -36,7 +36,7 @@ func TestNewTextRenderer(t *testing.T) {
 
 func TestNewTextRendererWithConfig(t *testing.T) {
 	config := TextRendererConfig{
-		FlipY:               false,
+		FlipY:               true,
 		SubpixelPositioning: false,
 		HintingEnabled:      true,
 	}
@@ -58,15 +58,15 @@ func TestTextRenderer_SetConfig(t *testing.T) {
 	r := NewTextRenderer()
 
 	newConfig := TextRendererConfig{
-		FlipY:               false,
+		FlipY:               true,
 		SubpixelPositioning: false,
 		HintingEnabled:      true,
 	}
 	r.SetConfig(newConfig)
 
 	got := r.Config()
-	if got.FlipY != false {
-		t.Errorf("FlipY should be false after SetConfig")
+	if !got.FlipY {
+		t.Errorf("FlipY should be true after SetConfig")
 	}
 }
 

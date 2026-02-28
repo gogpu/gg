@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, five-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF rendering, emoji support, bidirectional text, HarfBuzz shaping |
+| **Text** | TrueType fonts, MSDF rendering, transform-aware CPU text (scale/rotate/shear), emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
@@ -304,6 +304,32 @@ opts := text.LayoutOptions{
 }
 layout := text.LayoutText("Long text...", face, opts)
 ```
+
+#### Transform-Aware Text
+
+Text rendering respects the full transformation matrix (scale, rotation, shear):
+
+```go
+dc.SetFont(source.Face(24))
+dc.SetRGB(0, 0, 0)
+
+// Scaled text — rendered at device resolution (no pixelation)
+dc.Push()
+dc.Scale(2, 2)
+dc.DrawString("2x Scale", 50, 50)
+dc.Pop()
+
+// Rotated text — glyph outlines converted to vector paths
+dc.Push()
+dc.Translate(200, 200)
+dc.Rotate(math.Pi / 6) // 30 degrees
+dc.DrawString("Rotated", 0, 0)
+dc.Pop()
+```
+
+The CPU text pipeline uses a three-tier strategy (modeled after Skia/Cairo/Vello):
+translation-only → bitmap, uniform scale ≤256px → bitmap at device size,
+everything else → glyph outlines as vector paths.
 
 ### Color Emoji
 

@@ -47,6 +47,9 @@ type Context struct {
 	// Rasterizer mode
 	rasterizerMode RasterizerMode // CPU rasterizer selection mode
 
+	// Text rendering
+	outlineExtractor *text.OutlineExtractor // lazy: for transform-aware text (Strategy B)
+
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
 }
