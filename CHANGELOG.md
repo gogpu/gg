@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.1] - 2026-02-28
+
+### Added
+
+- **CPU text transform support (TEXT-002)** — `DrawString` now respects the full CTM
+  (Current Transform Matrix) for CPU text rendering, not just position. Three-tier
+  hybrid decision tree modeled after Skia/Cairo/Vello:
+  - **Tier 0**: Translation-only → bitmap fast path (zero quality loss)
+  - **Tier 1**: Uniform positive scale ≤256px → bitmap at device pixel size (Skia pattern)
+  - **Tier 2**: Rotation, shear, non-uniform scale, mirror, extreme scale → glyph vector
+    outlines converted to `Path`, transformed by CTM, filled via `SoftwareRenderer`
+  - `DrawStringAnchored` and `DrawStringWrapped` inherit transform support automatically
+  - MultiFace graceful degradation (falls back to position-only bitmap)
+  - Lazy `OutlineExtractor` initialization on Context (GC-managed lifecycle)
+  ([#145](https://github.com/gogpu/gg/issues/145))
+
 ## [0.32.0] - 2026-02-28
 
 ### Added

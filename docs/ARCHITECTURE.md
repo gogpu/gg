@@ -237,6 +237,57 @@ dc.SetRasterizerMode(gg.RasterizerAuto)          // restore auto-selection
 | `RasterizerTileCompute` | Force 16×16 tiles via `ForceableFiller` |
 | `RasterizerSDF` | Force SDF for shapes, bypass min-size check |
 
+## Text Rendering Pipeline (v0.29.0+, CPU Transform v0.32.1)
+
+Text rendering uses a multi-tier strategy. GPU MSDF handles text when available;
+the CPU pipeline uses a hybrid decision tree for transform-aware rendering.
+
+### Pipeline Flow
+
+```
+dc.DrawString(s, x, y)
+    │
+    ├── [1] GPU MSDF Text (if GPUTextAccelerator registered)
+    │       CTM passed to vertex shader → correct scale/rotation/skew
+    │
+    └── [2] CPU Pipeline (drawStringCPU — 3-tier decision tree)
+             │
+             ├── Tier 0: Translation-only? → bitmap fast path (text.Draw)
+             │            No quality loss, position transformed by CTM
+             │
+             ├── Tier 1: Uniform positive scale ≤256px?
+             │            → bitmap at device size (Strategy A, Skia pattern)
+             │            FontSource.Face(fontSize * scale) at transformed position
+             │
+             └── Tier 2: Everything else (rotation, shear, non-uniform scale,
+                          negative scale, scale >256px)
+                          → glyph outlines as vector paths (Strategy B, Vello pattern)
+                          OutlineExtractor → Path (all glyphs, one fill)
+                          → path.Transform(CTM) → SoftwareRenderer.Fill()
+```
+
+### Design Decisions (Enterprise References)
+
+| Decision | Reference | Rationale |
+|----------|-----------|-----------|
+| 256px atlas threshold | Skia `kSkSideTooBigForAtlas` | Above this, bitmap quality degrades; outlines scale perfectly |
+| Translation-only fast path | Cairo `_cairo_gstate_get_font_ctm` | Most common case, zero overhead vs identity |
+| Glyph outlines as Path | Vello `resolve_glyph_run` | Exact rendering at any transform, no quality loss |
+| Y-flip (`y - outlineY`) | TrueType/PostScript (Y-up) → screen (Y-down) | Industry standard for font outline conversion |
+| All glyphs in one Path | `scene/text.go:ToCompositePath` | Single fill call, more efficient than per-glyph |
+| FillRuleNonZero | Font outline convention | Standard winding rule for TrueType/OpenType contours |
+| MultiFace fallback | `Source() == nil` → bitmap | Graceful degradation for composite faces |
+| Lazy OutlineExtractor | GC-managed lifecycle | No changes to `NewContext()` or `Close()` |
+
+### Key Files
+
+| File | Content |
+|------|---------|
+| `text.go` | `drawStringCPU` decision tree, `drawStringBitmap/Scaled/AsOutlines` |
+| `context.go` | `outlineExtractor` field (lazy init) |
+| `text/glyph_outline.go` | `OutlineExtractor`, `GlyphOutline`, `OutlineSegment` |
+| `text/face.go` | `Face.Glyphs()`, `Face.Source()`, `Face.Size()` |
+
 ## Package Structure
 
 ```
@@ -629,6 +680,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Multi-Engine Rasterizer** | coregex/gg | Adaptive algorithm selection per-path (analytic/4×4/16×16/SDF) |
 | **Adaptive Threshold** | gg | `2048/sqrt(bboxArea)` — scales threshold with shape size |
 | **CoverageFiller Registration** | accelerator.go pattern | Tile rasterizer registration via `RegisterCoverageFiller()` |
+| **Hybrid Text Transform** | Skia/Cairo/Vello | 3-tier decision tree: bitmap → scaled bitmap → outline paths |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
