@@ -692,9 +692,9 @@ func TestTextTransformGolden(t *testing.T) {
 		{
 			name: "UniformScaleDown",
 			transform: func(dc *Context) {
-				dc.Scale(0.5, 0.5)
+				dc.Scale(0.7, 0.7)
 			},
-			expectedTier: "Tier 1 (bitmap@0.5x)",
+			expectedTier: "Tier 1 (bitmap@0.7x)",
 		},
 		{
 			name:   "LargeScale",
@@ -737,7 +737,7 @@ func TestTextTransformGolden(t *testing.T) {
 		{
 			name: "Shear",
 			transform: func(dc *Context) {
-				dc.Shear(0.3, 0) // B=0.3 faux italic
+				dc.Shear(-0.3, 0) // B=-0.3 faux italic (lean right)
 			},
 			expectedTier: "Tier 2 (outlines)",
 		},

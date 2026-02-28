@@ -25,9 +25,11 @@ type TextRenderer struct {
 
 // TextRendererConfig holds configuration for TextRenderer.
 type TextRendererConfig struct {
-	// FlipY inverts the Y-axis for rendering (default: true).
-	// Fonts define Y as increasing upward, but screen coordinates
-	// typically have Y increasing downward.
+	// FlipY inverts the Y-axis for glyph outlines (default: false).
+	// Our OutlineExtractor preserves sfnt's Y-down convention
+	// (Y=0 at baseline, Y<0 above, Y>0 below), which matches
+	// screen coordinates directly. Set to true only if your
+	// coordinate system has Y increasing upward.
 	FlipY bool
 
 	// SubpixelPositioning enables fractional glyph positioning.
@@ -41,7 +43,7 @@ type TextRendererConfig struct {
 // DefaultTextRendererConfig returns the default configuration.
 func DefaultTextRendererConfig() TextRendererConfig {
 	return TextRendererConfig{
-		FlipY:               true,
+		FlipY:               false,
 		SubpixelPositioning: true,
 		HintingEnabled:      false,
 	}

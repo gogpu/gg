@@ -88,7 +88,7 @@ func main() {
 		},
 		{
 			{fmt.Sprintf("Rotate(%s/4 = 45%s)", "\u03c0", "\u00b0"), func(dc *gg.Context) { dc.Rotate(math.Pi / 4) }},
-			{"Shear (faux italic)", func(dc *gg.Context) { dc.Shear(0.3, 0) }},
+			{"Shear (faux italic)", func(dc *gg.Context) { dc.Shear(-0.3, 0) }},
 			{fmt.Sprintf("Scale(2)+Rotate(%s/8)", "\u03c0"), func(dc *gg.Context) {
 				dc.Scale(2, 2)
 				dc.Rotate(math.Pi / 8)
