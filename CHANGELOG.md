@@ -20,6 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MultiFace graceful degradation (falls back to position-only bitmap)
   - Lazy `OutlineExtractor` initialization on Context (GC-managed lifecycle)
   ([#145](https://github.com/gogpu/gg/issues/145))
+- **GPU MSDF text transform support (TEXT-001)** — CTM passed to GPU MSDF
+  vertex shader for correct scale, rotation, and skew of GPU-rendered text.
+  ([#146](https://github.com/gogpu/gg/issues/146))
+- **Text transform golden tests (TEXT-003)** — 9-scenario golden test suite
+  (identity, translate, scale, rotate, shear) with cross-comparison validation.
+- **`examples/text_transform`** — Visual 3×3 grid example demonstrating all
+  CPU text rendering tiers with per-cell clipping.
+
+### Fixed
+
+- **Outline text Y-coordinate inversion** — `drawStringAsOutlines` used Y-up
+  formula but `sfnt.LoadGlyph` returns Y-down (screen convention). Text rendered
+  via Tier 2 (rotation, shear, non-uniform scale) was upside-down.
+  ([#145](https://github.com/gogpu/gg/issues/145))
+- **`scene/text.go` FlipY default** — Changed `TextRendererConfig.FlipY` default
+  from `true` to `false`. Since `OutlineExtractor` preserves sfnt's Y-down
+  convention, no flip is needed. Fixes inverted text in scene text rendering.
 
 ## [0.32.0] - 2026-02-28
 
