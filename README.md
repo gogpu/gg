@@ -99,10 +99,24 @@ func main() {
 
 ### Software Rendering (Default)
 
+The CPU rasterizer automatically selects the optimal algorithm per-path:
+
+| Algorithm | Best For |
+|-----------|----------|
+| **Scanline** | Simple paths, small shapes (< 32px) |
+| **SparseStrips** (4×4 tiles) | Complex paths, CPU/SIMD workloads |
+| **TileCompute** (16×16 tiles) | Extreme complexity (10K+ segments) |
+
 ```go
-// Default software renderer — high-quality CPU rasterizer
 dc := gg.NewContext(800, 600)
 defer dc.Close()
+
+// Auto-selection (default) — optimal algorithm per-path
+dc.DrawCircle(400, 300, 100)
+dc.Fill()
+
+// Force specific algorithm for benchmarking
+dc.SetRasterizerMode(gg.RasterizerSparseStrips)
 ```
 
 ### GPU Acceleration (Optional)
