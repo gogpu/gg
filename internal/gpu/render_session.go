@@ -471,7 +471,9 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 		s.sdfVertBuf = buf
 		s.sdfVertBufCap = allocSize
 	}
-	s.queue.WriteBuffer(s.sdfVertBuf, 0, vertexData)
+	if err := s.queue.WriteBuffer(s.sdfVertBuf, 0, vertexData); err != nil {
+		return nil, fmt.Errorf("write vertex buffer: %w", err)
+	}
 
 	uniformData := makeSDFRenderUniform(w, h)
 	if s.sdfUniformBuf == nil {
@@ -490,7 +492,9 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 			s.sdfBindGroup = nil
 		}
 	}
-	s.queue.WriteBuffer(s.sdfUniformBuf, 0, uniformData)
+	if err := s.queue.WriteBuffer(s.sdfUniformBuf, 0, uniformData); err != nil {
+		return nil, fmt.Errorf("write uniform buffer: %w", err)
+	}
 
 	if s.sdfBindGroup == nil {
 		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
@@ -550,7 +554,9 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 		s.convexVertBuf = buf
 		s.convexVertBufCap = allocSize
 	}
-	s.queue.WriteBuffer(s.convexVertBuf, 0, vertexData)
+	if err := s.queue.WriteBuffer(s.convexVertBuf, 0, vertexData); err != nil {
+		return nil, fmt.Errorf("write convex vertex buffer: %w", err)
+	}
 
 	uniformData := makeSDFRenderUniform(w, h) // Same 16-byte viewport layout.
 	if s.convexUniformBuf == nil {
@@ -568,7 +574,9 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 			s.convexBindGroup = nil
 		}
 	}
-	s.queue.WriteBuffer(s.convexUniformBuf, 0, uniformData)
+	if err := s.queue.WriteBuffer(s.convexUniformBuf, 0, uniformData); err != nil {
+		return nil, fmt.Errorf("write convex uniform buffer: %w", err)
+	}
 
 	if s.convexBindGroup == nil {
 		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
@@ -663,7 +671,7 @@ func aggregateTextBatches(batches []TextBatch) ([]TextQuad, TextBatch) {
 
 // The bind group is persistent (matching SDF pattern) — recreated only when
 // buffers are reallocated or atlas changes via SetTextAtlas.
-func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) {
+func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) { //nolint:gocyclo,cyclop,funlen // sequential buffer management, complexity from error handling
 	if len(batches) == 0 {
 		return nil, nil //nolint:nilnil // empty batch list is a valid no-op, not an error
 	}
@@ -699,7 +707,9 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 		s.textVertBuf = buf
 		s.textVertBufCap = allocSize
 	}
-	s.queue.WriteBuffer(s.textVertBuf, 0, vertexData)
+	if err := s.queue.WriteBuffer(s.textVertBuf, 0, vertexData); err != nil {
+		return nil, fmt.Errorf("write text vertex buffer: %w", err)
+	}
 
 	// Build index data (6 indices per quad, 2 bytes per index).
 	indexData := buildTextIndexData(len(allQuads))
@@ -727,7 +737,9 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 		s.textIdxBuf = buf
 		s.textIdxBufCap = allocSize
 	}
-	s.queue.WriteBuffer(s.textIdxBuf, 0, indexData)
+	if err := s.queue.WriteBuffer(s.textIdxBuf, 0, indexData); err != nil {
+		return nil, fmt.Errorf("write text index buffer: %w", err)
+	}
 
 	// Build uniform data (96 bytes).
 	uniformData := makeTextUniform(batch.Color, batch.Transform, batch.PxRange, batch.AtlasSize)
@@ -747,7 +759,9 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 			s.textBindGroup = nil
 		}
 	}
-	s.queue.WriteBuffer(s.textUniformBuf, 0, uniformData)
+	if err := s.queue.WriteBuffer(s.textUniformBuf, 0, uniformData); err != nil {
+		return nil, fmt.Errorf("write text uniform buffer: %w", err)
+	}
 
 	// The bind group requires an atlas texture view. If no atlas view is
 	// available yet, skip text rendering this frame.

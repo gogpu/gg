@@ -753,7 +753,7 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 		}
 
 		// Upload RGBA data to the GPU texture.
-		a.queue.WriteTexture(
+		if err := a.queue.WriteTexture(
 			&hal.ImageCopyTexture{Texture: tex, MipLevel: 0},
 			rgbaData,
 			&hal.ImageDataLayout{
@@ -762,7 +762,10 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 				RowsPerImage: atlasSize,
 			},
 			&hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
-		)
+		); err != nil {
+			a.device.DestroyTexture(tex)
+			return fmt.Errorf("upload atlas texture %d: %w", idx, err)
+		}
 
 		// Pass texture ownership to the session (it destroys the old one).
 		a.session.SetTextAtlas(tex, view)

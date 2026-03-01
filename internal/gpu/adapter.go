@@ -193,7 +193,9 @@ func (a *HALAdapter) WriteBuffer(id gpucore.BufferID, offset uint64, data []byte
 	a.mu.RUnlock()
 
 	if ok && len(data) > 0 {
-		a.queue.WriteBuffer(buffer, offset, data)
+		if err := a.queue.WriteBuffer(buffer, offset, data); err != nil {
+			hal.Logger().Warn("WriteBuffer failed", "error", err)
+		}
 	}
 }
 
@@ -360,7 +362,9 @@ func (a *HALAdapter) WriteTexture(id gpucore.TextureID, data []byte) {
 		DepthOrArrayLayers: 1,
 	}
 
-	a.queue.WriteTexture(dst, data, layout, size)
+	if err := a.queue.WriteTexture(dst, data, layout, size); err != nil {
+		hal.Logger().Warn("WriteTexture failed", "error", err)
+	}
 }
 
 // ReadTexture reads data from a texture.
