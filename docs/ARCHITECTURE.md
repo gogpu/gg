@@ -150,13 +150,13 @@ CPU, producing identical output to the GPU compute shaders. This enables:
 gg uses multi-factor auto-selection to choose the optimal rasterization algorithm per-path.
 Five algorithms are available, each optimal for different scenarios:
 
-| Algorithm | Tile Size | Optimal For | Implementation |
-|-----------|-----------|-------------|----------------|
-| **AnalyticFiller** | — (scanline) | Simple paths, small shapes | `internal/raster/analytic_filler.go` |
-| **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads | `internal/gpu/sparse_strips_filler.go` |
-| **TileCompute** | 16×16 | Extreme complexity (10K+ segments) | `internal/gpu/tilecompute_filler.go` |
-| **SDFAccelerator** | — (per-pixel) | Geometric shapes (circles, rrects) | `sdf_accelerator.go` |
-| **Vello PTCL** | 16×16 | Full scenes (many paths, GPU compute) | `internal/gpu/vello_accelerator.go` |
+| Algorithm | Type | Tiles | Origin | Optimal For | Location |
+|-----------|------|-------|--------|-------------|----------|
+| **AnalyticFiller** | CPU | — (scanline) | Coverage: Vello fine.rs; Edges: tiny-skia/Skia | Simple paths, small shapes | `internal/raster/` |
+| **SparseStrips** | CPU | 4×4 | Vello sparse_strips | Complex paths, CPU/SIMD workloads | `internal/gpu/sparse_strips*.go`, `fine.go`, `coarse.go` |
+| **TileCompute** | CPU | 16×16 | Vello 9-stage compute (CPU port) | Extreme complexity (10K+ segments) | `internal/gpu/tilecompute/` |
+| **SDFAccelerator** | CPU+GPU | — (per-pixel) | Original (gg) | Geometric shapes (circles, rrects) | `sdf_accelerator.go`, `internal/gpu/sdf_gpu.go` |
+| **Vello PTCL** | GPU | 16×16 | Vello 9-stage compute | Full scenes (many paths, GPU compute) | `internal/gpu/vello_*.go` |
 
 ### Auto-Selection Flow
 
@@ -506,35 +506,60 @@ Per-tile rendering:
 | `LayerCache` | Caches rendered layers between frames |
 | `tilePool` | sync.Pool for per-tile SoftwareRenderer/Pixmap reuse |
 
-## Vello Tile Rasterizer (v0.25.0)
+## CPU Tile Rasterizers (v0.25.0+)
 
-Port of vello_shaders CPU fine rasterizer to Go. Used in `internal/gpu/`.
+Two tile-based CPU rasterizers ported from [Vello](https://github.com/linebender/vello), each optimized for different scenarios:
 
-### Architecture
+### SparseStrips (4×4 tiles)
+
+Port of Vello's `sparse_strips` rasterizer. Default CoverageFiller for complex paths.
 
 ```
-Path → EdgeBuilder → VelloLines → binSegments → 16x16 Tiles
-                                                     │
-                                               collectSegments
-                                                     │
-                                              Analytic Coverage
-                                                     │
-                                               Pixel Output
+Path → FlattenContext → Line Segments → CoarseRasterizer (bin to 4×4 tiles)
+  → FineRasterizer (per-tile coverage) → StripRenderer → Blend
 ```
 
-### Key Components
+- **Location:** `internal/gpu/sparse_strips.go`, `fine.go`, `coarse.go`, `segment.go`
+- **Tile size:** 4×4 (16 pixels) — optimized for CPU/SIMD (4px = f32x4 lane width)
+- **Winding:** int32 backdrop prefix sum between tiles, float accumulation within tiles
+- **Best for:** Complex paths with many elements, general-purpose CPU workloads
 
-- **VelloLine**: stores original float32 coordinates from curve flattening, bypassing fixed-point quantization (FDot6/FDot16 round-trip)
-- **binSegments**: DDA-based segment distribution into 16x16 tiles with backdrop tracking
-- **yEdge mechanism**: correct winding number propagation via backdrop prefix sum
-- **Analytic trapezoidal coverage**: exact per-pixel area calculation (no supersampling)
+### TileCompute (16×16 tiles)
 
-### Fill Rules
+Port of Vello's 9-stage compute pipeline running on CPU. Produces bit-exact results with the GPU compute path (Tier 5).
 
-- **NonZero** (default): winding number != 0 → filled
-- **EvenOdd**: winding number is odd → filled
+```
+Path → FlattenContext → Line Segments → Coarse (bin to 16×16 tiles)
+  → fillPath() (per-tile, Vello area formula) → float32 alpha → Blend
+```
 
-## Analytic Anti-Aliasing
+- **Location:** `internal/gpu/tilecompute/`
+- **Tile size:** 16×16 (256 pixels) — matches GPU compute workgroup dimensions
+- **Area accumulation:** Per-tile `area[256]`, full reset per tile (zero drift by design)
+- **Best for:** Extreme complexity (10K+ segments), GPU compute validation/fallback
+
+### Shared Components
+
+- **FlattenContext** (`internal/gpu/flatten.go`): Euler spiral curve flattening (Vello)
+- **CoarseRasterizer** (`internal/gpu/coarse.go`): Segment-to-tile binning with DDA
+- **Backdrop** (`internal/gpu/coarse.go`): int32 prefix sum for winding propagation
+- **Analytic coverage**: Exact per-pixel trapezoidal area calculation (no supersampling)
+- **Fill rules:** NonZero (winding != 0) and EvenOdd (winding is odd)
+
+## AnalyticFiller (CPU Scanline AA)
+
+Hybrid architecture combining Vello's coverage formula with Skia/tiny-skia's scanline infrastructure.
+
+**From Vello fine.rs** (`internal/raster/analytic_filler.go`):
+- Trapezoidal area integration per pixel (`area*sign + acc`)
+- Left-to-right accumulator propagation (`acc += pixelH * sign`)
+
+**From tiny-skia / Skia** (`internal/raster/`):
+- EdgeBuilder: path → Y-monotonic edges (`edge_builder.go`)
+- CurveEdge: forward differencing for quadratic/cubic curves (`curve_edge.go`)
+- CurveAwareAET: Active Edge Table for scanline intersections (`curve_aet.go`)
+- AlphaRuns: RLE-encoded coverage buffer (`alpha_runs.go`)
+- FDot6/FDot16: fixed-point arithmetic (`fixed.go`)
 
 Enterprise-grade curve rendering using forward differencing and trapezoidal coverage calculation.
 
