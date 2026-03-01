@@ -91,6 +91,11 @@ jobs:
       shell: bash
       run: go test -v -race -tags nogpu -coverprofile=coverage.txt -covermode=atomic ./...
 
+    - name: Verify coverage file
+      if: matrix.os == 'ubuntu-latest'
+      shell: bash
+      run: ls -la coverage.txt && echo "$(wc -l < coverage.txt) lines"
+
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@v5
