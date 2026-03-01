@@ -2,6 +2,7 @@ package gg
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 )
 
@@ -151,7 +152,7 @@ func TestContext_SavePNG(t *testing.T) {
 	dc.DrawRectangle(0, 0, 10, 10)
 	_ = dc.Fill()
 
-	err := dc.SavePNG("tmp/test_coverage_save.png")
+	err := dc.SavePNG(filepath.Join(t.TempDir(), "test_coverage_save.png"))
 	if err != nil {
 		t.Errorf("SavePNG() = %v", err)
 	}
@@ -161,7 +162,7 @@ func TestPixmap_SavePNG(t *testing.T) {
 	pm := NewPixmap(10, 10)
 	pm.SetPixel(5, 5, Red)
 
-	err := pm.SavePNG("tmp/test_coverage_pixmap.png")
+	err := pm.SavePNG(filepath.Join(t.TempDir(), "test_coverage_pixmap.png"))
 	if err != nil {
 		t.Errorf("SavePNG() = %v", err)
 	}
