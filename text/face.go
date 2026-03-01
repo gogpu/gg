@@ -75,8 +75,16 @@ func (f *sourceFace) Advance(text string) float64 {
 	totalAdvance := 0.0
 
 	for _, r := range text {
-		gid := parsed.GlyphIndex(r)
-		advance := parsed.GlyphAdvance(gid, f.size)
+		if r < 0x20 && r != '\t' {
+			continue
+		}
+		var advance float64
+		if r == '\t' {
+			_, advance = tabAdvance(parsed, f.size)
+		} else {
+			gid := parsed.GlyphIndex(r)
+			advance = parsed.GlyphAdvance(gid, f.size)
+		}
 		totalAdvance += advance
 	}
 
@@ -98,9 +106,25 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 		byteIndex := 0
 
 		for i, r := range text {
-			gid := parsed.GlyphIndex(r)
-			advance := parsed.GlyphAdvance(gid, f.size)
-			bounds := parsed.GlyphBounds(gid, f.size)
+			// Skip non-tab control characters.
+			if r < 0x20 && r != '\t' {
+				byteIndex += utf8.RuneLen(r)
+				continue
+			}
+
+			var gid uint16
+			var advance float64
+			var bounds Rect
+
+			if r == '\t' {
+				// Tab: use space GID (empty outline) with tab-stop advance.
+				gid, advance = tabAdvance(parsed, f.size)
+				// Space bounds are empty — no visual rendering.
+			} else {
+				gid = parsed.GlyphIndex(r)
+				advance = parsed.GlyphAdvance(gid, f.size)
+				bounds = parsed.GlyphBounds(gid, f.size)
+			}
 
 			glyph := Glyph{
 				Rune:    r,
@@ -132,9 +156,23 @@ func (f *sourceFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
 	byteIndex := 0
 
 	for i, r := range text {
-		gid := parsed.GlyphIndex(r)
-		advance := parsed.GlyphAdvance(gid, f.size)
-		bounds := parsed.GlyphBounds(gid, f.size)
+		// Skip non-tab control characters.
+		if r < 0x20 && r != '\t' {
+			byteIndex += utf8.RuneLen(r)
+			continue
+		}
+
+		var gid uint16
+		var advance float64
+		var bounds Rect
+
+		if r == '\t' {
+			gid, advance = tabAdvance(parsed, f.size)
+		} else {
+			gid = parsed.GlyphIndex(r)
+			advance = parsed.GlyphAdvance(gid, f.size)
+			bounds = parsed.GlyphBounds(gid, f.size)
+		}
 
 		glyph := Glyph{
 			Rune:    r,

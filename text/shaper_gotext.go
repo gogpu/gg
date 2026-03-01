@@ -114,7 +114,13 @@ func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 	s.shaperPool.Put(hbShaper)
 
 	// Convert go-text glyphs to our ShapedGlyph format.
-	return convertGlyphs(output.Glyphs, dir)
+	result := convertGlyphs(output.Glyphs, dir)
+
+	// Post-process: fix tab characters that HarfBuzz mapped to notdef (GID=0).
+	// Replace with space GID and proper tab-stop advance.
+	fixTabGlyphs(result, runes, face)
+
+	return result
 }
 
 // getOrCreateFont returns a cached go-text font.Font for the given source,

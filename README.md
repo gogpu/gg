@@ -101,11 +101,11 @@ func main() {
 
 The CPU rasterizer automatically selects the optimal algorithm per-path:
 
-| Algorithm | Best For |
-|-----------|----------|
-| **Scanline** | Simple paths, small shapes (< 32px) |
-| **SparseStrips** (4×4 tiles) | Complex paths, CPU/SIMD workloads |
-| **TileCompute** (16×16 tiles) | Extreme complexity (10K+ segments) |
+| Algorithm | Tiles | Best For |
+|-----------|-------|----------|
+| **AnalyticFiller** (scanline) | — | Simple paths, small shapes (< 32px) |
+| **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads |
+| **TileCompute** | 16×16 | Extreme complexity (10K+ segments) |
 
 ```go
 dc := gg.NewContext(800, 600)
@@ -195,8 +195,8 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 
 | Component | Location | Description |
 |-----------|----------|-------------|
-| **CPU Raster** | `internal/raster` | Core analytic AA rasterizer (Vello-based) |
-| **Tile Rasterizers** | `internal/gpu` | SparseStrips (4×4) + TileCompute (16×16) with adaptive selection |
+| **CPU Raster** | `internal/raster/` | Scanline analytic AA (hybrid: Vello coverage + Skia/tiny-skia edge infrastructure) |
+| **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
 | **GPU Accelerator** | `internal/gpu` | Five-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute) |
 | **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
 | **Tiles Only** | `raster/` | Opt-in via `import _ "github.com/gogpu/gg/raster"` (CPU-only tiles) |

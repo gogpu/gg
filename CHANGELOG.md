@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.4] - 2026-03-01
+
+### Changed
+
+- **Update wgpu v0.19.0 → v0.19.3** — includes MSL backend fixes for Apple Silicon:
+  vertex `[[stage_in]]` for struct-typed arguments, `metal::discard_fragment()` namespace
+  ([naga#38](https://github.com/gogpu/naga/pull/38),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+
+## [0.32.3] - 2026-03-01
+
+### Fixed
+
+- **Horizontal line artifacts in rotated text (#148)** — forward differencing in
+  `QuadraticEdge`/`CubicEdge` produced zero-height segments after FDot6 rounding,
+  silently losing winding contribution. The residual propagated via tail accumulator
+  to all pixels rightward, creating horizontal gray lines from curved glyphs (e, o,
+  b, p) at small rotation angles. Fix: flatten curves to line segments (adaptive
+  subdivision, 0.1px tolerance) before AnalyticFiller scanline processing —
+  industry-standard approach (tiny-skia, Skia AAA).
+- **Tab character rendering as tofu boxes (TEXT-008)** — tab (`\t`) rendered as
+  `.notdef` rectangle across all text paths: bitmap (`font.Drawer`), outline
+  (`drawStringAsOutlines`), and HarfBuzz (`GoTextShaper`). Fix: unified tab handling
+  at each rendering layer — `expandTabs()` for bitmap path, space GID + tab-stop
+  advance for shaper/outline paths. Configurable via `text.SetTabWidth()` (default: 8,
+  matching CSS `tab-size`, Pango, and POSIX terminal conventions).
+- **Text rasterizer mode propagation** — `drawStringAsOutlines()` bypassed `doFill()`,
+  so `SetRasterizerMode()` had no effect on outline-rendered text.
+
+### Added
+
+- **Tab character API** — `text.SetTabWidth(n)` / `text.TabWidth()` for configurable
+  tab stops (default: 8, matching CSS `tab-size`, Pango, POSIX).
+- **Text regression test suite (TEXT-011)** — programmatic artifact detection for
+  rotated text (9 angles, curved glyphs), tab rendering verification (bitmap + outline),
+  and unit tests for tab configuration (`expandTabs`, `SetTabWidth`, `tabAdvance`,
+  `fixTabGlyphs`). Cross-platform, no golden images.
+
 ## [0.32.2] - 2026-03-01
 
 ### Fixed

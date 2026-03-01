@@ -245,6 +245,15 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	r.edgeBuilder.Reset()
 	r.analyticFiller.Reset()
 
+	// Flatten curves to line segments for the AnalyticFiller.
+	// Forward differencing (QuadraticEdge/CubicEdge) can produce zero-height
+	// segments after FDot6 rounding, silently losing winding contribution.
+	// Pre-flattening with adaptive subdivision (0.1px tolerance) eliminates
+	// this class of errors. This is the standard approach in tiny-skia and
+	// Skia's analytic AA scanline rasterizer.
+	r.edgeBuilder.SetFlattenCurves(true)
+	defer r.edgeBuilder.SetFlattenCurves(false)
+
 	// Build edges from the path
 	pathAdapter := convertGGPathToCorePath(p)
 	r.edgeBuilder.BuildFromPath(pathAdapter, raster.IdentityTransform{})
