@@ -162,7 +162,7 @@ func TestFaceGlyphsWithTab(t *testing.T) {
 
 	face := source.Face(16.0)
 
-	var glyphs []Glyph
+	glyphs := make([]Glyph, 0, 3)
 	for g := range face.Glyphs("A\tB") {
 		glyphs = append(glyphs, g)
 	}

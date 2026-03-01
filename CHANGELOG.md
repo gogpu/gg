@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.4] - 2026-03-01
+
+### Changed
+
+- **Update wgpu v0.19.0 → v0.19.3** — includes MSL backend fixes for Apple Silicon:
+  vertex `[[stage_in]]` for struct-typed arguments, `metal::discard_fragment()` namespace
+  ([naga#38](https://github.com/gogpu/naga/pull/38),
+  [ui#23](https://github.com/gogpu/ui/issues/23))
+
 ## [0.32.3] - 2026-03-01
 
 ### Fixed
