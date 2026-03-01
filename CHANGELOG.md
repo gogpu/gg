@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Text rasterizer mode propagation** — `drawStringAsOutlines()` bypassed `doFill()`,
   so `SetRasterizerMode()` had no effect on outline-rendered text.
 
+### Added
+
+- **Text regression test suite (TEXT-011)** — programmatic artifact detection for
+  rotated text (9 angles, curved glyphs), tab rendering verification (bitmap + outline),
+  and unit tests for tab configuration (`expandTabs`, `SetTabWidth`, `tabAdvance`,
+  `fixTabGlyphs`). Cross-platform, no golden images.
+
 ## [0.32.2] - 2026-03-01
 
 ### Fixed
