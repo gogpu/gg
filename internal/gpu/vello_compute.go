@@ -883,7 +883,10 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 		// Zero-fill buffers that use atomics or require sentinel values.
 		if s.zeroInit && s.size > 0 {
 			zeros := make([]byte, s.size)
-			d.queue.WriteBuffer(buf, 0, zeros)
+			if err := d.queue.WriteBuffer(buf, 0, zeros); err != nil {
+				d.DestroyBuffers(bufs)
+				return nil, fmt.Errorf("vello compute: zero-fill %s: %w", s.label, err)
+			}
 		}
 	}
 
@@ -1088,7 +1091,9 @@ func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config Vell
 	}
 
 	// Upload config uniform to the GPU.
-	d.queue.WriteBuffer(bufs.Config, 0, config.toBytes())
+	if err := d.queue.WriteBuffer(bufs.Config, 0, config.toBytes()); err != nil {
+		return fmt.Errorf("vello compute: write config: %w", err)
+	}
 
 	// Number of path tag words for pathtag stages.
 	nTagWords := uint32(0)

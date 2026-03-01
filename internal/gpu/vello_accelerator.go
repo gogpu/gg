@@ -547,13 +547,21 @@ func (a *VelloAccelerator) dispatchComputeScene(
 	defer a.dispatcher.DestroyBuffers(bufs)
 
 	// Step 7: Upload scene data, line segments, and path metadata to GPU.
-	a.queue.WriteBuffer(bufs.Scene, 0, uint32SliceToBytes(scene.Data))
-	a.queue.WriteBuffer(bufs.Lines, 0, uint32SliceToBytes(linesU32))
-	a.queue.WriteBuffer(bufs.Paths, 0, uint32SliceToBytes(pathsU32))
+	if err := a.queue.WriteBuffer(bufs.Scene, 0, uint32SliceToBytes(scene.Data)); err != nil {
+		return nil, fmt.Errorf("vello-compute: write scene buffer: %w", err)
+	}
+	if err := a.queue.WriteBuffer(bufs.Lines, 0, uint32SliceToBytes(linesU32)); err != nil {
+		return nil, fmt.Errorf("vello-compute: write lines buffer: %w", err)
+	}
+	if err := a.queue.WriteBuffer(bufs.Paths, 0, uint32SliceToBytes(pathsU32)); err != nil {
+		return nil, fmt.Errorf("vello-compute: write paths buffer: %w", err)
+	}
 
 	// Step 8: Upload per-path auxiliary data.
 	numPaths := int(scene.Layout.NumPaths)
-	a.uploadPathAuxData(bufs, numPaths, pathStylesU32)
+	if err := a.uploadPathAuxData(bufs, numPaths, pathStylesU32); err != nil {
+		return nil, fmt.Errorf("vello-compute: upload path aux data: %w", err)
+	}
 
 	// Step 9: Dispatch all 8 stages.
 	if err := a.dispatcher.Dispatch(bufs, config); err != nil {
@@ -703,13 +711,13 @@ func (a *VelloAccelerator) uploadPathAuxData(
 	bufs *VelloComputeBuffers,
 	numPaths int,
 	pathStylesU32 []uint32,
-) {
+) error {
 	// Write path styles.
 	stylesBytes := make([]byte, len(pathStylesU32)*4)
 	for i, v := range pathStylesU32 {
 		binary.LittleEndian.PutUint32(stylesBytes[i*4:(i+1)*4], v)
 	}
-	a.queue.WriteBuffer(bufs.PathStyles, 0, stylesBytes)
+	return a.queue.WriteBuffer(bufs.PathStyles, 0, stylesBytes)
 }
 
 // readbackBuffer copies a GPU output buffer to a staging buffer and reads the

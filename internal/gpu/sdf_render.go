@@ -563,7 +563,10 @@ func (p *SDFRenderPipeline) createAndUploadBuffer(label string, data []byte, usa
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", label, err)
 	}
-	p.queue.WriteBuffer(buf, 0, data)
+	if err := p.queue.WriteBuffer(buf, 0, data); err != nil {
+		p.device.DestroyBuffer(buf)
+		return nil, fmt.Errorf("write %s: %w", label, err)
+	}
 	return buf, nil
 }
 

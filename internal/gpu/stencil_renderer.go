@@ -295,7 +295,10 @@ func (sr *StencilRenderer) createAndUploadVertexBuffer(label string, data []byte
 	if err != nil {
 		return nil, fmt.Errorf("create %s buffer: %w", label, err)
 	}
-	sr.queue.WriteBuffer(buf, 0, data)
+	if err := sr.queue.WriteBuffer(buf, 0, data); err != nil {
+		sr.device.DestroyBuffer(buf)
+		return nil, fmt.Errorf("write %s buffer: %w", label, err)
+	}
 	return buf, nil
 }
 
@@ -311,7 +314,10 @@ func (sr *StencilRenderer) createUniformAndBindGroup(
 	if err != nil {
 		return nil, nil, fmt.Errorf("create %s uniform: %w", label, err)
 	}
-	sr.queue.WriteBuffer(buf, 0, data)
+	if err := sr.queue.WriteBuffer(buf, 0, data); err != nil {
+		sr.device.DestroyBuffer(buf)
+		return nil, nil, fmt.Errorf("write %s uniform: %w", label, err)
+	}
 
 	bg, err := sr.device.CreateBindGroup(&hal.BindGroupDescriptor{
 		Label: label + "_bind", Layout: sr.uniformLayout,

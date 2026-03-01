@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.32.2] - 2026-03-01
+
+### Fixed
+
+- **GPU error propagation for `WriteBuffer`** — 15+ call sites across `render_session.go`,
+  `sdf_render.go`, `stencil_renderer.go`, `vello_accelerator.go`, `vello_compute.go` now
+  check and propagate errors instead of silently swallowing them. Buffer upload failures
+  trigger proper cleanup (destroy buffer) before returning errors.
+- **GPU error propagation for `WriteTexture`** — `text_pipeline.go` and `sdf_gpu.go` now
+  propagate texture upload errors with cleanup on failure.
+- **`uploadPathAuxData` returns error** — `VelloAccelerator.uploadPathAuxData` now returns
+  `error` instead of silently ignoring buffer upload failures.
+
+### Changed
+
+- Update wgpu v0.18.1 → v0.19.0 — `WriteBuffer` and `WriteTexture` breaking interface changes
+
 ## [0.32.1] - 2026-02-28
 
 ### Added

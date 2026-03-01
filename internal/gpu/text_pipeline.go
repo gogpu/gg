@@ -946,7 +946,7 @@ func (r *TextRenderer) SyncAtlases() error {
 		rgbaData := rgbToRGBA(atlas.Data, atlas.Size, atlas.Size)
 
 		// Upload to GPU via queue.WriteTexture.
-		r.queue.WriteTexture(
+		if err := r.queue.WriteTexture(
 			&hal.ImageCopyTexture{
 				Texture:  r.atlasTextures[idx],
 				MipLevel: 0,
@@ -958,7 +958,13 @@ func (r *TextRenderer) SyncAtlases() error {
 				RowsPerImage: atlasSize,
 			},
 			&hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
-		)
+		); err != nil {
+			r.device.DestroyTextureView(r.atlasTextureViews[idx])
+			r.device.DestroyTexture(r.atlasTextures[idx])
+			r.atlasTextureViews[idx] = nil
+			r.atlasTextures[idx] = nil
+			return fmt.Errorf("upload text atlas %d: %w", idx, err)
+		}
 
 		// Mark atlas as clean.
 		r.atlasManager.MarkClean(idx)
