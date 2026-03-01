@@ -8,11 +8,12 @@ import (
 )
 
 // accResetInterval is the number of pixels between geometric recomputations
-// of the accumulator in computeSegmentCoverage. This prevents unbounded
-// float32 drift across wide spans. Matches Vello sparse_strips Tile::WIDTH.
+// of the accumulator in computeSegmentCoverage. Defense-in-depth against
+// float32 drift across wide line edge spans.
 //
-// Within each interval: max 4 float additions = negligible drift (~4 ULP).
-// At each boundary: recompute from line equation = 1-2 ULP (constant).
+// Note: the primary #148 fix is EdgeBuilder.SetFlattenCurves(true) in
+// SoftwareRenderer.Fill(), which eliminates forward differencing errors.
+// This interval provides additional safety for the line edge accumulator.
 const accResetInterval = 4
 
 // AnalyticFiller computes per-pixel coverage using exact geometric calculations.
@@ -442,10 +443,8 @@ func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance
 
 	// Process pixels in the edge's range with detailed coverage computation.
 	//
-	// DRIFT PREVENTION (Skia AAA pattern, RAST-009):
-	// Every accResetInterval pixels, recompute acc from the line equation
-	// instead of relying on accumulated float additions.
-	// One multiply (1-2 ULP error) replaces N additions (N ULP drift).
+	// Defense-in-depth: every accResetInterval pixels, recompute acc from
+	// the line equation instead of relying on accumulated float additions.
 	for xIdx := xStart; xIdx < xEnd; xIdx++ {
 		// Periodic geometric recomputation — kills accumulated float drift.
 		// The sum of |pixelH| from xStart to xIdx telescopes for monotone

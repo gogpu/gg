@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Horizontal line artifacts in rotated text (#148)** — forward differencing in
+  `QuadraticEdge`/`CubicEdge` produced zero-height segments after FDot6 rounding,
+  silently losing winding contribution. The residual propagated via tail accumulator
+  to all pixels rightward, creating horizontal gray lines from curved glyphs (e, o,
+  b, p) at small rotation angles. Fix: flatten curves to line segments (adaptive
+  subdivision, 0.1px tolerance) before AnalyticFiller scanline processing —
+  industry-standard approach (tiny-skia, Skia AAA).
+- **Text rasterizer mode propagation** — `drawStringAsOutlines()` bypassed `doFill()`,
+  so `SetRasterizerMode()` had no effect on outline-rendered text.
+
 ## [0.32.2] - 2026-03-01
 
 ### Fixed
