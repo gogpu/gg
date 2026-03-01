@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.3] - 2026-03-01
+
 ### Fixed
 
 - **Horizontal line artifacts in rotated text (#148)** — forward differencing in
@@ -27,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tab character API** — `text.SetTabWidth(n)` / `text.TabWidth()` for configurable
+  tab stops (default: 8, matching CSS `tab-size`, Pango, POSIX).
 - **Text regression test suite (TEXT-011)** — programmatic artifact detection for
   rotated text (9 angles, curved glyphs), tab rendering verification (bitmap + outline),
   and unit tests for tab configuration (`expandTabs`, `SetTabWidth`, `tabAdvance`,
