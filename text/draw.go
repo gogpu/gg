@@ -18,6 +18,11 @@ func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color)
 		return
 	}
 
+	// Expand tabs to spaces for bitmap rendering.
+	// font.Drawer maps \t to .notdef (tofu) because fonts lack a tab glyph.
+	// Tab = globalTabWidth spaces (default: 8, matching CSS/Pango/POSIX).
+	text = expandTabs(text)
+
 	switch f := face.(type) {
 	case *sourceFace:
 		drawSourceFace(dst, text, f, x, y, col)
@@ -60,7 +65,7 @@ func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, c
 		Dot:  fixed.Point26_6{X: fixed.Int26_6(x * 64), Y: fixed.Int26_6(y * 64)},
 	}
 
-	// Draw the text
+	// Tabs already expanded to spaces by Draw() via expandTabs().
 	d.DrawString(text)
 }
 
@@ -68,6 +73,7 @@ func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, c
 func drawMultiFace(dst draw.Image, text string, mf *MultiFace, x, y float64, col color.Color) {
 	currentX := x
 
+	// Tabs already expanded to spaces by Draw() via expandTabs().
 	for _, r := range text {
 		runeStr := string(r)
 
@@ -113,6 +119,7 @@ func drawFilteredFace(dst draw.Image, text string, ff *FilteredFace, x, y float6
 	// Only render runes that pass the filter
 	currentX := x
 
+	// Tabs already expanded to spaces by Draw() via expandTabs().
 	for _, r := range text {
 		if !ff.inRanges(r) {
 			continue // Skip filtered runes

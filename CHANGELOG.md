@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   b, p) at small rotation angles. Fix: flatten curves to line segments (adaptive
   subdivision, 0.1px tolerance) before AnalyticFiller scanline processing —
   industry-standard approach (tiny-skia, Skia AAA).
+- **Tab character rendering as tofu boxes (TEXT-008)** — tab (`\t`) rendered as
+  `.notdef` rectangle across all text paths: bitmap (`font.Drawer`), outline
+  (`drawStringAsOutlines`), and HarfBuzz (`GoTextShaper`). Fix: unified tab handling
+  at each rendering layer — `expandTabs()` for bitmap path, space GID + tab-stop
+  advance for shaper/outline paths. Configurable via `text.SetTabWidth()` (default: 8,
+  matching CSS `tab-size`, Pango, and POSIX terminal conventions).
 - **Text rasterizer mode propagation** — `drawStringAsOutlines()` bypassed `doFill()`,
   so `SetRasterizerMode()` had no effect on outline-rendered text.
 

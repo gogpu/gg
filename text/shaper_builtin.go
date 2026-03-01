@@ -44,17 +44,23 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 	var x float64
 
 	for cluster, r := range runes {
-		// Skip control characters (U+0000..U+001F except tab U+0009)
-		// These have no visual representation and would render as □
+		// Skip control characters (U+0000..U+001F) — no visual representation.
+		// Tab (U+0009) is handled below with proper advance width.
 		if r < 0x20 && r != '\t' {
 			continue
 		}
 
-		// Get glyph index from font
-		gid := parsed.GlyphIndex(r)
+		var gid uint16
+		var advance float64
 
-		// Get advance width for this glyph at the given size
-		advance := parsed.GlyphAdvance(gid, size)
+		if r == '\t' {
+			// Tab: use space GID (empty outline) with tab-stop advance.
+			// Space GID has no contours → correctly skipped by outline renderer.
+			gid, advance = tabAdvance(parsed, size)
+		} else {
+			gid = parsed.GlyphIndex(r)
+			advance = parsed.GlyphAdvance(gid, size)
+		}
 
 		result = append(result, ShapedGlyph{
 			GID:      GlyphID(gid),
