@@ -369,6 +369,15 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 	devicePath := path.Transform(c.matrix)
 
 	c.flushGPUAccelerator()
+
+	// Apply rasterizer mode for text (same as doFill).
+	// Without this, text always uses the default rasterizer,
+	// ignoring SetRasterizerMode().
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.rasterizerMode = c.rasterizerMode
+		defer func() { sr.rasterizerMode = RasterizerAuto }()
+	}
+
 	textPaint := *c.paint // shallow copy
 	textPaint.FillRule = FillRuleNonZero
 	_ = c.renderer.Fill(c.pixmap, devicePath, &textPaint)

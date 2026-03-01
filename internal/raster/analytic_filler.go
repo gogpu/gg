@@ -7,6 +7,14 @@ import (
 	"math"
 )
 
+// accResetInterval is the number of pixels between geometric recomputations
+// of the accumulator in computeSegmentCoverage. This prevents unbounded
+// float32 drift across wide spans. Matches Vello sparse_strips Tile::WIDTH.
+//
+// Within each interval: max 4 float additions = negligible drift (~4 ULP).
+// At each boundary: recompute from line equation = 1-2 ULP (constant).
+const accResetInterval = 4
+
 // AnalyticFiller computes per-pixel coverage using exact geometric calculations.
 //
 // Unlike supersampling approaches that sample multiple points per pixel,
@@ -46,6 +54,10 @@ type AnalyticFiller struct {
 
 	// edgeIdx tracks which edges we've processed from the EdgeBuilder.
 	edgeIdx int
+
+	// WindingCallback, if set, is called after edge accumulation with (y, winding[])
+	// before applyFillRule. Used by winding residual tests to verify contour closure.
+	WindingCallback func(y int, winding []float32)
 }
 
 // NewAnalyticFiller creates a new analytic filler for the given dimensions.
@@ -185,6 +197,11 @@ func (af *AnalyticFiller) processScanlineWithScale(
 		af.accumulateCoverageSubpixel(edge, ySubpixel, aaScale, fillRule)
 		return true
 	})
+
+	// Winding callback hook (used by regression tests).
+	if af.WindingCallback != nil {
+		af.WindingCallback(y, af.winding)
+	}
 
 	// Apply fill rule and convert to alpha
 	af.applyFillRule(fillRule)
@@ -401,7 +418,8 @@ func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance
 	// Pre-accumulate winding for the off-screen-left portion of the edge.
 	// When part of the edge is at X < 0, pixels at X >= 0 are to the RIGHT
 	// of that portion and must receive its winding contribution.
-	acc := offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign)
+	offscreenAcc := offscreenLeftWinding(lineTopX, lineBottomX, lineTopY, lineBottomY, ySlope, yTop, yBot, sign)
+	acc := offscreenAcc
 
 	// Compute the pixel range that needs detailed per-pixel processing.
 	// Pixels outside this range get only the accumulated winding (acc).
@@ -414,13 +432,33 @@ func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance
 		xEnd = af.width
 	}
 
+	// Y at the start of the edge range — baseline for geometric recomputation.
+	yAtXStart := clamp32(lineTopY+(float32(xStart)-lineTopX)*ySlope, yTop, yBot)
+
 	// Apply pre-accumulated winding to pixels before the edge's range
 	for xIdx := 0; xIdx < xStart; xIdx++ {
 		af.winding[xIdx] += acc
 	}
 
-	// Process pixels in the edge's range with detailed coverage computation
+	// Process pixels in the edge's range with detailed coverage computation.
+	//
+	// DRIFT PREVENTION (Skia AAA pattern, RAST-009):
+	// Every accResetInterval pixels, recompute acc from the line equation
+	// instead of relying on accumulated float additions.
+	// One multiply (1-2 ULP error) replaces N additions (N ULP drift).
 	for xIdx := xStart; xIdx < xEnd; xIdx++ {
+		// Periodic geometric recomputation — kills accumulated float drift.
+		// The sum of |pixelH| from xStart to xIdx telescopes for monotone
+		// clamped functions: sum = |clamp(y(xIdx)) - clamp(y(xStart))|.
+		if d := xIdx - xStart; d > 0 && d%accResetInterval == 0 {
+			yAtXCurrent := clamp32(lineTopY+(float32(xIdx)-lineTopX)*ySlope, yTop, yBot)
+			heightSum := yAtXCurrent - yAtXStart
+			if heightSum < 0 {
+				heightSum = -heightSum
+			}
+			acc = offscreenAcc + heightSum*sign
+		}
+
 		pxLeftX := float32(xIdx)
 		pxRightX := pxLeftX + 1.0
 
@@ -460,9 +498,16 @@ func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance
 		acc += pixelH * sign
 	}
 
-	// Apply remaining accumulated winding to pixels after the edge's range
+	// Tail: geometric recomputation for all pixels after edge range.
+	// Uses line equation directly — zero accumulated drift.
+	yAtXEnd := clamp32(lineTopY+(float32(xEnd)-lineTopX)*ySlope, yTop, yBot)
+	totalHeight := yAtXEnd - yAtXStart
+	if totalHeight < 0 {
+		totalHeight = -totalHeight
+	}
+	tailAcc := offscreenAcc + totalHeight*sign
 	for xIdx := xEnd; xIdx < af.width; xIdx++ {
-		af.winding[xIdx] += acc
+		af.winding[xIdx] += tailAcc
 	}
 }
 
