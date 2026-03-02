@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-03-03
+
+### Added
+
+- **DrawImage respects clip stack** — `DrawImageEx` refactored to route through the
+  `Fill()` pipeline (image-as-shader pattern). Images now correctly clip to any path
+  set via `Clip()`, `ClipRect()`, or nested `Push`/`Pop` clips. This follows the
+  enterprise pattern used by Skia, Cairo, tiny-skia, and Vello.
+  ([#155](https://github.com/gogpu/gg/issues/155))
+- **`DrawImageRounded(img, x, y, radius)`** — convenience method for drawing images
+  with rounded corners
+- **`DrawImageCircular(img, cx, cy, radius)`** — convenience method for drawing
+  circular avatar-style images
+- **`ImagePattern.SetAnchor(x, y)`** — position image patterns at arbitrary canvas
+  coordinates instead of tiling from origin (0,0)
+- **`ImagePattern.SetScale(sx, sy)`** — scale image patterns
+- **`ImagePattern.SetOpacity(opacity)`** — opacity multiplier for image patterns
+- **`ImagePattern.SetClamp(bool)`** — clamp mode: out-of-bounds returns transparent
+  instead of tiling
+- **Fill() and Stroke() respect clip stack** — all software rendering paths (analytic
+  filler + coverage filler) now apply clip masks via `Paint.ClipCoverage`
+
 ## [0.32.5] - 2026-03-02
 
 ### Changed

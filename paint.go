@@ -82,6 +82,12 @@ type Paint struct {
 	// Used internally by the renderer to determine effective stroke width.
 	// Set automatically by Context.Stroke() before rendering.
 	TransformScale float64
+
+	// ClipCoverage is a function that returns the clip coverage (0-255)
+	// at a given pixel coordinate. When non-nil, the renderer multiplies
+	// pixel alpha by this coverage to apply the clip mask.
+	// Set automatically by Context before rendering when a clip is active.
+	ClipCoverage func(x, y float64) byte
 }
 
 // NewPaint creates a new Paint with default values.
