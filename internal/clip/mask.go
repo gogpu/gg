@@ -180,10 +180,14 @@ func (mc *MaskClipper) rasterizePath(elements []PathElement, antiAlias bool) {
 	}
 
 	// Scanline rasterization
-	// Note: antiAlias parameter is reserved for future enhancement
-	_ = antiAlias
-	for y := 0; y < mc.mask.Height(); y++ {
-		mc.rasterizeScanline(edges, y)
+	if antiAlias {
+		for y := 0; y < mc.mask.Height(); y++ {
+			mc.rasterizeScanlineAA(edges, y)
+		}
+	} else {
+		for y := 0; y < mc.mask.Height(); y++ {
+			mc.rasterizeScanline(edges, y)
+		}
 	}
 }
 
@@ -209,6 +213,102 @@ func (mc *MaskClipper) makeEdge(p0, p1 Point) edge {
 		return edge{x0: x0, y0: y0, x1: x1, y1: y1, dir: -1}
 	}
 	return edge{x0: x0, y0: y0, x1: x1, y1: y1, dir: 1}
+}
+
+// rasterizeScanlineAA fills a single scanline with anti-aliasing using 4x
+// Y-supersampling and fractional X-edge coverage. Each pixel is sampled at 4
+// sub-scanlines (y+0.125, y+0.375, y+0.625, y+0.875) and the coverage is
+// averaged. Edge pixels get fractional coverage based on the exact intersection.
+func (mc *MaskClipper) rasterizeScanlineAA(edges []edge, y int) {
+	width := mc.mask.Width()
+	// Accumulate coverage from 4 sub-scanlines (each contributes 0-255/4).
+	coverage := make([]uint16, width)
+
+	subOffsets := [4]float64{0.125, 0.375, 0.625, 0.875}
+	for _, off := range subOffsets {
+		scanY := float64(y) + off
+
+		// Find edge intersections at this sub-scanline.
+		var intersections []float64
+		for _, e := range edges {
+			if e.y0 <= scanY && scanY < e.y1 {
+				t := (scanY - e.y0) / (e.y1 - e.y0)
+				x := e.x0 + t*(e.x1-e.x0)
+				intersections = append(intersections, x)
+			}
+		}
+		if len(intersections) == 0 {
+			continue
+		}
+		sortFloats(intersections)
+
+		// Fill spans with fractional edge coverage.
+		for i := 0; i+1 < len(intersections); i += 2 {
+			x1 := intersections[i]
+			x2 := intersections[i+1]
+
+			px1 := int(x1)
+			px2 := int(x2)
+			if px1 < 0 {
+				px1 = 0
+			}
+			if px2 >= width {
+				px2 = width - 1
+			}
+
+			if px1 == px2 {
+				// Single pixel span — coverage = span width.
+				frac := x2 - x1
+				if frac > 1.0 {
+					frac = 1.0
+				}
+				coverage[px1] += uint16(frac * 64) // 64 = 255/4 ≈ per-subsample max
+				continue
+			}
+
+			// Left edge pixel: fractional coverage.
+			if px1 >= 0 && px1 < width {
+				leftFrac := 1.0 - (x1 - float64(px1))
+				if leftFrac > 1.0 {
+					leftFrac = 1.0
+				}
+				if leftFrac < 0 {
+					leftFrac = 0
+				}
+				coverage[px1] += uint16(leftFrac * 64)
+			}
+
+			// Interior pixels: full coverage for this subsample.
+			for x := px1 + 1; x < px2; x++ {
+				if x >= 0 && x < width {
+					coverage[x] += 64 // 255/4
+				}
+			}
+
+			// Right edge pixel: fractional coverage.
+			if px2 >= 0 && px2 < width && px2 > px1 {
+				rightFrac := x2 - float64(px2)
+				if rightFrac > 1.0 {
+					rightFrac = 1.0
+				}
+				if rightFrac < 0 {
+					rightFrac = 0
+				}
+				coverage[px2] += uint16(rightFrac * 64)
+			}
+		}
+	}
+
+	// Write accumulated coverage to mask.
+	for x := 0; x < width; x++ {
+		if coverage[x] > 0 {
+			c := coverage[x]
+			if c > 255 {
+				c = 255
+			}
+			_ = mc.mask.SetRGBA(x, y, byte(c), byte(c), byte(c), byte(c))
+		}
+	}
 }
 
 // rasterizeScanline fills a single scanline using the non-zero winding rule.

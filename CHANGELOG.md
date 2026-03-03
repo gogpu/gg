@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of tiling
 - **Fill() and Stroke() respect clip stack** — all software rendering paths (analytic
   filler + coverage filler) now apply clip masks via `Paint.ClipCoverage`
+- **Anti-aliased clip masks** — path-based clips now use 4x Y-supersampling with
+  fractional X-edge coverage for smooth clip edges (previously binary 0/255 only)
 
 ## [0.32.5] - 2026-03-02
 
