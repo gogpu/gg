@@ -444,3 +444,399 @@ func TestBlendModes(t *testing.T) {
 		})
 	}
 }
+
+// TestDrawImageClipped_RoundedRect verifies that DrawImage respects a
+// rounded rectangle clip region.
+func TestDrawImageClipped_RoundedRect(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	// Create a red 100x100 image.
+	img := makeTestImage(t, 100, 100, 255, 0, 0, 255)
+
+	dc.Push()
+
+	// Set a rounded rectangle clip in the center.
+	dc.DrawRoundedRectangle(50, 50, 100, 100, 15)
+	dc.Clip()
+
+	// Draw image at (50, 50) — exactly covering the clip region.
+	dc.DrawImage(img, 50, 50)
+
+	dc.Pop()
+
+	// Pixel inside the clip (center of the rounded rect) should be red.
+	inside := dc.pixmap.GetPixel(100, 100)
+	if inside.R < 0.8 {
+		t.Errorf("Expected red inside clip, got R=%.2f G=%.2f B=%.2f", inside.R, inside.G, inside.B)
+	}
+
+	// Pixel at the corner (50, 50) should be clipped away by the rounded corner.
+	// The corner radius is 15px, so (50, 50) is in the clipped corner area.
+	corner := dc.pixmap.GetPixel(51, 51)
+	if corner.R > 0.5 {
+		t.Errorf("Expected clipped corner at (51, 51), got R=%.2f (should be low due to rounded clip)", corner.R)
+	}
+
+	// Pixel outside the clip entirely should be transparent/background.
+	outside := dc.pixmap.GetPixel(10, 10)
+	if outside.R > 0.1 {
+		t.Errorf("Expected no image outside clip, got R=%.2f", outside.R)
+	}
+}
+
+// TestDrawImageClipped_Circle verifies that DrawImage respects a circular
+// clip region.
+func TestDrawImageClipped_Circle(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	// Create a green 200x200 image.
+	img := makeTestImage(t, 200, 200, 0, 255, 0, 255)
+
+	dc.Push()
+
+	// Clip to a circle centered at (100, 100) with radius 50.
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+
+	// Draw image at origin — covers entire canvas.
+	dc.DrawImage(img, 0, 0)
+
+	dc.Pop()
+
+	// Pixel at the center of the circle should be green.
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.G < 0.8 {
+		t.Errorf("Expected green at circle center, got G=%.2f", center.G)
+	}
+
+	// Pixel well outside the circle should be background (not green).
+	outside := dc.pixmap.GetPixel(5, 5)
+	if outside.G > 0.1 {
+		t.Errorf("Expected no green outside circle clip, got G=%.2f", outside.G)
+	}
+}
+
+// TestDrawImageClipped_NestedClips verifies that DrawImage works with
+// nested Push/Pop and multiple clip regions.
+func TestDrawImageClipped_NestedClips(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	// Create a blue 200x200 image.
+	img := makeTestImage(t, 200, 200, 0, 0, 255, 255)
+
+	dc.Push()
+
+	// First clip: large rectangle covering most of the canvas.
+	dc.ClipRect(20, 20, 160, 160)
+
+	dc.Push()
+
+	// Second clip: circle in the center (intersects with the rectangle).
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+
+	// Draw image — should only appear in the intersection of rect and circle.
+	dc.DrawImage(img, 0, 0)
+
+	dc.Pop() // Restore to just the rectangle clip.
+	dc.Pop() // Restore to no clip.
+
+	// Pixel at center (inside both clips) should be blue.
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.B < 0.8 {
+		t.Errorf("Expected blue at center (inside both clips), got B=%.2f", center.B)
+	}
+
+	// Pixel inside the rectangle but outside the circle should NOT be blue.
+	rectOnly := dc.pixmap.GetPixel(25, 25)
+	if rectOnly.B > 0.1 {
+		t.Errorf("Expected no blue at (25,25) — inside rect but outside circle, got B=%.2f", rectOnly.B)
+	}
+
+	// Pixel completely outside both clips should be background.
+	outside := dc.pixmap.GetPixel(5, 5)
+	if outside.B > 0.1 {
+		t.Errorf("Expected no blue at (5,5), got B=%.2f", outside.B)
+	}
+}
+
+// TestDrawImageClipped_NoClip is a regression test ensuring that DrawImage
+// without any clip produces the same result as before the refactoring.
+func TestDrawImageClipped_NoClip(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	// Create red image.
+	img := makeTestImage(t, 50, 50, 255, 0, 0, 255)
+
+	// Draw without any clip.
+	dc.DrawImage(img, 10, 10)
+
+	// Verify pixel at (10, 10) is red.
+	result := dc.pixmap.GetPixel(10, 10)
+	if result.R < 0.9 || result.G > 0.1 || result.B > 0.1 {
+		t.Errorf("Expected red at (10, 10), got R=%.2f G=%.2f B=%.2f", result.R, result.G, result.B)
+	}
+
+	// Verify pixel just inside at (59, 59) is red (10+50-1=59).
+	inside := dc.pixmap.GetPixel(59, 59)
+	if inside.R < 0.9 {
+		t.Errorf("Expected red at (59, 59), got R=%.2f", inside.R)
+	}
+
+	// Verify pixel just outside at (60, 60) is NOT red.
+	outsideR := dc.pixmap.GetPixel(60, 10)
+	if outsideR.R > 0.1 {
+		t.Errorf("Expected no red at (60, 10), got R=%.2f", outsideR.R)
+	}
+}
+
+// TestImagePattern_Anchor verifies that an image pattern with a non-zero
+// anchor renders at the correct position.
+func TestImagePattern_Anchor(t *testing.T) {
+	// Create 10x10 red image.
+	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
+
+	pattern := &ImagePattern{
+		image:   img,
+		w:       10,
+		h:       10,
+		anchorX: 50,
+		anchorY: 50,
+		clamp:   true,
+	}
+
+	// At the anchor position, should return red.
+	col := pattern.ColorAt(50, 50)
+	if col.R < 0.9 || col.A < 0.9 {
+		t.Errorf("Expected red at anchor (50, 50), got R=%.2f A=%.2f", col.R, col.A)
+	}
+
+	// Outside the image region, should return transparent (clamp mode).
+	col = pattern.ColorAt(0, 0)
+	if col.A > 0.01 {
+		t.Errorf("Expected transparent outside anchor region, got A=%.2f", col.A)
+	}
+
+	// Just past the image region, should also be transparent.
+	col = pattern.ColorAt(60, 60)
+	if col.A > 0.01 {
+		t.Errorf("Expected transparent past anchor region at (60, 60), got A=%.2f", col.A)
+	}
+}
+
+// TestImagePattern_Scale verifies that scaling works on the image pattern.
+func TestImagePattern_Scale(t *testing.T) {
+	// Create 10x10 red image.
+	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
+
+	pattern := &ImagePattern{
+		image:  img,
+		w:      10,
+		h:      10,
+		scaleX: 2.0, // Each pixel covers 2 destination pixels.
+		scaleY: 2.0,
+		clamp:  true,
+	}
+
+	// At (0, 0), maps to source (0, 0) — should be red.
+	col := pattern.ColorAt(0, 0)
+	if col.R < 0.9 {
+		t.Errorf("Expected red at (0, 0) with 2x scale, got R=%.2f", col.R)
+	}
+
+	// At (19, 19), maps to source (9, 9) — still inside, should be red.
+	col = pattern.ColorAt(19, 19)
+	if col.R < 0.9 {
+		t.Errorf("Expected red at (19, 19) with 2x scale, got R=%.2f", col.R)
+	}
+
+	// At (20, 0), maps to source (10, 0) — outside, should be transparent.
+	col = pattern.ColorAt(20, 0)
+	if col.A > 0.01 {
+		t.Errorf("Expected transparent at (20, 0) with 2x scale, got A=%.2f", col.A)
+	}
+}
+
+// TestImagePattern_Opacity verifies that pattern opacity is applied.
+func TestImagePattern_Opacity(t *testing.T) {
+	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
+
+	pattern := &ImagePattern{
+		image:   img,
+		w:       10,
+		h:       10,
+		opacity: 0.5,
+	}
+
+	col := pattern.ColorAt(0, 0)
+	if col.R < 0.9 {
+		t.Errorf("Expected red channel unchanged, got R=%.2f", col.R)
+	}
+	// Alpha should be halved.
+	if col.A < 0.45 || col.A > 0.55 {
+		t.Errorf("Expected alpha ~0.5, got A=%.2f", col.A)
+	}
+}
+
+// TestDrawImageClipped_WithTransform verifies that DrawImage respects
+// clipping even when a transform is applied.
+func TestDrawImageClipped_WithTransform(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	// Create red image.
+	img := makeTestImage(t, 100, 100, 255, 0, 0, 255)
+
+	dc.Push()
+
+	// Clip to center rectangle.
+	dc.ClipRect(50, 50, 100, 100)
+
+	// Apply translation so image starts at (0, 0) but is shifted to (50, 50).
+	dc.Translate(50, 50)
+
+	// Draw image at origin in transformed space.
+	dc.DrawImage(img, 0, 0)
+
+	dc.Pop()
+
+	// Center of the clip should have red pixels.
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.R < 0.8 {
+		t.Errorf("Expected red at center with transform+clip, got R=%.2f", center.R)
+	}
+
+	// Outside the clip should be background.
+	outside := dc.pixmap.GetPixel(10, 10)
+	if outside.R > 0.1 {
+		t.Errorf("Expected no red outside clip with transform, got R=%.2f", outside.R)
+	}
+}
+
+// TestDrawImageRounded verifies the convenience method.
+func TestDrawImageRounded(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	img := makeTestImage(t, 80, 80, 255, 0, 0, 255)
+
+	dc.DrawImageRounded(img, 60, 60, 10)
+
+	// Center of the image should be red.
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.R < 0.8 {
+		t.Errorf("Expected red at center of rounded image, got R=%.2f", center.R)
+	}
+
+	// Corner should be clipped (radius=10, so the pixel at (60, 60) is in the rounded corner).
+	corner := dc.pixmap.GetPixel(61, 61)
+	if corner.R > 0.5 {
+		t.Errorf("Expected clipped corner at (61, 61), got R=%.2f", corner.R)
+	}
+}
+
+// TestDrawImageCircular verifies the convenience method.
+func TestDrawImageCircular(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	img := makeTestImage(t, 100, 100, 0, 0, 255, 255)
+
+	dc.DrawImageCircular(img, 100, 100, 40)
+
+	// Center should be blue (inside the circle).
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.B < 0.8 {
+		t.Errorf("Expected blue at center of circular image, got B=%.2f", center.B)
+	}
+
+	// Pixel at the edge of the bounding box but outside the circle.
+	// At 45 degrees from center at distance 40 = (100+28, 100+28) roughly.
+	// At the actual corner (60, 60) which is outside the circle.
+	corner := dc.pixmap.GetPixel(62, 62)
+	if corner.B > 0.3 {
+		t.Errorf("Expected no blue at corner outside circle, got B=%.2f", corner.B)
+	}
+}
+
+// TestFillClippedSolid verifies that regular solid-color Fill() also
+// respects the clip stack after this refactoring.
+func TestFillClippedSolid(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	dc.Push()
+
+	// Clip to a circle.
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+
+	// Fill the entire canvas with red.
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 200, 200)
+	dc.Fill()
+
+	dc.Pop()
+
+	// Center of the circle should be red.
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.R < 0.8 {
+		t.Errorf("Expected red at circle center, got R=%.2f", center.R)
+	}
+
+	// Outside the circle should be background (black from Clear).
+	outside := dc.pixmap.GetPixel(5, 5)
+	if outside.R > 0.1 {
+		t.Errorf("Expected no red outside circle clip, got R=%.2f", outside.R)
+	}
+}
+
+// TestStrokeClipped verifies that Stroke() respects the clip stack.
+func TestStrokeClipped(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.Clear()
+
+	dc.Push()
+
+	// Clip to a small rectangle in the center.
+	dc.ClipRect(80, 80, 40, 40)
+
+	// Stroke a horizontal line across the entire canvas.
+	dc.SetRGB(1, 0, 0)
+	dc.SetLineWidth(4)
+	dc.DrawLine(0, 100, 200, 100)
+	dc.Stroke()
+
+	dc.Pop()
+
+	// Inside the clip, the line should be visible.
+	inside := dc.pixmap.GetPixel(100, 100)
+	if inside.R < 0.5 {
+		t.Errorf("Expected red stroke inside clip, got R=%.2f", inside.R)
+	}
+
+	// Outside the clip, the line should NOT be visible.
+	outside := dc.pixmap.GetPixel(10, 100)
+	if outside.R > 0.1 {
+		t.Errorf("Expected no stroke outside clip, got R=%.2f", outside.R)
+	}
+}
+
+// makeTestImage creates a solid-color test image with the given RGBA values.
+func makeTestImage(t *testing.T, width, height int, r, g, b, a uint8) *ImageBuf { //nolint:unparam // a=255 is intentional in tests; keeping param for completeness
+	t.Helper()
+	img, err := NewImageBuf(width, height, FormatRGBA8)
+	if err != nil {
+		t.Fatalf("Failed to create image: %v", err)
+	}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			_ = img.SetRGBA(x, y, r, g, b, a)
+		}
+	}
+	return img
+}

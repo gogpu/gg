@@ -902,6 +902,11 @@ func (c *Context) doFill() error {
 		sr.rasterizerMode = cpuMode
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
+
+	// Set clip coverage function on paint so the renderer can apply clipping.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
 	return c.renderer.Fill(c.pixmap, c.path, c.paint)
 }
 
@@ -934,7 +939,25 @@ func (c *Context) doStroke() error {
 		sr.rasterizerMode = cpuMode
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
+
+	// Set clip coverage function on paint so the renderer can apply clipping.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
 	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
+}
+
+// applyClipToPaint sets the ClipCoverage function on the paint when a clip
+// stack is active and has entries. This allows the renderer to apply per-pixel
+// clip masks during compositing.
+func (c *Context) applyClipToPaint() {
+	if c.clipStack == nil || c.clipStack.Depth() == 0 {
+		return
+	}
+	cs := c.clipStack
+	c.paint.ClipCoverage = func(x, y float64) byte {
+		return cs.Coverage(x, y)
+	}
 }
 
 // setForceSDF enables/disables forced SDF on the registered accelerator.

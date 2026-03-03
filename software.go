@@ -195,17 +195,58 @@ func (r *SoftwareRenderer) fillWithCoverageFiller(
 	if paint.FillRule == FillRuleEvenOdd {
 		fillRule = FillRuleEvenOdd
 	}
+	clipFn := paint.ClipCoverage
 	if color, ok := solidColorFromPaint(paint); ok {
-		filler.FillCoverage(p, r.width, r.height, fillRule,
-			func(x, y int, coverage uint8) {
-				r.blendCoverageSolid(pixmap, x, y, coverage, color)
-			})
+		r.fillCoverageSolidPath(pixmap, p, filler, fillRule, color, clipFn)
 	} else {
-		filler.FillCoverage(p, r.width, r.height, fillRule,
-			func(x, y int, coverage uint8) {
-				r.blendCoveragePaint(pixmap, x, y, coverage, paint)
-			})
+		r.fillCoveragePaintPath(pixmap, p, filler, fillRule, paint, clipFn)
 	}
+}
+
+// fillCoverageSolidPath fills using the CoverageFiller with a solid color,
+// applying optional clip coverage.
+func (r *SoftwareRenderer) fillCoverageSolidPath(
+	pixmap *Pixmap, p *Path, filler CoverageFiller,
+	fillRule FillRule, color RGBA, clipFn func(x, y float64) byte,
+) {
+	filler.FillCoverage(p, r.width, r.height, fillRule,
+		func(x, y int, coverage uint8) {
+			coverage = applyClipCoverage(clipFn, x, y, coverage)
+			if coverage == 0 {
+				return
+			}
+			r.blendCoverageSolid(pixmap, x, y, coverage, color)
+		})
+}
+
+// fillCoveragePaintPath fills using the CoverageFiller with a paint pattern,
+// applying optional clip coverage.
+func (r *SoftwareRenderer) fillCoveragePaintPath(
+	pixmap *Pixmap, p *Path, filler CoverageFiller,
+	fillRule FillRule, paint *Paint, clipFn func(x, y float64) byte,
+) {
+	filler.FillCoverage(p, r.width, r.height, fillRule,
+		func(x, y int, coverage uint8) {
+			coverage = applyClipCoverage(clipFn, x, y, coverage)
+			if coverage == 0 {
+				return
+			}
+			r.blendCoveragePaint(pixmap, x, y, coverage, paint)
+		})
+}
+
+// applyClipCoverage multiplies pixel coverage by the clip mask coverage.
+// Returns 0 if the pixel is fully clipped. When clipFn is nil, returns the
+// original coverage unchanged.
+func applyClipCoverage(clipFn func(x, y float64) byte, px, py int, coverage uint8) uint8 {
+	if clipFn == nil {
+		return coverage
+	}
+	cc := clipFn(float64(px)+0.5, float64(py)+0.5)
+	if cc == 0 {
+		return 0
+	}
+	return uint8(uint16(coverage) * uint16(cc) / 255)
 }
 
 // Fill implements Renderer.Fill using analytic anti-aliasing.
@@ -271,13 +312,15 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 
 	if color, ok := solidColorFromPaint(paint); ok {
 		// Fast path: solid color
+		clipFn := paint.ClipCoverage
 		r.analyticFiller.Fill(r.edgeBuilder, coreFillRule, func(y int, runs *raster.AlphaRuns) {
-			r.blendAlphaRunsFromCoreRuns(pixmap, y, runs, color)
+			r.blendAlphaRunsFromCoreRuns(pixmap, y, runs, color, clipFn)
 		})
 	} else {
 		// Pattern/gradient path: per-pixel color sampling
+		clipFn := paint.ClipCoverage
 		r.analyticFiller.Fill(r.edgeBuilder, coreFillRule, func(y int, runs *raster.AlphaRuns) {
-			r.blendAlphaRunsFromCoreRunsPaint(pixmap, y, runs, paint)
+			r.blendAlphaRunsFromCoreRunsPaint(pixmap, y, runs, paint, clipFn)
 		})
 	}
 
@@ -385,10 +428,13 @@ func solidColorFromPaint(paint *Paint) (RGBA, bool) {
 
 // blendAlphaRunsFromCoreRuns blends alpha values from raster.AlphaRuns to the pixmap.
 // Uses source-over compositing for proper alpha blending.
-func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, runs *raster.AlphaRuns, color RGBA) {
+// When clipFn is non-nil, each pixel's alpha is multiplied by the clip coverage.
+func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, runs *raster.AlphaRuns, color RGBA, clipFn func(x, y float64) byte) {
 	if y < 0 || y >= pixmap.Height() {
 		return
 	}
+
+	fy := float64(y) + 0.5
 
 	for x, alpha := range runs.Iter() {
 		if alpha == 0 {
@@ -396,6 +442,18 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, run
 		}
 		if x < 0 || x >= pixmap.Width() {
 			continue
+		}
+
+		// Apply clip coverage if active.
+		if clipFn != nil {
+			cc := clipFn(float64(x)+0.5, fy)
+			if cc == 0 {
+				continue
+			}
+			alpha = uint8(uint16(alpha) * uint16(cc) / 255)
+			if alpha == 0 {
+				continue
+			}
 		}
 
 		// Full coverage - just set the pixel
@@ -425,7 +483,8 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, run
 
 // blendAlphaRunsFromCoreRunsPaint is like blendAlphaRunsFromCoreRuns but samples
 // the paint color at each pixel instead of using a single constant color.
-func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int, runs *raster.AlphaRuns, paint *Paint) {
+// When clipFn is non-nil, each pixel's alpha is multiplied by the clip coverage.
+func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int, runs *raster.AlphaRuns, paint *Paint, clipFn func(x, y float64) byte) {
 	if y < 0 || y >= pixmap.Height() {
 		return
 	}
@@ -440,8 +499,22 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 			continue
 		}
 
+		fx := float64(x) + 0.5
+
+		// Apply clip coverage if active.
+		if clipFn != nil {
+			cc := clipFn(fx, fy)
+			if cc == 0 {
+				continue
+			}
+			alpha = uint8(uint16(alpha) * uint16(cc) / 255)
+			if alpha == 0 {
+				continue
+			}
+		}
+
 		// Sample color from paint at pixel center
-		color := paint.ColorAt(float64(x)+0.5, fy)
+		color := paint.ColorAt(fx, fy)
 
 		if alpha == 255 && color.A == 1.0 {
 			pixmap.SetPixel(x, y, color)

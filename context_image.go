@@ -127,6 +127,9 @@ func (c *Context) DrawImage(img *ImageBuf, x, y float64) {
 
 // DrawImageEx draws an image with advanced options.
 // The current transformation matrix is applied to the position and size.
+// The image is drawn through the Fill() pipeline, which means it respects
+// the current clip region. This follows the enterprise pattern used by
+// Skia, Cairo, tiny-skia, and Vello: image drawing = fillRect + image shader.
 //
 // Example:
 //
@@ -150,79 +153,62 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 
 	// Get source dimensions
 	srcWidth, srcHeight := img.Bounds()
-	var srcRect intImage.Rect
+	srcX, srcY := 0, 0
+	srcW, srcH := srcWidth, srcHeight
 	if opts.SrcRect != nil {
-		srcRect = intImage.Rect{
-			X:      opts.SrcRect.Min.X,
-			Y:      opts.SrcRect.Min.Y,
-			Width:  opts.SrcRect.Dx(),
-			Height: opts.SrcRect.Dy(),
-		}
-	} else {
-		srcRect = intImage.Rect{
-			X:      0,
-			Y:      0,
-			Width:  srcWidth,
-			Height: srcHeight,
-		}
+		srcX = opts.SrcRect.Min.X
+		srcY = opts.SrcRect.Min.Y
+		srcW = opts.SrcRect.Dx()
+		srcH = opts.SrcRect.Dy()
 	}
 
-	// Determine destination size
+	// Determine destination size in user coordinates (before transform).
 	dstWidth := opts.DstWidth
 	dstHeight := opts.DstHeight
 	if dstWidth == 0 {
-		dstWidth = float64(srcRect.Width)
+		dstWidth = float64(srcW)
 	}
 	if dstHeight == 0 {
-		dstHeight = float64(srcRect.Height)
+		dstHeight = float64(srcH)
 	}
 
-	// Transform destination rectangle corners
+	// Compute scale factors for the image pattern.
+	// The pattern maps source pixels to destination pixels.
+	scaleX := dstWidth / float64(srcW)
+	scaleY := dstHeight / float64(srcH)
+
+	// Transform destination rectangle to device coordinates for the anchor.
 	topLeft := c.matrix.TransformPoint(Pt(opts.X, opts.Y))
-	bottomRight := c.matrix.TransformPoint(Pt(opts.X+dstWidth, opts.Y+dstHeight))
 
-	// Calculate transformed destination rectangle
-	dstX := int(topLeft.X)
-	dstY := int(topLeft.Y)
-	dstW := int(bottomRight.X - topLeft.X)
-	dstH := int(bottomRight.Y - topLeft.Y)
-
-	// Create destination rectangle
-	dstRect := intImage.Rect{
-		X:      dstX,
-		Y:      dstY,
-		Width:  dstW,
-		Height: dstH,
+	// Create image pattern anchored at the destination position.
+	pattern := &ImagePattern{
+		image:   img,
+		x:       srcX,
+		y:       srcY,
+		w:       srcW,
+		h:       srcH,
+		anchorX: topLeft.X,
+		anchorY: topLeft.Y,
+		opacity: opts.Opacity,
+		clamp:   true, // Don't tile — clamp to image bounds
+		scaleX:  scaleX,
+		scaleY:  scaleY,
 	}
 
-	// Convert Pixmap to ImageBuf for drawing
-	// This is a zero-copy operation - ImageBuf wraps the pixmap's data
-	dstImg := c.pixmapToImageBuf(c.pixmap)
+	// Save current state (paint, path, transform).
+	c.Push()
 
-	// Compute a scaling transform that maps dst rect coordinates to src rect
-	// coordinates. Without this, DrawImage uses identity (1:1 pixel mapping)
-	// which clips the source when dst is larger than src.
-	var transform *intImage.Affine
-	if dstW > 0 && dstH > 0 && srcRect.Width > 0 && srcRect.Height > 0 {
-		scaleX := float64(dstW) / float64(srcRect.Width)
-		scaleY := float64(dstH) / float64(srcRect.Height)
-		t := intImage.Scale(scaleX, scaleY)
-		transform = &t
-	}
+	// Set image pattern as fill source.
+	c.SetFillPattern(pattern)
 
-	// Prepare draw parameters
-	params := intImage.DrawParams{
-		SrcRect:   &srcRect,
-		DstRect:   dstRect,
-		Transform: transform,
-		Interp:    opts.Interpolation,
-		Opacity:   opts.Opacity,
-		BlendMode: opts.BlendMode,
-	}
+	// Draw rectangle at destination using the current transform.
+	// DrawRectangle applies the transform, which is what we want.
+	c.DrawRectangle(opts.X, opts.Y, dstWidth, dstHeight)
 
-	// Draw the image directly into the pixmap via the ImageBuf wrapper
-	intImage.DrawImage(dstImg, img, params)
-	// No need to copy back - ImageBuf shares the pixmap's underlying data
+	// Fill the rectangle — the Fill() pipeline handles clipping automatically.
+	_ = c.Fill()
+
+	c.Pop()
 }
 
 // CreateImagePattern creates an image pattern from a rectangular region of an image.
@@ -260,19 +246,71 @@ func (c *Context) SetStrokePattern(pattern Pattern) {
 }
 
 // ImagePattern represents an image-based pattern.
+// When anchorX/anchorY are set, the pattern is positioned at that canvas
+// location instead of tiling from (0,0). Coordinates outside the image region
+// return transparent black (clamp mode) when clamp is true.
 type ImagePattern struct {
-	image *ImageBuf
-	x, y  int
-	w, h  int
+	image   *ImageBuf
+	x, y    int     // source region offset within the image
+	w, h    int     // source region size (0 = full image dimension)
+	anchorX float64 // canvas anchor X
+	anchorY float64 // canvas anchor Y
+	opacity float64 // opacity multiplier (0=transparent, 1=opaque; 0 means default=1)
+	clamp   bool    // when true, out-of-bounds returns transparent instead of tiling
+	scaleX  float64 // horizontal scale factor (0 means 1.0)
+	scaleY  float64 // vertical scale factor (0 means 1.0)
+}
+
+// SetAnchor sets the canvas position where the pattern is anchored.
+// This offsets all coordinate lookups so the image appears at (x, y)
+// on the canvas rather than tiled from the origin.
+func (p *ImagePattern) SetAnchor(x, y float64) {
+	p.anchorX = x
+	p.anchorY = y
+}
+
+// SetOpacity sets the opacity multiplier for the pattern (0.0 to 1.0).
+func (p *ImagePattern) SetOpacity(opacity float64) {
+	p.opacity = opacity
+}
+
+// SetClamp enables clamp mode. When true, coordinates outside the image region
+// return transparent black instead of tiling/wrapping.
+func (p *ImagePattern) SetClamp(clamp bool) {
+	p.clamp = clamp
+}
+
+// SetScale sets the scale factors for the pattern. The source image is scaled
+// by these factors before being sampled. For example, SetScale(2, 2) makes
+// each source pixel cover 2x2 destination pixels.
+func (p *ImagePattern) SetScale(sx, sy float64) {
+	p.scaleX = sx
+	p.scaleY = sy
 }
 
 // ColorAt implements the Pattern interface.
-// It samples the image at the given coordinates using wrapping/tiling behavior.
+// It samples the image at the given coordinates. If an anchor is set,
+// coordinates are offset by the anchor position. In clamp mode, out-of-bounds
+// coordinates return transparent black; otherwise the pattern tiles.
 func (p *ImagePattern) ColorAt(x, y float64) RGBA {
+	// Subtract anchor to get local coordinates relative to the image origin.
+	lx := x - p.anchorX
+	ly := y - p.anchorY
+
+	// Apply inverse scale (map destination coords to source coords).
+	sx := p.scaleX
+	sy := p.scaleY
+	if sx != 0 {
+		lx /= sx
+	}
+	if sy != 0 {
+		ly /= sy
+	}
+
 	// Get image bounds
 	imgW, imgH := p.image.Bounds()
 
-	// If pattern region is specified, use it
+	// Determine pattern region.
 	patternW := p.w
 	patternH := p.h
 	if patternW == 0 {
@@ -282,9 +320,31 @@ func (p *ImagePattern) ColorAt(x, y float64) RGBA {
 		patternH = imgH
 	}
 
-	// Wrap coordinates to pattern region (tiling)
-	px := int(x) % patternW
-	py := int(y) % patternH
+	if p.clamp {
+		// Clamp mode: out-of-bounds returns transparent.
+		ix := int(lx)
+		iy := int(ly)
+		if ix < 0 || ix >= patternW || iy < 0 || iy >= patternH {
+			return RGBA{}
+		}
+		ix += p.x
+		iy += p.y
+		r, g, b, a := p.image.GetRGBA(ix, iy)
+		col := RGBA{
+			R: float64(r) / 255.0,
+			G: float64(g) / 255.0,
+			B: float64(b) / 255.0,
+			A: float64(a) / 255.0,
+		}
+		if p.opacity > 0 && p.opacity < 1.0 {
+			col.A *= p.opacity
+		}
+		return col
+	}
+
+	// Wrap coordinates to pattern region (tiling).
+	px := int(lx) % patternW
+	py := int(ly) % patternH
 	if px < 0 {
 		px += patternW
 	}
@@ -292,18 +352,65 @@ func (p *ImagePattern) ColorAt(x, y float64) RGBA {
 		py += patternH
 	}
 
-	// Add pattern offset
+	// Add source region offset.
 	px += p.x
 	py += p.y
 
-	// Sample the image
+	// Sample the image.
 	r, g, b, a := p.image.GetRGBA(px, py)
-	return RGBA{
+	col := RGBA{
 		R: float64(r) / 255.0,
 		G: float64(g) / 255.0,
 		B: float64(b) / 255.0,
 		A: float64(a) / 255.0,
 	}
+	if p.opacity > 0 && p.opacity < 1.0 {
+		col.A *= p.opacity
+	}
+	return col
+}
+
+// DrawImageRounded draws an image at (x, y) clipped to a rounded rectangle.
+// The image is drawn at its natural size, clipped by a rounded rectangle with
+// the given corner radius. This is a convenience method equivalent to:
+//
+//	dc.Push()
+//	dc.DrawRoundedRectangle(x, y, w, h, radius)
+//	dc.Clip()
+//	dc.DrawImage(img, x, y)
+//	dc.Pop()
+func (c *Context) DrawImageRounded(img *ImageBuf, x, y, radius float64) {
+	w, h := img.Bounds()
+	fw := float64(w)
+	fh := float64(h)
+
+	c.Push()
+	c.DrawRoundedRectangle(x, y, fw, fh, radius)
+	c.Clip()
+	c.DrawImage(img, x, y)
+	c.Pop()
+}
+
+// DrawImageCircular draws an image at the specified center, clipped to a circle.
+// The image is drawn centered at (cx, cy) and clipped by a circle with the given
+// radius. The image is scaled to fit within the circle's bounding box.
+func (c *Context) DrawImageCircular(img *ImageBuf, cx, cy, radius float64) {
+	c.Push()
+	c.DrawCircle(cx, cy, radius)
+	c.Clip()
+
+	// Draw image centered, scaled to fit the circle diameter.
+	diameter := radius * 2
+	c.DrawImageEx(img, DrawImageOptions{
+		X:         cx - radius,
+		Y:         cy - radius,
+		DstWidth:  diameter,
+		DstHeight: diameter,
+		Opacity:   1.0,
+		BlendMode: BlendNormal,
+	})
+
+	c.Pop()
 }
 
 // pixmapToImageBuf converts a Pixmap to an ImageBuf.
