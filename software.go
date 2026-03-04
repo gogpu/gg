@@ -28,7 +28,7 @@ type SoftwareRenderer struct {
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
 func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
-	eb := raster.NewEdgeBuilder(4) // 16x AA quality
+	eb := raster.NewEdgeBuilder(2) // 4x AA (Skia default), max coord 8191px
 	return &SoftwareRenderer{
 		edgeBuilder:    eb,
 		analyticFiller: raster.NewAnalyticFiller(width, height),
@@ -42,7 +42,7 @@ func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
 func (r *SoftwareRenderer) Resize(width, height int) {
 	r.width = width
 	r.height = height
-	eb := raster.NewEdgeBuilder(4)
+	eb := raster.NewEdgeBuilder(2) // 4x AA (Skia default), max coord 8191px
 	r.edgeBuilder = eb
 	r.analyticFiller = raster.NewAnalyticFiller(width, height)
 }

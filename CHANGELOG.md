@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Fix FDot6→FDot16 integer overflow causing black lines/artifacts** — geometry with
-  device-space coordinates exceeding 2048px at aaShift=4 (16x AA) caused silent int32
-  overflow, wrapping off-screen edges into the visible canvas as dark pixels. Fixed with
-  two-layer defense: (1) path clipping to canvas bounds in EdgeBuilder with Skia-style
-  sentinel vertical lines preserving winding, (2) saturating FDot6ToFDot16 conversion
-  clamping to int32 range instead of wrapping.
+- **Fix FDot6→FDot16 integer overflow causing black lines/artifacts** — three-layer fix:
+  (1) reduce aaShift from 4 to 2 (Skia default), expanding max coordinate from 2048px to
+  8191px; (2) path clipping to canvas bounds in EdgeBuilder with Skia-style sentinel
+  vertical lines preserving winding; (3) saturating FDot6ToFDot16 conversion clamping to
+  int32 range instead of wrapping. aaShift=4 (16x AA) was unnecessarily aggressive —
+  Skia ships aaShift=2 (4x AA) on billions of devices with excellent quality.
   ([#148](https://github.com/gogpu/gg/issues/148))
 
 ## [0.33.0] - 2026-03-03
