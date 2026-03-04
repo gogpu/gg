@@ -107,10 +107,20 @@ func FDot6Round(v FDot6) int32 {
 	return (v + FDot6Half) >> FDot6Shift
 }
 
-// FDot6ToFDot16 converts an FDot6 to FDot16.
+// FDot6ToFDot16 converts an FDot6 to FDot16 with saturating arithmetic.
 // This is a left shift by 10 bits (16 - 6 = 10).
+// Values that would overflow int32 are clamped to MaxInt32/MinInt32
+// instead of wrapping, preventing silent data corruption (RAST-010).
 func FDot6ToFDot16(v FDot6) FDot16 {
-	return leftShift(v, FDot16Shift-FDot6Shift)
+	const shift = FDot16Shift - FDot6Shift // 10
+	result := int64(v) << uint(shift)
+	if result > 0x7FFFFFFF {
+		return 0x7FFFFFFF
+	}
+	if result < -0x7FFFFFFF {
+		return -0x7FFFFFFF
+	}
+	return FDot16(result)
 }
 
 // FDot6Div divides two FDot6 values and returns an FDot16.

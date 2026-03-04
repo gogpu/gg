@@ -286,6 +286,20 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	r.edgeBuilder.Reset()
 	r.analyticFiller.Reset()
 
+	// Clip paths to canvas bounds to prevent FDot6→FDot16 integer overflow.
+	// At aaShift=4, coordinates > 2048px overflow int32 in FDot16, causing
+	// silent wrap-around that places edges at wrong positions (RAST-010).
+	// Small margin for AA bleed — coordinates at canvas+2px are still well
+	// within safe range.
+	clipMargin := float32(2)
+	clipRect := raster.Rect{
+		MinX: -clipMargin,
+		MinY: -clipMargin,
+		MaxX: float32(pixmap.Width()) + clipMargin,
+		MaxY: float32(pixmap.Height()) + clipMargin,
+	}
+	r.edgeBuilder.SetClipRect(&clipRect)
+
 	// Flatten curves to line segments for the AnalyticFiller.
 	// Forward differencing (QuadraticEdge/CubicEdge) can produce zero-height
 	// segments after FDot6 rounding, silently losing winding contribution.
