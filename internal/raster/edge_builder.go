@@ -87,10 +87,17 @@ func (r Rect) IsEmpty() bool {
 // The builder ensures all edges are Y-monotonic by chopping curves at their
 // Y extrema before creating edge objects.
 //
+// When a clip rect is set via SetClipRect, all edges are clipped to the rect
+// before fixed-point conversion. This prevents FDot6→FDot16 integer overflow
+// (RAST-010) by ensuring coordinates stay within safe range. Out-of-bounds
+// portions are replaced with sentinel vertical lines at clip boundaries to
+// preserve correct winding numbers for fill operations.
+//
 // Usage:
 //
 //	eb := NewEdgeBuilder(2) // 4x AA quality
 //	eb.SetFlattenCurves(true) // Flatten curves to lines
+//	eb.SetClipRect(&raster.Rect{MinX: -2, MinY: -2, MaxX: 802, MaxY: 602})
 //	eb.BuildFromPath(path, IdentityTransform{})
 //
 //	for edge := range eb.AllEdges() {
@@ -110,6 +117,11 @@ type EdgeBuilder struct {
 
 	// flattenCurves when true converts all curves to line segments
 	flattenCurves bool
+
+	// clipRect when non-nil clips all edges to this rectangle.
+	// Prevents FDot6→FDot16 overflow for coordinates exceeding safe range.
+	// Sentinel vertical lines are emitted at X boundaries to preserve winding.
+	clipRect *Rect
 
 	// bounds accumulates the bounding box of all edges
 	bounds edgeBounds
@@ -278,8 +290,21 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 	}
 }
 
-// addLine adds a line edge, handling vertical edge combining.
+// addLine adds a line edge, clipping to clipRect if set.
+// When clipRect is active, delegates to clipAndAddLine which may emit
+// sentinel vertical lines at clip boundaries to preserve winding.
 func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
+	if eb.clipRect != nil {
+		eb.clipAndAddLine(x0, y0, x1, y1)
+		return
+	}
+	eb.addLineUnclipped(x0, y0, x1, y1)
+}
+
+// addLineUnclipped adds a line edge without clipping.
+// This is the original addLine logic, called directly by clipAndAddLine
+// after coordinates have been clipped to safe range.
+func (eb *EdgeBuilder) addLineUnclipped(x0, y0, x1, y1 float32) {
 	// Update bounds
 	eb.bounds.unionPoint(x0, y0)
 	eb.bounds.unionPoint(x1, y1)
@@ -327,6 +352,205 @@ func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
 	eb.lineEdges = append(eb.lineEdges, *edge)
 }
 
+// clipAndAddLine clips a line to clipRect and emits clipped segments.
+//
+// Algorithm (Skia-style Y-then-X clipping):
+//
+// Phase 1: Y-clip — discard portions above/below clip rect.
+// No sentinel verticals needed for Y because edges are Y-sorted and
+// winding doesn't bleed vertically.
+//
+// Phase 2: X-clip with sentinel verticals — replace portions outside
+// left/right boundaries with vertical lines at the boundary. This
+// preserves the winding contribution of clipped edges.
+//
+// Reference: Skia SkEdgeClipper, tiny-skia edge_clipper.rs
+func (eb *EdgeBuilder) clipAndAddLine(x0, y0, x1, y1 float32) {
+	cr := eb.clipRect
+
+	// Ensure y0 <= y1 for consistent clipping (track original direction)
+	downward := true
+	if y0 > y1 {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+		downward = false
+	}
+
+	// Phase 1: Y-clip
+	// Entirely above or below → discard
+	if y1 <= cr.MinY || y0 >= cr.MaxY {
+		return
+	}
+
+	// Clip to top Y boundary
+	if y0 < cr.MinY {
+		// Interpolate X at top boundary
+		t := (cr.MinY - y0) / (y1 - y0)
+		x0 += t * (x1 - x0)
+		y0 = cr.MinY
+	}
+
+	// Clip to bottom Y boundary
+	if y1 > cr.MaxY {
+		t := (cr.MaxY - y0) / (y1 - y0)
+		x1 = x0 + t*(x1-x0)
+		y1 = cr.MaxY
+	}
+
+	// After Y-clip, check for degenerate
+	if y0 >= y1 {
+		return
+	}
+
+	// Phase 2: X-clip with sentinel verticals
+	// Restore original direction for emit
+	if !downward {
+		x0, y0, x1, y1 = x1, y1, x0, y0
+	}
+
+	eb.clipLineX(x0, y0, x1, y1)
+}
+
+// clipLineX handles the X-clipping phase, emitting sentinel verticals
+// at clip boundaries for out-of-bounds portions.
+func (eb *EdgeBuilder) clipLineX(x0, y0, x1, y1 float32) {
+	cr := eb.clipRect
+	left := cr.MinX
+	right := cr.MaxX
+
+	// Sort by Y for consistent boundary analysis
+	var topX, topY, botX, botY float32
+	if y0 <= y1 {
+		topX, topY, botX, botY = x0, y0, x1, y1
+	} else {
+		topX, topY, botX, botY = x1, y1, x0, y0
+	}
+
+	// Fast paths for common cases
+	if topX >= left && topX <= right && botX >= left && botX <= right {
+		eb.addLineUnclipped(x0, y0, x1, y1) // Entirely inside
+		return
+	}
+	if topX <= left && botX <= left {
+		eb.addLineUnclipped(left, y0, left, y1) // Entirely left → sentinel
+		return
+	}
+	if topX >= right && botX >= right {
+		eb.addLineUnclipped(right, y0, right, y1) // Entirely right → sentinel
+		return
+	}
+
+	// Line crosses one or both X boundaries — split and emit segments.
+	preserveDir := y0 <= y1
+
+	// Find intersection t values
+	splits := eb.findXSplits(topX, topY, botX, botY, left, right)
+
+	// Build and emit segments
+	eb.emitClippedSegments(splits, topX, topY, botX, botY, left, right, preserveDir)
+}
+
+// findXSplits finds t values where a line (in top→bottom order) crosses
+// the left and right clip boundaries. Returns sorted t values (max 2).
+func (eb *EdgeBuilder) findXSplits(
+	topX, _, botX, _ float32, left, right float32,
+) [2]struct {
+	t     float32
+	x     float32
+	valid bool
+} {
+	var splits [2]struct {
+		t     float32
+		x     float32
+		valid bool
+	}
+	count := 0
+
+	dx := botX - topX
+	if dx == 0 {
+		return splits
+	}
+
+	for _, boundary := range [2]float32{left, right} {
+		tVal := (boundary - topX) / dx
+		if tVal > 0 && tVal < 1 {
+			splits[count] = struct {
+				t     float32
+				x     float32
+				valid bool
+			}{t: tVal, x: boundary, valid: true}
+			count++
+		}
+	}
+
+	// Sort by t if we have 2 splits
+	if count == 2 && splits[0].t > splits[1].t {
+		splits[0], splits[1] = splits[1], splits[0]
+	}
+
+	return splits
+}
+
+// emitClippedSegments emits line segments between split points.
+// Inside segments are emitted as-is; outside segments become sentinel verticals.
+func (eb *EdgeBuilder) emitClippedSegments(
+	splits [2]struct {
+		t     float32
+		x     float32
+		valid bool
+	},
+	topX, topY, botX, botY, left, right float32,
+	preserveDir bool,
+) {
+	prevX, prevY := topX, topY
+
+	for _, sp := range splits {
+		if !sp.valid {
+			break
+		}
+		yAt := topY + sp.t*(botY-topY)
+		eb.emitSegment(prevX, prevY, sp.x, yAt, left, right, preserveDir)
+		prevX, prevY = sp.x, yAt
+	}
+	eb.emitSegment(prevX, prevY, botX, botY, left, right, preserveDir)
+}
+
+// emitSegment emits a single line segment, converting outside portions to sentinels.
+func (eb *EdgeBuilder) emitSegment(
+	sx0, sy0, sx1, sy1, left, right float32, preserveDir bool,
+) {
+	midX := (sx0 + sx1) * 0.5
+	var ex0, ey0, ex1, ey1 float32
+
+	switch {
+	case midX < left:
+		ex0, ey0, ex1, ey1 = left, sy0, left, sy1
+	case midX > right:
+		ex0, ey0, ex1, ey1 = right, sy0, right, sy1
+	default:
+		ex0, ey0, ex1, ey1 = sx0, sy0, sx1, sy1
+	}
+
+	if !preserveDir {
+		ex0, ey0, ex1, ey1 = ex1, ey1, ex0, ey0
+	}
+	eb.addLineUnclipped(ex0, ey0, ex1, ey1)
+}
+
+// curveBBoxInsideClip returns true if all given coordinates (control points
+// and endpoints) are inside the clip rect. Used as a fast check for curves:
+// if the convex hull (approximated by control point bbox) is inside clip,
+// the curve itself is safe and doesn't need force-flattening.
+func (eb *EdgeBuilder) curveBBoxInsideClip(coords ...float32) bool {
+	cr := eb.clipRect
+	for i := 0; i < len(coords); i += 2 {
+		x, y := coords[i], coords[i+1]
+		if x < cr.MinX || x > cr.MaxX || y < cr.MinY || y > cr.MaxY {
+			return false
+		}
+	}
+	return true
+}
+
 // SetFlattenCurves enables or disables curve flattening mode.
 // When enabled, all curves are converted to line segments at build time.
 // This is simpler and more reliable for AnalyticFiller.
@@ -339,6 +563,23 @@ func (eb *EdgeBuilder) FlattenCurves() bool {
 	return eb.flattenCurves
 }
 
+// SetClipRect sets the clipping rectangle for edge building.
+// When set, all edges are clipped to this rect before fixed-point conversion,
+// preventing FDot6→FDot16 integer overflow (RAST-010). Out-of-bounds line
+// portions are replaced with sentinel vertical lines at clip boundaries
+// to preserve correct winding numbers.
+//
+// Pass nil to disable clipping (default).
+// The clip rect is preserved across Reset() calls.
+func (eb *EdgeBuilder) SetClipRect(r *Rect) {
+	eb.clipRect = r
+}
+
+// ClipRect returns the current clip rectangle, or nil if not set.
+func (eb *EdgeBuilder) ClipRect() *Rect {
+	return eb.clipRect
+}
+
 // VelloLines returns the stored float-coordinate lines.
 // Only populated when flattenCurves is true.
 func (eb *EdgeBuilder) VelloLines() []VelloLine {
@@ -347,8 +588,17 @@ func (eb *EdgeBuilder) VelloLines() []VelloLine {
 
 // addQuad adds quadratic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
-	// If flattenCurves is enabled, convert curve to line segments
+	// If flattenCurves is enabled, convert curve to line segments.
+	// Line clipping (clipAndAddLine) handles overflow prevention.
 	if eb.flattenCurves {
+		eb.flattenQuadToLines(x0, y0, cx, cy, x1, y1)
+		return
+	}
+
+	// Safety guard: when clip rect is set and not flattening, force-flatten
+	// curves that extend beyond clip bounds to ensure line clipping catches them.
+	// This prevents FDot6→FDot16 overflow in NewQuadraticEdge. (RAST-010)
+	if eb.clipRect != nil && !eb.curveBBoxInsideClip(x0, y0, cx, cy, x1, y1) {
 		eb.flattenQuadToLines(x0, y0, cx, cy, x1, y1)
 		return
 	}
@@ -443,8 +693,17 @@ func (eb *EdgeBuilder) flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance fl
 
 // addCubic adds cubic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
-	// If flattenCurves is enabled, convert curve to line segments
+	// If flattenCurves is enabled, convert curve to line segments.
+	// Line clipping (clipAndAddLine) handles overflow prevention.
 	if eb.flattenCurves {
+		eb.flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
+		return
+	}
+
+	// Safety guard: when clip rect is set and not flattening, force-flatten
+	// curves that extend beyond clip bounds to ensure line clipping catches them.
+	// This prevents FDot6→FDot16 overflow in NewCubicEdge. (RAST-010)
+	if eb.clipRect != nil && !eb.curveBBoxInsideClip(x0, y0, c1x, c1y, c2x, c2y, x1, y1) {
 		eb.flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
 		return
 	}
