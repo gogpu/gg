@@ -6,10 +6,10 @@ require (
 	github.com/go-text/typesetting v0.3.3
 	github.com/gogpu/gpucontext v0.9.0
 	github.com/gogpu/gputypes v0.2.0
-	github.com/gogpu/naga v0.14.4
-	github.com/gogpu/wgpu v0.19.4
+	github.com/gogpu/naga v0.14.5
+	github.com/gogpu/wgpu v0.19.5
 	golang.org/x/image v0.36.0
 	golang.org/x/text v0.34.0
 )
 
-require github.com/go-webgpu/goffi v0.4.1 // indirect
+require github.com/go-webgpu/goffi v0.4.2 // indirect

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-03-05
+
 ### Fixed
 
 - **Fix FDot6→FDot16 integer overflow causing black lines/artifacts** — three-layer fix:
@@ -16,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   int32 range instead of wrapping. aaShift=4 (16x AA) was unnecessarily aggressive —
   Skia ships aaShift=2 (4x AA) on billions of devices with excellent quality.
   ([#148](https://github.com/gogpu/gg/issues/148))
+
+### Changed
+
+- **Update wgpu v0.19.4 → v0.19.5** — Metal vertex descriptor fix
+  ([wgpu#93](https://github.com/gogpu/wgpu/pull/93))
+- **Update naga v0.14.4 → v0.14.5**
+- **Update goffi v0.4.1 → v0.4.2**
 
 ## [0.33.0] - 2026-03-03
 
