@@ -209,6 +209,11 @@ func (s *GPURenderSession) RenderFrame(
 		return nil
 	}
 
+	slogger().Debug("RenderFrame",
+		"sdf", len(sdfShapes), "convex", len(convexCommands),
+		"stencil", len(stencilPaths), "text", len(textBatches),
+		"surface", s.surfaceView != nil)
+
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
 	// In surface mode, use surface dimensions for MSAA textures and viewport.
 	// The target (gg pixmap) may differ from the surface; the MSAA resolve

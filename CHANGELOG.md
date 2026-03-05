@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-03-05
+
+### Fixed
+
+- **Logger propagation to wgpu HAL** — `gg.SetLogger()` now propagates to
+  `hal.SetLogger()`, enabling Metal/Vulkan backend logging with a single call.
+  Previously, HAL-level logs (surface configuration, pipeline creation, command
+  submission) were silently discarded even when gg logging was enabled.
+
+### Added
+
+- **RenderFrame debug log** — render session logs shape/text counts and surface
+  mode at DEBUG level, making it visible when GPU rendering actually executes.
+
+### Changed
+
+- **Update wgpu v0.19.5 → v0.19.6** — Metal MSAA resolve store action fix
+  ([wgpu#94](https://github.com/gogpu/wgpu/pull/94))
+
 ## [0.33.1] - 2026-03-05
 
 ### Fixed
