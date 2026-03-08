@@ -307,6 +307,15 @@ func (e *StrokeExpander) startFirstSegment(p0 Point, norm, tan0 Vec2) {
 }
 
 // joinWithPrevious handles joining with the previous segment.
+//
+// The key insight (from Skia/tiny-skia/Cairo) is that the two sides of a join
+// must be treated asymmetrically:
+//   - Outer (convex) side: receives join decoration (miter/bevel/round)
+//   - Inner (concave) side: routes through the pivot point to prevent self-intersection
+//
+// The cross product of consecutive tangents determines which side is which:
+//   - cross > 0 (left turn): forward is outer, backward is inner
+//   - cross < 0 (right turn): backward is outer, forward is inner
 func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 	ab := e.lastTan
 	cd := tan0
@@ -323,71 +332,100 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 		return
 	}
 
-	switch e.style.Join {
-	case LineJoinBevel:
-		e.applyBevelJoin(p0, norm)
-	case LineJoinMiter:
-		e.applyMiterJoin(p0, norm, ab, cd, cross, dot, hypot)
-	case LineJoinRound:
-		e.applyRoundJoin(p0, norm, cross, dot)
-	}
-}
-
-// applyBevelJoin applies a bevel join at the given point.
-func (e *StrokeExpander) applyBevelJoin(p0 Point, norm Vec2) {
-	e.forward.lineTo(p0.Add(norm.Neg()))
-	e.backward.lineTo(p0.Add(norm))
-}
-
-// applyMiterJoin applies a miter join at the given point.
-func (e *StrokeExpander) applyMiterJoin(p0 Point, norm, ab, cd Vec2, cross, dot, hypot float64) {
-	miterLimitSq := e.style.MiterLimit * e.style.MiterLimit
-	if 2.0*hypot < (hypot+dot)*miterLimitSq {
-		e.computeMiterPoint(p0, norm, ab, cd, cross)
-	}
-	e.forward.lineTo(p0.Add(norm.Neg()))
-	e.backward.lineTo(p0.Add(norm))
-}
-
-// computeMiterPoint computes and applies the miter point.
-func (e *StrokeExpander) computeMiterPoint(p0 Point, norm, ab, cd Vec2, cross float64) {
+	// Compute the previous segment's normal (needed for miter point and round arc).
 	lastScale := 0.5 * e.style.Width / ab.Length()
 	lastNorm := ab.Perp().Scale(lastScale)
 
-	if cross > 0.0 {
-		// Join on forward path
-		fpLast := p0.Add(lastNorm.Neg())
-		fpThis := p0.Add(norm.Neg())
-		h := ab.Cross(fpThis.Sub(fpLast.Vec2().ToPoint())) / cross
-		miterPt := fpThis.Add(cd.Scale(-h))
-		e.forward.lineTo(miterPt)
-		e.backward.lineTo(p0)
-	} else if cross < 0.0 {
-		// Join on backward path
-		fpLast := p0.Add(lastNorm)
-		fpThis := p0.Add(norm)
-		h := ab.Cross(fpThis.Sub(fpLast.Vec2().ToPoint())) / cross
-		miterPt := fpThis.Add(cd.Scale(-h))
-		e.backward.lineTo(miterPt)
-		e.forward.lineTo(p0)
+	switch {
+	case cross > 0.0:
+		// Left turn: forward path is outer (convex), backward is inner (concave).
+		e.applyOuterJoin(e.forward, p0, lastNorm.Neg(), norm.Neg(), ab, cd, cross, dot, hypot)
+		e.handleInnerJoin(e.backward, p0, norm)
+	case cross < 0.0:
+		// Right turn: backward path is outer (convex), forward is inner (concave).
+		e.applyOuterJoin(e.backward, p0, lastNorm, norm, ab, cd, -cross, dot, hypot)
+		e.handleInnerJoin(e.forward, p0, norm.Neg())
+	default:
+		// Exactly parallel (cross == 0). This includes near-180-degree reversals
+		// (dot < 0) and exactly collinear (dot > 0). Just connect both sides.
+		e.forward.lineTo(p0.Add(norm.Neg()))
+		e.backward.lineTo(p0.Add(norm))
 	}
 }
 
-// applyRoundJoin applies a round join at the given point.
-// The arc goes from the previous segment's normal (lastNorm) to the current normal (norm).
-func (e *StrokeExpander) applyRoundJoin(p0 Point, norm Vec2, cross, dot float64) {
-	// Compute lastNorm from lastTan (same pattern as computeMiterPoint)
-	lastScale := 0.5 * e.style.Width / e.lastTan.Length()
-	lastNorm := e.lastTan.Perp().Scale(lastScale)
+// handleInnerJoin handles the concave (inner) side of a join.
+// Routes through the pivot point to prevent self-intersection artifacts.
+//
+// This follows Skia/tiny-skia's handle_inner_join pattern (stroker.rs:1370-1379):
+// In the degenerate case that the stroke radius is larger than our segments,
+// just connecting the two inner segments may "show through" as a funny diagonal.
+// To fix this, we go through the pivot point, creating a V-shape.
+func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, afterNorm Vec2) {
+	path.lineTo(pivot)
+	path.lineTo(pivot.Add(afterNorm))
+}
 
-	angle := math.Atan2(cross, dot)
-	if angle > 0.0 {
-		e.backward.lineTo(p0.Add(norm))
-		e.roundJoin(e.forward, p0, lastNorm.Neg(), angle)
-	} else {
-		e.forward.lineTo(p0.Add(norm.Neg()))
-		e.roundJoinRev(e.backward, p0, lastNorm, -angle)
+// applyOuterJoin applies the requested join type to the outer (convex) side of a join.
+// The inner side is handled separately by handleInnerJoin.
+//
+// Parameters:
+//   - outerPath: the path builder for the outer (convex) side
+//   - p0: the join vertex (pivot point)
+//   - lastNorm: normal of the previous segment (pointing away from center, toward this outer path)
+//   - norm: normal of the current segment (pointing away from center, toward this outer path)
+//   - ab, cd: tangent vectors of previous and current segments
+//   - crossAbs: absolute value of cross product (always positive)
+//   - dot: dot product of tangents
+//   - hypot: hypot(cross, dot)
+func (e *StrokeExpander) applyOuterJoin(
+	outerPath *pathBuilder, p0 Point, lastNorm, norm, ab, cd Vec2,
+	crossAbs, dot, hypot float64,
+) {
+	switch e.style.Join {
+	case LineJoinBevel:
+		outerPath.lineTo(p0.Add(norm))
+	case LineJoinMiter:
+		e.applyOuterMiterJoin(outerPath, p0, lastNorm, norm, ab, cd, crossAbs, dot, hypot)
+	case LineJoinRound:
+		e.applyOuterRoundJoin(outerPath, p0, lastNorm, norm)
 	}
+}
+
+// applyOuterMiterJoin applies a miter join on the outer (convex) side.
+// If the miter limit is exceeded, falls back to bevel.
+func (e *StrokeExpander) applyOuterMiterJoin(
+	outerPath *pathBuilder, p0 Point, lastNorm, norm, ab, cd Vec2,
+	crossAbs, dot, hypot float64,
+) {
+	miterLimitSq := e.style.MiterLimit * e.style.MiterLimit
+	if 2.0*hypot < (hypot+dot)*miterLimitSq {
+		// Compute miter point: intersection of the two offset lines.
+		fpLast := p0.Add(lastNorm)
+		fpThis := p0.Add(norm)
+		h := ab.Cross(fpThis.Sub(fpLast.Vec2().ToPoint())) / crossAbs
+		miterPt := fpThis.Add(cd.Scale(-h))
+		outerPath.lineTo(miterPt)
+	}
+	outerPath.lineTo(p0.Add(norm))
+}
+
+// applyOuterRoundJoin applies a round join arc on the outer (convex) side.
+// The arc sweeps from lastNorm to norm around the pivot point p0.
+func (e *StrokeExpander) applyOuterRoundJoin(outerPath *pathBuilder, p0 Point, lastNorm, norm Vec2) {
+	// Compute the sweep angle between the two normals.
+	// Both normals point outward on the same (convex) side, so the angle
+	// between them is the exterior angle at the join.
+	crossN := lastNorm.Cross(norm)
+	dotN := lastNorm.Dot(norm)
+	angle := math.Atan2(crossN, dotN)
+
+	if math.Abs(angle) < 1e-6 {
+		// Normals are nearly identical; just connect with a line.
+		outerPath.lineTo(p0.Add(norm))
+		return
+	}
+
+	e.roundJoin(outerPath, p0, lastNorm, angle)
 }
 
 // doLine extends both paths with a line segment.
@@ -533,11 +571,6 @@ func (e *StrokeExpander) roundJoin(out *pathBuilder, center Point, norm Vec2, an
 		e.arcSegment(out, center, radius, a0, a1)
 		currentAngle = a1
 	}
-}
-
-// roundJoinRev adds a round join arc in reverse direction.
-func (e *StrokeExpander) roundJoinRev(out *pathBuilder, center Point, norm Vec2, angle float64) {
-	e.roundJoin(out, center, norm.Neg(), angle)
 }
 
 // arcSegment adds a single arc segment (up to 90 degrees) using cubic Bezier.

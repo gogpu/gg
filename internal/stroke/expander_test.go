@@ -706,6 +706,214 @@ func BenchmarkStrokeExpander_CubicCurves(b *testing.B) {
 	}
 }
 
+// TestInnerJoin_AcuteAngle tests that acute angles do not produce self-intersecting
+// geometry on the inner (concave) side of the join. This is the fix for Issue #168.
+// All three join types must route the inner path through the pivot point.
+func TestInnerJoin_AcuteAngle(t *testing.T) {
+	// Zig-zag polyline with near-reversal angles.
+	// Without inner join handling, the inner side self-intersects.
+	zigzag := []PathElement{
+		MoveTo{Point: Point{X: 10, Y: 50}},
+		LineTo{Point: Point{X: 100, Y: 50}},
+		LineTo{Point: Point{X: 130, Y: 100}},
+		LineTo{Point: Point{X: 130, Y: 60}}, // near-reversal
+		LineTo{Point: Point{X: 250, Y: 50}},
+	}
+
+	tests := []struct {
+		name string
+		join LineJoin
+	}{
+		{"Bevel", LineJoinBevel},
+		{"Miter", LineJoinMiter},
+		{"Round", LineJoinRound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			style := Stroke{
+				Width:      10.0,
+				Cap:        LineCapButt,
+				Join:       tt.join,
+				MiterLimit: 4.0,
+			}
+			expander := NewStrokeExpander(style)
+			result := expander.Expand(zigzag)
+
+			if len(result) == 0 {
+				t.Fatal("result should not be empty")
+			}
+
+			// Verify no self-intersection by checking that the expanded path
+			// does not have any line segments that cross the centerline at
+			// join points. We check this indirectly: the inner side must pass
+			// through the pivot point at each join.
+			pivots := []Point{
+				{X: 100, Y: 50},
+				{X: 130, Y: 100},
+				{X: 130, Y: 60},
+			}
+
+			for _, pivot := range pivots {
+				found := false
+				for _, el := range result {
+					if lt, ok := el.(LineTo); ok {
+						dist := lt.Point.Distance(pivot)
+						if dist < 0.01 {
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					t.Errorf("inner join should route through pivot %v", pivot)
+				}
+			}
+		})
+	}
+}
+
+// TestInnerJoin_ExactReversal tests that an exact 180-degree reversal
+// does not panic or produce degenerate output.
+func TestInnerJoin_ExactReversal(t *testing.T) {
+	// Exact reversal: go right then go left
+	input := []PathElement{
+		MoveTo{Point: Point{X: 0, Y: 0}},
+		LineTo{Point: Point{X: 100, Y: 0}},
+		LineTo{Point: Point{X: 0, Y: 0}}, // exact 180-degree reversal
+	}
+
+	for _, join := range []LineJoin{LineJoinBevel, LineJoinMiter, LineJoinRound} {
+		style := Stroke{
+			Width:      10.0,
+			Cap:        LineCapButt,
+			Join:       join,
+			MiterLimit: 4.0,
+		}
+		expander := NewStrokeExpander(style)
+		result := expander.Expand(input)
+
+		if len(result) == 0 {
+			t.Errorf("join=%d: exact reversal should produce output", join)
+		}
+	}
+}
+
+// TestInnerJoin_VeryAcuteAngle tests a very acute angle (close to 180 degrees).
+func TestInnerJoin_VeryAcuteAngle(t *testing.T) {
+	// Nearly-reversing V shape: ~170 degrees between segments
+	input := []PathElement{
+		MoveTo{Point: Point{X: 0, Y: 50}},
+		LineTo{Point: Point{X: 100, Y: 50}},
+		LineTo{Point: Point{X: 10, Y: 55}}, // very acute return
+	}
+
+	for _, join := range []LineJoin{LineJoinBevel, LineJoinMiter, LineJoinRound} {
+		style := Stroke{
+			Width:      8.0,
+			Cap:        LineCapButt,
+			Join:       join,
+			MiterLimit: 4.0,
+		}
+		expander := NewStrokeExpander(style)
+		result := expander.Expand(input)
+
+		if len(result) == 0 {
+			t.Errorf("join=%d: acute angle should produce output", join)
+		}
+
+		// The inner join must pass through the pivot (100, 50).
+		pivot := Point{X: 100, Y: 50}
+		found := false
+		for _, el := range result {
+			if lt, ok := el.(LineTo); ok {
+				if lt.Point.Distance(pivot) < 0.01 {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Errorf("join=%d: inner join should route through pivot %v", join, pivot)
+		}
+	}
+}
+
+// TestInnerJoin_ClosedPath tests that inner join handling works correctly
+// for closed paths (triangles, etc.).
+func TestInnerJoin_ClosedPath(t *testing.T) {
+	// Acute triangle
+	input := []PathElement{
+		MoveTo{Point: Point{X: 50, Y: 0}},
+		LineTo{Point: Point{X: 100, Y: 80}},
+		LineTo{Point: Point{X: 0, Y: 80}},
+		Close{},
+	}
+
+	style := Stroke{
+		Width:      6.0,
+		Cap:        LineCapButt,
+		Join:       LineJoinBevel,
+		MiterLimit: 4.0,
+	}
+	expander := NewStrokeExpander(style)
+	result := expander.Expand(input)
+
+	if len(result) == 0 {
+		t.Fatal("result should not be empty")
+	}
+
+	// Closed path should produce two closed subpaths
+	closeCount := 0
+	for _, el := range result {
+		if _, ok := el.(Close); ok {
+			closeCount++
+		}
+	}
+	if closeCount != 2 {
+		t.Errorf("closed path should produce 2 Close elements, got %d", closeCount)
+	}
+}
+
+// TestInnerJoin_WideStrokeShortSegment tests that wide strokes on short
+// segments route through the pivot correctly (prevents "funny diagonal").
+func TestInnerJoin_WideStrokeShortSegment(t *testing.T) {
+	// Short segments with wide stroke (width > segment length)
+	input := []PathElement{
+		MoveTo{Point: Point{X: 50, Y: 50}},
+		LineTo{Point: Point{X: 55, Y: 50}}, // 5px segment
+		LineTo{Point: Point{X: 53, Y: 45}}, // 5px segment, acute angle
+	}
+
+	style := Stroke{
+		Width:      20.0, // Width much larger than segment length
+		Cap:        LineCapButt,
+		Join:       LineJoinBevel,
+		MiterLimit: 4.0,
+	}
+	expander := NewStrokeExpander(style)
+	result := expander.Expand(input)
+
+	if len(result) == 0 {
+		t.Fatal("result should not be empty")
+	}
+
+	// Pivot at (55, 50) must appear in the output (inner join routes through it)
+	pivot := Point{X: 55, Y: 50}
+	found := false
+	for _, el := range result {
+		if lt, ok := el.(LineTo); ok {
+			if lt.Point.Distance(pivot) < 0.01 {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("inner join should route through pivot %v for wide stroke on short segment", pivot)
+	}
+}
+
 // TestRoundJoin_VShape tests the round join fix for Issue #62
 // https://github.com/gogpu/gg/issues/62
 // The V-shape path should produce a smooth round join arc
