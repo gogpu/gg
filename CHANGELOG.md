@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.5] - 2026-03-08
+
+### Fixed
+
+- **Fix stroke join artifacts at acute/near-reversal angles** — implement
+  Skia/tiny-skia inner join handling: at acute angles, the outer (convex) side
+  receives join decoration (miter/bevel/round) while the inner (concave) side
+  routes through the pivot point to prevent self-intersection. Previously both
+  sides were treated identically (inherited from kurbo), causing visible
+  artifacts. Verified against Skia, tiny-skia, and Vello reference
+  implementations.
+  ([#168](https://github.com/gogpu/gg/issues/168),
+  reported in [#159](https://github.com/gogpu/gg/issues/159) by
+  [@rcarlier](https://github.com/rcarlier))
+
+### Changed
+
+- **Per-batch uniform buffers for MSDF text pipeline** — replace single
+  uniform buffer/bind group with pooled slices that grow per batch, fixing
+  resource lifecycle for multi-batch text rendering.
+
 ## [0.33.4] - 2026-03-07
 
 ### Fixed

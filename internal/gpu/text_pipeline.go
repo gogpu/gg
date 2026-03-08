@@ -303,14 +303,19 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 // The resources parameter holds pre-built vertex/index buffers, uniform buffer,
 // and bind group for the current frame.
 func (p *MSDFTextPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *textFrameResources) {
-	if resources == nil || resources.indexCount == 0 {
+	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
 	rp.SetPipeline(p.pipelineWithStencil)
-	rp.SetBindGroup(0, resources.bindGroup, nil)
 	rp.SetVertexBuffer(0, resources.vertBuf, 0)
 	rp.SetIndexBuffer(resources.idxBuf, gputypes.IndexFormatUint16, 0)
-	rp.DrawIndexed(resources.indexCount, 1, 0, 0, 0)
+	for _, dc := range resources.drawCalls {
+		if dc.indexCount == 0 {
+			continue
+		}
+		rp.SetBindGroup(0, dc.bindGroup, nil)
+		rp.DrawIndexed(dc.indexCount, 1, dc.indexOffset, 0, 0)
+	}
 }
 
 // destroyPipeline releases all pipeline resources in reverse creation order.
@@ -341,12 +346,17 @@ func (p *MSDFTextPipeline) destroyPipeline() {
 }
 
 // textFrameResources holds per-frame GPU resources for MSDF text rendering.
+// textDrawCall represents a single text draw with its own color/transform.
+type textDrawCall struct {
+	indexOffset uint32 // first index in the shared index buffer
+	indexCount  uint32 // number of indices for this batch
+	bindGroup   hal.BindGroup
+}
+
 type textFrameResources struct {
-	vertBuf    hal.Buffer
-	idxBuf     hal.Buffer
-	uniformBuf hal.Buffer
-	bindGroup  hal.BindGroup
-	indexCount uint32
+	vertBuf   hal.Buffer
+	idxBuf    hal.Buffer
+	drawCalls []textDrawCall
 }
 
 // textVertexLayout returns the vertex buffer layout for the MSDF text pipeline.
