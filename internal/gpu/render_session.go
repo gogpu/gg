@@ -106,8 +106,9 @@ type GPURenderSession struct {
 	textVertBufCap uint64
 	textIdxBuf     hal.Buffer
 	textIdxBufCap  uint64
-	textUniformBuf hal.Buffer
-	textBindGroup  hal.BindGroup
+	// Per-batch uniform buffers and bind groups (pool, grows as needed).
+	textUniformBufs []hal.Buffer
+	textBindGroups  []hal.BindGroup
 	// Atlas texture and view for current frame's text rendering.
 	textAtlasTex  hal.Texture
 	textAtlasView hal.TextureView
@@ -361,15 +362,20 @@ func (s *GPURenderSession) destroyPersistentBuffers() {
 		s.convexVertBuf = nil
 		s.convexVertBufCap = 0
 	}
-	// Tier 4: Text buffers.
-	if s.textBindGroup != nil {
-		s.device.DestroyBindGroup(s.textBindGroup)
-		s.textBindGroup = nil
+	// Tier 4: Text per-batch pools.
+	for i, bg := range s.textBindGroups {
+		if bg != nil {
+			s.device.DestroyBindGroup(bg)
+			s.textBindGroups[i] = nil
+		}
 	}
-	if s.textUniformBuf != nil {
-		s.device.DestroyBuffer(s.textUniformBuf)
-		s.textUniformBuf = nil
+	s.textBindGroups = nil
+	for _, buf := range s.textUniformBufs {
+		if buf != nil {
+			s.device.DestroyBuffer(buf)
+		}
 	}
+	s.textUniformBufs = nil
 	if s.textIdxBuf != nil {
 		s.device.DestroyBuffer(s.textIdxBuf)
 		s.textIdxBuf = nil
@@ -655,46 +661,41 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 	return result, nil
 }
 
-// buildTextResources updates persistent vertex, index, and uniform buffers
-// for MSDF text rendering. Currently handles a single atlas (first batch's
-// atlas). Buffers are grow-only: reallocated only when data exceeds current
-// capacity.
-//
-// aggregateTextBatches merges all batches into a single quad list and returns
-// the first batch for color/transform/atlas parameters.
-func aggregateTextBatches(batches []TextBatch) ([]TextQuad, TextBatch) {
-	n := 0
-	for i := range batches {
-		n += len(batches[i].Quads)
-	}
-	allQuads := make([]TextQuad, 0, n)
-	for i := range batches {
-		allQuads = append(allQuads, batches[i].Quads...)
-	}
-	return allQuads, batches[0]
-}
-
-// The bind group is persistent (matching SDF pattern) — recreated only when
-// buffers are reallocated or atlas changes via SetTextAtlas.
-func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) { //nolint:gocyclo,cyclop,funlen // sequential buffer management, complexity from error handling
+// buildTextResources updates persistent vertex, index, and per-batch uniform
+// buffers for MSDF text rendering. Each batch gets its own uniform buffer and
+// bind group so that different text colors/transforms render correctly.
+// Vertex and index buffers are shared across all batches. Buffers are grow-only.
+func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameResources, error) { //nolint:gocyclo,cyclop,funlen // sequential buffer management
 	if len(batches) == 0 {
 		return nil, nil //nolint:nilnil // empty batch list is a valid no-op, not an error
 	}
 
-	allQuads, batch := aggregateTextBatches(batches)
-	if len(allQuads) == 0 {
+	// The bind group requires an atlas texture view.
+	if s.textAtlasView == nil {
+		hal.Logger().Warn("text atlas view is nil, skipping text rendering")
+		return nil, nil //nolint:nilnil // no atlas uploaded yet
+	}
+
+	// Aggregate all quads into shared vertex/index buffers.
+	totalQuads := 0
+	for i := range batches {
+		totalQuads += len(batches[i].Quads)
+	}
+	if totalQuads == 0 {
 		return nil, nil //nolint:nilnil // no quads to render
 	}
 
-	// Build vertex data (4 vertices per quad, 16 bytes per vertex).
+	allQuads := make([]TextQuad, 0, totalQuads)
+	for i := range batches {
+		allQuads = append(allQuads, batches[i].Quads...)
+	}
+
+	// Build and upload shared vertex data (4 vertices per quad, 16 bytes per vertex).
 	vertexData := buildTextVertexData(allQuads)
 	vertSize := uint64(len(vertexData))
 
 	if s.textVertBuf == nil || s.textVertBufCap < vertSize {
-		if s.textBindGroup != nil {
-			s.device.DestroyBindGroup(s.textBindGroup)
-			s.textBindGroup = nil
-		}
+		s.invalidateTextBindGroups()
 		if s.textVertBuf != nil {
 			s.device.DestroyBuffer(s.textVertBuf)
 		}
@@ -716,15 +717,12 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 		return nil, fmt.Errorf("write text vertex buffer: %w", err)
 	}
 
-	// Build index data (6 indices per quad, 2 bytes per index).
-	indexData := buildTextIndexData(len(allQuads))
+	// Build and upload shared index data (6 indices per quad, 2 bytes per index).
+	indexData := buildTextIndexData(totalQuads)
 	idxSize := uint64(len(indexData))
 
 	if s.textIdxBuf == nil || s.textIdxBufCap < idxSize {
-		if s.textBindGroup != nil {
-			s.device.DestroyBindGroup(s.textBindGroup)
-			s.textBindGroup = nil
-		}
+		s.invalidateTextBindGroups()
 		if s.textIdxBuf != nil {
 			s.device.DestroyBuffer(s.textIdxBuf)
 		}
@@ -746,70 +744,94 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 		return nil, fmt.Errorf("write text index buffer: %w", err)
 	}
 
-	// Build uniform data (96 bytes).
-	uniformData := makeTextUniform(batch.Color, batch.Transform, batch.PxRange, batch.AtlasSize)
-	if s.textUniformBuf == nil {
+	// Grow uniform buffer and bind group pools to match batch count.
+	s.ensureTextBatchPools(len(batches))
+
+	// Build per-batch draw calls with individual uniform buffers.
+	drawCalls := make([]textDrawCall, 0, len(batches))
+	quadOffset := 0
+
+	for i, batch := range batches {
+		nQuads := len(batch.Quads)
+		if nQuads == 0 {
+			continue
+		}
+
+		// Write uniform data for this batch.
+		uniformData := makeTextUniform(batch.Color, batch.Transform, batch.PxRange, batch.AtlasSize)
+		if err := s.queue.WriteBuffer(s.textUniformBufs[i], 0, uniformData); err != nil {
+			return nil, fmt.Errorf("write text uniform[%d]: %w", i, err)
+		}
+
+		// Ensure bind group exists for this batch.
+		if s.textBindGroups[i] == nil {
+			bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+				Label:  fmt.Sprintf("session_text_bind_%d", i),
+				Layout: s.textPipeline.uniformLayout,
+				Entries: []gputypes.BindGroupEntry{
+					{Binding: 0, Resource: gputypes.BufferBinding{
+						Buffer: s.textUniformBufs[i].NativeHandle(), Offset: 0, Size: textUniformSize,
+					}},
+					{Binding: 1, Resource: gputypes.TextureViewBinding{
+						TextureView: s.textAtlasView.NativeHandle(),
+					}},
+					{Binding: 2, Resource: gputypes.SamplerBinding{
+						Sampler: s.textPipeline.sampler.NativeHandle(),
+					}},
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create text bind group[%d]: %w", i, err)
+			}
+			s.textBindGroups[i] = bg
+		}
+
+		indexOffset := uint32(quadOffset * 6) //nolint:gosec // bounded by MaxQuadCapacity
+		indexCount := uint32(nQuads * 6)      //nolint:gosec // bounded by MaxQuadCapacity
+
+		drawCalls = append(drawCalls, textDrawCall{
+			indexOffset: indexOffset,
+			indexCount:  indexCount,
+			bindGroup:   s.textBindGroups[i],
+		})
+
+		quadOffset += nQuads
+	}
+
+	return &textFrameResources{
+		vertBuf:   s.textVertBuf,
+		idxBuf:    s.textIdxBuf,
+		drawCalls: drawCalls,
+	}, nil
+}
+
+// ensureTextBatchPools grows the uniform buffer and bind group pools to at
+// least n entries. Existing entries are preserved.
+func (s *GPURenderSession) ensureTextBatchPools(n int) {
+	for len(s.textUniformBufs) < n {
 		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
-			Label: "session_text_uniform",
+			Label: fmt.Sprintf("session_text_uniform_%d", len(s.textUniformBufs)),
 			Size:  textUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create text uniform buffer: %w", err)
+			hal.Logger().Warn("failed to create text uniform buffer", "err", err)
+			return
 		}
-		s.textUniformBuf = buf
-		// Bind group must be recreated with the new uniform buffer.
-		if s.textBindGroup != nil {
-			s.device.DestroyBindGroup(s.textBindGroup)
-			s.textBindGroup = nil
+		s.textUniformBufs = append(s.textUniformBufs, buf)
+		s.textBindGroups = append(s.textBindGroups, nil) // bind group created lazily
+	}
+}
+
+// invalidateTextBindGroups destroys all cached text bind groups so they are
+// recreated with updated buffer references.
+func (s *GPURenderSession) invalidateTextBindGroups() {
+	for i, bg := range s.textBindGroups {
+		if bg != nil {
+			s.device.DestroyBindGroup(bg)
+			s.textBindGroups[i] = nil
 		}
 	}
-	if err := s.queue.WriteBuffer(s.textUniformBuf, 0, uniformData); err != nil {
-		return nil, fmt.Errorf("write text uniform buffer: %w", err)
-	}
-
-	// The bind group requires an atlas texture view. If no atlas view is
-	// available yet, skip text rendering this frame.
-	if s.textAtlasView == nil {
-		hal.Logger().Warn("text atlas view is nil, skipping text rendering")
-		return nil, nil //nolint:nilnil // no atlas uploaded yet
-	}
-
-	// Reuse persistent bind group (same pattern as SDF). The bind group is
-	// invalidated (set to nil) when buffers are reallocated or atlas changes
-	// via SetTextAtlas. The CBV/SRV descriptors reference buffer GPU addresses
-	// and texture views — uniform DATA changes via WriteBuffer don't require
-	// bind group recreation.
-	if s.textBindGroup == nil {
-		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
-			Label:  "session_text_bind",
-			Layout: s.textPipeline.uniformLayout,
-			Entries: []gputypes.BindGroupEntry{
-				{Binding: 0, Resource: gputypes.BufferBinding{
-					Buffer: s.textUniformBuf.NativeHandle(), Offset: 0, Size: textUniformSize,
-				}},
-				{Binding: 1, Resource: gputypes.TextureViewBinding{
-					TextureView: s.textAtlasView.NativeHandle(),
-				}},
-				{Binding: 2, Resource: gputypes.SamplerBinding{
-					Sampler: s.textPipeline.sampler.NativeHandle(),
-				}},
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create text bind group: %w", err)
-		}
-		s.textBindGroup = bg
-	}
-
-	indexCount := uint32(len(allQuads) * 6) //nolint:gosec // quad count bounded by MaxQuadCapacity
-	return &textFrameResources{
-		vertBuf:    s.textVertBuf,
-		idxBuf:     s.textIdxBuf,
-		uniformBuf: s.textUniformBuf,
-		bindGroup:  s.textBindGroup,
-		indexCount: indexCount,
-	}, nil
 }
 
 // SetTextAtlas sets the atlas texture and view for MSDF text rendering.
@@ -827,11 +849,8 @@ func (s *GPURenderSession) SetTextAtlas(tex hal.Texture, view hal.TextureView) {
 	}
 	s.textAtlasTex = tex
 	s.textAtlasView = view
-	// Invalidate bind group -- it references the old texture view.
-	if s.textBindGroup != nil {
-		s.device.DestroyBindGroup(s.textBindGroup)
-		s.textBindGroup = nil
-	}
+	// Invalidate all bind groups -- they reference the old texture view.
+	s.invalidateTextBindGroups()
 }
 
 // TextPipelineRef returns the MSDF text pipeline. It is lazily created by
@@ -913,7 +932,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	}
 
 	// Tier 4: MSDF text (rendered last, on top of all other geometry).
-	if textRes != nil && textRes.indexCount > 0 {
+	if textRes != nil && len(textRes.drawCalls) > 0 {
 		s.textPipeline.RecordDraws(rp, textRes)
 	}
 
@@ -1089,7 +1108,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	}
 
 	// Tier 4: MSDF text (rendered last, on top of all other geometry).
-	if textRes != nil && textRes.indexCount > 0 {
+	if textRes != nil && len(textRes.drawCalls) > 0 {
 		s.textPipeline.RecordDraws(rp, textRes)
 	}
 
