@@ -1,0 +1,228 @@
+// Copyright 2026 The gogpu Authors
+// SPDX-License-Identifier: MIT
+
+package gg
+
+import "testing"
+
+func TestNewContextWithScale(t *testing.T) {
+	tests := []struct {
+		name       string
+		width      int
+		height     int
+		scale      float64
+		wantW      int
+		wantH      int
+		wantPixelW int
+		wantPixelH int
+		wantScale  float64
+	}{
+		{
+			name:  "no scale",
+			width: 800, height: 600,
+			scale: 1.0,
+			wantW: 800, wantH: 600,
+			wantPixelW: 800, wantPixelH: 600,
+			wantScale: 1.0,
+		},
+		{
+			name:  "retina 2x",
+			width: 800, height: 600,
+			scale: 2.0,
+			wantW: 800, wantH: 600,
+			wantPixelW: 1600, wantPixelH: 1200,
+			wantScale: 2.0,
+		},
+		{
+			name:  "mobile 3x",
+			width: 400, height: 800,
+			scale: 3.0,
+			wantW: 400, wantH: 800,
+			wantPixelW: 1200, wantPixelH: 2400,
+			wantScale: 3.0,
+		},
+		{
+			name:  "fractional 1.5x",
+			width: 1000, height: 500,
+			scale: 1.5,
+			wantW: 1000, wantH: 500,
+			wantPixelW: 1500, wantPixelH: 750,
+			wantScale: 1.5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dc := NewContextWithScale(tt.width, tt.height, tt.scale)
+			defer func() { _ = dc.Close() }()
+
+			if dc.Width() != tt.wantW {
+				t.Errorf("Width() = %d, want %d", dc.Width(), tt.wantW)
+			}
+			if dc.Height() != tt.wantH {
+				t.Errorf("Height() = %d, want %d", dc.Height(), tt.wantH)
+			}
+			if dc.PixelWidth() != tt.wantPixelW {
+				t.Errorf("PixelWidth() = %d, want %d", dc.PixelWidth(), tt.wantPixelW)
+			}
+			if dc.PixelHeight() != tt.wantPixelH {
+				t.Errorf("PixelHeight() = %d, want %d", dc.PixelHeight(), tt.wantPixelH)
+			}
+			if dc.DeviceScale() != tt.wantScale {
+				t.Errorf("DeviceScale() = %f, want %f", dc.DeviceScale(), tt.wantScale)
+			}
+		})
+	}
+}
+
+func TestWithDeviceScale(t *testing.T) {
+	dc := NewContext(800, 600, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	if dc.Width() != 800 {
+		t.Errorf("Width() = %d, want 800", dc.Width())
+	}
+	if dc.Height() != 600 {
+		t.Errorf("Height() = %d, want 600", dc.Height())
+	}
+	if dc.PixelWidth() != 1600 {
+		t.Errorf("PixelWidth() = %d, want 1600", dc.PixelWidth())
+	}
+	if dc.PixelHeight() != 1200 {
+		t.Errorf("PixelHeight() = %d, want 1200", dc.PixelHeight())
+	}
+	if dc.DeviceScale() != 2.0 {
+		t.Errorf("DeviceScale() = %f, want 2.0", dc.DeviceScale())
+	}
+}
+
+func TestDefaultContextHasScale1(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	if dc.DeviceScale() != 1.0 {
+		t.Errorf("DeviceScale() = %f, want 1.0", dc.DeviceScale())
+	}
+	if dc.PixelWidth() != dc.Width() {
+		t.Errorf("PixelWidth() = %d != Width() = %d at scale 1.0", dc.PixelWidth(), dc.Width())
+	}
+	if dc.PixelHeight() != dc.Height() {
+		t.Errorf("PixelHeight() = %d != Height() = %d at scale 1.0", dc.PixelHeight(), dc.Height())
+	}
+}
+
+func TestSetDeviceScale(t *testing.T) {
+	dc := NewContext(800, 600)
+	defer func() { _ = dc.Close() }()
+
+	// Initially 1x
+	if dc.DeviceScale() != 1.0 {
+		t.Fatalf("initial DeviceScale() = %f, want 1.0", dc.DeviceScale())
+	}
+	if dc.PixelWidth() != 800 {
+		t.Fatalf("initial PixelWidth() = %d, want 800", dc.PixelWidth())
+	}
+
+	// Change to 2x
+	dc.SetDeviceScale(2.0)
+	if dc.DeviceScale() != 2.0 {
+		t.Errorf("DeviceScale() = %f, want 2.0", dc.DeviceScale())
+	}
+	if dc.Width() != 800 {
+		t.Errorf("Width() changed to %d, want 800", dc.Width())
+	}
+	if dc.PixelWidth() != 1600 {
+		t.Errorf("PixelWidth() = %d, want 1600", dc.PixelWidth())
+	}
+	if dc.PixelHeight() != 1200 {
+		t.Errorf("PixelHeight() = %d, want 1200", dc.PixelHeight())
+	}
+}
+
+func TestSetDeviceScaleIgnoresInvalid(t *testing.T) {
+	dc := NewContext(100, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	// Zero should be ignored
+	dc.SetDeviceScale(0)
+	if dc.DeviceScale() != 2.0 {
+		t.Errorf("DeviceScale() = %f after SetDeviceScale(0), want 2.0", dc.DeviceScale())
+	}
+
+	// Negative should be ignored
+	dc.SetDeviceScale(-1)
+	if dc.DeviceScale() != 2.0 {
+		t.Errorf("DeviceScale() = %f after SetDeviceScale(-1), want 2.0", dc.DeviceScale())
+	}
+
+	// Same value should be no-op
+	dc.SetDeviceScale(2.0)
+	if dc.DeviceScale() != 2.0 {
+		t.Errorf("DeviceScale() = %f after SetDeviceScale(2.0), want 2.0", dc.DeviceScale())
+	}
+}
+
+func TestResizeWithDeviceScale(t *testing.T) {
+	dc := NewContext(800, 600, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	if err := dc.Resize(400, 300); err != nil {
+		t.Fatalf("Resize() error: %v", err)
+	}
+
+	if dc.Width() != 400 {
+		t.Errorf("Width() = %d, want 400", dc.Width())
+	}
+	if dc.Height() != 300 {
+		t.Errorf("Height() = %d, want 300", dc.Height())
+	}
+	// Physical should be 400*2=800, 300*2=600
+	if dc.PixelWidth() != 800 {
+		t.Errorf("PixelWidth() = %d, want 800", dc.PixelWidth())
+	}
+	if dc.PixelHeight() != 600 {
+		t.Errorf("PixelHeight() = %d, want 600", dc.PixelHeight())
+	}
+}
+
+func TestIdentityResetsToBaseMatrix(t *testing.T) {
+	dc := NewContext(800, 600, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	// Apply user transform
+	dc.Translate(100, 100)
+	dc.Rotate(0.5)
+
+	// Reset to identity
+	dc.Identity()
+
+	// Should be back to base matrix (Scale(2, 2)), not pure identity.
+	// Verify by transforming a point: (1, 0) should map to (2, 0)
+	px, py := dc.TransformPoint(1, 0)
+	if px != 2.0 || py != 0.0 {
+		t.Errorf("TransformPoint(1, 0) = (%f, %f), want (2, 0) after Identity() with scale 2x", px, py)
+	}
+}
+
+func TestDrawingAtDeviceScale(t *testing.T) {
+	// Verify that drawing at 2x scale produces pixels in the right location.
+	// Draw a single pixel at logical (0, 0) and verify physical pixmap is written.
+	dc := NewContextWithScale(10, 10, 2.0)
+	defer func() { _ = dc.Close() }()
+
+	// Physical pixmap is 20x20. Drawing at logical (0,0)-(1,1) should
+	// affect physical pixels (0,0)-(2,2) due to the 2x scale transform.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, 1, 1)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill() error: %v", err)
+	}
+
+	img := dc.Image()
+	bounds := img.Bounds()
+
+	// Physical image should be 20x20
+	if bounds.Dx() != 20 || bounds.Dy() != 20 {
+		t.Errorf("Image bounds = %dx%d, want 20x20", bounds.Dx(), bounds.Dy())
+	}
+}

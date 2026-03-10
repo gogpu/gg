@@ -288,6 +288,64 @@ dc.DrawString(s, x, y)
 | `text/glyph_outline.go` | `OutlineExtractor`, `GlyphOutline`, `OutlineSegment` |
 | `text/face.go` | `Face.Glyphs()`, `Face.Source()`, `Face.Size()` |
 
+## HiDPI/Retina Device Scale
+
+gg uses the Cairo-pattern `device_scale` for DPI-transparent drawing. User code
+operates in logical coordinates (points/DIP), while the internal pixmap is
+allocated at physical pixel resolution. A permanent base scale transform maps
+logical to physical automatically.
+
+### API
+
+```go
+// Create HiDPI-aware context (800x600 logical, 1600x1200 physical on Retina 2x)
+dc := gg.NewContextWithScale(800, 600, 2.0)
+
+// Or via functional option
+dc := gg.NewContext(800, 600, gg.WithDeviceScale(2.0))
+
+// Or set dynamically
+dc.SetDeviceScale(2.0)
+
+dc.Width()       // 800 (logical)
+dc.Height()      // 600 (logical)
+dc.PixelWidth()  // 1600 (physical)
+dc.PixelHeight() // 1200 (physical)
+dc.DeviceScale() // 2.0
+
+// Drawing uses logical coordinates — no DPI awareness needed in user code
+dc.DrawCircle(400, 300, 100) // centered in logical space
+dc.Fill()                     // rasterized at physical resolution
+```
+
+### Implementation
+
+- `NewContextWithScale(w, h, scale)` allocates pixmap at `w*scale × h*scale`
+- A permanent `Scale(scale, scale)` base matrix is applied to the transform stack
+- `Identity()` resets to the base matrix (not the identity matrix)
+- All drawing operations flow through the transform stack and are automatically scaled
+- `SoftwareRenderer` receives device scale for DPI-aware tolerances
+
+### DPI-Aware Rasterization (femtovg pattern)
+
+On HiDPI displays, rasterization tolerances are adjusted for sharper output:
+
+| Parameter | Formula | Effect on Retina 2x |
+|-----------|---------|---------------------|
+| Curve flatten tolerance | `baseTol / deviceScale` | 0.05 instead of 0.1 — finer subdivision |
+| Stroke expansion tolerance | `baseTol / deviceScale` | Tighter stroke edges |
+
+### gogpu Integration (ggcanvas)
+
+```go
+// ggcanvas automatically uses platform scale factor
+canvas := ggcanvas.MustNewWithScale(provider, logicalW, logicalH, scaleFactor)
+```
+
+`ggcanvas.NewWithScale()` creates the GPU texture at physical pixel dimensions
+while the gg Context operates in logical coordinates. The scale factor typically
+comes from `gogpu.App.ScaleFactor()`.
+
 ## Package Structure
 
 ```

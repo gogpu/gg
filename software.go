@@ -17,8 +17,12 @@ type SoftwareRenderer struct {
 	edgeBuilder    *raster.EdgeBuilder
 	analyticFiller *raster.AnalyticFiller
 
-	// Dimensions
+	// Dimensions (physical pixels)
 	width, height int
+
+	// HiDPI device scale factor (1.0 = no scaling).
+	// Used to adjust curve flattening tolerance for sharper rendering on Retina.
+	deviceScale float32
 
 	// rasterizerMode is set by Context before calling Fill/Stroke
 	// to support forced algorithm selection (RasterizerSparseStrips, etc.).
@@ -34,17 +38,35 @@ func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
 		analyticFiller: raster.NewAnalyticFiller(width, height),
 		width:          width,
 		height:         height,
+		deviceScale:    1.0,
 	}
 }
 
-// Resize updates the renderer dimensions.
+// Resize updates the renderer dimensions (physical pixels).
 // This should be called when the context is resized.
 func (r *SoftwareRenderer) Resize(width, height int) {
 	r.width = width
 	r.height = height
 	eb := raster.NewEdgeBuilder(2) // 4x AA (Skia default), max coord 8191px
+	if r.deviceScale > 1.0 {
+		eb.SetFlattenTolerance(0.1 / r.deviceScale)
+	}
 	r.edgeBuilder = eb
 	r.analyticFiller = raster.NewAnalyticFiller(width, height)
+}
+
+// SetDeviceScale sets the HiDPI device scale factor for the renderer.
+// When scale > 1.0, curve flattening tolerance is reduced for finer
+// subdivision on HiDPI displays (femtovg pattern: tol = baseTol / scale).
+// This produces smoother curves at physical pixel resolution.
+func (r *SoftwareRenderer) SetDeviceScale(scale float32) {
+	if scale <= 0 {
+		scale = 1.0
+	}
+	r.deviceScale = scale
+	if scale > 1.0 {
+		r.edgeBuilder.SetFlattenTolerance(0.1 / scale)
+	}
 }
 
 // convertGGPathToCorePath converts a gg.Path to raster.PathLike.
@@ -597,10 +619,13 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 
 	// Create stroke expander with tight tolerance for smooth curves.
-	// 0.025 px produces ~128 segments per circle — eliminates visible
-	// polygon faceting on small UI circles (radio buttons, checkboxes).
+	// 0.1 px base tolerance; on HiDPI, divide by deviceScale for finer curves.
 	expander := stroke.NewStrokeExpander(strokeStyle)
-	expander.SetTolerance(0.1)
+	strokeTol := float64(0.1)
+	if r.deviceScale > 1.0 {
+		strokeTol = 0.1 / float64(r.deviceScale)
+	}
+	expander.SetTolerance(strokeTol)
 
 	// Expand stroke to fill path
 	expandedElements := expander.Expand(strokeElements)

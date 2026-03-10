@@ -16,11 +16,18 @@ import (
 // Context is the main drawing context.
 // It maintains a pixmap, current path, paint state, and transformation stack.
 // Context implements io.Closer for proper resource cleanup.
+//
+// When deviceScale > 1.0 (HiDPI/Retina), the Context maintains a larger physical
+// pixmap while exposing logical dimensions to user code. Drawing operations use
+// logical coordinates; the Context applies a base scale transform transparently.
 type Context struct {
-	width    int
-	height   int
+	width    int // logical width (user-facing)
+	height   int // logical height (user-facing)
 	pixmap   *Pixmap
 	renderer Renderer
+
+	// HiDPI support
+	deviceScale float64 // physical pixels per logical pixel (default 1.0)
 
 	// Current state
 	path      *Path
@@ -30,6 +37,7 @@ type Context struct {
 
 	// Transform and state stack
 	matrix         Matrix
+	baseMatrix     Matrix // device scale transform (Identity when scale=1.0)
 	stack          []Matrix
 	clipStackDepth []int // Tracks clip stack depth for each Push/Pop
 
@@ -57,7 +65,7 @@ type Context struct {
 // Ensure Context implements io.Closer
 var _ io.Closer = (*Context)(nil)
 
-// NewContext creates a new drawing context with the given dimensions.
+// NewContext creates a new drawing context with the given logical dimensions.
 // Optional ContextOption arguments can be used for dependency injection:
 //
 //	// Default software rendering (uses analytic anti-aliasing)
@@ -65,6 +73,13 @@ var _ io.Closer = (*Context)(nil)
 //
 //	// Custom GPU renderer (dependency injection)
 //	dc := gg.NewContext(800, 600, gg.WithRenderer(gpuRenderer))
+//
+//	// HiDPI/Retina rendering (logical 800x600, physical 1600x1200)
+//	dc := gg.NewContext(800, 600, gg.WithDeviceScale(2.0))
+//
+// When WithDeviceScale is used, the internal pixmap is allocated at physical
+// resolution (width*scale x height*scale) while Width/Height return the
+// logical dimensions. All drawing operations use logical coordinates.
 func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Apply options
 	options := defaultOptions()
@@ -72,26 +87,48 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		opt(&options)
 	}
 
-	// Use provided pixmap or create new one
-	pixmap := options.pixmap
-	if pixmap == nil {
-		pixmap = NewPixmap(width, height)
+	scale := options.deviceScale
+	if scale <= 0 {
+		scale = 1.0
 	}
 
-	// Use provided renderer or create software renderer
+	// Physical dimensions for the pixmap
+	pw := int(float64(width) * scale)
+	ph := int(float64(height) * scale)
+
+	// Use provided pixmap or create one at physical resolution
+	pixmap := options.pixmap
+	if pixmap == nil {
+		pixmap = NewPixmap(pw, ph)
+	}
+
+	// Use provided renderer or create software renderer at physical resolution
 	renderer := options.renderer
 	if renderer == nil {
-		renderer = NewSoftwareRenderer(width, height)
+		sr := NewSoftwareRenderer(pw, ph)
+		if scale > 1.0 {
+			sr.SetDeviceScale(float32(scale))
+		}
+		renderer = sr
+	}
+
+	// Base matrix: when scale != 1.0, apply a permanent scale transform
+	// so user coordinates are automatically mapped to physical pixels.
+	baseMatrix := Identity()
+	if scale != 1.0 {
+		baseMatrix = Scale(scale, scale)
 	}
 
 	return &Context{
 		width:          width,
 		height:         height,
+		deviceScale:    scale,
 		pixmap:         pixmap,
 		renderer:       renderer,
 		path:           NewPath(),
 		paint:          NewPaint(),
-		matrix:         Identity(),
+		matrix:         baseMatrix,
+		baseMatrix:     baseMatrix,
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
 		pipelineMode:   options.pipelineMode,
@@ -100,6 +137,7 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 
 // NewContextForImage creates a context for drawing on an existing image.
 // Optional ContextOption arguments can be used for dependency injection.
+// The image dimensions are treated as physical pixel dimensions (deviceScale=1.0).
 func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 	bounds := img.Bounds()
 	width := bounds.Dx()
@@ -121,15 +159,35 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 	return &Context{
 		width:          width,
 		height:         height,
+		deviceScale:    1.0,
 		pixmap:         pixmap,
 		renderer:       renderer,
 		path:           NewPath(),
 		paint:          NewPaint(),
 		matrix:         Identity(),
+		baseMatrix:     Identity(),
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
 		pipelineMode:   options.pipelineMode,
 	}
+}
+
+// NewContextWithScale creates a new drawing context with the given logical
+// dimensions and device scale factor. This is a convenience wrapper for:
+//
+//	gg.NewContext(w, h, gg.WithDeviceScale(scale))
+//
+// The internal pixmap is allocated at physical resolution (w*scale x h*scale).
+// All drawing operations use logical coordinates (w x h).
+//
+// Example (macOS Retina 2x):
+//
+//	dc := gg.NewContextWithScale(800, 600, 2.0)
+//	dc.Width()      // 800 (logical)
+//	dc.PixelWidth() // 1600 (physical)
+//	dc.DrawCircle(400, 300, 100) // logical coordinates
+func NewContextWithScale(width, height int, scale float64) *Context {
+	return NewContext(width, height, WithDeviceScale(scale))
 }
 
 // Close releases resources associated with the Context.
@@ -198,14 +256,86 @@ func (c *Context) RasterizerMode() RasterizerMode {
 	return c.rasterizerMode
 }
 
-// Width returns the width of the context.
+// Width returns the logical width of the context.
+// This is the coordinate space used by drawing operations.
+// For the physical pixel dimensions, use PixelWidth.
 func (c *Context) Width() int {
 	return c.width
 }
 
-// Height returns the height of the context.
+// Height returns the logical height of the context.
+// This is the coordinate space used by drawing operations.
+// For the physical pixel dimensions, use PixelHeight.
 func (c *Context) Height() int {
 	return c.height
+}
+
+// PixelWidth returns the physical pixel width of the internal pixmap.
+// This equals Width() * DeviceScale(), rounded to int.
+// On non-HiDPI displays (scale=1.0), this equals Width().
+func (c *Context) PixelWidth() int {
+	return int(float64(c.width) * c.deviceScale)
+}
+
+// PixelHeight returns the physical pixel height of the internal pixmap.
+// This equals Height() * DeviceScale(), rounded to int.
+// On non-HiDPI displays (scale=1.0), this equals Height().
+func (c *Context) PixelHeight() int {
+	return int(float64(c.height) * c.deviceScale)
+}
+
+// DeviceScale returns the device scale factor (physical pixels per logical pixel).
+// Default is 1.0. On Retina/HiDPI displays, typical values are 2.0 or 3.0.
+func (c *Context) DeviceScale() float64 {
+	return c.deviceScale
+}
+
+// SetDeviceScale changes the device scale factor on an existing context.
+// This reallocates the internal pixmap at the new physical resolution
+// and adjusts the base transform. The logical dimensions (Width, Height)
+// remain unchanged.
+//
+// Use this when the window moves to a display with a different scale factor.
+// Scale must be > 0; values <= 0 are ignored.
+func (c *Context) SetDeviceScale(scale float64) {
+	if scale <= 0 || scale == c.deviceScale {
+		return
+	}
+
+	oldScale := c.deviceScale
+	c.deviceScale = scale
+
+	// Physical dimensions
+	pw := int(float64(c.width) * scale)
+	ph := int(float64(c.height) * scale)
+
+	// Reallocate pixmap at new physical resolution
+	c.pixmap = NewPixmap(pw, ph)
+
+	// Update renderer dimensions and device scale
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.Resize(pw, ph)
+		sr.SetDeviceScale(float32(scale))
+	}
+
+	// Update base matrix
+	c.baseMatrix = Identity()
+	if scale != 1.0 {
+		c.baseMatrix = Scale(scale, scale)
+	}
+
+	// Update current matrix: remove old base scale, apply new one.
+	// If the user had additional transforms, preserve them.
+	if oldScale != 1.0 {
+		invOld := Scale(1.0/oldScale, 1.0/oldScale)
+		c.matrix = c.baseMatrix.Multiply(invOld.Multiply(c.matrix))
+	} else {
+		c.matrix = c.baseMatrix.Multiply(c.matrix)
+	}
+
+	// Reset clip stack (clip regions are in pixel coordinates)
+	c.clipStack = nil
+	c.ClearPath()
 }
 
 // Image returns the context's image.
@@ -509,9 +639,12 @@ func (c *Context) Pop() {
 	}
 }
 
-// Identity resets the transformation matrix to identity.
+// Identity resets the transformation matrix to the base matrix.
+// When device scale is 1.0, this is the identity matrix.
+// When device scale is > 1.0, this preserves the base scale transform
+// so drawing operations continue to map logical to physical coordinates.
 func (c *Context) Identity() {
-	c.matrix = Identity()
+	c.matrix = c.baseMatrix
 }
 
 // Translate applies a translation to the transformation matrix.
@@ -569,6 +702,7 @@ func (c *Context) TransformPoint(x, y float64) (float64, float64) {
 }
 
 // InvertY inverts the Y axis (useful for coordinate system changes).
+// Uses logical height so the inversion works correctly at any device scale.
 func (c *Context) InvertY() {
 	c.Translate(0, float64(c.height))
 	c.Scale(1, -1)
@@ -717,9 +851,12 @@ func (c *Context) EncodeJPEG(w io.Writer, quality int) error {
 	return jpeg.Encode(w, c.Image(), &jpeg.Options{Quality: quality})
 }
 
-// Resize changes the context dimensions, reusing internal buffers where possible.
+// Resize changes the context logical dimensions, reusing internal buffers where possible.
 // If the dimensions haven't changed, this is a no-op.
 // Returns an error if width or height is <= 0.
+//
+// The width and height are logical dimensions. The internal pixmap is
+// allocated at physical resolution (width*deviceScale x height*deviceScale).
 //
 // After Resize:
 //   - The pixmap is reallocated only if dimensions changed
@@ -739,16 +876,20 @@ func (c *Context) Resize(width, height int) error {
 		return nil
 	}
 
-	// Update dimensions
+	// Update logical dimensions
 	c.width = width
 	c.height = height
 
-	// Reallocate pixmap
-	c.pixmap = NewPixmap(width, height)
+	// Physical dimensions
+	pw := int(float64(width) * c.deviceScale)
+	ph := int(float64(height) * c.deviceScale)
+
+	// Reallocate pixmap at physical resolution
+	c.pixmap = NewPixmap(pw, ph)
 
 	// Resize renderer if it supports resizing
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
-		sr.Resize(width, height)
+		sr.Resize(pw, ph)
 	}
 
 	// Reset clip stack to full rectangle
