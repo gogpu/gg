@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/gogpu/gg v0.35.1
-	github.com/gogpu/gogpu v0.23.0
+	github.com/gogpu/gogpu v0.23.1
 	github.com/gogpu/gpucontext v0.9.0
 )
 
