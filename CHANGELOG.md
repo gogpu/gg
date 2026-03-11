@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.3] - 2026-03-11
+
+### Changed
+
+- Update gogpu v0.23.1 → v0.23.2 in examples (Retina contentsScale fix)
+
 ## [0.35.2] - 2026-03-11
 
 ### Fixed
