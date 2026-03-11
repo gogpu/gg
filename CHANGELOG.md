@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.2] - 2026-03-11
+
+### Fixed
+
+- **`DrawRoundedRectangle` HiDPI/Retina rendering** — fix coordinate space mismatch
+  where rounded rectangles appeared at half size in the wrong position on HiDPI displays.
+  The method now uses Context drawing methods (with matrix transform) instead of direct
+  Path methods, matching the pattern used by `DrawCircle` and `DrawEllipse`.
+  ([#171](https://github.com/gogpu/gg/issues/171))
+
 ## [0.34.1] - 2026-03-11
 
 ### Added
