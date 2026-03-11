@@ -371,6 +371,12 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	// is only cleared on Close() or when switching to offscreen mode.
 	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
 
+	// Reset per-frame state so the first render pass clears the surface.
+	// Without this, frameRendered stays true from the previous frame,
+	// causing LoadOpLoad instead of LoadOpClear — previous frame content
+	// persists and new shapes accumulate on top (progressive drift bug).
+	gg.BeginAcceleratorFrame()
+
 	// Flush GPU shapes directly to the surface view (no readback).
 	err := c.ctx.FlushGPU()
 

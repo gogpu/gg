@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.2] - 2026-03-11
+
+### Fixed
+
+- **GPU surface not cleared between frames (progressive drift on Retina)** —
+  `GPURenderSession.BeginFrame()` was never called, so `frameRendered` stayed `true`
+  after the first frame, causing all subsequent frames to use `LoadOpLoad` instead of
+  `LoadOpClear`. Previous frame content persisted and new shapes accumulated on top,
+  producing progressive stretching and drift on macOS Retina displays. Fix: add
+  `FrameAware` interface and `BeginAcceleratorFrame()`, called from
+  `ggcanvas.RenderDirect()`. Also auto-detect new frame via swapchain TextureView
+  pointer change in `SetSurfaceTarget`. Mid-frame flushes correctly use `LoadOpLoad`
+  to preserve previously drawn content.
+  ([#171](https://github.com/gogpu/gg/issues/171))
+
 ## [0.35.1] - 2026-03-11
 
 ### Changed

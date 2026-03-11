@@ -123,6 +123,17 @@ type GPURenderSession struct {
 	// In-flight command buffer from the previous surface frame. Freed at
 	// the start of the next frame, when VSync guarantees the GPU is done.
 	prevCmdBuf hal.CommandBuffer
+
+	// frameRendered tracks whether at least one render pass has been
+	// submitted to the surface in the current frame. When true, subsequent
+	// render passes use LoadOpLoad instead of LoadOpClear to preserve
+	// previously drawn content. This handles mid-frame flushes caused by
+	// CPU fallback operations (e.g., DrawImage between GPU draws).
+	//
+	// Reset by BeginFrame() at the start of each frame.
+	// Only relevant in surface mode — offscreen mode composites via
+	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
+	frameRendered bool
 }
 
 // NewGPURenderSession creates a new render session with the given device and
@@ -160,6 +171,20 @@ func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height 
 		}
 		s.textures.destroyTextures(s.device)
 	}
+
+	// Detect new frame: swapchain creates a new TextureView each frame
+	// (gogpu renderer.BeginFrame → CreateTextureView), so a different view
+	// pointer means a new frame has started. Reset per-frame state so the
+	// first render pass clears the surface while subsequent mid-frame
+	// flushes preserve content via LoadOpLoad.
+	//
+	// When the same view is passed again (e.g., ggcanvas.RenderDirect calls
+	// SetSurfaceTarget a second time within the same frame), this is a no-op
+	// for frame state — preserving frameRendered so mid-frame content survives.
+	if view != s.surfaceView {
+		s.BeginFrame()
+	}
+
 	s.surfaceView = view
 	s.surfaceWidth = width
 	s.surfaceHeight = height
@@ -170,6 +195,17 @@ func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height 
 			"modeChanged", modeChanged, "sizeChanged", sizeChanged,
 		)
 	}
+}
+
+// BeginFrame resets per-frame state. Call this at the start of each frame
+// before any drawing operations. In surface mode, this ensures the first
+// render pass clears the surface while subsequent mid-frame flushes
+// preserve previously drawn content (LoadOpLoad instead of LoadOpClear).
+//
+// For offscreen mode this is a no-op — offscreen readback composites via
+// Porter-Duff "over", so LoadOpClear is always safe there.
+func (s *GPURenderSession) BeginFrame() {
+	s.frameRendered = false
 }
 
 // RenderMode returns the current render mode based on whether a surface
@@ -1081,22 +1117,34 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		return fmt.Errorf("begin encoding: %w", err)
 	}
 
-	// Unified render pass: MSAA color resolves to surface view (zero-copy).
+	// Surface render pass LoadOp: first pass clears, subsequent passes
+	// preserve existing content. This handles mid-frame flushes caused by
+	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
+	// Without this, each flush would wipe previously rendered shapes.
+	colorLoadOp := gputypes.LoadOpClear
+	stencilLoadOp := gputypes.LoadOpClear
+	depthLoadOp := gputypes.LoadOpClear
+	if s.frameRendered {
+		colorLoadOp = gputypes.LoadOpLoad
+		stencilLoadOp = gputypes.LoadOpLoad
+		depthLoadOp = gputypes.LoadOpLoad
+	}
+
 	rpDesc := &hal.RenderPassDescriptor{
 		Label: "session_surface_pass",
 		ColorAttachments: []hal.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
 			ResolveTarget: s.surfaceView,
-			LoadOp:        gputypes.LoadOpClear,
+			LoadOp:        colorLoadOp,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}},
 		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
-			DepthLoadOp:       gputypes.LoadOpClear,
+			DepthLoadOp:       depthLoadOp,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
 			DepthClearValue:   1.0,
-			StencilLoadOp:     gputypes.LoadOpClear,
+			StencilLoadOp:     stencilLoadOp,
 			StencilStoreOp:    gputypes.StoreOpStore,
 			StencilClearValue: 0,
 		},
@@ -1145,6 +1193,10 @@ func (s *GPURenderSession) encodeSubmitSurface(
 
 	// Keep reference so next frame can free it after GPU is done.
 	s.prevCmdBuf = cmdBuf
+
+	// Mark that at least one render pass has been submitted this frame.
+	// Subsequent mid-frame flushes will use LoadOpLoad to preserve content.
+	s.frameRendered = true
 
 	return nil
 }

@@ -115,6 +115,18 @@ type SurfaceTargetAware interface {
 	SetSurfaceTarget(view any, width, height uint32)
 }
 
+// FrameAware is an optional interface for accelerators that need per-frame
+// lifecycle management. BeginFrame resets per-frame state so that the first
+// render pass of each frame clears the surface (LoadOpClear), while
+// subsequent mid-frame flushes preserve content (LoadOpLoad).
+//
+// Without calling BeginFrame, the surface is only cleared on the very first
+// frame and all subsequent frames composite on top of previous content,
+// causing progressive accumulation artifacts.
+type FrameAware interface {
+	BeginFrame()
+}
+
 // GPUTextAccelerator is an optional interface for accelerators that support
 // GPU-accelerated text rendering via MSDF (Multi-channel Signed Distance
 // Field). When the registered accelerator implements this interface,
@@ -239,6 +251,23 @@ func SetAcceleratorSurfaceTarget(view any, width, height uint32) {
 	}
 	if sta, ok := a.(SurfaceTargetAware); ok {
 		sta.SetSurfaceTarget(view, width, height)
+	}
+}
+
+// BeginAcceleratorFrame signals the start of a new rendering frame.
+// This resets per-frame state so that the first render pass clears the
+// surface. Must be called once per frame before any drawing operations
+// when using direct surface rendering (RenderDirect).
+//
+// If no accelerator is registered or it doesn't implement FrameAware,
+// this is a no-op.
+func BeginAcceleratorFrame() {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if fa, ok := a.(FrameAware); ok {
+		fa.BeginFrame()
 	}
 }
 

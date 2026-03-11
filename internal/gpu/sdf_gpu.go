@@ -281,6 +281,10 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 // instead of reading back to GPURenderTarget.Data. This eliminates the
 // GPU->CPU readback for windowed rendering.
 //
+// When the view pointer changes (new swapchain frame), per-frame state is
+// automatically reset so the first render pass clears the surface while
+// subsequent mid-frame flushes preserve content (LoadOpLoad).
+//
 // Call with nil to return to offscreen mode. The caller retains ownership
 // of the view.
 func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
@@ -300,6 +304,17 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 	}
 	a.session.SetSurfaceTarget(halView, width, height)
 	slogger().Debug("SetSurfaceTarget configured", "width", width, "height", height)
+}
+
+// BeginFrame resets per-frame state so that the first render pass of each
+// frame clears the surface (LoadOpClear). Without this call, subsequent
+// frames use LoadOpLoad and composite on top of previous content.
+func (a *SDFAccelerator) BeginFrame() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.session != nil {
+		a.session.BeginFrame()
+	}
 }
 
 // DrawText queues text for GPU MSDF rendering. The face parameter must be a
