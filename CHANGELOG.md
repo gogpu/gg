@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `LoadOpClear`, wiping previously drawn content.
   ([#184](https://github.com/gogpu/gg/issues/184))
 
+### Dependencies
+
+- Update wgpu v0.20.0 → v0.20.1 (Metal stencil attachment fix for Retina)
+
 ## [0.35.1] - 2026-03-11
 
 ### Changed
