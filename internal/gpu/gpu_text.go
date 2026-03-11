@@ -263,12 +263,20 @@ func (e *GPUTextEngine) GlyphCount() int {
 }
 
 // computeFontID generates a stable hash identifier for a font source.
-// Uses the font name and number of glyphs as a lightweight fingerprint.
+// Uses the full font name (includes subfamily like "Regular"/"Bold") and
+// number of glyphs as a lightweight fingerprint. The full name is critical
+// to distinguish fonts within the same family (e.g., "Go Regular" vs "Go Bold")
+// that share the same family name and glyph count.
 func computeFontID(source *text.FontSource) uint64 {
 	if source == nil {
 		return 0
 	}
 	h := fnv.New64a()
-	_, _ = fmt.Fprintf(h, "%s:%d", source.Name(), source.Parsed().NumGlyphs())
+	parsed := source.Parsed()
+	fullName := parsed.FullName()
+	if fullName == "" {
+		fullName = source.Name() // fallback to family name
+	}
+	_, _ = fmt.Fprintf(h, "%s:%d", fullName, parsed.NumGlyphs())
 	return h.Sum64()
 }
