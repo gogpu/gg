@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to preserve previously drawn content.
   ([#171](https://github.com/gogpu/gg/issues/171))
 
+- **TextModeVector text invisible with GPU SurfaceTarget** —
+  `drawStringAsOutlines()` rendered glyph outlines directly to CPU pixmap via
+  `renderer.Fill()`, bypassing the GPU pipeline. In zero-copy surface mode
+  (`ggcanvas.RenderDirect`), the pixmap was never composited onto the GPU surface.
+  Fix: route device-space glyph path through `doFill()` — the same multi-tier pipeline
+  used by all shapes (GPU stencil+cover → surface, or CPU fallback → pixmap). Also
+  removed unnecessary `flushGPUAccelerator()` call that created a mid-frame render pass
+  with `LoadOpClear`, wiping previously drawn content.
+  ([#184](https://github.com/gogpu/gg/issues/184))
+
 ## [0.35.1] - 2026-03-11
 
 ### Changed

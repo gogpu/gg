@@ -64,9 +64,12 @@ func (c *Context) DrawString(s string, x, y float64) {
 		}
 		c.drawStringCPU(s, x, y)
 	case TextModeVector:
-		// Phase 3 will add GPU vector text via compute pipeline.
-		// For now, use CPU outline rendering (Strategy B).
-		c.flushGPUAccelerator()
+		// Vector text is rendered as glyph outline paths through the normal
+		// fill pipeline (doFill). This routes through GPU stencil+cover when
+		// a SurfaceTarget is active, or CPU when standalone. No explicit
+		// flush here — doFill() manages GPU/CPU routing and any necessary
+		// flush internally. An explicit flush would create a mid-frame
+		// render pass with LoadOpClear, wiping previously drawn content.
 		c.drawStringAsOutlines(s, x, y)
 	case TextModeBitmap:
 		// Skip GPU entirely, use CPU pipeline directly.
@@ -336,15 +339,16 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 	text.Draw(c.pixmap, s, deviceFace, p.X, p.Y, c.currentColor())
 }
 
-// drawStringAsOutlines renders text by converting glyph vector outlines to a Path,
-// transforming by the CTM, and filling with the SoftwareRenderer.
+// drawStringAsOutlines renders text by converting glyph vector outlines to a Path
+// and filling through the normal multi-tier pipeline (GPU → CoverageFiller → Analytic).
 // Strategy B (Vello pattern): handles rotation, non-uniform scale, shear, mirroring,
 // and extreme scales that exceed the bitmap threshold.
 //
 // Design: all glyphs are composed into ONE path for a single efficient fill call.
 // Outlines are built in user space, then path.Transform(CTM) converts to device space.
-// Y-flip is applied because font outlines use Y-up (PostScript/TrueType convention)
-// while screen coordinates use Y-down.
+// The device-space path is routed through doFill() so that GPU accelerator can render
+// it to the surface (stencil+cover) when SurfaceTarget is active, or CPU renders
+// to pixmap in standalone mode.
 func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 	source := c.face.Source()
 	if source == nil {
@@ -426,19 +430,19 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 
 	devicePath := path.Transform(c.matrix)
 
-	c.flushGPUAccelerator()
-
-	// Apply rasterizer mode for text (same as doFill).
-	// Without this, text always uses the default rasterizer,
-	// ignoring SetRasterizerMode().
-	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
-		sr.rasterizerMode = c.rasterizerMode
-		defer func() { sr.rasterizerMode = RasterizerAuto }()
-	}
-
-	textPaint := *c.paint // shallow copy
-	textPaint.FillRule = FillRuleNonZero
-	_ = c.renderer.Fill(c.pixmap, devicePath, &textPaint)
+	// Route through the normal fill pipeline (doFill) so GPU accelerator
+	// can render to the surface when SurfaceTarget is active. Without this,
+	// text rendered via renderer.Fill() goes to CPU pixmap which is never
+	// composited in zero-copy RenderDirect mode. (#184)
+	//
+	// Save and restore context path/paint state — doFill uses c.path and c.paint.
+	savedPath := c.path
+	savedFillRule := c.paint.FillRule
+	c.path = devicePath
+	c.paint.FillRule = FillRuleNonZero
+	_ = c.doFill()
+	c.path = savedPath
+	c.paint.FillRule = savedFillRule
 }
 
 // ensureOutlineExtractor lazily initializes the outline extractor.
