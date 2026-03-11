@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] - 2026-03-11
+
+### Added
+
+- **GPU pipeline diagnostic logging** — comprehensive structured `slog` logging
+  across the entire GPU rendering dimensional handoff chain. All logs are
+  zero-cost when disabled (default `nopHandler`). Enable via `gg.SetLogger()`.
+  ([#171](https://github.com/gogpu/gg/issues/171))
+  - `NewContext` / `SetDeviceScale` — log logical/physical dimensions and scale
+  - `ggcanvas.NewWithScale` — log canvas creation with logical, scale, physical dims
+  - `ggcanvas.RenderDirect` — log surface dimensions per frame
+  - `SetDeviceProvider` — log shared GPU device type on success
+  - `SetSurfaceTarget` — log surface dimensions and mode/size changes
+  - `RenderFrame` — log effective viewport dimensions (target vs surface override)
+  - `EnsureTextures` — log MSAA/stencil texture creation dimensions
+  - `FlushGPU` — log target dimensions on entry
+  - `makeSDFRenderUniform` — log viewport uniform dimensions passed to shader
+  - `Flush` — log pending shape counts per tier and pipeline mode
+
+### Fixed
+
+- **`ggcanvas.NewWithScale` no longer silently discards `SetAcceleratorDeviceProvider`
+  errors** — now logs `Warn` on failure instead of `_ =` discard.
+
 ## [0.34.0] - 2026-03-11
 
 ### Added

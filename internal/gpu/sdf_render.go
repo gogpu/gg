@@ -731,5 +731,6 @@ func makeSDFRenderUniform(w, h uint32) []byte {
 	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(float32(w)))
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(float32(h)))
 	// Padding bytes 8..15 remain zero.
+	slogger().Debug("SDF uniform viewport", "width", w, "height", h)
 	return buf
 }

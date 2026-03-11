@@ -119,6 +119,14 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		baseMatrix = Scale(scale, scale)
 	}
 
+	if scale != 1.0 {
+		Logger().Info("NewContext HiDPI",
+			"logical_w", width, "logical_h", height,
+			"scale", scale,
+			"physical_w", pw, "physical_h", ph,
+		)
+	}
+
 	return &Context{
 		width:          width,
 		height:         height,
@@ -308,6 +316,12 @@ func (c *Context) SetDeviceScale(scale float64) {
 	// Physical dimensions
 	pw := int(float64(c.width) * scale)
 	ph := int(float64(c.height) * scale)
+
+	Logger().Info("SetDeviceScale",
+		"old_scale", oldScale, "new_scale", scale,
+		"logical_w", c.width, "logical_h", c.height,
+		"physical_w", pw, "physical_h", ph,
+	)
 
 	// Reallocate pixmap at new physical resolution
 	c.pixmap = NewPixmap(pw, ph)
@@ -916,7 +930,12 @@ func (c *Context) FlushGPU() error {
 	if a == nil {
 		return nil
 	}
-	return a.Flush(c.gpuRenderTarget())
+	t := c.gpuRenderTarget()
+	Logger().Debug("FlushGPU",
+		"target_w", t.Width, "target_h", t.Height,
+		"stride", t.Stride,
+	)
+	return a.Flush(t)
 }
 
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.

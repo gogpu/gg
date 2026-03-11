@@ -163,6 +163,13 @@ func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height 
 	s.surfaceView = view
 	s.surfaceWidth = width
 	s.surfaceHeight = height
+	if modeChanged || sizeChanged {
+		slogger().Debug("GPURenderSession.SetSurfaceTarget changed",
+			"surface", view != nil,
+			"width", width, "height", height,
+			"modeChanged", modeChanged, "sizeChanged", sizeChanged,
+		)
+	}
 }
 
 // RenderMode returns the current render mode based on whether a surface
@@ -222,6 +229,11 @@ func (s *GPURenderSession) RenderFrame(
 	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
 		w, h = s.surfaceWidth, s.surfaceHeight
 	}
+	slogger().Debug("RenderFrame dimensions",
+		"target_w", target.Width, "target_h", target.Height,
+		"effective_w", w, "effective_h", h,
+		"surface", s.surfaceView != nil,
+	)
 	if err := s.EnsureTextures(w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}

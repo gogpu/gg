@@ -104,10 +104,20 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		scale = 1.0
 	}
 
+	physW := int(float64(width) * scale)
+	physH := int(float64(height) * scale)
+	gg.Logger().Info("ggcanvas.NewWithScale",
+		"logical_w", width, "logical_h", height,
+		"scale", scale,
+		"physical_w", physW, "physical_h", physH,
+	)
+
 	// Share GPU device with accelerator if registered.
 	// Error is non-fatal: accelerator may not support device sharing or
 	// provider may not implement HalProvider. GPU will initialize its own device.
-	_ = gg.SetAcceleratorDeviceProvider(provider)
+	if err := gg.SetAcceleratorDeviceProvider(provider); err != nil {
+		gg.Logger().Warn("SetAcceleratorDeviceProvider failed", "err", err)
+	}
 
 	var opts []gg.ContextOption
 	if scale != 1.0 {
@@ -349,6 +359,11 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	if !c.dirty {
 		return nil
 	}
+
+	gg.Logger().Debug("ggcanvas.RenderDirect",
+		"width", width, "height", height,
+		"hasSurfaceView", surfaceView != nil,
+	)
 
 	// Configure GPU accelerator for direct surface rendering.
 	// The surface target stays set between frames to avoid destroying

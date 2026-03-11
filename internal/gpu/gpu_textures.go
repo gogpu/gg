@@ -128,6 +128,11 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 
 	ts.width = w
 	ts.height = h
+	slogger().Info("created offscreen textures",
+		"label", labelPrefix,
+		"width", w, "height", h,
+		"msaa_samples", sampleCount,
+	)
 	return nil
 }
 
@@ -206,6 +211,11 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 	// No resolve texture -- surface view is the resolve target.
 	ts.width = w
 	ts.height = h
+	slogger().Info("created surface textures",
+		"label", labelPrefix,
+		"width", w, "height", h,
+		"msaa_samples", sampleCount,
+	)
 	return nil
 }
 

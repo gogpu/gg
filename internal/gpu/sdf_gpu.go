@@ -270,7 +270,9 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 	// Initialize internal VelloAccelerator with the shared device for compute routing.
 	a.initVelloAccelerator(device, queue)
 
-	slogger().Debug("switched to shared GPU device")
+	slogger().Info("switched to shared GPU device",
+		"adapter", fmt.Sprintf("%T", device),
+	)
 	return nil
 }
 
@@ -297,6 +299,7 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 		return
 	}
 	a.session.SetSurfaceTarget(halView, width, height)
+	slogger().Debug("SetSurfaceTarget configured", "width", width, "height", height)
 }
 
 // DrawText queues text for GPU MSDF rendering. The face parameter must be a
@@ -614,6 +617,14 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 
 	// Determine effective mode for this flush.
 	effectiveMode := a.effectivePipelineMode()
+
+	slogger().Debug("Flush",
+		"sdf", len(a.pendingShapes),
+		"convex", len(a.pendingConvexCommands),
+		"stencil", len(a.pendingStencilPaths),
+		"text", len(a.pendingTextBatches),
+		"mode", effectiveMode,
+	)
 
 	// Reset scene stats for the next frame.
 	a.sceneStats = gg.SceneStats{}
