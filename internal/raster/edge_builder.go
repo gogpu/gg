@@ -118,6 +118,11 @@ type EdgeBuilder struct {
 	// flattenCurves when true converts all curves to line segments
 	flattenCurves bool
 
+	// flattenTolerance overrides the default curve flattening tolerance (0.1 px).
+	// When > 0, this value is used instead of the hardcoded constant.
+	// On HiDPI displays, set to baseTol/deviceScale for finer subdivision.
+	flattenTolerance float32
+
 	// clipRect when non-nil clips all edges to this rectangle.
 	// Prevents FDot6→FDot16 overflow for coordinates exceeding safe range.
 	// Sentinel vertical lines are emitted at X boundaries to preserve winding.
@@ -563,6 +568,38 @@ func (eb *EdgeBuilder) FlattenCurves() bool {
 	return eb.flattenCurves
 }
 
+// SetFlattenTolerance sets the curve flattening tolerance in pixels.
+// When > 0, this overrides the default 0.1 px tolerance used for
+// converting curves to line segments. Smaller values produce more
+// segments (smoother curves).
+//
+// On HiDPI displays, set to baseTol/deviceScale for finer subdivision:
+//
+//	eb.SetFlattenTolerance(0.1 / deviceScale) // e.g., 0.05 for 2x Retina
+//
+// Set to 0 to use the default tolerance.
+func (eb *EdgeBuilder) SetFlattenTolerance(tol float32) {
+	if tol < 0 {
+		tol = 0
+	}
+	eb.flattenTolerance = tol
+}
+
+// FlattenTolerance returns the current curve flattening tolerance.
+// Returns 0 if using the default (0.1 px).
+func (eb *EdgeBuilder) FlattenTolerance() float32 {
+	return eb.flattenTolerance
+}
+
+// effectiveFlattenTolerance returns the tolerance to use for flattening.
+// Returns the custom tolerance if set, otherwise the default 0.1 px.
+func (eb *EdgeBuilder) effectiveFlattenTolerance() float32 {
+	if eb.flattenTolerance > 0 {
+		return eb.flattenTolerance
+	}
+	return 0.1 // default: tight tolerance for smooth curves
+}
+
 // SetClipRect sets the clipping rectangle for edge building.
 // When set, all edges are clipped to this rect before fixed-point conversion,
 // preventing FDot6→FDot16 integer overflow (RAST-010). Out-of-bounds line
@@ -639,10 +676,10 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenQuadToLines(x0, y0, cx, cy, x1, y1 float32) {
 	// Flatness tolerance: max deviation from straight line.
-	// 0.1 px produces smooth curves even at small radii (r=9 → ~32 segments).
-	// Tighter than Skia's default (~0.25) to avoid visible polygon faceting
-	// in UI elements like radio buttons and checkboxes.
-	const tolerance = 0.1
+	// Default 0.1 px produces smooth curves even at small radii.
+	// On HiDPI, effectiveFlattenTolerance() returns baseTol/deviceScale
+	// for finer subdivision at physical pixel resolution.
+	tolerance := eb.effectiveFlattenTolerance()
 
 	eb.flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance, 0)
 }
@@ -749,10 +786,10 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 // Uses adaptive subdivision based on flatness tolerance.
 func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 	// Flatness tolerance: max deviation from straight line.
-	// 0.1 px produces smooth curves even at small radii (r=9 → ~32 segments).
-	// Tighter than Skia's default (~0.25) to avoid visible polygon faceting
-	// in UI elements like radio buttons and checkboxes.
-	const tolerance = 0.1
+	// Default 0.1 px produces smooth curves even at small radii.
+	// On HiDPI, effectiveFlattenTolerance() returns baseTol/deviceScale
+	// for finer subdivision at physical pixel resolution.
+	tolerance := eb.effectiveFlattenTolerance()
 
 	eb.flattenCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
 }

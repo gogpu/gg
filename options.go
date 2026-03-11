@@ -17,6 +17,7 @@ type contextOptions struct {
 	renderer     Renderer
 	pixmap       *Pixmap
 	pipelineMode PipelineMode
+	deviceScale  float64
 }
 
 // defaultOptions returns the default context options.
@@ -25,6 +26,7 @@ func defaultOptions() contextOptions {
 		renderer:     nil,              // Will be set to SoftwareRenderer if nil
 		pixmap:       nil,              // Will be created if nil
 		pipelineMode: PipelineModeAuto, // Auto-select pipeline
+		deviceScale:  1.0,              // No HiDPI scaling by default
 	}
 }
 
@@ -68,5 +70,27 @@ func WithPixmap(pm *Pixmap) ContextOption {
 func WithPipelineMode(mode PipelineMode) ContextOption {
 	return func(o *contextOptions) {
 		o.pipelineMode = mode
+	}
+}
+
+// WithDeviceScale sets the HiDPI device scale factor for the Context.
+// The scale factor determines the ratio between logical coordinates (used by
+// drawing code) and physical pixels (in the internal pixmap).
+//
+// For example, on a macOS Retina display with 2x scaling:
+//
+//	// Logical size: 800x600, Physical pixmap: 1600x1200
+//	dc := gg.NewContext(800, 600, gg.WithDeviceScale(2.0))
+//	dc.Width()      // 800 (logical)
+//	dc.PixelWidth() // 1600 (physical)
+//
+// The Context automatically applies a base scale transform so all drawing
+// operations work in logical coordinates while rendering at physical resolution.
+// Default is 1.0 (no scaling).
+func WithDeviceScale(scale float64) ContextOption {
+	return func(o *contextOptions) {
+		if scale > 0 {
+			o.deviceScale = scale
+		}
 	}
 }

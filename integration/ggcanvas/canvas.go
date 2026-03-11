@@ -62,17 +62,46 @@ type Canvas struct {
 
 // New creates a Canvas for integrated mode.
 // The provider should come from gogpu.App.GPUContextProvider().
+// The width and height are logical dimensions.
 //
-// The Canvas is created with default gg.Context settings.
+// If the provider also implements gpucontext.WindowProvider, the device
+// scale is auto-detected for HiDPI/Retina support. Otherwise defaults to 1.0.
 // Use Context() to access and configure the drawing context.
 //
 // Returns error if dimensions are invalid or provider is nil.
 func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error) {
+	scale := 1.0
+	if wp, ok := provider.(gpucontext.WindowProvider); ok {
+		if s := wp.ScaleFactor(); s > 0 {
+			scale = s
+		}
+	}
+	return NewWithScale(provider, width, height, scale)
+}
+
+// NewWithScale creates a Canvas with HiDPI device scale support.
+// The width and height are logical dimensions. The internal pixmap is
+// allocated at physical resolution (width*scale x height*scale).
+//
+// The provider should come from gogpu.App.GPUContextProvider().
+// Scale factor should come from the platform (e.g., gogpu.Context.ScaleFactor()).
+// Typical values: 1.0 (standard), 2.0 (macOS Retina), 3.0 (mobile HiDPI).
+//
+// Example:
+//
+//	scale := dc.ScaleFactor()  // from gogpu.Context
+//	canvas, err := ggcanvas.NewWithScale(provider, 800, 600, scale)
+//
+// Returns error if dimensions are invalid, provider is nil, or scale <= 0.
+func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale float64) (*Canvas, error) {
 	if provider == nil {
 		return nil, ErrNilProvider
 	}
 	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("%w: width=%d, height=%d", ErrInvalidDimensions, width, height)
+	}
+	if scale <= 0 {
+		scale = 1.0
 	}
 
 	// Share GPU device with accelerator if registered.
@@ -80,8 +109,13 @@ func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error)
 	// provider may not implement HalProvider. GPU will initialize its own device.
 	_ = gg.SetAcceleratorDeviceProvider(provider)
 
+	var opts []gg.ContextOption
+	if scale != 1.0 {
+		opts = append(opts, gg.WithDeviceScale(scale))
+	}
+
 	c := &Canvas{
-		ctx:      gg.NewContext(width, height),
+		ctx:      gg.NewContext(width, height, opts...),
 		provider: provider,
 		width:    width,
 		height:   height,
@@ -109,6 +143,15 @@ func MustNew(provider gpucontext.DeviceProvider, width, height int) *Canvas {
 	return c
 }
 
+// MustNewWithScale is like NewWithScale but panics on error.
+func MustNewWithScale(provider gpucontext.DeviceProvider, width, height int, scale float64) *Canvas {
+	c, err := NewWithScale(provider, width, height, scale)
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
 // Context returns the gg drawing context.
 // All gg drawing methods are available through this context.
 //
@@ -123,19 +166,43 @@ func (c *Canvas) Context() *gg.Context {
 	return c.ctx
 }
 
-// Width returns the canvas width in pixels.
+// Width returns the canvas logical width.
 func (c *Canvas) Width() int {
 	return c.width
 }
 
-// Height returns the canvas height in pixels.
+// Height returns the canvas logical height.
 func (c *Canvas) Height() int {
 	return c.height
 }
 
-// Size returns width and height as a convenience.
+// Size returns logical width and height as a convenience.
 func (c *Canvas) Size() (width, height int) {
 	return c.width, c.height
+}
+
+// DeviceScale returns the current device scale factor.
+// Returns 1.0 if the canvas was created without HiDPI support.
+func (c *Canvas) DeviceScale() float64 {
+	if c.ctx == nil {
+		return 1.0
+	}
+	return c.ctx.DeviceScale()
+}
+
+// SetDeviceScale changes the device scale factor on the canvas.
+// This delegates to the gg.Context and marks the canvas for re-upload.
+// Scale must be > 0; values <= 0 are ignored.
+func (c *Canvas) SetDeviceScale(scale float64) {
+	if c.closed || c.ctx == nil || scale <= 0 {
+		return
+	}
+	if scale == c.ctx.DeviceScale() {
+		return
+	}
+	c.ctx.SetDeviceScale(scale)
+	c.sizeChanged = true
+	c.dirty = true
 }
 
 // MarkDirty flags the canvas for GPU upload on next Flush().
@@ -366,6 +433,7 @@ func destroyTexture(tex any) {
 // createTexture creates a pending texture placeholder from pixel data.
 // This is called lazily on first Flush().
 // The actual GPU texture is created during RenderTo when a renderer is available.
+// Uses physical pixel dimensions (PixelWidth/PixelHeight) for the texture.
 func (c *Canvas) createTexture(data []byte) *pendingTexture {
 	// We store the creation request and let RenderTo handle it
 	// when it has access to the actual renderer.
@@ -377,9 +445,10 @@ func (c *Canvas) createTexture(data []byte) *pendingTexture {
 	// 3. Store data and create texture on-demand in RenderTo
 	//
 	// We choose option 3: store a placeholder and create in RenderTo.
+	// Use physical pixel dimensions since the pixmap is at physical resolution.
 	return &pendingTexture{
-		width:  c.width,
-		height: c.height,
+		width:  c.ctx.PixelWidth(),
+		height: c.ctx.PixelHeight(),
 		data:   data,
 	}
 }

@@ -5,7 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.34.0] - 2026-03-11
+
+### Added
+
+- **HiDPI/Retina device scale** — Cairo-pattern `SetDeviceScale()` for
+  DPI-transparent drawing. User code draws in logical coordinates (points/DIP),
+  the Context automatically scales to physical pixel resolution internally.
+  ([#171](https://github.com/gogpu/gg/issues/171),
+  [#175](https://github.com/gogpu/gg/issues/175))
+  - `NewContextWithScale(w, h, scale)` — create HiDPI-aware context
+  - `WithDeviceScale(scale)` — functional option for `NewContext`
+  - `SetDeviceScale(scale)` — set device scale on existing context
+  - `DeviceScale()` — query current device scale
+  - `PixelWidth()/PixelHeight()` — physical pixel dimensions
+  - `Width()/Height()` — logical dimensions (unchanged)
+- **DPI-aware rasterization tolerances** — curve flattening tolerance and stroke
+  expansion tolerance now scale with device DPI (femtovg pattern:
+  `tolerance = baseTolerance / deviceScale`). Produces sharper curves on
+  Retina/HiDPI displays.
+- **ggcanvas HiDPI auto-detection** — `ggcanvas.New()` auto-detects HiDPI scale
+  via `gpucontext.WindowProvider` interface (no manual scale parameter needed).
+  `ggcanvas.NewWithScale()` and `MustNewWithScale()` for explicit control.
+  `DeviceScale()` and `SetDeviceScale()` methods on Canvas.
 
 ## [0.33.6] - 2026-03-10
 
