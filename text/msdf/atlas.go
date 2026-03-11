@@ -12,9 +12,9 @@ import (
 // fraction of full range) of any channel from the median.  Channels that
 // exceed this are clamped toward the median, preventing bilinear filtering
 // from producing incorrect median values at texel boundaries.
-// 0.35 ≈ 89/255: preserves corner sharpness while eliminating the worst
-// bilinear artifacts visible on small/gray text.
-const msdfErrorCorrectionThreshold = 0.25
+// 0.40: preserves multi-channel encoding for thin strokes while eliminating
+// the worst bilinear artifacts visible on small/gray text.
+const msdfErrorCorrectionThreshold = 0.40
 
 // AtlasConfig holds atlas configuration.
 type AtlasConfig struct {

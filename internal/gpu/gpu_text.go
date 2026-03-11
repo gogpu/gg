@@ -40,7 +40,7 @@ type GPUTextEngine struct {
 // NewGPUTextEngine creates a new GPU text engine with default configuration.
 func NewGPUTextEngine() *GPUTextEngine {
 	const glyphSize = 64
-	const pxRange = 8.0
+	const pxRange = 4.0
 
 	cfg := msdf.DefaultAtlasConfig()
 	cfg.GlyphSize = glyphSize
