@@ -1,6 +1,8 @@
 package gg
 
 import (
+	"fmt"
+	"hash/fnv"
 	"strings"
 
 	"github.com/gogpu/gg/text"
@@ -54,14 +56,28 @@ func (c *Context) DrawString(s string, x, y float64) {
 		return
 	}
 
-	// Try GPU text rendering first with user-space coordinates.
-	// The GPU pipeline receives the CTM and applies it in the vertex shader,
-	// so positions are passed in user space (not pre-transformed).
-	if c.tryGPUText(s, x, y) {
-		return
+	switch c.selectTextStrategy() {
+	case TextModeMSDF:
+		// Try GPU MSDF first; fall back to CPU if unavailable.
+		if c.tryGPUText(s, x, y) {
+			return
+		}
+		c.drawStringCPU(s, x, y)
+	case TextModeVector:
+		// Phase 3 will add GPU vector text via compute pipeline.
+		// For now, use CPU outline rendering (Strategy B).
+		c.flushGPUAccelerator()
+		c.drawStringAsOutlines(s, x, y)
+	case TextModeBitmap:
+		// Skip GPU entirely, use CPU pipeline directly.
+		c.flushGPUAccelerator()
+		c.drawStringCPU(s, x, y)
+	default: // TextModeAuto — current behavior
+		if c.tryGPUText(s, x, y) {
+			return
+		}
+		c.drawStringCPU(s, x, y)
 	}
-
-	c.drawStringCPU(s, x, y)
 }
 
 // tryGPUText attempts to render text via the GPU MSDF pipeline.
@@ -83,8 +99,16 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	}
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
-	err := ta.DrawText(target, c.face, s, x, y, col, c.matrix)
+	err := ta.DrawText(target, c.face, s, x, y, col, c.matrix, c.deviceScale)
 	return err == nil
+}
+
+// selectTextStrategy returns the effective text rendering strategy.
+// When TextModeAuto, it returns TextModeAuto to preserve the current
+// auto-selection behavior (try GPU MSDF first, then CPU).
+// Future: smarter auto-selection based on transform, size, animation state.
+func (c *Context) selectTextStrategy() TextMode {
+	return c.textMode
 }
 
 // DrawStringAnchored draws text with an anchor point.
@@ -113,13 +137,8 @@ func (c *Context) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	x -= w * ax
 	y = y + metrics.Ascent - ay*h
 
-	// Try GPU text rendering first with user-space coordinates.
-	// The CTM is applied in the vertex shader.
-	if c.tryGPUText(s, x, y) {
-		return
-	}
-
-	c.drawStringCPU(s, x, y)
+	// Delegate to DrawString which handles TextMode routing.
+	c.DrawString(s, x, y)
 }
 
 // MeasureString returns the dimensions of text in pixels.
@@ -337,12 +356,37 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 	parsed := source.Parsed()
 	fontSize := c.face.Size()
 
+	// Use glyph cache to avoid repeated outline extraction.
+	cache := c.ensureGlyphCache()
+	fontID := computeTextFontID(source)
+	var sizeKey int16
+	switch {
+	case fontSize < 0:
+		sizeKey = 0
+	case fontSize > 32767:
+		sizeKey = 32767
+	default:
+		sizeKey = int16(fontSize) //nolint:gosec // bounds checked above
+	}
+
 	path := NewPath()
 	hasContour := false
 
 	for glyph := range c.face.Glyphs(s) {
-		outline, err := extractor.ExtractOutline(parsed, glyph.GID, fontSize)
-		if err != nil || outline == nil || outline.IsEmpty() {
+		cacheKey := text.OutlineCacheKey{
+			FontID:  fontID,
+			GID:     glyph.GID,
+			Size:    sizeKey,
+			Hinting: text.HintingNone,
+		}
+		outline := cache.GetOrCreate(cacheKey, func() *text.GlyphOutline {
+			o, err := extractor.ExtractOutline(parsed, glyph.GID, fontSize)
+			if err != nil || o == nil || o.IsEmpty() {
+				return nil
+			}
+			return o
+		})
+		if outline == nil {
 			continue // space/missing glyph — advance handled by Glyphs iterator
 		}
 
@@ -403,6 +447,27 @@ func (c *Context) ensureOutlineExtractor() *text.OutlineExtractor {
 		c.outlineExtractor = text.NewOutlineExtractor()
 	}
 	return c.outlineExtractor
+}
+
+// ensureGlyphCache lazily initializes the glyph cache reference.
+// Uses the global shared cache to benefit from cross-Context reuse.
+func (c *Context) ensureGlyphCache() *text.GlyphCache {
+	if c.glyphCache == nil {
+		c.glyphCache = text.GetGlobalGlyphCache()
+	}
+	return c.glyphCache
+}
+
+// computeTextFontID generates a stable hash identifier for a font source.
+// Uses FNV-1a hash of font name and glyph count as a lightweight fingerprint.
+// Same algorithm as internal/gpu/gpu_text.go:computeFontID.
+func computeTextFontID(source *text.FontSource) uint64 {
+	if source == nil {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = fmt.Fprintf(h, "%s:%d", source.Name(), source.Parsed().NumGlyphs())
+	return h.Sum64()
 }
 
 // fontHeight returns the font's natural line height (ascent + descent + line gap).

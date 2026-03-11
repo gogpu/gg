@@ -130,8 +130,15 @@ type GPUTextAccelerator interface {
 	// transformation matrix (CTM), which the GPU pipeline composes into the
 	// vertex shader uniform so that Scale, Rotate, and Skew transforms
 	// affect text rendering, not just position.
+	//
+	// The deviceScale parameter is the ratio of physical pixels to logical
+	// pixels (e.g., 2.0 on a Retina display). The MSDF pipeline uses this
+	// to compute an effective font size (logical size * deviceScale), which
+	// produces a higher screenPxRange and crisper text on HiDPI displays.
+	// Pass 1.0 for standard (non-HiDPI) rendering.
+	//
 	// Returns ErrFallbackToCPU if GPU text rendering is not available.
-	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA, matrix Matrix) error
+	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
 var (

@@ -40,7 +40,7 @@ type GPUTextEngine struct {
 // NewGPUTextEngine creates a new GPU text engine with default configuration.
 func NewGPUTextEngine() *GPUTextEngine {
 	const glyphSize = 64
-	const pxRange = 8.0
+	const pxRange = 4.0
 
 	cfg := msdf.DefaultAtlasConfig()
 	cfg.GlyphSize = glyphSize
@@ -78,6 +78,12 @@ func NewGPUTextEngine() *GPUTextEngine {
 // Scale, Rotate, and Skew transforms applied to the drawing context affect
 // text rendering correctly. The MSDF fragment shader's fwidth() automatically
 // adapts to the composed transform for correct anti-aliasing.
+//
+// The deviceScale parameter scales the logical font size to physical pixels
+// (e.g., 2.0 on a Retina display). This produces a higher screenPxRange in
+// the MSDF shader, yielding crisper text on HiDPI displays. Quad positions
+// remain in logical coordinates because the CTM already handles device scaling.
+// Pass 1.0 for standard (non-HiDPI) rendering.
 func (e *GPUTextEngine) LayoutText(
 	face text.Face,
 	s string,
@@ -85,6 +91,7 @@ func (e *GPUTextEngine) LayoutText(
 	color gg.RGBA,
 	viewportW, viewportH int,
 	matrix gg.Matrix,
+	deviceScale float64,
 ) (TextBatch, error) {
 	if face == nil || s == "" {
 		return TextBatch{}, nil
@@ -93,7 +100,14 @@ func (e *GPUTextEngine) LayoutText(
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	fontSize := face.Size()
+	logicalSize := face.Size()
+	// Apply device scale to get effective physical font size.
+	// On HiDPI displays (deviceScale > 1) this produces higher-quality MSDF
+	// rendering because screenPxRange scales proportionally with physical size.
+	fontSize := logicalSize * deviceScale
+	if fontSize <= 0 {
+		fontSize = logicalSize // fallback: never zero
+	}
 	fontSource := face.Source()
 	fontID := computeFontID(fontSource)
 	atlasConfig := e.atlasManager.Config()

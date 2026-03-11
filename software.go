@@ -104,10 +104,15 @@ func convertGGPathToCorePath(p *Path) raster.PathLike {
 }
 
 const (
-	// bboxMinDimension is the minimum bounding box dimension (px) for tile-based
-	// rasterization. Below this, tile setup overhead exceeds scanline cost because
-	// tiles are 4x4 or 16x16 px and the overhead of grid allocation dominates.
-	bboxMinDimension = 32
+	// minTileArea is the minimum bounding box area (px²) for tile-based
+	// rasterization. Below this, tile setup overhead exceeds scanline cost.
+	// 512 = 32×16 — allows wide-but-short paths (e.g. text at 16px height)
+	// while rejecting paths that are too small in both dimensions.
+	minTileArea = 512
+
+	// minSingleDimension prevents degenerate nearly-linear paths from
+	// triggering tile rasterization. A 1000px × 1px line should not use tiles.
+	minSingleDimension = 8
 
 	// minElementThreshold is the absolute minimum element count for CoverageFiller.
 	// Paths with fewer elements are always cheaper with scanline rasterization
@@ -189,8 +194,9 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 }
 
 // shouldUseTileRasterizer returns true if the path is complex enough to
-// benefit from tile-based rasterization. It checks element count against
-// an adaptive threshold derived from the bounding box area.
+// benefit from tile-based rasterization. It uses a bounding box area check
+// (not per-dimension) so that wide-but-short dense paths (e.g. text outlines
+// at 16px with hundreds of path elements) can be routed to the tile rasterizer.
 func shouldUseTileRasterizer(p *Path) bool {
 	nElems := len(p.Elements())
 	if nElems <= 0 {
@@ -201,11 +207,21 @@ func shouldUseTileRasterizer(p *Path) bool {
 	bboxW := x2 - x1
 	bboxH := y2 - y1
 
-	// Skip tile rasterization for shapes smaller than a single tile group.
-	if bboxW < bboxMinDimension || bboxH < bboxMinDimension {
+	// Area check: tile setup overhead is only worthwhile when there is
+	// enough fill area. This replaces the old per-dimension check
+	// (bboxMinDimension=32) which rejected wide-but-short text paths.
+	bboxArea := bboxW * bboxH
+	if bboxArea < minTileArea {
 		return false
 	}
-	return nElems > adaptiveThreshold(bboxW*bboxH)
+
+	// Require at least half-tile in each dimension to avoid degenerate
+	// nearly-linear paths (e.g. 1000px × 1px hairline).
+	if bboxW < minSingleDimension || bboxH < minSingleDimension {
+		return false
+	}
+
+	return nElems > adaptiveThreshold(bboxArea)
 }
 
 // fillWithCoverageFiller rasterizes the path using the tile-based CoverageFiller

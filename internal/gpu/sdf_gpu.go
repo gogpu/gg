@@ -317,7 +317,7 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 // vertex shader.
 //
 // Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
-func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix) error {
+func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
 		return gg.ErrFallbackToCPU
@@ -345,7 +345,7 @@ func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string,
 		}
 	}
 
-	batch, err := a.textEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix)
+	batch, err := a.textEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
 	if err != nil {
 		return gg.ErrFallbackToCPU
 	}

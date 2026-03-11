@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-03-11
+
+### Added
+
+- **TextMode API** — per-Context text rendering strategy selection with four modes:
+  `TextModeAuto` (default), `TextModeMSDF` (GPU atlas), `TextModeVector` (glyph outlines),
+  `TextModeBitmap` (CPU bitmap). Set via `SetTextMode()` / query via `TextMode()`.
+- **DPI-aware MSDF text pipeline** — `deviceScale` propagated through the GPU MSDF
+  pipeline. On HiDPI displays (2× Retina), MSDF `screenPxRange` scales proportionally
+  with physical font size, producing crisper anti-aliased text without atlas changes.
+- **MSDF stem darkening** — shader-level stem darkening (FreeType/macOS/Pathfinder
+  pattern) counteracts gamma-induced thinning at small text sizes. Applied to all three
+  MSDF entry points (fill, outline, shadow). Starts at `screenPxRange=2`, fades to zero
+  at `screenPxRange≥8` (large text unaffected).
+- **GlyphCache integration for vector text** — `drawStringAsOutlines()` now caches
+  glyph outlines via `text.GlyphCache.GetOrCreate()`, avoiding repeated `ExtractOutline()`
+  calls on every frame. Uses the global shared cache for cross-Context reuse.
+- **Text-aware rasterizer routing** — area-based tile rasterizer selection replaces
+  per-dimension check. Wide-but-short text paths (400+ elements at 16px height) now
+  route to SparseStrips tile rasterizer instead of always using AnalyticFiller.
+- **Visual regression tests** — 6 test functions covering text quality across strategies
+  (Bitmap/Vector), sizes (12-48px), thin strokes, and GlyphCache integration.
+
+### Changed
+
+- **MSDF `pxRange` tuned from 8.0 to 4.0** — doubles effective `screenPxRange` at
+  all font sizes, improving anti-aliasing quality especially at 12-16px body text.
+- **MSDF error correction threshold raised from 0.25 to 0.40** — more aggressive
+  artifact correction for cleaner glyph edges.
+- **MSDF `screenPxRange` minimum clamp raised from 1.0 to 1.5** — prevents AA
+  failure on very small characters where the range would collapse below usable threshold.
+
 ## [0.34.2] - 2026-03-11
 
 ### Fixed

@@ -130,9 +130,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
 
     // screenPxRange: how many screen pixels the distance range spans.
-    // max(..., 1.0) prevents artifacts on narrow/small characters where
-    // the range would otherwise collapse below one pixel.
-    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
+    // max(..., 1.5) prevents AA failure on very small characters where
+    // the range would otherwise collapse below usable threshold.
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.5);
 
     // 2x2 supersampling of the signed distance.
     // Offsets are ±0.25 texel in screen space via fwidth, giving a rotated
@@ -144,8 +144,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sd3 = sampleSD(in.tex_coord + vec2<f32>( offset.x,  offset.y));
     let sd = (sd0 + sd1 + sd2 + sd3) * 0.25;
 
+    // Stem darkening: counteract gamma-induced thinning at small sizes.
+    // Adds a small positive bias that fades to zero at large screenPxRange.
+    // Used by macOS, FreeType, Pathfinder. Starts at 0.08 for screenPxRange=2,
+    // fades to zero at screenPxRange>=8 (large text unaffected).
+    let darkening = max(0.0, 0.08 * (1.0 - (screen_px_range - 2.0) / 6.0));
+    let sd_darkened = sd + darkening;
+
     // Scale signed distance to screen pixels and compute anti-aliased alpha.
-    let alpha = clamp(screen_px_range * sd + 0.5, 0.0, 1.0);
+    let alpha = clamp(screen_px_range * sd_darkened + 0.5, 0.0, 1.0);
 
     // Apply alpha to text color (premultiplied alpha output).
     return vec4<f32>(in.color.rgb * alpha, in.color.a * alpha);
@@ -165,8 +172,12 @@ fn fs_main_outline(in: VertexOutput) -> @location(0) vec4<f32> {
     let unit_range = vec2<f32>(uniforms.msdf_params.x / uniforms.msdf_params.y,
                               uniforms.msdf_params.x / uniforms.msdf_params.y);
     let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
-    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
-    let screen_px_distance = screen_px_range * sd;
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.5);
+
+    // Stem darkening: counteract gamma-induced thinning at small sizes.
+    let darkening = max(0.0, 0.08 * (1.0 - (screen_px_range - 2.0) / 6.0));
+    let fill_sd = sd + darkening;
+    let screen_px_distance = screen_px_range * fill_sd;
 
     // Outline width in screen pixels (stored in msdf_params.z)
     let outline_width = uniforms.msdf_params.z;
@@ -200,16 +211,19 @@ fn fs_main_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
     let unit_range = vec2<f32>(uniforms.msdf_params.x / uniforms.msdf_params.y,
                               uniforms.msdf_params.x / uniforms.msdf_params.y);
     let screen_tex_size = vec2<f32>(1.0, 1.0) / fwidth(in.tex_coord);
-    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.0);
+    let screen_px_range = max(0.5 * dot(unit_range, screen_tex_size), 1.5);
 
-    // Sample shadow (offset)
+    // Stem darkening: counteract gamma-induced thinning at small sizes.
+    let darkening = max(0.0, 0.08 * (1.0 - (screen_px_range - 2.0) / 6.0));
+
+    // Sample shadow (offset) — no stem darkening on shadow
     let shadow_msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord - shadow_offset).rgb;
     let shadow_sd = median3(shadow_msdf.r, shadow_msdf.g, shadow_msdf.b) - 0.5;
     let shadow_alpha = clamp(screen_px_range * shadow_sd + 0.5, 0.0, 1.0);
 
-    // Sample fill (no offset)
+    // Sample fill (no offset) — apply stem darkening to fill only
     let msdf = textureSample(msdf_atlas, msdf_sampler, in.tex_coord).rgb;
-    let fill_sd = median3(msdf.r, msdf.g, msdf.b) - 0.5;
+    let fill_sd = median3(msdf.r, msdf.g, msdf.b) - 0.5 + darkening;
     let fill_alpha = clamp(screen_px_range * fill_sd + 0.5, 0.0, 1.0);
 
     // Composite: fill over shadow (Porter-Duff Source Over)

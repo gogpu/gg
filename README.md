@@ -40,11 +40,11 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, five-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF rendering, transform-aware CPU text (scale/rotate/shear), emoji support, bidirectional text, HarfBuzz shaping |
+| **Text** | TrueType fonts, MSDF rendering with stem darkening, TextMode strategy selection, DPI-aware HiDPI text, transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
-| **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute) |
+| **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute), text-aware area-based routing |
 | **Performance** | Tile-based parallel rendering, LRU caching |
 
 ---
@@ -327,9 +327,18 @@ dc.DrawString("Rotated", 0, 0)
 dc.Pop()
 ```
 
+Text rendering strategy is selectable per-Context via `SetTextMode()`:
+
+| Mode | Strategy | Best for |
+|------|----------|----------|
+| `TextModeAuto` | Auto-select (default) | General use |
+| `TextModeMSDF` | GPU MSDF atlas | Games, animations, real-time scaling |
+| `TextModeVector` | Glyph outlines as paths | UI labels, quality-critical text |
+| `TextModeBitmap` | CPU bitmap rasterization | PNG/PDF export, static text |
+
 The CPU text pipeline uses a three-tier strategy (modeled after Skia/Cairo/Vello):
 translation-only → bitmap, uniform scale ≤256px → bitmap at device size,
-everything else → glyph outlines as vector paths.
+everything else → glyph outlines as vector paths with cached outlines via `GlyphCache`.
 
 ### Color Emoji
 
