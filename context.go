@@ -748,8 +748,36 @@ func (c *Context) DrawRectangle(x, y, w, h float64) {
 }
 
 // DrawRoundedRectangle draws a rectangle with rounded corners.
+//
+// The corner radius r is clamped to half the smaller dimension.
+// All coordinates are transformed through the current matrix,
+// ensuring correct rendering on HiDPI/Retina displays.
 func (c *Context) DrawRoundedRectangle(x, y, w, h, r float64) {
-	c.path.RoundedRectangle(x, y, w, h, r)
+	maxR := math.Min(w, h) / 2
+	if r > maxR {
+		r = maxR
+	}
+	// Cubic Bézier approximation for 90° arcs (same constant as DrawCircle).
+	const k = 0.5522847498307936
+	kr := k * r
+	// Top edge
+	c.MoveTo(x+r, y)
+	c.LineTo(x+w-r, y)
+	// Top-right corner
+	c.CubicTo(x+w-r+kr, y, x+w, y+r-kr, x+w, y+r)
+	// Right edge
+	c.LineTo(x+w, y+h-r)
+	// Bottom-right corner
+	c.CubicTo(x+w, y+h-r+kr, x+w-r+kr, y+h, x+w-r, y+h)
+	// Bottom edge
+	c.LineTo(x+r, y+h)
+	// Bottom-left corner
+	c.CubicTo(x+r-kr, y+h, x, y+h-r+kr, x, y+h-r)
+	// Left edge
+	c.LineTo(x, y+r)
+	// Top-left corner
+	c.CubicTo(x, y+r-kr, x+r-kr, y, x+r, y)
+	c.ClosePath()
 }
 
 // DrawCircle draws a circle.
