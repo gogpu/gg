@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **GPU Glyph Mask Cache (Tier 6)** — enterprise text rendering pipeline following
+  the Skia/Chrome/DirectWrite pattern: CPU rasterizes glyphs at exact pixel sizes via
+  AnalyticFiller (256-level AA coverage), packs into R8 alpha atlas with shelf allocator
+  and LRU eviction, uploads to GPU as R8Unorm textures, composites via textured quads
+  in the render pass. Foundation for future ClearType (TEXT-011) and font hinting (TEXT-012).
+  - `text/glyph_mask_atlas.go` — R8 atlas with shelf packing, LRU cache, dirty page tracking
+  - `text/glyph_mask_rasterizer.go` — CPU glyph rasterization at exact device pixel size
+  - `internal/gpu/glyph_mask_engine.go` — bridge between text shaping and GPU atlas
+  - `internal/gpu/glyph_mask_pipeline.go` — Tier 6 GPU render pipeline
+  - `internal/gpu/shaders/glyph_mask.wgsl` — R8 atlas sampling shader
+  - Subpixel positioning (1/4 pixel, 16 variants per glyph)
+  - `TextModeGlyphMask` text mode + auto-selection: horizontal text ≤48px → GlyphMask,
+    else MSDF (Tier 4)
+  - `GPUGlyphMaskAccelerator` interface in `accelerator.go`
+
+### Fixed
+
+- **Glyph mask rasterizer Y-coordinate inversion** — `GlyphMaskRasterizer` applied an
+  unnecessary Y-flip to outline coordinates, but `sfnt.LoadGlyph` already returns Y-down
+  (screen convention). Glyphs in the R8 atlas were vertically flipped, causing mirrored
+  text appearance.
+- **Glyph mask text invisible on first frame** — `buildGlyphMaskResources` incorrectly
+  invalidated bind groups when creating vertex/index buffers. Bind groups reference
+  (uniform buffer, atlas texture, sampler) — not vertex/index buffers — so the
+  invalidation destroyed bind groups that were just configured by `syncGlyphMaskAtlases`,
+  causing all glyph mask draw calls to be skipped on the first render.
+
 ## [0.35.3] - 2026-03-11
 
 ### Fixed

@@ -27,7 +27,7 @@
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/34243cff-5434-411c-a17c-3e52a80f1d57" width="100%" autoplay loop muted playsinline>
-    Five-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline
+    Six-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline, glyph mask cache
   </video>
   <br>
   <sub>Four-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, and MSDF text in a single render pass.
@@ -38,9 +38,9 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, five-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute), Vello analytic AA, CPU fallback |
+| **Rendering** | Immediate and retained mode, six-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF rendering with stem darkening, TextMode strategy selection, DPI-aware HiDPI text, transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
+| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |
@@ -122,18 +122,20 @@ dc.SetRasterizerMode(gg.RasterizerSparseStrips)
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with
-a five-tier rendering pipeline:
+a six-tier rendering pipeline:
 
 | Tier | Method | Best For |
 |------|--------|----------|
 | **SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
 | **Convex** | Direct vertex emission | Convex polygons, single draw call |
 | **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
-| **MSDF Text** | Multi-channel Signed Distance Field | Resolution-independent anti-aliased text |
+| **MSDF Text** | Multi-channel Signed Distance Field | Dynamic/animated text, resolution-independent |
 | **Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
+| **Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤48px, pixel-perfect quality |
 
-Tiers 1–4 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
-via `PipelineMode` (Auto/RenderPass/Compute).
+Tiers 1–4, 6 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
+via `PipelineMode` (Auto/RenderPass/Compute). Text auto-selection routes horizontal
+text ≤48px to Glyph Mask (Skia/Chrome pattern), else MSDF.
 
 When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 

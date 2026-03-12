@@ -36,6 +36,13 @@ const (
 	// Bypasses GPU entirely, using the CPU text pipeline directly.
 	// Best for: PNG/PDF export, translation-only static text.
 	TextModeBitmap
+
+	// TextModeGlyphMask forces GPU glyph mask rendering (Tier 6).
+	// Glyphs are CPU-rasterized into an R8 alpha atlas at the exact pixel
+	// size and rendered as textured quads on the GPU. This produces
+	// pixel-perfect hinted text for horizontal layouts at small sizes.
+	// Best for: UI labels, small body text (<48px), horizontal-only text.
+	TextModeGlyphMask
 )
 
 // String returns the text mode name.
@@ -49,6 +56,8 @@ func (m TextMode) String() string {
 		return "Vector"
 	case TextModeBitmap:
 		return "Bitmap"
+	case TextModeGlyphMask:
+		return "GlyphMask"
 	default:
 		return "Unknown"
 	}

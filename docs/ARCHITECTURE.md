@@ -69,21 +69,23 @@ Optional extension interfaces for gogpu integration:
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
 - **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
 
-### Five-Tier GPU Rendering
+### Six-Tier GPU Rendering
 
 The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
-dispatches shapes and text to five rendering tiers:
+dispatches shapes and text to six rendering tiers:
 
 | Tier | Name | Content | Technique |
 |------|------|---------|-----------|
 | **1** | SDF | Circles, ellipses, rounded rects | SDF shader evaluation per-pixel |
 | **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
-| **4** | MSDF Text | Text glyphs | Multi-channel SDF with median+smoothstep shader |
+| **4** | MSDF Text | Text glyphs (dynamic/animated) | Multi-channel SDF with median+smoothstep shader |
 | **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
+| **6** | Glyph Mask | Text glyphs (static/UI, ≤48px) | CPU-rasterized R8 alpha atlas, GPU textured quads |
 
-Tiers 1–4 use a render-pass pipeline (one render pass, multiple pipeline switches).
+Tiers 1–4, 6 use a render-pass pipeline (one render pass, multiple pipeline switches).
 Tier 5 uses a compute-only pipeline (9 dispatch stages, no render pass).
+Auto-selection routes horizontal text ≤48px to Tier 6 (pixel-perfect), else Tier 4 (scalable MSDF).
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 
@@ -397,7 +399,7 @@ gg/
 │   │   ├── path_geometry.go    # Y-monotonic curve chopping
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
-│   ├── gpu/                # GPU rendering pipeline (five-tier) + tile rasterizers
+│   ├── gpu/                # GPU rendering pipeline (six-tier) + tile rasterizers
 │   │   ├── backend.go      # GPU backend implementation
 │   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL, ForceSDFAware)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
@@ -424,6 +426,8 @@ gg/
 │   │   ├── texture.go      # Texture with lazy default view
 │   │   ├── buffer.go       # Buffer with async mapping
 │   │   ├── text_pipeline.go    # MSDF text rendering pipeline (Tier 4)
+│   │   ├── glyph_mask_engine.go   # Glyph mask engine (Tier 6, shaping → atlas → quads)
+│   │   ├── glyph_mask_pipeline.go # Glyph mask GPU pipeline (Tier 6, R8 alpha atlas)
 │   │   ├── vello_accelerator.go  # VelloAccelerator (Tier 5 compute integration)
 │   │   ├── vello_compute.go     # VelloComputeDispatcher (hal-based GPU dispatch)
 │   │   ├── scene_bridge.go # Scene to native bridge
@@ -745,7 +749,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 |---------|--------|----------------|
 | **Scene Delegation** | Qt/Skia/Vello/Flutter | Scene orchestrates tiles, SoftwareRenderer rasterizes |
 | **GPU Accelerator** | gg v0.26.0 | Opt-in GPU via `import _ "github.com/gogpu/gg/gpu"` |
-| **Five-Tier Rendering** | Skia Ganesh/Impeller/Vello | SDF, convex, stencil+cover, MSDF text (render pass) + compute pipeline |
+| **Six-Tier Rendering** | Skia Ganesh/Impeller/Vello | SDF, convex, stencil+cover, MSDF text, glyph mask (render pass) + compute pipeline |
 | **9-Stage Compute** | vello | pathtag→draw→path_count→backdrop→coarse→path_tiling→fine GPU compute |
 | **SDF Shape Rendering** | Shadertoy/GPU Gems | Per-pixel signed distance field for circles/rrects |
 | **Stencil-Then-Cover** | GPU Gems 3, NV_path_rendering | Winding via stencil buffer, then cover fill |

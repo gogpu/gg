@@ -70,6 +70,13 @@ type SDFAccelerator struct {
 	// Lazily created on first DrawText call.
 	textEngine *GPUTextEngine
 
+	// GlyphMaskEngine bridges text shaping with the CPU-rasterized R8 alpha
+	// atlas + Tier 6 quad pipeline. Lazily created on first glyph mask call.
+	glyphMaskEngine *GlyphMaskEngine
+
+	// Pending glyph mask batches for Tier 6 dispatch.
+	pendingGlyphMaskBatches []GlyphMaskBatch
+
 	pendingTarget *gg.GPURenderTarget // nil if no pending commands
 
 	cpuFallback    gg.SDFAccelerator
@@ -85,6 +92,7 @@ type SDFAccelerator struct {
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
+var _ gg.GPUGlyphMaskAccelerator = (*SDFAccelerator)(nil)
 var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
 var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
 var _ gg.ForceSDFAware = (*SDFAccelerator)(nil)
@@ -146,7 +154,12 @@ func (a *SDFAccelerator) Close() {
 	a.pendingConvexCommands = nil
 	a.pendingStencilPaths = nil
 	a.pendingTextBatches = nil
+	a.pendingGlyphMaskBatches = nil
 	a.textEngine = nil
+	if a.glyphMaskEngine != nil && a.device != nil {
+		a.glyphMaskEngine.Destroy(a.device)
+		a.glyphMaskEngine = nil
+	}
 	a.pendingTarget = nil
 	a.sceneStats = gg.SceneStats{}
 	if a.velloAccel != nil {
@@ -332,6 +345,8 @@ func (a *SDFAccelerator) BeginFrame() {
 // vertex shader.
 //
 // Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
+//
+//nolint:dupl // Intentional: mirrors DrawGlyphMaskText structure; each method owns its engine/batch type.
 func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
@@ -638,6 +653,7 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 		"convex", len(a.pendingConvexCommands),
 		"stencil", len(a.pendingStencilPaths),
 		"text", len(a.pendingTextBatches),
+		"glyphMask", len(a.pendingGlyphMaskBatches),
 		"mode", effectiveMode,
 	)
 
@@ -663,12 +679,13 @@ func (a *SDFAccelerator) Flush(target gg.GPURenderTarget) error {
 func (a *SDFAccelerator) PendingCount() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths) + len(a.pendingTextBatches)
+	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths) + len(a.pendingTextBatches) + len(a.pendingGlyphMaskBatches)
 }
 
 func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 &&
-		len(a.pendingStencilPaths) == 0 && len(a.pendingTextBatches) == 0 {
+		len(a.pendingStencilPaths) == 0 && len(a.pendingTextBatches) == 0 &&
+		len(a.pendingGlyphMaskBatches) == 0 {
 		return nil
 	}
 
@@ -716,6 +733,10 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 	textBatches := make([]TextBatch, len(a.pendingTextBatches))
 	copy(textBatches, a.pendingTextBatches)
 	a.pendingTextBatches = a.pendingTextBatches[:0]
+
+	glyphMaskBatches := make([]GlyphMaskBatch, len(a.pendingGlyphMaskBatches))
+	copy(glyphMaskBatches, a.pendingGlyphMaskBatches)
+	a.pendingGlyphMaskBatches = a.pendingGlyphMaskBatches[:0]
 	a.pendingTarget = nil
 
 	// Upload dirty MSDF atlases to the GPU before rendering text.
@@ -726,11 +747,20 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 		}
 	}
 
-	err := a.session.RenderFrame(target, shapes, convexCmds, paths, textBatches)
+	// Upload dirty glyph mask atlas pages to GPU before rendering.
+	if len(glyphMaskBatches) > 0 && a.glyphMaskEngine != nil {
+		if err := a.syncGlyphMaskAtlases(glyphMaskBatches); err != nil {
+			slogger().Warn("glyph mask atlas sync failed", "err", err)
+			glyphMaskBatches = nil
+		}
+	}
+
+	err := a.session.RenderFrame(target, shapes, convexCmds, paths, textBatches, glyphMaskBatches...)
 	if err != nil {
 		slogger().Warn("render session error",
 			"shapes", len(shapes), "convex", len(convexCmds),
-			"paths", len(paths), "text", len(textBatches), "err", err)
+			"paths", len(paths), "text", len(textBatches),
+			"glyphMask", len(glyphMaskBatches), "err", err)
 	}
 	return err
 }
@@ -798,6 +828,81 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 		a.textEngine.MarkClean(idx)
 	}
 
+	return nil
+}
+
+// DrawGlyphMaskText queues text for GPU glyph mask rendering (Tier 6).
+// The face parameter must be a text.Face. Glyphs are CPU-rasterized into
+// the R8 alpha atlas at the exact device pixel size, then rendered as
+// textured quads in the unified render pass.
+//
+// Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
+//
+//nolint:dupl // Intentional: mirrors DrawText structure for MSDF; each method owns its engine/batch type.
+func (a *SDFAccelerator) DrawGlyphMaskText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	textFace, ok := face.(text.Face)
+	if !ok || textFace == nil {
+		return gg.ErrFallbackToCPU
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Track text scene stats.
+	a.sceneStats.TextCount++
+
+	if !a.gpuReady {
+		return gg.ErrFallbackToCPU
+	}
+
+	// Lazily create the glyph mask engine.
+	if a.glyphMaskEngine == nil {
+		a.glyphMaskEngine = NewGlyphMaskEngine()
+	}
+
+	// If target changed, flush previous batch first.
+	if a.pendingTarget != nil && !sameTarget(a.pendingTarget, &target) {
+		if err := a.flushLocked(*a.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	batch, err := a.glyphMaskEngine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
+	if err != nil {
+		return gg.ErrFallbackToCPU
+	}
+	if len(batch.Quads) == 0 {
+		return nil // Empty text (e.g., all spaces), nothing to render.
+	}
+
+	a.pendingGlyphMaskBatches = append(a.pendingGlyphMaskBatches, batch)
+	targetCopy := target
+	a.pendingTarget = &targetCopy
+	return nil
+}
+
+// syncGlyphMaskAtlases uploads dirty R8 atlas pages to GPU textures and
+// sets atlas views on the render session for each batch. Must be called
+// after accumulating glyph mask batches and before RenderFrame.
+func (a *SDFAccelerator) syncGlyphMaskAtlases(batches []GlyphMaskBatch) error {
+	if err := a.glyphMaskEngine.SyncAtlasTextures(a.device, a.queue); err != nil {
+		return err
+	}
+
+	// Ensure the glyph mask pipeline is initialized before setting atlas views.
+	// SetGlyphMaskAtlasView requires the pipeline's uniformLayout and sampler.
+	if err := a.session.ensureGlyphMaskPipeline(); err != nil {
+		return err
+	}
+
+	// Bind the atlas texture view for each batch.
+	for i, batch := range batches {
+		view := a.glyphMaskEngine.PageTextureView(batch.AtlasPageIndex)
+		if view == nil {
+			continue
+		}
+		a.session.SetGlyphMaskAtlasView(i, view)
+	}
 	return nil
 }
 

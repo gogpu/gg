@@ -113,6 +113,15 @@ type GPURenderSession struct {
 	textAtlasTex  hal.Texture
 	textAtlasView hal.TextureView
 
+	// Tier 6: Glyph mask text persistent buffers.
+	glyphMaskPipeline    *GlyphMaskPipeline
+	glyphMaskVertBuf     hal.Buffer
+	glyphMaskVertBufCap  uint64
+	glyphMaskIdxBuf      hal.Buffer
+	glyphMaskIdxBufCap   uint64
+	glyphMaskUniformBufs []hal.Buffer
+	glyphMaskBindGroups  []hal.BindGroup
+
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
 
@@ -231,8 +240,8 @@ func (s *GPURenderSession) EnsureTextures(w, h uint32) error {
 }
 
 // RenderFrame renders all draw commands (SDF shapes + convex polygons +
-// stencil paths + MSDF text) in a single render pass. This is the main
-// entry point for unified rendering.
+// stencil paths + MSDF text + glyph mask text) in a single render pass.
+// This is the main entry point for unified rendering.
 //
 // The render pass uses the shared textures with:
 //   - MSAA color cleared to transparent black
@@ -248,14 +257,16 @@ func (s *GPURenderSession) RenderFrame(
 	convexCommands []ConvexDrawCommand,
 	stencilPaths []StencilPathCommand,
 	textBatches []TextBatch,
+	glyphMaskBatches ...GlyphMaskBatch,
 ) error {
-	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 && len(textBatches) == 0 {
+	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 && len(textBatches) == 0 && len(glyphMaskBatches) == 0 {
 		return nil
 	}
 
 	slogger().Debug("RenderFrame",
 		"sdf", len(sdfShapes), "convex", len(convexCommands),
 		"stencil", len(stencilPaths), "text", len(textBatches),
+		"glyphMask", len(glyphMaskBatches),
 		"surface", s.surfaceView != nil)
 
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
@@ -307,10 +318,15 @@ func (s *GPURenderSession) RenderFrame(
 		return err
 	}
 
-	if s.surfaceView != nil {
-		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes)
+	glyphMaskRes, err := s.prepareGlyphMaskResources(glyphMaskBatches)
+	if err != nil {
+		return err
 	}
-	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, target)
+
+	if s.surfaceView != nil {
+		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes)
+	}
+	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes, target)
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -383,7 +399,7 @@ func (s *GPURenderSession) drainQueue() {
 	_, _ = s.device.Wait(fence, 1, 5*time.Second)
 }
 
-func (s *GPURenderSession) destroyPersistentBuffers() {
+func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen // sequential resource cleanup across 6 tiers
 	if s.sdfBindGroup != nil {
 		s.device.DestroyBindGroup(s.sdfBindGroup)
 		s.sdfBindGroup = nil
@@ -441,6 +457,34 @@ func (s *GPURenderSession) destroyPersistentBuffers() {
 	if s.textAtlasTex != nil {
 		s.device.DestroyTexture(s.textAtlasTex)
 		s.textAtlasTex = nil
+	}
+	// Tier 6: Glyph mask text per-batch pools.
+	for i, bg := range s.glyphMaskBindGroups {
+		if bg != nil {
+			s.device.DestroyBindGroup(bg)
+			s.glyphMaskBindGroups[i] = nil
+		}
+	}
+	s.glyphMaskBindGroups = nil
+	for _, buf := range s.glyphMaskUniformBufs {
+		if buf != nil {
+			s.device.DestroyBuffer(buf)
+		}
+	}
+	s.glyphMaskUniformBufs = nil
+	if s.glyphMaskIdxBuf != nil {
+		s.device.DestroyBuffer(s.glyphMaskIdxBuf)
+		s.glyphMaskIdxBuf = nil
+		s.glyphMaskIdxBufCap = 0
+	}
+	if s.glyphMaskVertBuf != nil {
+		s.device.DestroyBuffer(s.glyphMaskVertBuf)
+		s.glyphMaskVertBuf = nil
+		s.glyphMaskVertBufCap = 0
+	}
+	if s.glyphMaskPipeline != nil {
+		s.glyphMaskPipeline.Destroy()
+		s.glyphMaskPipeline = nil
 	}
 	for _, b := range s.stencilBufPool {
 		b.destroy(s.device)
@@ -919,6 +963,217 @@ func (s *GPURenderSession) SetTextPipeline(p *MSDFTextPipeline) {
 	s.textPipeline = p
 }
 
+// ---- Tier 6: Glyph mask text rendering ----
+
+// prepareGlyphMaskResources builds glyph mask GPU resources if there are batches.
+// Pipeline failure is non-fatal: logs and skips glyph mask rendering.
+func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (*glyphMaskFrameResources, error) {
+	if len(batches) == 0 {
+		return nil, nil //nolint:nilnil // no glyph mask text to render
+	}
+	if err := s.ensureGlyphMaskPipeline(); err != nil {
+		hal.Logger().Warn("glyph mask pipeline init failed", "err", err)
+		return nil, nil //nolint:nilnil // non-fatal, skip glyph mask text
+	}
+	res, err := s.buildGlyphMaskResources(batches)
+	if err != nil {
+		return nil, fmt.Errorf("build glyph mask resources: %w", err)
+	}
+	return res, nil
+}
+
+// ensureGlyphMaskPipeline creates the glyph mask pipeline on demand. Called
+// only when glyph mask batches are present.
+func (s *GPURenderSession) ensureGlyphMaskPipeline() error {
+	if s.glyphMaskPipeline == nil {
+		s.glyphMaskPipeline = NewGlyphMaskPipeline(s.device, s.queue)
+	}
+	if err := s.glyphMaskPipeline.ensurePipelineWithStencil(); err != nil {
+		return fmt.Errorf("glyph mask pipeline: %w", err)
+	}
+	return nil
+}
+
+// buildGlyphMaskResources updates persistent vertex, index, and per-batch
+// uniform buffers for glyph mask text rendering. Each batch gets its own
+// uniform buffer and bind group. Vertex and index buffers are shared across
+// all batches. Buffers are grow-only.
+func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*glyphMaskFrameResources, error) {
+	if len(batches) == 0 {
+		return nil, nil //nolint:nilnil // empty batch list is a valid no-op
+	}
+
+	// Aggregate all quads into shared vertex/index buffers.
+	totalQuads := 0
+	for i := range batches {
+		totalQuads += len(batches[i].Quads)
+	}
+	if totalQuads == 0 {
+		return nil, nil //nolint:nilnil // no quads to render
+	}
+
+	allQuads := make([]GlyphMaskQuad, 0, totalQuads)
+	for i := range batches {
+		allQuads = append(allQuads, batches[i].Quads...)
+	}
+
+	// Build and upload shared vertex data (4 vertices per quad, 32 bytes per vertex).
+	vertexData := buildGlyphMaskVertexData(allQuads)
+	vertSize := uint64(len(vertexData))
+
+	if s.glyphMaskVertBuf == nil || s.glyphMaskVertBufCap < vertSize {
+		// Note: no bind group invalidation needed here — glyph mask bind groups
+		// reference (uniform, atlas texture, sampler), not vertex/index buffers.
+		if s.glyphMaskVertBuf != nil {
+			s.device.DestroyBuffer(s.glyphMaskVertBuf)
+		}
+		allocSize := vertSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_glyph_mask_verts",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.glyphMaskVertBuf = nil
+			s.glyphMaskVertBufCap = 0
+			return nil, fmt.Errorf("create glyph mask vertex buffer: %w", err)
+		}
+		s.glyphMaskVertBuf = buf
+		s.glyphMaskVertBufCap = allocSize
+	}
+	if err := s.queue.WriteBuffer(s.glyphMaskVertBuf, 0, vertexData); err != nil {
+		return nil, fmt.Errorf("write glyph mask vertex buffer: %w", err)
+	}
+
+	// Build and upload shared index data (6 indices per quad, 2 bytes per index).
+	indexData := buildGlyphMaskIndexData(totalQuads)
+	idxSize := uint64(len(indexData))
+
+	if s.glyphMaskIdxBuf == nil || s.glyphMaskIdxBufCap < idxSize {
+		if s.glyphMaskIdxBuf != nil {
+			s.device.DestroyBuffer(s.glyphMaskIdxBuf)
+		}
+		allocSize := idxSize * 2
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: "session_glyph_mask_indices",
+			Size:  allocSize,
+			Usage: gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			s.glyphMaskIdxBuf = nil
+			s.glyphMaskIdxBufCap = 0
+			return nil, fmt.Errorf("create glyph mask index buffer: %w", err)
+		}
+		s.glyphMaskIdxBuf = buf
+		s.glyphMaskIdxBufCap = allocSize
+	}
+	if err := s.queue.WriteBuffer(s.glyphMaskIdxBuf, 0, indexData); err != nil {
+		return nil, fmt.Errorf("write glyph mask index buffer: %w", err)
+	}
+
+	// Grow uniform buffer and bind group pools to match batch count.
+	s.ensureGlyphMaskBatchPools(len(batches))
+
+	// Build per-batch draw calls with individual uniform buffers.
+	drawCalls := make([]glyphMaskDrawCall, 0, len(batches))
+	quadOffset := 0
+
+	for i, batch := range batches {
+		nQuads := len(batch.Quads)
+		if nQuads == 0 {
+			continue
+		}
+
+		// Write uniform data for this batch.
+		uniformData := makeGlyphMaskUniform(batch.Transform)
+		if err := s.queue.WriteBuffer(s.glyphMaskUniformBufs[i], 0, uniformData); err != nil {
+			return nil, fmt.Errorf("write glyph mask uniform[%d]: %w", i, err)
+		}
+
+		// Ensure bind group exists for this batch.
+		if s.glyphMaskBindGroups[i] == nil {
+			// Get the atlas page texture view for this batch.
+			// The caller (SDFAccelerator) must have synced atlas textures
+			// before calling RenderFrame, so PageTextureView should be valid.
+			// If not, skip this batch.
+			continue
+		}
+
+		indexOffset := uint32(quadOffset * 6) //nolint:gosec // bounded by quad capacity
+		indexCount := uint32(nQuads * 6)      //nolint:gosec // bounded by quad capacity
+
+		drawCalls = append(drawCalls, glyphMaskDrawCall{
+			indexOffset: indexOffset,
+			indexCount:  indexCount,
+			bindGroup:   s.glyphMaskBindGroups[i],
+		})
+
+		quadOffset += nQuads
+	}
+
+	return &glyphMaskFrameResources{
+		vertBuf:   s.glyphMaskVertBuf,
+		idxBuf:    s.glyphMaskIdxBuf,
+		drawCalls: drawCalls,
+	}, nil
+}
+
+// ensureGlyphMaskBatchPools grows the uniform buffer and bind group pools to
+// at least n entries. Existing entries are preserved.
+func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
+	for len(s.glyphMaskUniformBufs) < n {
+		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+			Label: fmt.Sprintf("session_glyph_mask_uniform_%d", len(s.glyphMaskUniformBufs)),
+			Size:  glyphMaskUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			hal.Logger().Warn("failed to create glyph mask uniform buffer", "err", err)
+			return
+		}
+		s.glyphMaskUniformBufs = append(s.glyphMaskUniformBufs, buf)
+		s.glyphMaskBindGroups = append(s.glyphMaskBindGroups, nil) // bind group created lazily
+	}
+}
+
+// SetGlyphMaskAtlasView creates or updates the bind group for a glyph mask
+// batch at the given index, binding the provided atlas texture view. This must
+// be called after syncing atlas textures and before RenderFrame.
+func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView hal.TextureView) {
+	if s.glyphMaskPipeline == nil || atlasView == nil {
+		return
+	}
+	s.ensureGlyphMaskBatchPools(batchIndex + 1)
+	if batchIndex >= len(s.glyphMaskBindGroups) {
+		return
+	}
+	// Destroy old bind group if it exists.
+	if s.glyphMaskBindGroups[batchIndex] != nil {
+		s.device.DestroyBindGroup(s.glyphMaskBindGroups[batchIndex])
+		s.glyphMaskBindGroups[batchIndex] = nil
+	}
+	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label:  fmt.Sprintf("session_glyph_mask_bind_%d", batchIndex),
+		Layout: s.glyphMaskPipeline.uniformLayout,
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{
+				Buffer: s.glyphMaskUniformBufs[batchIndex].NativeHandle(), Offset: 0, Size: glyphMaskUniformSize,
+			}},
+			{Binding: 1, Resource: gputypes.TextureViewBinding{
+				TextureView: atlasView.NativeHandle(),
+			}},
+			{Binding: 2, Resource: gputypes.SamplerBinding{
+				Sampler: s.glyphMaskPipeline.sampler.NativeHandle(),
+			}},
+		},
+	})
+	if err != nil {
+		hal.Logger().Warn("failed to create glyph mask bind group", "index", batchIndex, "err", err)
+		return
+	}
+	s.glyphMaskBindGroups[batchIndex] = bg
+}
+
 // encodeSubmitReadback encodes the unified render pass, copies the resolve
 // texture to a staging buffer, submits, waits, and reads back pixels.
 func (s *GPURenderSession) encodeSubmitReadback(
@@ -929,6 +1184,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	stencilRes []*stencilCoverBuffers,
 	stencilPaths []StencilPathCommand,
 	textRes *textFrameResources,
+	glyphMaskRes *glyphMaskFrameResources,
 	target gg.GPURenderTarget,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
@@ -979,9 +1235,14 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		s.stencilRenderer.RecordPath(rp, bufs, stencilPaths[i].FillRule)
 	}
 
-	// Tier 4: MSDF text (rendered last, on top of all other geometry).
+	// Tier 4: MSDF text (rendered after shapes).
 	if textRes != nil && len(textRes.drawCalls) > 0 {
 		s.textPipeline.RecordDraws(rp, textRes)
+	}
+
+	// Tier 6: Glyph mask text (rendered last, on top of all other geometry).
+	if glyphMaskRes != nil && len(glyphMaskRes.drawCalls) > 0 {
+		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes)
 	}
 
 	rp.End()
@@ -1106,6 +1367,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	stencilRes []*stencilCoverBuffers,
 	stencilPaths []StencilPathCommand,
 	textRes *textFrameResources,
+	glyphMaskRes *glyphMaskFrameResources,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
 		Label: "session_surface_encoder",
@@ -1167,9 +1429,14 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.stencilRenderer.RecordPath(rp, bufs, stencilPaths[i].FillRule)
 	}
 
-	// Tier 4: MSDF text (rendered last, on top of all other geometry).
+	// Tier 4: MSDF text (rendered after shapes).
 	if textRes != nil && len(textRes.drawCalls) > 0 {
 		s.textPipeline.RecordDraws(rp, textRes)
+	}
+
+	// Tier 6: Glyph mask text (rendered last, on top of all other geometry).
+	if glyphMaskRes != nil && len(glyphMaskRes.drawCalls) > 0 {
+		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes)
 	}
 
 	rp.End()
