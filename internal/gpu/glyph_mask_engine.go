@@ -33,18 +33,51 @@ type GlyphMaskEngine struct {
 	atlas      *text.GlyphMaskAtlas
 	rasterizer *text.GlyphMaskRasterizer
 
+	// LCD subpixel rendering configuration.
+	lcdLayout text.LCDLayout
+	lcdFilter text.LCDFilter
+
 	// GPU textures for atlas pages. Index matches atlas page index.
 	pageTextures []hal.Texture
 	pageViews    []hal.TextureView
 }
 
 // NewGlyphMaskEngine creates a new glyph mask engine with the default atlas
-// configuration.
+// configuration. LCD subpixel rendering is disabled by default (LCDLayoutNone).
 func NewGlyphMaskEngine() *GlyphMaskEngine {
 	return &GlyphMaskEngine{
 		atlas:      text.NewGlyphMaskAtlasDefault(),
 		rasterizer: text.NewGlyphMaskRasterizer(),
+		lcdLayout:  text.LCDLayoutNone,
+		lcdFilter:  text.DefaultLCDFilter(),
 	}
+}
+
+// SetLCDLayout sets the LCD subpixel layout for ClearType rendering.
+// Use LCDLayoutRGB for most monitors, LCDLayoutBGR for rare BGR panels,
+// or LCDLayoutNone to disable subpixel rendering (grayscale).
+func (e *GlyphMaskEngine) SetLCDLayout(layout text.LCDLayout) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lcdLayout != layout {
+		e.lcdLayout = layout
+		// Clear atlas: existing masks were rasterized for different layout.
+		e.atlas.Clear()
+	}
+}
+
+// SetLCDFilter sets the LCD FIR filter for ClearType fringe reduction.
+func (e *GlyphMaskEngine) SetLCDFilter(filter text.LCDFilter) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lcdFilter = filter
+}
+
+// LCDLayout returns the current LCD subpixel layout.
+func (e *GlyphMaskEngine) LCDLayout() text.LCDLayout {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.lcdLayout
 }
 
 // LayoutText converts a text string with font face into a GPU-ready
@@ -93,6 +126,12 @@ func (e *GlyphMaskEngine) LayoutText(
 	// makes sense when the pixel grid is axis-aligned (no rotation/skew).
 	hinting := selectGlyphMaskHinting(fontSize, matrix)
 
+	// Determine LCD mode: use ClearType for small axis-aligned text
+	// (same conditions as hinting).
+	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
+	lcdLayout := e.lcdLayout
+	lcdFilter := e.lcdFilter
+
 	// Premultiply color for per-vertex embedding.
 	premul := color.Premultiply()
 	vertColor := [4]float32{
@@ -111,20 +150,27 @@ func (e *GlyphMaskEngine) LayoutText(
 
 		key := text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
 
-		// GetOrRasterize: cache hit returns immediately, miss triggers
-		// CPU rasterization via AnalyticFiller.
-		region, err := e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-			result, rErr := e.rasterizer.RasterizeHinted(parsed, glyph.GID, fontSize, fracX, fracY, hinting)
-			if rErr != nil {
-				return nil, 0, 0, 0, 0, rErr
-			}
-			if result == nil {
-				return nil, 0, 0, 0, 0, nil // empty glyph (space)
-			}
-			return result.Mask, result.Width, result.Height, result.BearingX, result.BearingY, nil
-		})
-		if err != nil {
-			slogger().Warn("glyph mask rasterize failed", "gid", glyph.GID, "err", err)
+		var region text.GlyphMaskRegion
+		var rErr error
+
+		if useLCD {
+			// LCD path: rasterize at 3x width, store RGB coverage in R8 atlas.
+			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, fontSize, fracX, fracY, hinting, lcdFilter, lcdLayout)
+		} else {
+			// Grayscale path: standard R8 alpha mask.
+			region, rErr = e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
+				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, fontSize, fracX, fracY, hinting)
+				if err2 != nil {
+					return nil, 0, 0, 0, 0, err2
+				}
+				if result == nil {
+					return nil, 0, 0, 0, 0, nil // empty glyph (space)
+				}
+				return result.Mask, result.Width, result.Height, result.BearingX, result.BearingY, nil
+			})
+		}
+		if rErr != nil {
+			slogger().Warn("glyph mask rasterize failed", "gid", glyph.GID, "err", rErr)
 			continue
 		}
 
@@ -141,10 +187,23 @@ func (e *GlyphMaskEngine) LayoutText(
 		// convert mask pixel coordinates back to user-space coordinates
 		// by dividing by deviceScale.
 		scale := 1.0 / deviceScale
+
+		// For LCD glyphs, the atlas region.Width is 3x the logical pixel width.
+		// The screen quad width must use the logical width (region.Width / 3).
+		regionLogicalW := region.Width
+		if region.IsLCD {
+			regionLogicalW = region.Width / 3
+		}
+
 		qx0 := float32(absX + float64(region.BearingX)*scale)
 		qy0 := float32(absY - float64(region.BearingY)*scale) // flip Y: bearing is up, screen is down
-		qx1 := qx0 + float32(float64(region.Width)*scale)
+		qx1 := qx0 + float32(float64(regionLogicalW)*scale)
 		qy1 := qy0 + float32(float64(region.Height)*scale)
+
+		var isLCD uint32
+		if region.IsLCD {
+			isLCD = 1
+		}
 
 		quads = append(quads, GlyphMaskQuad{
 			X0: qx0, Y0: qy0,
@@ -152,6 +211,7 @@ func (e *GlyphMaskEngine) LayoutText(
 			U0: region.U0, V0: region.V0,
 			U1: region.U1, V1: region.V1,
 			Color: vertColor,
+			IsLCD: isLCD,
 		})
 	}
 
@@ -294,6 +354,36 @@ func (e *GlyphMaskEngine) Atlas() *text.GlyphMaskAtlas {
 	return e.atlas
 }
 
+// rasterizeLCDGlyph rasterizes a glyph with LCD subpixel rendering and stores
+// the RGB coverage data in the R8 atlas at 3x width. Returns a cached region
+// if already present.
+func (e *GlyphMaskEngine) rasterizeLCDGlyph(
+	key text.GlyphMaskKey,
+	parsed text.ParsedFont,
+	gid text.GlyphID,
+	fontSize float64,
+	fracX, fracY float64,
+	hinting text.Hinting,
+	filter text.LCDFilter,
+	layout text.LCDLayout,
+) (text.GlyphMaskRegion, error) {
+	// Fast path: check cache.
+	if region, ok := e.atlas.Get(key); ok {
+		return region, nil
+	}
+
+	// Slow path: rasterize with LCD.
+	result, err := e.rasterizer.RasterizeLCD(parsed, gid, fontSize, fracX, fracY, hinting, filter, layout)
+	if err != nil {
+		return text.GlyphMaskRegion{}, fmt.Errorf("lcd glyph rasterize: %w", err)
+	}
+	if result == nil {
+		return text.GlyphMaskRegion{}, nil // empty glyph (space)
+	}
+
+	return e.atlas.PutLCD(key, result.Mask, result.Width, result.Height, result.BearingX, result.BearingY)
+}
+
 // glyphMaskHintingMaxSize is the maximum font size in device pixels for which
 // hinting is auto-enabled. Above this size, outlines are smooth enough that
 // grid-fitting provides no visual benefit and can introduce distortion.
@@ -315,6 +405,25 @@ func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix) text.Hinting {
 
 	// Small axis-aligned text: full hinting for crisp stems and baselines.
 	return text.HintingFull
+}
+
+// glyphMaskLCDMaxSize is the maximum font size in device pixels for which
+// LCD subpixel rendering is auto-enabled. Above this size, individual subpixels
+// are large enough that per-channel alpha provides no visual benefit and the
+// color fringing becomes more noticeable.
+const glyphMaskLCDMaxSize = 48.0
+
+// selectGlyphMaskLCD returns true if LCD subpixel rendering should be used.
+// LCD rendering requires an axis-aligned matrix (no rotation/skew) and small
+// font size (same conditions as hinting, since ClearType depends on the
+// subpixel grid being axis-aligned).
+func selectGlyphMaskLCD(fontSize float64, matrix gg.Matrix) bool {
+	// Rotated/skewed text: subpixel grid is not axis-aligned.
+	if matrix.B != 0 || matrix.D != 0 {
+		return false
+	}
+	// Large text: subpixels are big enough that per-channel alpha isn't needed.
+	return fontSize <= glyphMaskLCDMaxSize
 }
 
 // computeGlyphMaskFontID generates a stable hash identifier for a font source.

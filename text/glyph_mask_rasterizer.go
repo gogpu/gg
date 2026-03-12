@@ -242,6 +242,186 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	}, nil
 }
 
+// RasterizeLCD renders a glyph with 3x horizontal oversampling for LCD
+// subpixel (ClearType) rendering. The glyph outline is rasterized at 3x
+// horizontal width, then the LCD filter is applied row-by-row to produce
+// per-channel RGB coverage. The result is stored in the R8 atlas at 3x width
+// (3 atlas texels per logical pixel: R, G, B coverage).
+//
+// For BGR layout, the R and B channels are swapped after filtering.
+//
+// Parameters:
+//   - font: parsed font to extract outlines from
+//   - gid: glyph index in the font
+//   - size: font size in pixels (ppem)
+//   - subpixelX: fractional X offset in pixels [0, 1) for subpixel positioning
+//   - subpixelY: fractional Y offset in pixels [0, 1) for subpixel positioning
+//   - hinting: hinting mode (HintingNone, HintingVertical, HintingFull)
+//   - filter: LCD FIR filter for fringe reduction
+//   - layout: physical subpixel arrangement (RGB or BGR)
+//
+// Returns nil result for empty glyphs (e.g., space character).
+func (r *GlyphMaskRasterizer) RasterizeLCD(
+	font ParsedFont,
+	gid GlyphID,
+	size float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+	filter LCDFilter,
+	layout LCDLayout,
+) (*LCDMaskResult, error) {
+	// Extract outline at the target size with hinting.
+	outline, err := r.extractor.ExtractOutlineHinted(font, gid, size, hinting)
+	if err != nil {
+		return nil, err
+	}
+	if outline == nil || outline.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
+	}
+
+	return r.rasterizeLCDOutline(outline, subpixelX, subpixelY, filter, layout)
+}
+
+// RasterizeLCDOutline renders a pre-extracted glyph outline with 3x horizontal
+// oversampling for LCD subpixel rendering. This is useful when the outline has
+// already been extracted (e.g., from cache).
+func (r *GlyphMaskRasterizer) RasterizeLCDOutline(
+	outline *GlyphOutline,
+	subpixelX, subpixelY float64,
+	filter LCDFilter,
+	layout LCDLayout,
+) (*LCDMaskResult, error) {
+	if outline == nil || outline.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
+	}
+	return r.rasterizeLCDOutline(outline, subpixelX, subpixelY, filter, layout)
+}
+
+// rasterizeLCDOutline is the internal LCD rasterization implementation.
+func (r *GlyphMaskRasterizer) rasterizeLCDOutline(
+	outline *GlyphOutline,
+	subpixelX, subpixelY float64,
+	filter LCDFilter,
+	layout LCDLayout,
+) (*LCDMaskResult, error) {
+	// Compute tight bounding box at 1x width (logical pixels).
+	const aaMargin = 1
+
+	boundsMinX := float64(outline.Bounds.MinX) + subpixelX
+	boundsMaxX := float64(outline.Bounds.MaxX) + subpixelX
+	boundsMinY := outline.Bounds.MinY + subpixelY
+	boundsMaxY := outline.Bounds.MaxY + subpixelY
+
+	pixMinX := int(math.Floor(boundsMinX)) - aaMargin
+	pixMinY := int(math.Floor(boundsMinY)) - aaMargin
+	pixMaxX := int(math.Ceil(boundsMaxX)) + aaMargin
+	pixMaxY := int(math.Ceil(boundsMaxY)) + aaMargin
+
+	maskW := pixMaxX - pixMinX // logical pixel width
+	maskH := pixMaxY - pixMinY
+
+	if maskW <= 0 || maskH <= 0 {
+		return nil, nil //nolint:nilnil // degenerate bbox = no renderable content
+	}
+
+	const maxMaskDim = 512
+	if maskW > maxMaskDim || maskH > maxMaskDim {
+		return nil, nil //nolint:nilnil // oversized glyph = skip rendering
+	}
+
+	// Rasterize at 3x horizontal width.
+	// X-coordinates are scaled by 3 in the path data, and the buffer is 3x wider.
+	tripleW := maskW * 3
+	offsetX := float32(-pixMinX*3) + float32(subpixelX*3)
+	offsetY := float32(-pixMinY) + float32(subpixelY)
+
+	r.pathVerbs = r.pathVerbs[:0]
+	r.pathPoints = r.pathPoints[:0]
+
+	for _, seg := range outline.Segments {
+		switch seg.Op {
+		case OutlineOpMoveTo:
+			r.pathVerbs = append(r.pathVerbs, raster.VerbMoveTo)
+			r.pathPoints = append(r.pathPoints,
+				seg.Points[0].X*3+offsetX,
+				seg.Points[0].Y+offsetY,
+			)
+		case OutlineOpLineTo:
+			r.pathVerbs = append(r.pathVerbs, raster.VerbLineTo)
+			r.pathPoints = append(r.pathPoints,
+				seg.Points[0].X*3+offsetX,
+				seg.Points[0].Y+offsetY,
+			)
+		case OutlineOpQuadTo:
+			r.pathVerbs = append(r.pathVerbs, raster.VerbQuadTo)
+			r.pathPoints = append(r.pathPoints,
+				seg.Points[0].X*3+offsetX,
+				seg.Points[0].Y+offsetY,
+				seg.Points[1].X*3+offsetX,
+				seg.Points[1].Y+offsetY,
+			)
+		case OutlineOpCubicTo:
+			r.pathVerbs = append(r.pathVerbs, raster.VerbCubicTo)
+			r.pathPoints = append(r.pathPoints,
+				seg.Points[0].X*3+offsetX,
+				seg.Points[0].Y+offsetY,
+				seg.Points[1].X*3+offsetX,
+				seg.Points[1].Y+offsetY,
+				seg.Points[2].X*3+offsetX,
+				seg.Points[2].Y+offsetY,
+			)
+		}
+	}
+
+	if len(r.pathVerbs) > 0 {
+		r.pathVerbs = append(r.pathVerbs, raster.VerbClose)
+	}
+
+	if len(r.pathVerbs) == 0 {
+		return nil, nil //nolint:nilnil // no path segments = nothing to rasterize
+	}
+
+	// Build edges and fill to 3x-wide alpha buffer.
+	eb := raster.NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(&glyphPath{verbs: r.pathVerbs, points: r.pathPoints}, raster.IdentityTransform{})
+
+	if eb.IsEmpty() {
+		return nil, nil //nolint:nilnil // no edges produced = nothing to rasterize
+	}
+
+	oversampled := make([]byte, tripleW*maskH)
+	raster.FillToBuffer(eb, tripleW, maskH, raster.FillRuleNonZero, oversampled)
+
+	// Apply LCD filter row-by-row: 3x-wide R8 → per-pixel RGB.
+	// The output is stored as 3 bytes per pixel (R, G, B coverage) which
+	// will be packed into the R8 atlas at 3x width (one R8 texel per channel).
+	rgbMask := make([]byte, maskW*3*maskH)
+	for row := range maskH {
+		srcRow := oversampled[row*tripleW : row*tripleW+tripleW]
+		dstRow := rgbMask[row*maskW*3 : row*maskW*3+maskW*3]
+		filter.Apply(dstRow, srcRow, maskW)
+	}
+
+	// For BGR layout, swap R and B channels in each pixel.
+	if layout == LCDLayoutBGR {
+		for i := 0; i < len(rgbMask)-2; i += 3 {
+			rgbMask[i], rgbMask[i+2] = rgbMask[i+2], rgbMask[i]
+		}
+	}
+
+	bearingX := float32(pixMinX) - float32(subpixelX)
+	bearingY := float32(-pixMinY) + float32(subpixelY)
+
+	return &LCDMaskResult{
+		Mask:     rgbMask,
+		Width:    maskW,
+		Height:   maskH,
+		BearingX: bearingX,
+		BearingY: bearingY,
+	}, nil
+}
+
 // glyphPath implements raster.PathLike for glyph outline data.
 type glyphPath struct {
 	verbs  []raster.PathVerb

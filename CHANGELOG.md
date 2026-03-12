@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Auto-selection: `HintingFull` for ≤48px axis-aligned text, `HintingNone`
     for rotated/skewed/large text
   - Hinting mode already in glyph cache key (no cache pollution)
+- **ClearType LCD subpixel rendering (TEXT-011)** — 3× horizontal oversampling with
+  5-tap FIR LCD filter for per-channel RGB alpha, following the FreeType/ClearType
+  approach. Triples effective horizontal resolution for crisp text on LCD monitors.
+  - `text.LCDFilter` — 5-tap FIR filter with configurable weights (default: FreeType "light")
+  - `text.LCDLayout` — RGB/BGR subpixel ordering support
+  - `text.LCDMaskResult` — per-channel RGB coverage output
+  - `GlyphMaskRasterizer.RasterizeLCD()` / `RasterizeLCDOutline()` — 3× oversampled
+    rasterization via AnalyticFiller + row-by-row LCD filter application
+  - `GlyphMaskAtlas.PutLCD()` — stores 3×-wide RGB data in R8 atlas
+  - `GlyphMaskEngine.SetLCDLayout()` / `SetLCDFilter()` — runtime LCD configuration
+  - GPU shader: dual-mode fragment shader (grayscale / LCD per-channel alpha blending)
+  - Auto-selection: LCD enabled for ≤48px axis-aligned text when layout is set
+  - `IsLCD` flag in `GlyphMaskRegion` and `GlyphMaskQuad` for pipeline awareness
 
 ### Fixed
 

@@ -84,6 +84,12 @@ type GlyphMaskRegion struct {
 	// UV coordinates [0, 1] for texture sampling.
 	// Inset by 0.5 texels to prevent bilinear bleed.
 	U0, V0, U1, V1 float32
+
+	// IsLCD indicates that this region contains LCD subpixel data stored
+	// at 3x horizontal width in the R8 atlas. Each logical pixel occupies
+	// 3 consecutive R8 texels (R, G, B coverage). The Width field stores
+	// the atlas width (3 * logical width), not the logical pixel width.
+	IsLCD bool
 }
 
 // GlyphMaskAtlasConfig holds configuration for the glyph mask atlas.
@@ -439,6 +445,77 @@ func (a *GlyphMaskAtlas) Put(key GlyphMaskKey, mask []byte, maskW, maskH int, be
 	}
 
 	// Create cache entry and add to LRU
+	entry := &glyphMaskEntry{
+		key:             key,
+		region:          region,
+		lastAccessFrame: a.currentFrame.Load(),
+	}
+	a.lookup[key] = entry
+	a.addToFront(entry)
+
+	return region, nil
+}
+
+// PutLCD stores an LCD (ClearType) glyph mask in the atlas. The mask contains
+// RGB coverage data (3 bytes per pixel, logicalW pixels wide), which is packed
+// into the R8 atlas at 3x width (3 * logicalW R8 texels per row). The region's
+// Width is set to 3 * logicalW (atlas texels), and IsLCD is set to true.
+//
+// The caller must convert the RGB triplets to row-major R8 data before calling:
+// for each row, the 3*logicalW bytes are stored sequentially in the atlas.
+func (a *GlyphMaskAtlas) PutLCD(key GlyphMaskKey, rgbMask []byte, logicalW, maskH int, bearingX, bearingY float32) (GlyphMaskRegion, error) {
+	atlasW := logicalW * 3 // width in R8 texels
+	if logicalW <= 0 || maskH <= 0 || len(rgbMask) < atlasW*maskH {
+		return GlyphMaskRegion{}, errors.New("text: invalid LCD glyph mask dimensions")
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check if already cached.
+	if entry, ok := a.lookup[key]; ok {
+		entry.lastAccessFrame = a.currentFrame.Load()
+		a.moveToFront(entry)
+		return entry.region, nil
+	}
+
+	// Evict LRU entries if at capacity.
+	for len(a.lookup) >= a.config.MaxEntries {
+		a.evictTail()
+	}
+
+	// Find or create a page with space for the 3x-wide data.
+	page, err := a.findOrCreatePage(atlasW, maskH)
+	if err != nil {
+		return GlyphMaskRegion{}, err
+	}
+
+	x, y, ok := page.allocator.Allocate(atlasW, maskH)
+	if !ok {
+		return GlyphMaskRegion{}, fmt.Errorf("text: failed to allocate %dx%d LCD glyph mask in atlas page %d", atlasW, maskH, page.index)
+	}
+
+	// Copy the RGB data row by row into the R8 atlas at 3x width.
+	page.copyMask(rgbMask, atlasW, maskH, x, y)
+
+	atlasSize := float32(a.config.Size)
+	halfTexel := float32(0.5) / atlasSize
+
+	region := GlyphMaskRegion{
+		AtlasIndex: page.index,
+		X:          x,
+		Y:          y,
+		Width:      atlasW, // 3x logical width in R8 texels
+		Height:     maskH,
+		BearingX:   bearingX,
+		BearingY:   bearingY,
+		U0:         float32(x)/atlasSize + halfTexel,
+		V0:         float32(y)/atlasSize + halfTexel,
+		U1:         float32(x+atlasW)/atlasSize - halfTexel,
+		V1:         float32(y+maskH)/atlasSize - halfTexel,
+		IsLCD:      true,
+	}
+
 	entry := &glyphMaskEntry{
 		key:             key,
 		region:          region,

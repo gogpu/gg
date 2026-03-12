@@ -24,9 +24,10 @@ var glyphMaskShaderSource string
 //	position  (vec2<f32>) =  8 bytes  (location 0)
 //	tex_coord (vec2<f32>) =  8 bytes  (location 1)
 //	color     (vec4<f32>) = 16 bytes  (location 2)
+//	is_lcd    (u32)       =  4 bytes  (location 3)
 //
-// Total = 32 bytes per vertex.
-const glyphMaskVertexStride = 32
+// Total = 36 bytes per vertex.
+const glyphMaskVertexStride = 36
 
 // glyphMaskUniformSize is the byte size of the glyph mask uniform buffer.
 // Layout: transform (mat4x4<f32>) = 64 bytes + color (vec4<f32>) = 16 bytes = 80 bytes.
@@ -347,6 +348,7 @@ type glyphMaskFrameResources struct {
 //	location 0: position  (vec2<f32>)
 //	location 1: tex_coord (vec2<f32>)
 //	location 2: color     (vec4<f32>)
+//	location 3: is_lcd    (u32)
 func glyphMaskVertexLayout() []gputypes.VertexBufferLayout {
 	return []gputypes.VertexBufferLayout{
 		{
@@ -356,6 +358,7 @@ func glyphMaskVertexLayout() []gputypes.VertexBufferLayout {
 				{Format: gputypes.VertexFormatFloat32x2, Offset: 0, ShaderLocation: 0},  // position
 				{Format: gputypes.VertexFormatFloat32x2, Offset: 8, ShaderLocation: 1},  // tex_coord
 				{Format: gputypes.VertexFormatFloat32x4, Offset: 16, ShaderLocation: 2}, // color
+				{Format: gputypes.VertexFormatUint32, Offset: 32, ShaderLocation: 3},    // is_lcd
 			},
 		},
 	}
@@ -370,10 +373,16 @@ type GlyphMaskQuad struct {
 	X0, Y0, X1, Y1 float32
 
 	// UV coordinates in R8 atlas [0, 1].
+	// For LCD glyphs, UVs span the 3x-wide region in the atlas.
 	U0, V0, U1, V1 float32
 
 	// Text color (RGBA, premultiplied alpha).
 	Color [4]float32
+
+	// IsLCD indicates this quad uses LCD subpixel rendering.
+	// When set, the fragment shader samples 3 adjacent R8 texels
+	// per output pixel for per-channel alpha blending.
+	IsLCD uint32
 }
 
 // GlyphMaskBatch represents a batch of glyph mask quads with shared
@@ -402,23 +411,23 @@ func buildGlyphMaskVertexData(quads []GlyphMaskQuad) []byte {
 	off := 0
 	for _, q := range quads {
 		// Vertex 0: top-left
-		writeGlyphMaskVertex(data[off:], q.X0, q.Y0, q.U0, q.V0, q.Color)
+		writeGlyphMaskVertex(data[off:], q.X0, q.Y0, q.U0, q.V0, q.Color, q.IsLCD)
 		off += glyphMaskVertexStride
 		// Vertex 1: top-right
-		writeGlyphMaskVertex(data[off:], q.X1, q.Y0, q.U1, q.V0, q.Color)
+		writeGlyphMaskVertex(data[off:], q.X1, q.Y0, q.U1, q.V0, q.Color, q.IsLCD)
 		off += glyphMaskVertexStride
 		// Vertex 2: bottom-right
-		writeGlyphMaskVertex(data[off:], q.X1, q.Y1, q.U1, q.V1, q.Color)
+		writeGlyphMaskVertex(data[off:], q.X1, q.Y1, q.U1, q.V1, q.Color, q.IsLCD)
 		off += glyphMaskVertexStride
 		// Vertex 3: bottom-left
-		writeGlyphMaskVertex(data[off:], q.X0, q.Y1, q.U0, q.V1, q.Color)
+		writeGlyphMaskVertex(data[off:], q.X0, q.Y1, q.U0, q.V1, q.Color, q.IsLCD)
 		off += glyphMaskVertexStride
 	}
 	return data
 }
 
 // writeGlyphMaskVertex writes a single glyph mask vertex into buf.
-func writeGlyphMaskVertex(buf []byte, x, y, u, v float32, color [4]float32) {
+func writeGlyphMaskVertex(buf []byte, x, y, u, v float32, color [4]float32, isLCD uint32) {
 	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(x))
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(y))
 	binary.LittleEndian.PutUint32(buf[8:12], math.Float32bits(u))
@@ -427,6 +436,7 @@ func writeGlyphMaskVertex(buf []byte, x, y, u, v float32, color [4]float32) {
 	binary.LittleEndian.PutUint32(buf[20:24], math.Float32bits(color[1]))
 	binary.LittleEndian.PutUint32(buf[24:28], math.Float32bits(color[2]))
 	binary.LittleEndian.PutUint32(buf[28:32], math.Float32bits(color[3]))
+	binary.LittleEndian.PutUint32(buf[32:36], isLCD)
 }
 
 // buildGlyphMaskIndexData serializes quad indices into raw bytes for GPU upload.
