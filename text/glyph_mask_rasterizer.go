@@ -73,13 +73,37 @@ func (r *GlyphMaskRasterizer) Rasterize(
 	size float64,
 	subpixelX, subpixelY float64,
 ) (*GlyphMaskResult, error) {
-	// Extract outline at the target size (exact pixel size, not reference size).
-	outline, err := r.extractor.ExtractOutline(font, gid, size)
+	return r.RasterizeHinted(font, gid, size, subpixelX, subpixelY, HintingNone)
+}
+
+// RasterizeHinted renders a single glyph into an R8 alpha mask with hinting.
+//
+// When hinting is HintingVertical or HintingFull, the outline is grid-fitted
+// before rasterization, producing crisper horizontal stems and consistent
+// stem widths at small sizes (12-16px).
+//
+// Parameters:
+//   - font: parsed font to extract outlines from
+//   - gid: glyph index in the font
+//   - size: font size in pixels (ppem)
+//   - subpixelX: fractional X offset in pixels [0, 1) for subpixel positioning
+//   - subpixelY: fractional Y offset in pixels [0, 1) for subpixel positioning
+//   - hinting: hinting mode (HintingNone, HintingVertical, HintingFull)
+//
+// Returns nil result for empty glyphs (e.g., space character).
+func (r *GlyphMaskRasterizer) RasterizeHinted(
+	font ParsedFont,
+	gid GlyphID,
+	size float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+) (*GlyphMaskResult, error) {
+	// Extract outline at the target size with hinting.
+	outline, err := r.extractor.ExtractOutlineHinted(font, gid, size, hinting)
 	if err != nil {
 		return nil, err
 	}
 	if outline == nil || outline.IsEmpty() {
-		// Empty glyph (space, control char) — no mask needed.
 		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
 	}
 
