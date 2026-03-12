@@ -1022,7 +1022,8 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 	vertSize := uint64(len(vertexData))
 
 	if s.glyphMaskVertBuf == nil || s.glyphMaskVertBufCap < vertSize {
-		s.invalidateGlyphMaskBindGroups()
+		// Note: no bind group invalidation needed here — glyph mask bind groups
+		// reference (uniform, atlas texture, sampler), not vertex/index buffers.
 		if s.glyphMaskVertBuf != nil {
 			s.device.DestroyBuffer(s.glyphMaskVertBuf)
 		}
@@ -1049,7 +1050,6 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 	idxSize := uint64(len(indexData))
 
 	if s.glyphMaskIdxBuf == nil || s.glyphMaskIdxBufCap < idxSize {
-		s.invalidateGlyphMaskBindGroups()
 		if s.glyphMaskIdxBuf != nil {
 			s.device.DestroyBuffer(s.glyphMaskIdxBuf)
 		}
@@ -1133,17 +1133,6 @@ func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 		}
 		s.glyphMaskUniformBufs = append(s.glyphMaskUniformBufs, buf)
 		s.glyphMaskBindGroups = append(s.glyphMaskBindGroups, nil) // bind group created lazily
-	}
-}
-
-// invalidateGlyphMaskBindGroups destroys all cached glyph mask bind groups so
-// they are recreated with updated buffer/texture references.
-func (s *GPURenderSession) invalidateGlyphMaskBindGroups() {
-	for i, bg := range s.glyphMaskBindGroups {
-		if bg != nil {
-			s.device.DestroyBindGroup(bg)
-			s.glyphMaskBindGroups[i] = nil
-		}
 	}
 }
 

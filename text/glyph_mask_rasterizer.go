@@ -108,14 +108,13 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	// We add a 1-pixel margin for anti-aliasing coverage.
 	const aaMargin = 1
 
-	// Outline Y coordinates from sfnt are in the "Y-up" convention:
-	// positive Y = above baseline. For rasterization we need Y-down
-	// (screen coordinates). We flip Y: screenY = -outlineY.
-	// So MinY in outline becomes -MaxY in screen, and vice versa.
+	// Outline Y coordinates from sfnt are already in Y-down (screen) convention:
+	// Y=0 at baseline, Y<0 above baseline, Y>0 below baseline.
+	// No Y-flip needed — OutlineExtractor preserves sfnt's Y-down convention.
 	boundsMinX := float64(outline.Bounds.MinX) + subpixelX
 	boundsMaxX := float64(outline.Bounds.MaxX) + subpixelX
-	boundsMinY := -outline.Bounds.MaxY + subpixelY // flip Y
-	boundsMaxY := -outline.Bounds.MinY + subpixelY // flip Y
+	boundsMinY := outline.Bounds.MinY + subpixelY
+	boundsMaxY := outline.Bounds.MaxY + subpixelY
 
 	// Compute pixel-aligned bounding box
 	pixMinX := int(math.Floor(boundsMinX)) - aaMargin
@@ -137,8 +136,8 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	}
 
 	// Build raster path from outline segments.
-	// Translate so that the glyph bbox starts at (aaMargin, aaMargin) in the mask,
-	// and flip Y for screen coordinates.
+	// Translate so that the glyph bbox starts at (aaMargin, aaMargin) in the mask.
+	// No Y-flip: sfnt coordinates are already Y-down (screen convention).
 	offsetX := float32(-pixMinX) + float32(subpixelX)
 	offsetY := float32(-pixMinY) + float32(subpixelY)
 
@@ -151,31 +150,31 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 			r.pathVerbs = append(r.pathVerbs, raster.VerbMoveTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
-				-seg.Points[0].Y+offsetY, // flip Y
+				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpLineTo:
 			r.pathVerbs = append(r.pathVerbs, raster.VerbLineTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
-				-seg.Points[0].Y+offsetY,
+				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpQuadTo:
 			r.pathVerbs = append(r.pathVerbs, raster.VerbQuadTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
-				-seg.Points[0].Y+offsetY,
+				seg.Points[0].Y+offsetY,
 				seg.Points[1].X+offsetX,
-				-seg.Points[1].Y+offsetY,
+				seg.Points[1].Y+offsetY,
 			)
 		case OutlineOpCubicTo:
 			r.pathVerbs = append(r.pathVerbs, raster.VerbCubicTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
-				-seg.Points[0].Y+offsetY,
+				seg.Points[0].Y+offsetY,
 				seg.Points[1].X+offsetX,
-				-seg.Points[1].Y+offsetY,
+				seg.Points[1].Y+offsetY,
 				seg.Points[2].X+offsetX,
-				-seg.Points[2].Y+offsetY,
+				seg.Points[2].Y+offsetY,
 			)
 		}
 	}
@@ -202,9 +201,13 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	mask := make([]byte, maskW*maskH)
 	raster.FillToBuffer(eb, maskW, maskH, raster.FillRuleNonZero, mask)
 
-	// Compute bearings: offset from glyph origin to mask top-left
+	// Compute bearings: offset from glyph origin to mask top-left.
+	// BearingX: horizontal offset in pixels (negative = left of origin).
+	// BearingY: vertical offset in pixels (positive = above baseline).
+	// In Y-down coords, pixMinY is negative for above-baseline content,
+	// so -pixMinY gives positive distance above baseline.
 	bearingX := float32(pixMinX) - float32(subpixelX)
-	bearingY := float32(-pixMinY) + float32(subpixelY) // flip Y back: screen pixMinY maps to outline -pixMinY
+	bearingY := float32(-pixMinY) + float32(subpixelY)
 
 	return &GlyphMaskResult{
 		Mask:     mask,
