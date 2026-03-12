@@ -2,6 +2,9 @@
 package text
 
 import (
+	"math"
+
+	"golang.org/x/image/font"
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 )
@@ -301,32 +304,60 @@ func NewOutlineExtractor() *OutlineExtractor {
 // ExtractOutline extracts the outline for a glyph at the given size.
 // The size is in pixels (ppem - pixels per em).
 // Returns nil if the glyph has no outline (e.g., space character).
-func (e *OutlineExtractor) ExtractOutline(font ParsedFont, gid GlyphID, size float64) (*GlyphOutline, error) {
-	// Type assert to get the underlying sfnt.Font
-	xiFont, ok := font.(*ximageParsedFont)
+func (e *OutlineExtractor) ExtractOutline(parsedFont ParsedFont, gid GlyphID, size float64) (*GlyphOutline, error) {
+	return e.ExtractOutlineHinted(parsedFont, gid, size, HintingNone)
+}
+
+// ExtractOutlineHinted extracts the outline for a glyph at the given size
+// with the specified hinting mode.
+//
+// When hinting is enabled:
+//   - Advance widths are grid-fitted to integer pixel boundaries (via sfnt)
+//   - Y-coordinates of horizontal segments are snapped to pixel grid
+//     (crisp baselines, x-heights, cap-heights)
+//   - HintingVertical snaps only Y-coordinates (horizontal stems)
+//   - HintingFull snaps both X and Y coordinates
+//
+// Hinting should be disabled for rotated/scaled text where grid-fitting
+// doesn't apply (the pixel grid is no longer axis-aligned).
+func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid GlyphID, size float64, hinting Hinting) (*GlyphOutline, error) {
+	xiFont, ok := parsedFont.(*ximageParsedFont)
 	if !ok {
 		return nil, ErrUnsupportedFontType
 	}
 
-	return e.extractFromSFNT(xiFont.font, gid, size)
+	outline, err := e.extractFromSFNT(xiFont.font, gid, size, hinting)
+	if err != nil {
+		return nil, err
+	}
+
+	if outline == nil || hinting == HintingNone {
+		return outline, nil
+	}
+
+	gridFitOutline(outline, hinting)
+	return outline, nil
 }
 
 // extractFromSFNT extracts outline from an sfnt.Font.
-func (e *OutlineExtractor) extractFromSFNT(font *sfntFont, gid GlyphID, size float64) (*GlyphOutline, error) {
+func (e *OutlineExtractor) extractFromSFNT(f *sfntFont, gid GlyphID, size float64, hinting Hinting) (*GlyphOutline, error) {
 	ppem := fixed.Int26_6(size * 64) // Convert to 26.6 fixed point
 
 	// Load glyph segments
-	segments, err := font.LoadGlyph(&e.buffer, sfnt.GlyphIndex(gid), ppem, nil)
+	segments, err := f.LoadGlyph(&e.buffer, sfnt.GlyphIndex(gid), ppem, nil)
 	if err != nil {
 		// ErrNotFound means glyph doesn't exist
 		// ErrColoredGlyph means it's a color glyph (COLR/sbix)
 		return nil, err
 	}
 
+	// Convert our Hinting to font.Hinting for advance width grid-fitting.
+	fontHinting := toFontHinting(hinting)
+
 	// Check if glyph has no outline (like space)
 	if len(segments) == 0 {
 		// Still return an outline with advance info
-		advance := getGlyphAdvance(font, &e.buffer, gid, size)
+		advance := getGlyphAdvance(f, &e.buffer, gid, size, fontHinting)
 		return &GlyphOutline{
 			Segments: nil,
 			GID:      gid,
@@ -390,8 +421,8 @@ func (e *OutlineExtractor) extractFromSFNT(font *sfntFont, gid GlyphID, size flo
 		}
 	}
 
-	// Get advance
-	outline.Advance = float32(getGlyphAdvance(font, &e.buffer, gid, size))
+	// Get advance with hinting
+	outline.Advance = float32(getGlyphAdvance(f, &e.buffer, gid, size, fontHinting))
 
 	return outline, nil
 }
@@ -421,13 +452,161 @@ func updateBounds(p OutlinePoint, minX, minY, maxX, maxY *float64) {
 }
 
 // getGlyphAdvance returns the advance width for a glyph.
-func getGlyphAdvance(font *sfntFont, buf *sfnt.Buffer, gid GlyphID, size float64) float64 {
+// When hinting is enabled, the advance is grid-fitted by sfnt to integer pixels.
+func getGlyphAdvance(f *sfntFont, buf *sfnt.Buffer, gid GlyphID, size float64, h font.Hinting) float64 {
 	ppem := fixed.Int26_6(size * 64)
-	advance, err := font.GlyphAdvance(buf, sfnt.GlyphIndex(gid), ppem, 0) // No hinting for outline extraction
+	advance, err := f.GlyphAdvance(buf, sfnt.GlyphIndex(gid), ppem, h)
 	if err != nil {
 		return 0
 	}
 	return float64(advance) / 64.0
+}
+
+// toFontHinting converts our Hinting enum to golang.org/x/image/font.Hinting.
+func toFontHinting(h Hinting) font.Hinting {
+	switch h {
+	case HintingVertical:
+		return font.HintingVertical
+	case HintingFull:
+		return font.HintingFull
+	default:
+		return font.HintingNone
+	}
+}
+
+// gridFitOutline applies grid-fitting to outline coordinates for crisp rendering
+// at small pixel sizes. This is a lightweight auto-hinter inspired by FreeType's
+// approach — it snaps key coordinates to pixel boundaries without executing
+// TrueType bytecode instructions.
+//
+// Strategy per hinting mode:
+//   - HintingVertical: snap Y-coordinates of near-horizontal segments to pixel grid.
+//     This aligns baselines, x-heights, and cap-heights to pixels, which is the
+//     single highest-impact hinting operation for body text.
+//   - HintingFull: snap both X and Y coordinates of axis-aligned segments.
+//     Additionally snaps vertical stems for consistent stem widths.
+//
+// The grid-fitting threshold (0.3px) allows tolerance for slightly off-axis
+// segments that should still be snapped (e.g., a "horizontal" line at Y=3.02
+// due to floating-point rounding in font scaling).
+func gridFitOutline(outline *GlyphOutline, hinting Hinting) {
+	if outline == nil || len(outline.Segments) == 0 {
+		return
+	}
+
+	// Build snap map: detect Y-values to grid-fit and baseline snap points.
+	ySnaps := buildYSnapMap(outline)
+
+	// Apply snapping and update bounds.
+	applyGridFit(outline, ySnaps, hinting)
+}
+
+// gridFitSnapThreshold is the max deviation from a pixel boundary for a coordinate
+// to be considered "aligned" and eligible for snapping. 0.3px allows tolerance for
+// slightly off-axis segments due to floating-point rounding in font scaling.
+const gridFitSnapThreshold = 0.3
+
+// buildYSnapMap detects Y-values that should be snapped to pixel boundaries.
+// It finds near-horizontal segments (where consecutive endpoints have similar Y)
+// and baseline-proximity points (Y near 0).
+func buildYSnapMap(outline *GlyphOutline) map[float32]float32 {
+	ySnaps := make(map[float32]float32)
+
+	// Detect horizontal segments: consecutive endpoints with similar Y.
+	for i := range len(outline.Segments) - 1 {
+		seg := &outline.Segments[i]
+		next := &outline.Segments[i+1]
+
+		if next.Op == OutlineOpMoveTo {
+			continue // new contour
+		}
+
+		if next.Op == OutlineOpLineTo {
+			endY := segEndY(seg)
+			nextY := next.Points[0].Y
+			if abs32f(endY-nextY) < gridFitSnapThreshold {
+				avgY := (endY + nextY) / 2
+				snapped := float32(math.Round(float64(avgY)))
+				ySnaps[endY] = snapped
+				ySnaps[nextY] = snapped
+			}
+		}
+	}
+
+	// Baseline snap: Y near 0 → exactly 0 (highest-impact single snap point).
+	for i := range outline.Segments {
+		seg := &outline.Segments[i]
+		for j := range segPointCount(seg.Op) {
+			if abs32f(seg.Points[j].Y) < gridFitSnapThreshold {
+				ySnaps[seg.Points[j].Y] = 0
+			}
+		}
+	}
+
+	return ySnaps
+}
+
+// applyGridFit applies the snap map to outline coordinates and refreshes bounds.
+func applyGridFit(outline *GlyphOutline, ySnaps map[float32]float32, hinting Hinting) {
+	snapY := hinting == HintingVertical || hinting == HintingFull
+	snapX := hinting == HintingFull
+
+	minX, minY := float64(1e10), float64(1e10)
+	maxX, maxY := float64(-1e10), float64(-1e10)
+
+	for i := range outline.Segments {
+		seg := &outline.Segments[i]
+		for j := range segPointCount(seg.Op) {
+			if snapY {
+				if snapped, ok := ySnaps[seg.Points[j].Y]; ok {
+					seg.Points[j].Y = snapped
+				}
+			}
+			if snapX && (seg.Op == OutlineOpMoveTo || seg.Op == OutlineOpLineTo) {
+				frac := seg.Points[j].X - float32(math.Round(float64(seg.Points[j].X)))
+				if abs32f(frac) < gridFitSnapThreshold {
+					seg.Points[j].X = float32(math.Round(float64(seg.Points[j].X)))
+				}
+			}
+			updateBounds(seg.Points[j], &minX, &minY, &maxX, &maxY)
+		}
+	}
+
+	outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
+}
+
+// segEndY returns the Y coordinate of the last on-curve point of a segment.
+func segEndY(seg *OutlineSegment) float32 {
+	switch seg.Op {
+	case OutlineOpMoveTo, OutlineOpLineTo:
+		return seg.Points[0].Y
+	case OutlineOpQuadTo:
+		return seg.Points[1].Y
+	case OutlineOpCubicTo:
+		return seg.Points[2].Y
+	}
+	return 0
+}
+
+// segPointCount returns the number of points used by a segment op.
+func segPointCount(op OutlineOp) int {
+	switch op {
+	case OutlineOpMoveTo, OutlineOpLineTo:
+		return 1
+	case OutlineOpQuadTo:
+		return 2
+	case OutlineOpCubicTo:
+		return 3
+	}
+	return 0
+}
+
+// abs32f returns the absolute value of a float32.
+func abs32f(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // sfntFont is a type alias for easier access.

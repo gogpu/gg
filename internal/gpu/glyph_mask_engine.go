@@ -88,6 +88,11 @@ func (e *GlyphMaskEngine) LayoutText(
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 
+	// Auto-select hinting: enable for small text (≤48px) on axis-aligned
+	// matrices. Hinting grid-fits outlines to pixel boundaries, which only
+	// makes sense when the pixel grid is axis-aligned (no rotation/skew).
+	hinting := selectGlyphMaskHinting(fontSize, matrix)
+
 	// Premultiply color for per-vertex embedding.
 	premul := color.Premultiply()
 	vertColor := [4]float32{
@@ -109,7 +114,7 @@ func (e *GlyphMaskEngine) LayoutText(
 		// GetOrRasterize: cache hit returns immediately, miss triggers
 		// CPU rasterization via AnalyticFiller.
 		region, err := e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-			result, rErr := e.rasterizer.Rasterize(parsed, glyph.GID, fontSize, fracX, fracY)
+			result, rErr := e.rasterizer.RasterizeHinted(parsed, glyph.GID, fontSize, fracX, fracY, hinting)
 			if rErr != nil {
 				return nil, 0, 0, 0, 0, rErr
 			}
@@ -287,6 +292,29 @@ func (e *GlyphMaskEngine) Destroy(device hal.Device) {
 // Atlas returns the underlying glyph mask atlas (for testing/introspection).
 func (e *GlyphMaskEngine) Atlas() *text.GlyphMaskAtlas {
 	return e.atlas
+}
+
+// glyphMaskHintingMaxSize is the maximum font size in device pixels for which
+// hinting is auto-enabled. Above this size, outlines are smooth enough that
+// grid-fitting provides no visual benefit and can introduce distortion.
+const glyphMaskHintingMaxSize = 48.0
+
+// selectGlyphMaskHinting returns the hinting mode for glyph mask rendering.
+// Hinting is enabled for small text (≤48px) when the CTM is axis-aligned
+// (no rotation or skew), since grid-fitting requires an aligned pixel grid.
+func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix) text.Hinting {
+	// Rotated/skewed text: pixel grid is not axis-aligned, hinting would distort.
+	if matrix.B != 0 || matrix.D != 0 {
+		return text.HintingNone
+	}
+
+	// Large text: smooth enough without hinting.
+	if fontSize > glyphMaskHintingMaxSize {
+		return text.HintingNone
+	}
+
+	// Small axis-aligned text: full hinting for crisp stems and baselines.
+	return text.HintingFull
 }
 
 // computeGlyphMaskFontID generates a stable hash identifier for a font source.

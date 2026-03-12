@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composites back. Supports nested clips, arbitrary clip shapes, and transforms.
   - `SceneBuilder.Clip(shape, fn)` now fully functional
   - Safety cleanup for unbalanced clip stacks
+- **Font hinting integration (TEXT-012)** — lightweight auto-hinting for crisp text
+  at small sizes (≤48px). Grid-fits glyph outline coordinates to pixel boundaries
+  for sharp horizontal stems (baselines, x-heights, cap-heights) and consistent
+  vertical stem widths. Inspired by FreeType's auto-hinter approach.
+  - `OutlineExtractor.ExtractOutlineHinted()` with `Hinting` parameter
+  - `GlyphMaskRasterizer.RasterizeHinted()` — hinted glyph rasterization
+  - Y-coordinate grid-fitting: baseline snap (Y≈0→0), horizontal segment detection
+  - X-coordinate stem snapping in `HintingFull` mode
+  - Hinted advance widths via `sfnt.GlyphAdvance` with `font.HintingFull`
+  - Auto-selection: `HintingFull` for ≤48px axis-aligned text, `HintingNone`
+    for rotated/skewed/large text
+  - Hinting mode already in glyph cache key (no cache pollution)
 
 ### Fixed
 
