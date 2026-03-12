@@ -19,18 +19,22 @@ import (
 var glyphMaskShaderSource string
 
 // glyphMaskVertexStride is the byte stride per vertex in the glyph mask pipeline.
-// Layout per vertex:
+// Layout per vertex (matches MSDF text pipeline for Intel Vulkan driver compat):
 //
 //	position  (vec2<f32>) =  8 bytes  (location 0)
 //	tex_coord (vec2<f32>) =  8 bytes  (location 1)
-//	color     (vec4<f32>) = 16 bytes  (location 2)
-//	is_lcd    (u32)       =  4 bytes  (location 3)
 //
-// Total = 36 bytes per vertex.
-const glyphMaskVertexStride = 36
+// Total = 16 bytes per vertex.
+// Color is passed via per-batch uniform buffer (not per-vertex).
+const glyphMaskVertexStride = 16
 
 // glyphMaskUniformSize is the byte size of the glyph mask uniform buffer.
-// Layout: transform (mat4x4<f32>) = 64 bytes + color (vec4<f32>) = 16 bytes = 80 bytes.
+// Layout:
+//
+//	transform (mat4x4<f32>) = 64 bytes
+//	color     (vec4<f32>)   = 16 bytes
+//
+// Total = 80 bytes.
 const glyphMaskUniformSize = 80
 
 // GlyphMaskPipeline manages GPU resources for alpha mask text rendering
@@ -89,9 +93,16 @@ func (p *GlyphMaskPipeline) Destroy() {
 	}
 }
 
-// createPipeline compiles the glyph mask shader and creates the render
-// pipeline with premultiplied alpha blending and MSAA.
-func (p *GlyphMaskPipeline) createPipeline() error {
+// ensureSharedResources compiles the shader and creates the bind group layout,
+// pipeline layout, and sampler. These are shared between the base and stencil
+// pipeline variants. Separated from pipeline creation to allow the stencil
+// variant to be created even if the base (non-stencil) pipeline fails on
+// some Intel drivers.
+func (p *GlyphMaskPipeline) ensureSharedResources() error {
+	if p.shader != nil && p.uniformLayout != nil && p.pipeLayout != nil && p.sampler != nil {
+		return nil
+	}
+
 	if glyphMaskShaderSource == "" {
 		return fmt.Errorf("glyph_mask shader source is empty")
 	}
@@ -162,40 +173,6 @@ func (p *GlyphMaskPipeline) createPipeline() error {
 	}
 	p.sampler = sampler
 
-	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
-		Label:  "glyph_mask_pipeline",
-		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
-			Module:     p.shader,
-			EntryPoint: "vs_main",
-			Buffers:    glyphMaskVertexLayout(),
-		},
-		Fragment: &hal.FragmentState{
-			Module:     p.shader,
-			EntryPoint: "fs_main",
-			Targets: []gputypes.ColorTargetState{
-				{
-					Format:    gputypes.TextureFormatBGRA8Unorm,
-					Blend:     &premulBlend,
-					WriteMask: gputypes.ColorWriteMaskAll,
-				},
-			},
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("create glyph_mask pipeline: %w", err)
-	}
-	p.pipeline = pipeline
-
 	return nil
 }
 
@@ -206,14 +183,10 @@ func (p *GlyphMaskPipeline) createPipeline() error {
 //
 // The base pipeline (shader, layout, sampler) is created first if it
 // doesn't exist.
-//
-//nolint:dupl // Intentional: each pipeline type owns its stencil variant with distinct labels and vertex layouts.
 func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
-	// Ensure base resources exist (shader, layouts, sampler).
-	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
-		if err := p.createPipeline(); err != nil {
-			return err
-		}
+	// Ensure shared resources exist (shader, layouts, sampler).
+	if err := p.ensureSharedResources(); err != nil {
+		return err
 	}
 	if p.pipelineWithStencil != nil {
 		return nil
@@ -347,18 +320,18 @@ type glyphMaskFrameResources struct {
 //
 //	location 0: position  (vec2<f32>)
 //	location 1: tex_coord (vec2<f32>)
-//	location 2: color     (vec4<f32>)
-//	location 3: is_lcd    (u32)
+//
+// Color and is_lcd are in the uniform buffer (per-batch, not per-vertex).
+// This matches the MSDF text pipeline layout and avoids Intel Vulkan driver
+// issues with >2 vertex attributes.
 func glyphMaskVertexLayout() []gputypes.VertexBufferLayout {
 	return []gputypes.VertexBufferLayout{
 		{
 			ArrayStride: glyphMaskVertexStride,
 			StepMode:    gputypes.VertexStepModeVertex,
 			Attributes: []gputypes.VertexAttribute{
-				{Format: gputypes.VertexFormatFloat32x2, Offset: 0, ShaderLocation: 0},  // position
-				{Format: gputypes.VertexFormatFloat32x2, Offset: 8, ShaderLocation: 1},  // tex_coord
-				{Format: gputypes.VertexFormatFloat32x4, Offset: 16, ShaderLocation: 2}, // color
-				{Format: gputypes.VertexFormatUint32, Offset: 32, ShaderLocation: 3},    // is_lcd
+				{Format: gputypes.VertexFormatFloat32x2, Offset: 0, ShaderLocation: 0}, // position
+				{Format: gputypes.VertexFormatFloat32x2, Offset: 8, ShaderLocation: 1}, // tex_coord
 			},
 		},
 	}
@@ -367,7 +340,7 @@ func glyphMaskVertexLayout() []gputypes.VertexBufferLayout {
 // ---- Data types for GlyphMaskPipeline ----
 
 // GlyphMaskQuad represents a single glyph quad for alpha mask rendering.
-// Each glyph is rendered as a textured quad with position, UV, and color.
+// Each glyph is rendered as a textured quad with position and UV.
 type GlyphMaskQuad struct {
 	// Position of quad corners in screen/local space.
 	X0, Y0, X1, Y1 float32
@@ -375,25 +348,26 @@ type GlyphMaskQuad struct {
 	// UV coordinates in R8 atlas [0, 1].
 	// For LCD glyphs, UVs span the 3x-wide region in the atlas.
 	U0, V0, U1, V1 float32
-
-	// Text color (RGBA, premultiplied alpha).
-	Color [4]float32
-
-	// IsLCD indicates this quad uses LCD subpixel rendering.
-	// When set, the fragment shader samples 3 adjacent R8 texels
-	// per output pixel for per-channel alpha blending.
-	IsLCD uint32
 }
 
 // GlyphMaskBatch represents a batch of glyph mask quads with shared
-// rendering parameters. Multiple batches may use different atlas pages
-// or transforms.
+// rendering parameters. Multiple batches may use different atlas pages,
+// transforms, or colors.
 type GlyphMaskBatch struct {
 	// Quads is the list of glyph quads to render.
 	Quads []GlyphMaskQuad
 
 	// Transform is the 2D affine transform for this batch.
 	Transform gg.Matrix
+
+	// Color is the text color (RGBA, premultiplied alpha) for this batch.
+	// All glyphs in a batch share the same color (set per DrawString call).
+	Color [4]float32
+
+	// IsLCD indicates this batch uses LCD subpixel rendering.
+	// Currently unused at the shader level (grayscale-only path) due to
+	// Intel Vulkan driver compatibility. Retained for future LCD restore.
+	IsLCD bool
 
 	// AtlasPageIndex identifies which atlas page (R8 texture) to use.
 	AtlasPageIndex int
@@ -402,7 +376,7 @@ type GlyphMaskBatch struct {
 // ---- Vertex/index/uniform data builders ----
 
 // buildGlyphMaskVertexData serializes GlyphMaskQuad slices into raw vertex
-// bytes suitable for GPU upload. Each quad produces 4 vertices x 32 bytes = 128 bytes.
+// bytes suitable for GPU upload. Each quad produces 4 vertices x 16 bytes = 64 bytes.
 func buildGlyphMaskVertexData(quads []GlyphMaskQuad) []byte {
 	if len(quads) == 0 {
 		return nil
@@ -411,32 +385,28 @@ func buildGlyphMaskVertexData(quads []GlyphMaskQuad) []byte {
 	off := 0
 	for _, q := range quads {
 		// Vertex 0: top-left
-		writeGlyphMaskVertex(data[off:], q.X0, q.Y0, q.U0, q.V0, q.Color, q.IsLCD)
+		writeGlyphMaskVertex(data[off:], q.X0, q.Y0, q.U0, q.V0)
 		off += glyphMaskVertexStride
 		// Vertex 1: top-right
-		writeGlyphMaskVertex(data[off:], q.X1, q.Y0, q.U1, q.V0, q.Color, q.IsLCD)
+		writeGlyphMaskVertex(data[off:], q.X1, q.Y0, q.U1, q.V0)
 		off += glyphMaskVertexStride
 		// Vertex 2: bottom-right
-		writeGlyphMaskVertex(data[off:], q.X1, q.Y1, q.U1, q.V1, q.Color, q.IsLCD)
+		writeGlyphMaskVertex(data[off:], q.X1, q.Y1, q.U1, q.V1)
 		off += glyphMaskVertexStride
 		// Vertex 3: bottom-left
-		writeGlyphMaskVertex(data[off:], q.X0, q.Y1, q.U0, q.V1, q.Color, q.IsLCD)
+		writeGlyphMaskVertex(data[off:], q.X0, q.Y1, q.U0, q.V1)
 		off += glyphMaskVertexStride
 	}
 	return data
 }
 
 // writeGlyphMaskVertex writes a single glyph mask vertex into buf.
-func writeGlyphMaskVertex(buf []byte, x, y, u, v float32, color [4]float32, isLCD uint32) {
+// Only position and texcoord are per-vertex; color/isLCD are per-batch uniform.
+func writeGlyphMaskVertex(buf []byte, x, y, u, v float32) {
 	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(x))
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(y))
 	binary.LittleEndian.PutUint32(buf[8:12], math.Float32bits(u))
 	binary.LittleEndian.PutUint32(buf[12:16], math.Float32bits(v))
-	binary.LittleEndian.PutUint32(buf[16:20], math.Float32bits(color[0]))
-	binary.LittleEndian.PutUint32(buf[20:24], math.Float32bits(color[1]))
-	binary.LittleEndian.PutUint32(buf[24:28], math.Float32bits(color[2]))
-	binary.LittleEndian.PutUint32(buf[28:32], math.Float32bits(color[3]))
-	binary.LittleEndian.PutUint32(buf[32:36], isLCD)
 }
 
 // buildGlyphMaskIndexData serializes quad indices into raw bytes for GPU upload.
@@ -451,9 +421,8 @@ func buildGlyphMaskIndexData(numQuads int) []byte {
 }
 
 // makeGlyphMaskUniform creates the 80-byte uniform buffer for a glyph mask batch.
-// The uniform contains the transform matrix and a dummy color (per-vertex color
-// is used instead, but the struct must match the WGSL layout).
-func makeGlyphMaskUniform(transform gg.Matrix) []byte {
+// The uniform contains the transform matrix and text color.
+func makeGlyphMaskUniform(transform gg.Matrix, color [4]float32) []byte {
 	buf := make([]byte, glyphMaskUniformSize)
 	off := 0
 
@@ -471,9 +440,9 @@ func makeGlyphMaskUniform(transform gg.Matrix) []byte {
 		off += 4
 	}
 
-	// Color: set to white (1,1,1,1) as default — actual color is per-vertex.
-	for range 4 {
-		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(1.0))
+	// Color (vec4<f32>): premultiplied RGBA.
+	for i := range 4 {
+		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4
 	}
 

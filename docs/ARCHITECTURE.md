@@ -81,11 +81,11 @@ dispatches shapes and text to six rendering tiers:
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
 | **4** | MSDF Text | Text glyphs (dynamic/animated) | Multi-channel SDF with median+smoothstep shader |
 | **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
-| **6** | Glyph Mask | Text glyphs (static/UI, ≤48px) | CPU-rasterized R8 alpha atlas, GPU textured quads |
+| **6** | Glyph Mask | Text glyphs (static/UI, ≤48px) | CPU-rasterized R8 alpha atlas, GPU textured quads, ClearType LCD subpixel, font hinting |
 
 Tiers 1–4, 6 use a render-pass pipeline (one render pass, multiple pipeline switches).
 Tier 5 uses a compute-only pipeline (9 dispatch stages, no render pass).
-Auto-selection routes horizontal text ≤48px to Tier 6 (pixel-perfect), else Tier 4 (scalable MSDF).
+Auto-selection routes horizontal text ≤48px to Tier 6 (pixel-perfect with font hinting and optional ClearType LCD subpixel rendering), else Tier 4 (scalable MSDF).
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 
@@ -239,10 +239,12 @@ dc.SetRasterizerMode(gg.RasterizerAuto)          // restore auto-selection
 | `RasterizerTileCompute` | Force 16×16 tiles via `ForceableFiller` |
 | `RasterizerSDF` | Force SDF for shapes, bypass min-size check |
 
-## Text Rendering Pipeline (v0.29.0+, CPU Transform v0.32.1)
+## Text Rendering Pipeline (v0.29.0+, CPU Transform v0.32.1, Hinting+ClearType v0.36.0)
 
 Text rendering uses a multi-tier strategy. GPU MSDF handles text when available;
 the CPU pipeline uses a hybrid decision tree for transform-aware rendering.
+Glyph Mask (Tier 6) provides pixel-perfect rendering with auto-hinting and
+optional ClearType LCD subpixel rendering for small axis-aligned text.
 
 ### Pipeline Flow
 
@@ -510,6 +512,10 @@ gg/
 │   ├── layout.go           # Multi-line layout engine
 │   ├── glyph_cache.go      # LRU glyph cache (16-shard)
 │   ├── glyph_run.go        # GlyphRunBuilder for batching
+│   ├── glyph_outline.go    # Outline extraction + grid-fit hinting
+│   ├── glyph_mask_rasterizer.go # CPU rasterization (grayscale + LCD/ClearType)
+│   ├── glyph_mask_atlas.go # R8 alpha atlas (shelf packing, LRU, LCD 3x support)
+│   ├── lcd_filter.go       # ClearType 5-tap FIR filter, LCDLayout (RGB/BGR)
 │   ├── msdf/               # MSDF text rendering
 │   └── emoji/              # Color emoji support
 │
@@ -567,6 +573,8 @@ Per-tile rendering:
 | `DirtyRegion` | Tracks changed areas to minimize re-rendering |
 | `LayerCache` | Caches rendered layers between frames |
 | `tilePool` | sync.Pool for per-tile SoftwareRenderer/Pixmap reuse |
+| `RoundRectShape` | SDF-based rounded rect with per-pixel tile rendering (~5x faster) |
+| `BeginClip/EndClip` | Alpha mask compositing for clip regions (Cairo/Skia pattern) |
 
 ## CPU Tile Rasterizers (v0.25.0+)
 
@@ -768,6 +776,8 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Adaptive Threshold** | gg | `2048/sqrt(bboxArea)` — scales threshold with shape size |
 | **CoverageFiller Registration** | accelerator.go pattern | Tile rasterizer registration via `RegisterCoverageFiller()` |
 | **Hybrid Text Transform** | Skia/Cairo/Vello | 3-tier decision tree: bitmap → scaled bitmap → outline paths |
+| **Font Hinting** | FreeType auto-hinter | Grid-fit outline Y/X coordinates for crisp stems at small sizes |
+| **ClearType LCD** | FreeType/Microsoft | 3× horizontal oversampling + 5-tap FIR filter for per-channel RGB alpha |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |

@@ -132,14 +132,15 @@ func (e *GlyphMaskEngine) LayoutText(
 	lcdLayout := e.lcdLayout
 	lcdFilter := e.lcdFilter
 
-	// Premultiply color for per-vertex embedding.
+	// Premultiply color for batch-level uniform.
 	premul := color.Premultiply()
-	vertColor := [4]float32{
+	batchColor := [4]float32{
 		float32(premul.R), float32(premul.G),
 		float32(premul.B), float32(premul.A),
 	}
 
 	var quads []GlyphMaskQuad
+	var batchIsLCD bool
 
 	for glyph := range face.Glyphs(s) {
 		// Compute subpixel position (fractional part of absolute position).
@@ -200,9 +201,8 @@ func (e *GlyphMaskEngine) LayoutText(
 		qx1 := qx0 + float32(float64(regionLogicalW)*scale)
 		qy1 := qy0 + float32(float64(region.Height)*scale)
 
-		var isLCD uint32
 		if region.IsLCD {
-			isLCD = 1
+			batchIsLCD = true
 		}
 
 		quads = append(quads, GlyphMaskQuad{
@@ -210,8 +210,6 @@ func (e *GlyphMaskEngine) LayoutText(
 			X1: qx1, Y1: qy1,
 			U0: region.U0, V0: region.V0,
 			U1: region.U1, V1: region.V1,
-			Color: vertColor,
-			IsLCD: isLCD,
 		})
 	}
 
@@ -234,6 +232,8 @@ func (e *GlyphMaskEngine) LayoutText(
 	return GlyphMaskBatch{
 		Quads:          quads,
 		Transform:      transform,
+		Color:          batchColor,
+		IsLCD:          batchIsLCD,
 		AtlasPageIndex: 0, // Currently single page support (first page).
 	}, nil
 }

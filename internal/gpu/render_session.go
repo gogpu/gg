@@ -1085,7 +1085,7 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 		}
 
 		// Write uniform data for this batch.
-		uniformData := makeGlyphMaskUniform(batch.Transform)
+		uniformData := makeGlyphMaskUniform(batch.Transform, batch.Color)
 		if err := s.queue.WriteBuffer(s.glyphMaskUniformBufs[i], 0, uniformData); err != nil {
 			return nil, fmt.Errorf("write glyph mask uniform[%d]: %w", i, err)
 		}
@@ -1096,6 +1096,9 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 			// The caller (SDFAccelerator) must have synced atlas textures
 			// before calling RenderFrame, so PageTextureView should be valid.
 			// If not, skip this batch.
+			hal.Logger().Warn("glyph mask bind group nil, skipping batch",
+				"index", i, "nQuads", nQuads, "totalBatches", len(batches),
+				"poolLen", len(s.glyphMaskBindGroups))
 			continue
 		}
 

@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, six-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask), Vello analytic AA, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
+| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **Vector Export** | Recording system with PDF and SVG backends |

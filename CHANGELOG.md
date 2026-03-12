@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.36.0] - 2026-03-12
 
 ### Added
 
@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Skia/Chrome/DirectWrite pattern: CPU rasterizes glyphs at exact pixel sizes via
   AnalyticFiller (256-level AA coverage), packs into R8 alpha atlas with shelf allocator
   and LRU eviction, uploads to GPU as R8Unorm textures, composites via textured quads
-  in the render pass. Foundation for future ClearType (TEXT-011) and font hinting (TEXT-012).
+  in the render pass. Foundation for ClearType LCD rendering and font hinting (both included in this release).
   - `text/glyph_mask_atlas.go` — R8 atlas with shelf packing, LRU cache, dirty page tracking
   - `text/glyph_mask_rasterizer.go` — CPU glyph rasterization at exact device pixel size
   - `internal/gpu/glyph_mask_engine.go` — bridge between text shaping and GPU atlas
@@ -59,12 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     rasterization via AnalyticFiller + row-by-row LCD filter application
   - `GlyphMaskAtlas.PutLCD()` — stores 3×-wide RGB data in R8 atlas
   - `GlyphMaskEngine.SetLCDLayout()` / `SetLCDFilter()` — runtime LCD configuration
-  - GPU shader: dual-mode fragment shader (grayscale / LCD per-channel alpha blending)
+  - GPU shader: grayscale alpha mask fragment shader (LCD per-channel blending planned)
   - Auto-selection: LCD enabled for ≤48px axis-aligned text when layout is set
   - `IsLCD` flag in `GlyphMaskRegion` and `GlyphMaskQuad` for pipeline awareness
 
 ### Fixed
 
+- **Glyph mask text invisible in GPU windowed rendering (Intel Vulkan)** —
+  `vkCreateGraphicsPipelines` returned `VK_SUCCESS` but wrote a null pipeline handle
+  on Intel Vulkan drivers. Root cause: the `is_lcd: u32` field in the WGSL uniform
+  struct generated SPIR-V that triggered the Intel driver bug. Fix: removed `is_lcd`
+  from the shader uniform (now matches MSDF pipeline: `transform + color` only),
+  reduced uniform buffer from 96 to 80 bytes. LCD rendering temporarily uses
+  grayscale-only path; LCD support to be restored via an Intel-compatible mechanism.
 - **Glyph mask rasterizer Y-coordinate inversion** — `GlyphMaskRasterizer` applied an
   unnecessary Y-flip to outline coordinates, but `sfnt.LoadGlyph` already returns Y-down
   (screen convention). Glyphs in the R8 atlas were vertically flipped, causing mirrored
@@ -74,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (uniform buffer, atlas texture, sampler) — not vertex/index buffers — so the
   invalidation destroyed bind groups that were just configured by `syncGlyphMaskAtlases`,
   causing all glyph mask draw calls to be skipped on the first render.
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.20.1 → v0.20.2 (Vulkan WSI query function validation)
+- Updated `go-text/typesetting` v0.3.3 → v0.3.4
+- Updated `golang.org/x/image` v0.36.0 → v0.37.0
+- Updated `golang.org/x/text` v0.34.0 → v0.35.0
 
 ## [0.35.3] - 2026-03-11
 
