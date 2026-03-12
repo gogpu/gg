@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `TextModeGlyphMask` text mode + auto-selection: horizontal text ≤48px → GlyphMask,
     else MSDF (Tier 4)
   - `GPUGlyphMaskAccelerator` interface in `accelerator.go`
+- **`RoundRectShape` with SDF tile rendering** — dedicated rounded rectangle shape for
+  the scene package with per-pixel SDF (Signed Distance Field) rendering in the tile
+  renderer, bypassing the expensive path pipeline. ~5x faster than `RoundedRectShape`
+  (89ns vs 452ns, zero allocations). Supports independent X/Y corner radii.
+  - `scene.NewRoundRectShape(rect, rx, ry)` / `scene.NewRoundRectShapeUniform(rect, r)`
+  - `TagFillRoundRect` encoding tag with dedicated encoder/decoder
+  - `SceneBuilder.FillRoundRect()` convenience method
+  - SDF-based `Contains()` for hit testing
 
 ### Fixed
 

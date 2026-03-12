@@ -301,6 +301,13 @@ func (b *SceneBuilder) StrokeRect(x, y, width, height float32, brush Brush, line
 	return b.Stroke(NewRectShape(x, y, width, height), brush, lineWidth)
 }
 
+// FillRoundRect is a convenience method to fill a rounded rectangle with independent corner radii.
+// Uses SDF-based rendering for high-quality anti-aliased output.
+func (b *SceneBuilder) FillRoundRect(x, y, w, h, rx, ry float32, brush Brush) *SceneBuilder {
+	rect := Rect{MinX: x, MinY: y, MaxX: x + w, MaxY: y + h}
+	return b.Fill(NewRoundRectShape(rect, rx, ry), brush)
+}
+
 // FillCircle is a convenience method to fill a circle.
 func (b *SceneBuilder) FillCircle(cx, cy, r float32, brush Brush) *SceneBuilder {
 	return b.Fill(NewCircleShape(cx, cy, r), brush)

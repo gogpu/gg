@@ -512,6 +512,10 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 				_ = sr.Fill(pm, ggPath, paint)
 			}
 
+		case TagFillRoundRect:
+			brush, _, rect, rx, ry := dec.FillRoundRect()
+			renderFillRoundRect(pm, currentTransform, brush, rect, rx, ry, tileX, tileY)
+
 		case TagStroke:
 			brush, style := dec.Stroke()
 			if currentPath != nil && !currentPath.IsEmpty() {
@@ -547,6 +551,99 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 // ---------------------------------------------------------------------------
 // Path and Paint Conversion (scene types -> gg types)
 // ---------------------------------------------------------------------------
+
+// renderFillRoundRect renders a filled rounded rectangle using SDF per-pixel
+// evaluation directly onto the pixmap, bypassing the path pipeline entirely.
+// This is the key performance optimization: no path construction, no edge building,
+// no scanline rasterization — just per-pixel SDF coverage with smoothstep AA.
+//
+//nolint:gosec // G115: Integer conversions are bounded by tile/pixmap dimensions
+func renderFillRoundRect(pm *gg.Pixmap, transform Affine, brush Brush, rect Rect, rx, ry float32, tileX, tileY int) {
+	if brush.Kind != BrushSolid {
+		return // Only solid brushes supported for SDF path
+	}
+
+	// Transform the rect corners
+	minX, minY := transform.TransformPoint(rect.MinX, rect.MinY)
+	maxX, maxY := transform.TransformPoint(rect.MaxX, rect.MaxY)
+
+	// Ensure min < max after transform (handles negative scale)
+	if minX > maxX {
+		minX, maxX = maxX, minX
+	}
+	if minY > maxY {
+		minY, maxY = maxY, minY
+	}
+
+	// SDF parameters
+	cx := (minX + maxX) / 2
+	cy := (minY + maxY) / 2
+	halfW := (maxX - minX) / 2
+	halfH := (maxY - minY) / 2
+	radius := min32(min32(rx, ry), min32(halfW, halfH))
+
+	// Compute pixel bounds within the tile (with 1px margin for AA)
+	tileW := pm.Width()
+	tileH := pm.Height()
+	startX := max(int(minX)-tileX-1, 0)
+	startY := max(int(minY)-tileY-1, 0)
+	endX := min(int(maxX)-tileX+2, tileW)
+	endY := min(int(maxY)-tileY+2, tileH)
+
+	// Brush color components
+	br := float32(brush.Color.R)
+	bg := float32(brush.Color.G)
+	bb := float32(brush.Color.B)
+	ba := float32(brush.Color.A)
+
+	pmData := pm.Data()
+	stride := tileW * 4
+
+	for py := startY; py < endY; py++ {
+		canvasY := float32(py+tileY) + 0.5
+		rowOff := py * stride
+		for px := startX; px < endX; px++ {
+			canvasX := float32(px+tileX) + 0.5
+			coverage := sdfRoundRectCoverage(canvasX, canvasY, cx, cy, halfW, halfH, radius)
+			if coverage <= 0 {
+				continue
+			}
+			off := rowOff + px*4
+			if off+3 >= len(pmData) {
+				continue
+			}
+			blendSDF(pmData, off, br, bg, bb, ba, coverage)
+		}
+	}
+}
+
+// blendSDF blends a source color with coverage onto a destination pixel
+// using premultiplied source-over compositing.
+func blendSDF(dst []byte, off int, sr, sg, sb, sa, coverage float32) {
+	alpha := coverage * sa
+	invAlpha := 1.0 - alpha
+
+	dr := float32(dst[off]) / 255.0
+	dg := float32(dst[off+1]) / 255.0
+	db := float32(dst[off+2]) / 255.0
+	da := float32(dst[off+3]) / 255.0
+
+	dst[off] = clampByte((sr*alpha + dr*invAlpha) * 255.0)
+	dst[off+1] = clampByte((sg*alpha + dg*invAlpha) * 255.0)
+	dst[off+2] = clampByte((sb*alpha + db*invAlpha) * 255.0)
+	dst[off+3] = clampByte((alpha + da*invAlpha) * 255.0)
+}
+
+// clampByte clamps a float32 to [0, 255] and converts to byte.
+func clampByte(v float32) byte {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return byte(v + 0.5)
+}
 
 // convertPath converts a scene.Path (float32, canvas space) to a gg.Path
 // (float64, tile-local space) by subtracting the tile origin offset.

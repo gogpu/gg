@@ -79,6 +79,25 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 	// Get the current layer's encoding
 	enc := s.currentEncoding()
 
+	// Optimization: RoundRectShape uses dedicated SDF encoding
+	// which bypasses path construction entirely.
+	if rr, ok := shape.(*RoundRectShape); ok {
+		if !combinedTransform.IsIdentity() {
+			enc.EncodeTransform(combinedTransform)
+		}
+		enc.EncodeFillRoundRect(brush, style, rr.Rect, rr.RadiusX, rr.RadiusY)
+
+		shapeBounds := rr.Rect
+		if !combinedTransform.IsIdentity() {
+			shapeBounds = transformBounds(shapeBounds, combinedTransform)
+		}
+		s.bounds = s.bounds.Union(shapeBounds)
+		enc.UpdateBounds(shapeBounds)
+		s.layerStack.Top().UpdateBounds(shapeBounds)
+		s.version++
+		return
+	}
+
 	// Encode transform if not identity
 	if !combinedTransform.IsIdentity() {
 		enc.EncodeTransform(combinedTransform)

@@ -82,6 +82,11 @@ const (
 	// Data: none
 	TagEndClip Tag = 0x41
 
+	// TagFillRoundRect fills a rounded rectangle using SDF (no path encoding needed).
+	// Data: 1 uint32 brush index, 1 uint32 fill style in drawData;
+	//       6 float32 in pathData: [minX, minY, maxX, maxY, radiusX, radiusY]
+	TagFillRoundRect Tag = 0x22
+
 	// TagBrush defines a brush (solid color, gradient, etc.).
 	// Data: variable depending on brush type
 	//   Solid: 4 float32 [r, g, b, a]
@@ -113,6 +118,8 @@ func (t Tag) String() string {
 		return "EndPath"
 	case TagFill:
 		return "Fill"
+	case TagFillRoundRect:
+		return "FillRoundRect"
 	case TagStroke:
 		return "Stroke"
 	case TagPushLayer:
@@ -139,7 +146,7 @@ func (t Tag) IsPathCommand() bool {
 
 // IsDrawCommand returns true if the tag is a draw command (fill/stroke).
 func (t Tag) IsDrawCommand() bool {
-	return t == TagFill || t == TagStroke
+	return t == TagFill || t == TagFillRoundRect || t == TagStroke
 }
 
 // IsLayerCommand returns true if the tag is a layer command.
@@ -164,6 +171,8 @@ func (t Tag) DataSize() int {
 		return 4
 	case TagCubicTo:
 		return 6
+	case TagFillRoundRect:
+		return 6 // minX, minY, maxX, maxY, radiusX, radiusY
 	case TagBrush:
 		return 4 // RGBA
 	default:

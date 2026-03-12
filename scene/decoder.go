@@ -230,6 +230,40 @@ func (d *Decoder) Stroke() (brush Brush, style *StrokeStyle) {
 	return brush, style
 }
 
+// FillRoundRect reads the current FillRoundRect command data.
+// Returns the brush, fill style, bounding rectangle, and corner radii.
+// Only valid when Tag() == TagFillRoundRect.
+func (d *Decoder) FillRoundRect() (brush Brush, style FillStyle, rect Rect, rx, ry float32) {
+	if d.drawIdx+2 > len(d.enc.drawData) {
+		return Brush{}, FillNonZero, Rect{}, 0, 0
+	}
+
+	brushIdx := d.enc.drawData[d.drawIdx]
+	styleVal := d.enc.drawData[d.drawIdx+1]
+	d.drawIdx += 2
+
+	if int(brushIdx) < len(d.enc.brushes) {
+		brush = d.enc.brushes[brushIdx]
+	}
+	style = FillStyle(styleVal)
+
+	if d.pathIdx+6 > len(d.enc.pathData) {
+		return brush, style, Rect{}, 0, 0
+	}
+
+	rect = Rect{
+		MinX: d.enc.pathData[d.pathIdx],
+		MinY: d.enc.pathData[d.pathIdx+1],
+		MaxX: d.enc.pathData[d.pathIdx+2],
+		MaxY: d.enc.pathData[d.pathIdx+3],
+	}
+	rx = d.enc.pathData[d.pathIdx+4]
+	ry = d.enc.pathData[d.pathIdx+5]
+	d.pathIdx += 6
+
+	return brush, style, rect, rx, ry
+}
+
 // ---------------------------------------------------------------------------
 // Layer Command Decoders
 // ---------------------------------------------------------------------------

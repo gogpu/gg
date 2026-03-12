@@ -142,6 +142,109 @@ func (e *EllipseShape) Contains(px, py float32) bool {
 	return dx*dx+dy*dy <= 1
 }
 
+// RoundRectShape represents a rounded rectangle with independent X/Y corner radii.
+// Unlike RoundedRectShape which only supports path-based rendering via ToPath(),
+// RoundRectShape supports dedicated SDF-based rendering in the tile renderer
+// for high-quality anti-aliased output without path encoding overhead.
+type RoundRectShape struct {
+	Rect             Rect    // Bounding rectangle
+	RadiusX, RadiusY float32 // Corner radii (clamped to half-width/height)
+}
+
+// NewRoundRectShape creates a new rounded rectangle shape with independent X/Y corner radii.
+// Radii are clamped to half the rectangle's width/height respectively.
+func NewRoundRectShape(rect Rect, rx, ry float32) *RoundRectShape {
+	rx = min32(rx, rect.Width()/2)
+	ry = min32(ry, rect.Height()/2)
+	if rx < 0 {
+		rx = 0
+	}
+	if ry < 0 {
+		ry = 0
+	}
+	return &RoundRectShape{Rect: rect, RadiusX: rx, RadiusY: ry}
+}
+
+// NewRoundRectShapeUniform creates a new rounded rectangle shape with uniform corner radius.
+// The radius is clamped to half the smaller dimension.
+func NewRoundRectShapeUniform(rect Rect, r float32) *RoundRectShape {
+	return NewRoundRectShape(rect, r, r)
+}
+
+// ToPath converts the rounded rectangle to a Path.
+func (s *RoundRectShape) ToPath() *Path {
+	x := s.Rect.MinX
+	y := s.Rect.MinY
+	w := s.Rect.Width()
+	h := s.Rect.Height()
+	r := min32(s.RadiusX, s.RadiusY)
+	return NewPath().RoundedRectangle(x, y, w, h, r)
+}
+
+// Bounds returns the bounding rectangle.
+func (s *RoundRectShape) Bounds() Rect {
+	return s.Rect
+}
+
+// Contains returns true if the point (px, py) is inside the rounded rectangle,
+// using SDF-based point containment for accurate corner testing.
+func (s *RoundRectShape) Contains(px, py float32) bool {
+	// Quick AABB reject
+	if px < s.Rect.MinX || px > s.Rect.MaxX || py < s.Rect.MinY || py > s.Rect.MaxY {
+		return false
+	}
+
+	cx := (s.Rect.MinX + s.Rect.MaxX) / 2
+	cy := (s.Rect.MinY + s.Rect.MaxY) / 2
+	halfW := s.Rect.Width() / 2
+	halfH := s.Rect.Height() / 2
+	r := min32(s.RadiusX, s.RadiusY)
+
+	dist := sdfRoundRect(px, py, cx, cy, halfW, halfH, r)
+	return dist <= 0
+}
+
+// sdfRoundRect computes the signed distance from a point to a rounded rectangle.
+// Negative values are inside, positive values are outside.
+// This is a float32 version of the algorithm used in sdf.go.
+func sdfRoundRect(px, py, cx, cy, halfW, halfH, cornerRadius float32) float32 {
+	dx := abs32(px-cx) - halfW + cornerRadius
+	dy := abs32(py-cy) - halfH + cornerRadius
+
+	outside := float32(math.Sqrt(float64(max32(dx, 0)*max32(dx, 0) + max32(dy, 0)*max32(dy, 0))))
+	inside := min32(max32(dx, dy), 0)
+
+	return outside + inside - cornerRadius
+}
+
+// sdfRoundRectCoverage computes anti-aliased coverage for a filled rounded
+// rectangle using a signed distance field approach. Float32 version for scene rendering.
+func sdfRoundRectCoverage(px, py, cx, cy, halfW, halfH, cornerRadius float32) float32 {
+	dist := sdfRoundRect(px, py, cx, cy, halfW, halfH, cornerRadius)
+	return smoothstepCoverage32(dist)
+}
+
+// smoothstepCoverage32 converts a signed distance to anti-aliased coverage
+// using a Hermite smoothstep function. Float32 version.
+func smoothstepCoverage32(sdf float32) float32 {
+	const aaWidth = 0.7 // matches sdfAntialiasWidth in gg/sdf.go
+	if sdf >= aaWidth {
+		return 0
+	}
+	if sdf <= -aaWidth {
+		return 1
+	}
+	t := (sdf + aaWidth) / (2 * aaWidth)
+	return 1 - (t * t * (3 - 2*t))
+}
+
+func abs32(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // LineShape represents a line segment.
 type LineShape struct {
 	X1, Y1 float32 // Start point

@@ -496,6 +496,22 @@ func (e *Encoding) EncodeFill(brush Brush, style FillStyle) {
 	e.shapeCount++
 }
 
+// EncodeFillRoundRect adds a rounded rectangle fill command using SDF rendering.
+// This bypasses path encoding entirely, storing the rectangle geometry directly
+// in the data streams for dedicated SDF per-pixel rendering in the tile renderer.
+func (e *Encoding) EncodeFillRoundRect(brush Brush, style FillStyle, rect Rect, rx, ry float32) {
+	brushIdx := len(e.brushes)
+	e.brushes = append(e.brushes, brush)
+
+	e.tags = append(e.tags, TagFillRoundRect)
+	//nolint:gosec // brush index is bounded by slice length, overflow not possible in practice
+	e.drawData = append(e.drawData, uint32(brushIdx), uint32(style))
+	e.pathData = append(e.pathData, rect.MinX, rect.MinY, rect.MaxX, rect.MaxY, rx, ry)
+
+	e.bounds = e.bounds.Union(rect)
+	e.shapeCount++
+}
+
 // EncodeStroke adds a stroke command with the given brush and stroke style.
 func (e *Encoding) EncodeStroke(brush Brush, style *StrokeStyle) {
 	if style == nil {
@@ -653,6 +669,13 @@ func (e *Encoding) Append(other *Encoding) {
 		switch tag {
 		case TagFill:
 			// Fill has brush index at drawIdx, fill style at drawIdx+1
+			if drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += brushOffset
+			}
+			drawIdx += 2
+		case TagFillRoundRect:
+			// FillRoundRect has brush index at drawIdx, fill style at drawIdx+1
+			// Path data (rect coords + radii) is in pathData stream, no adjustment needed
 			if drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += brushOffset
 			}
