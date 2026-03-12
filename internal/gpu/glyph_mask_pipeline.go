@@ -365,8 +365,8 @@ type GlyphMaskBatch struct {
 	Color [4]float32
 
 	// IsLCD indicates this batch uses LCD subpixel rendering.
-	// When set, the fragment shader samples 3 adjacent R8 texels
-	// per output pixel for per-channel alpha blending.
+	// Currently unused at the shader level (grayscale-only path) due to
+	// Intel Vulkan driver compatibility. Retained for future LCD restore.
 	IsLCD bool
 
 	// AtlasPageIndex identifies which atlas page (R8 texture) to use.

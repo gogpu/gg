@@ -82,6 +82,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalidation destroyed bind groups that were just configured by `syncGlyphMaskAtlases`,
   causing all glyph mask draw calls to be skipped on the first render.
 
+### Changed
+
+- Updated `gogpu/wgpu` v0.20.1 → v0.20.2 (Vulkan WSI query function validation)
+- Updated `go-text/typesetting` v0.3.3 → v0.3.4
+- Updated `golang.org/x/image` v0.36.0 → v0.37.0
+- Updated `golang.org/x/text` v0.34.0 → v0.35.0
+
 ## [0.35.3] - 2026-03-11
 
 ### Fixed
