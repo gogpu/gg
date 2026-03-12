@@ -57,6 +57,15 @@ func (c *Context) DrawString(s string, x, y float64) {
 	}
 
 	switch c.selectTextStrategy() {
+	case TextModeGlyphMask:
+		// Try GPU glyph mask (Tier 6) first; fall back to MSDF, then CPU.
+		if c.tryGPUGlyphMaskText(s, x, y) {
+			return
+		}
+		if c.tryGPUText(s, x, y) {
+			return
+		}
+		c.drawStringCPU(s, x, y)
 	case TextModeMSDF:
 		// Try GPU MSDF first; fall back to CPU if unavailable.
 		if c.tryGPUText(s, x, y) {
@@ -106,12 +115,87 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	return err == nil
 }
 
+// glyphMaskMaxSize is the maximum font size (in device pixels) for which
+// the glyph mask pipeline is preferred over MSDF in TextModeAuto.
+// Above this threshold, MSDF provides better quality per atlas byte.
+const glyphMaskMaxSize = 48.0
+
+// tryGPUGlyphMaskText attempts to render text via the GPU glyph mask pipeline
+// (Tier 6). Glyphs are CPU-rasterized at the exact device pixel size into an
+// R8 alpha atlas, then drawn as textured quads by the GPU.
+// Returns true if text was successfully queued for glyph mask rendering.
+func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
+	a := Accelerator()
+	if a == nil {
+		return false
+	}
+	gma, ok := a.(GPUGlyphMaskAccelerator)
+	if !ok {
+		return false
+	}
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	err := gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.matrix, c.deviceScale)
+	return err == nil
+}
+
 // selectTextStrategy returns the effective text rendering strategy.
-// When TextModeAuto, it returns TextModeAuto to preserve the current
-// auto-selection behavior (try GPU MSDF first, then CPU).
-// Future: smarter auto-selection based on transform, size, animation state.
+//
+// When TextModeAuto, the strategy is selected based on the current
+// transformation matrix and font size:
+//   - Horizontal text (no rotation/skew) at size < 48px: GlyphMask (Tier 6)
+//     if a GPUGlyphMaskAccelerator is registered.
+//   - Everything else: falls through to TextModeAuto (MSDF -> CPU).
+//
+// Explicit modes (MSDF, Vector, Bitmap, GlyphMask) are returned as-is.
 func (c *Context) selectTextStrategy() TextMode {
-	return c.textMode
+	if c.textMode != TextModeAuto {
+		return c.textMode
+	}
+	if c.shouldUseGlyphMask() {
+		return TextModeGlyphMask
+	}
+	return TextModeAuto
+}
+
+// shouldUseGlyphMask returns true when auto-selection should prefer glyph
+// mask rendering (Tier 6). Conditions: GPU with glyph mask support, horizontal
+// matrix (no rotation/skew), font size in device pixels <= glyphMaskMaxSize.
+func (c *Context) shouldUseGlyphMask() bool {
+	a := Accelerator()
+	if a == nil {
+		return false
+	}
+	if _, ok := a.(GPUGlyphMaskAccelerator); !ok {
+		return false
+	}
+
+	// Check if the matrix is horizontal-only (no rotation or skew).
+	// Matrix [A B C; D E F]: B == 0 && D == 0 means no rotation/skew.
+	m := c.matrix
+	if m.B != 0 || m.D != 0 {
+		return false
+	}
+
+	if c.face == nil {
+		return false
+	}
+
+	return c.glyphMaskDeviceSize() <= glyphMaskMaxSize
+}
+
+// glyphMaskDeviceSize returns the effective font size in device pixels,
+// accounting for deviceScale and the Y scale component of the matrix.
+func (c *Context) glyphMaskDeviceSize() float64 {
+	deviceSize := c.face.Size() * c.deviceScale
+	absScale := c.matrix.E
+	if absScale < 0 {
+		absScale = -absScale
+	}
+	if absScale != 0 {
+		deviceSize *= absScale
+	}
+	return deviceSize
 }
 
 // DrawStringAnchored draws text with an anchor point.

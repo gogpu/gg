@@ -153,6 +153,33 @@ type GPUTextAccelerator interface {
 	DrawText(target GPURenderTarget, face any, text string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
+// GPUGlyphMaskAccelerator is an optional interface for accelerators that
+// support Tier 6 glyph mask text rendering. When the registered accelerator
+// implements this interface, Context.DrawString routes small horizontal text
+// through the glyph mask pipeline instead of MSDF.
+//
+// Glyph mask rendering CPU-rasterizes glyphs at the exact device pixel size
+// into an R8 alpha atlas, then draws them as textured quads on the GPU. This
+// produces pixel-perfect hinted text for horizontal layouts at small sizes
+// (typically <48px), matching the quality of native platform text renderers.
+//
+// The MSDF pipeline (GPUTextAccelerator) remains the preferred path for
+// rotated, scaled, or large text where resolution-independence matters.
+type GPUGlyphMaskAccelerator interface {
+	// DrawGlyphMaskText renders text at position (x, y) in user space where
+	// y is the baseline. The face provides font metrics and glyph iteration.
+	//
+	// The paint parameter provides the text color. The matrix parameter is
+	// the context's current transformation matrix (CTM). The deviceScale
+	// parameter is the ratio of physical to logical pixels.
+	//
+	// viewportW and viewportH are the viewport dimensions for building the
+	// ortho projection in the vertex shader.
+	//
+	// Returns ErrFallbackToCPU if glyph mask rendering is not available.
+	DrawGlyphMaskText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+}
+
 var (
 	accelMu sync.RWMutex
 	accel   GPUAccelerator
