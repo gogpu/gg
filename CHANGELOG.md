@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.2] - 2026-03-13
+
+### Fixed
+
+- **GPU scissor rect performance regression** — v0.36.1 scissor clipping created
+  multiple render passes per frame (one per scissor change), causing GPU utilization
+  to spike from ~3% to ~45% during scrolling. Replaced batch-breaking approach with
+  `ScissorGroup` timeline tracking — all draws accumulate within a single render
+  pass, scissor rect is changed per group via `SetScissorRect()` (WebGPU dynamic
+  state, zero cost). GPU utilization back to ~3%.
+  - `ScissorGroup` type in `GPURenderSession` for per-group scissor tracking
+  - `RenderFrameGrouped` render path (single render pass, multiple scissor groups)
+  - Removed `flushOnScissorChange` — no more extra render passes
+
 ## [0.36.1] - 2026-03-13
 
 ### Fixed
