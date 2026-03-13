@@ -426,7 +426,7 @@ func (p *SDFRenderPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *sdf
 	rp.SetPipeline(p.pipelineWithStencil)
 	rp.SetBindGroup(0, resources.bindGroup, nil)
 	rp.SetVertexBuffer(0, resources.vertBuf, 0)
-	rp.Draw(resources.vertCount, 1, 0, 0)
+	rp.Draw(resources.vertCount, 1, resources.firstVertex, 0)
 }
 
 // destroyPipeline releases all pipeline resources in reverse creation order.

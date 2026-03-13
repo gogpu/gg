@@ -393,7 +393,10 @@ func (a *SDFAccelerator) BeginFrame() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.clipRect = nil
-	a.scissorSegments = a.scissorSegments[:0]
+	// NOTE: Do NOT clear scissorSegments here. They are accumulated during the
+	// draw phase (before BeginFrame+Flush) and consumed by flushLocked(), which
+	// clears them after use. Clearing here would destroy clip data recorded
+	// between draws and the flush call in RenderDirect().
 	if a.session != nil {
 		a.session.BeginFrame()
 	}

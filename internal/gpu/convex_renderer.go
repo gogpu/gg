@@ -187,7 +187,7 @@ func (cr *ConvexRenderer) RecordDraws(rp hal.RenderPassEncoder, resources *conve
 	rp.SetPipeline(cr.pipelineWithStencil)
 	rp.SetBindGroup(0, resources.bindGroup, nil)
 	rp.SetVertexBuffer(0, resources.vertBuf, 0)
-	rp.Draw(resources.vertCount, 1, 0, 0)
+	rp.Draw(resources.vertCount, 1, resources.firstVertex, 0)
 }
 
 // createPipeline compiles the convex render shader and creates the render
@@ -296,10 +296,11 @@ func (cr *ConvexRenderer) destroyPipeline() {
 
 // convexFrameResources holds per-frame GPU resources for convex rendering.
 type convexFrameResources struct {
-	vertBuf    hal.Buffer
-	uniformBuf hal.Buffer
-	bindGroup  hal.BindGroup
-	vertCount  uint32
+	vertBuf     hal.Buffer
+	uniformBuf  hal.Buffer
+	bindGroup   hal.BindGroup
+	vertCount   uint32
+	firstVertex uint32 // offset into shared vertex buffer (for scissor group sub-ranges)
 }
 
 func (r *convexFrameResources) destroy(device hal.Device) {

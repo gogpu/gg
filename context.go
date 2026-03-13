@@ -1150,7 +1150,12 @@ func (c *Context) isClipActive() bool {
 // If no clip is active or the accelerator doesn't support ClipAware, the
 // returned function is a no-op.
 func (c *Context) setGPUClipRect() func() {
-	if !c.isClipActive() || !c.clipStack.IsRectOnly() {
+	clipActive := c.isClipActive()
+	rectOnly := clipActive && c.clipStack.IsRectOnly()
+	if !clipActive {
+		return func() {}
+	}
+	if !rectOnly {
 		return func() {}
 	}
 	a := Accelerator()

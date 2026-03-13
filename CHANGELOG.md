@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.3] - 2026-03-13
+
+### Fixed
+
+- **GPU scissor clipping lost by BeginFrame** — `SDFAccelerator.BeginFrame()`
+  cleared `scissorSegments` accumulated during the draw phase. Since
+  `RenderDirect()` calls `BeginAcceleratorFrame()` right before `FlushGPU()`,
+  all scissor data was destroyed before rendering. Segments are now only cleared
+  by `flushLocked()` after consumption.
+
 ## [0.36.2] - 2026-03-13
 
 ### Fixed
