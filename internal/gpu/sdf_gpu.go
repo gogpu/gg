@@ -93,6 +93,7 @@ type SDFAccelerator struct {
 	// (which creates multiple render passes), we record scissor boundaries
 	// and replay them within a single render pass on Flush().
 	clipRect        *[4]uint32       // Current scissor rect (nil = full framebuffer)
+	clipRRect       *ClipParams      // Current RRect clip (nil = no RRect clip)
 	scissorSegments []scissorSegment // Timeline of scissor changes within a frame
 }
 
@@ -104,6 +105,7 @@ var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
 var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
 var _ gg.ForceSDFAware = (*SDFAccelerator)(nil)
 var _ gg.ClipAware = (*SDFAccelerator)(nil)
+var _ gg.RRectClipAware = (*SDFAccelerator)(nil)
 
 // Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
@@ -137,6 +139,33 @@ func (a *SDFAccelerator) ClearClipRect() {
 	a.recordScissorSegment(nil)
 }
 
+// SetClipRRect sets the rounded rectangle clip for subsequent GPU draw
+// commands. The RRect is specified in device pixels. The clip parameters are
+// recorded in the scissor timeline so that all pending commands can be
+// rendered in a single render pass on Flush(), with per-group clip state.
+func (a *SDFAccelerator) SetClipRRect(x, y, w, h, radius float32) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.clipRRect = &ClipParams{
+		RectX1:  x,
+		RectY1:  y,
+		RectX2:  x + w,
+		RectY2:  y + h,
+		Radius:  radius,
+		Enabled: 1.0,
+	}
+	a.recordScissorSegment(a.clipRect)
+}
+
+// ClearClipRRect removes the rounded rectangle clip, restoring full rendering
+// for subsequent draw commands. The change is recorded in the scissor timeline.
+func (a *SDFAccelerator) ClearClipRRect() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.clipRRect = nil
+	a.recordScissorSegment(a.clipRect)
+}
+
 // recordScissorSegment records a scissor state change in the timeline.
 // Each segment marks the current pending counts at the time of the change.
 // During Flush(), the timeline is used to slice pending arrays into groups,
@@ -149,8 +178,15 @@ func (a *SDFAccelerator) recordScissorSegment(rect *[4]uint32) {
 		c := *rect
 		copied = &c
 	}
+	// Copy the RRect clip so it's immutable.
+	var copiedRRect *ClipParams
+	if a.clipRRect != nil {
+		c := *a.clipRRect
+		copiedRRect = &c
+	}
 	a.scissorSegments = append(a.scissorSegments, scissorSegment{
 		rect:         copied,
+		clipRRect:    copiedRRect,
 		sdfCount:     len(a.pendingShapes),
 		convexCount:  len(a.pendingConvexCommands),
 		stencilCount: len(a.pendingStencilPaths),
@@ -163,12 +199,13 @@ func (a *SDFAccelerator) recordScissorSegment(rect *[4]uint32) {
 // pending counts at the time of the change. Used to slice pending arrays
 // into per-scissor groups during Flush().
 type scissorSegment struct {
-	rect         *[4]uint32 // nil = full framebuffer
-	sdfCount     int        // len(pendingShapes) at time of change
-	convexCount  int        // len(pendingConvexCommands) at time of change
-	stencilCount int        // len(pendingStencilPaths) at time of change
-	textCount    int        // len(pendingTextBatches) at time of change
-	glyphCount   int        // len(pendingGlyphMaskBatches) at time of change
+	rect         *[4]uint32  // nil = full framebuffer
+	clipRRect    *ClipParams // nil = no RRect clip
+	sdfCount     int         // len(pendingShapes) at time of change
+	convexCount  int         // len(pendingConvexCommands) at time of change
+	stencilCount int         // len(pendingStencilPaths) at time of change
+	textCount    int         // len(pendingTextBatches) at time of change
+	glyphCount   int         // len(pendingGlyphMaskBatches) at time of change
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
@@ -227,6 +264,7 @@ func (a *SDFAccelerator) Close() {
 	}
 	a.pendingTarget = nil
 	a.clipRect = nil
+	a.clipRRect = nil
 	a.scissorSegments = nil
 	a.sceneStats = gg.SceneStats{}
 	if a.velloAccel != nil {
@@ -818,6 +856,7 @@ func (a *SDFAccelerator) buildScissorGroups() []ScissorGroup {
 
 		groups = append(groups, ScissorGroup{
 			Rect:             seg.rect,
+			ClipRRect:        seg.clipRRect,
 			SDFShapes:        a.pendingShapes[seg.sdfCount:endSDF],
 			ConvexCommands:   a.pendingConvexCommands[seg.convexCount:endConvex],
 			StencilPaths:     a.pendingStencilPaths[seg.stencilCount:endStencil],
@@ -872,7 +911,7 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error { //nolint
 	ownedGroups := make([]ScissorGroup, len(groups))
 	for i := range groups {
 		g := &groups[i]
-		ownedGroups[i] = ScissorGroup{Rect: g.Rect}
+		ownedGroups[i] = ScissorGroup{Rect: g.Rect, ClipRRect: g.ClipRRect}
 		if len(g.SDFShapes) > 0 {
 			ownedGroups[i].SDFShapes = make([]SDFRenderShape, len(g.SDFShapes))
 			copy(ownedGroups[i].SDFShapes, g.SDFShapes)

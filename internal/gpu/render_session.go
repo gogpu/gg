@@ -21,6 +21,10 @@ type ScissorGroup struct {
 	// Rect is the scissor rect in device pixels. nil means full framebuffer.
 	Rect *[4]uint32
 
+	// ClipRRect is the analytic RRect clip parameters for this group.
+	// nil means no RRect clip (full rendering within scissor rect).
+	ClipRRect *ClipParams
+
 	// Per-tier draw command subsets for this scissor state.
 	SDFShapes        []SDFRenderShape
 	ConvexCommands   []ConvexDrawCommand
@@ -166,6 +170,17 @@ type GPURenderSession struct {
 	// When non-nil, all draw commands are clipped to this rectangle.
 	// nil means full framebuffer (default, no clipping).
 	scissorRect *[4]uint32
+
+	// RRect clip bind group infrastructure. All 5 pipelines share the same
+	// clip bind group layout at @group(1) @binding(0). A no-clip bind group
+	// (clip_enabled=0.0) is created once and reused for groups without RRect clip.
+	clipBindLayout   hal.BindGroupLayout
+	noClipUniformBuf hal.Buffer
+	noClipBindGroup  hal.BindGroup
+	// Pool of per-group clip uniform buffers and bind groups.
+	clipUniformPool []hal.Buffer
+	clipBindPool    []hal.BindGroup
+	clipPoolUsed    int // number of pool entries used in current frame
 }
 
 // NewGPURenderSession creates a new render session with the given device and
@@ -329,6 +344,11 @@ func (s *GPURenderSession) RenderFrame(
 		return fmt.Errorf("ensure textures: %w", err)
 	}
 
+	// Clip bind layout must be created BEFORE pipelines, because pipeline
+	// layout creation includes the clip layout at @group(1).
+	if err := s.ensureClipBindLayout(); err != nil {
+		return fmt.Errorf("ensure clip bind layout: %w", err)
+	}
 	if err := s.ensurePipelines(); err != nil {
 		return fmt.Errorf("ensure pipelines: %w", err)
 	}
@@ -375,14 +395,15 @@ func (s *GPURenderSession) RenderFrame(
 
 // groupResources holds pre-built GPU resources for a single ScissorGroup.
 type groupResources struct {
-	scissorRect  *[4]uint32
-	sdfRes       *sdfFrameResources
-	sdfShapes    []SDFRenderShape
-	convexRes    *convexFrameResources
-	stencilRes   []*stencilCoverBuffers
-	stencilPaths []StencilPathCommand
-	textRes      *textFrameResources
-	glyphMaskRes *glyphMaskFrameResources
+	scissorRect   *[4]uint32
+	clipBindGroup hal.BindGroup // @group(1) bind group for RRect clip (or no-clip)
+	sdfRes        *sdfFrameResources
+	sdfShapes     []SDFRenderShape
+	convexRes     *convexFrameResources
+	stencilRes    []*stencilCoverBuffers
+	stencilPaths  []StencilPathCommand
+	textRes       *textFrameResources
+	glyphMaskRes  *glyphMaskFrameResources
 }
 
 // RenderFrameGrouped renders multiple scissor groups in a single render pass.
@@ -414,9 +435,16 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	if err := s.EnsureTextures(w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
+	// Clip bind layout must be created BEFORE pipelines, because pipeline
+	// layout creation includes the clip layout at @group(1).
+	if err := s.ensureClipBindLayout(); err != nil {
+		return fmt.Errorf("ensure clip bind layout: %w", err)
+	}
 	if err := s.ensurePipelines(); err != nil {
 		return fmt.Errorf("ensure pipelines: %w", err)
 	}
+	// Reset clip pool usage for this frame.
+	s.clipPoolUsed = 0
 
 	// Concatenate all items across groups into combined arrays, tracking
 	// per-group offsets. Resources are built ONCE from combined data to avoid
@@ -506,6 +534,13 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		o := &gOff[i]
 		grpRes[i].scissorRect = groups[i].Rect
 		grpRes[i].stencilPaths = allStencil[o.stencilStart : o.stencilStart+o.stencilCount]
+
+		// Clip bind group: active RRect clip or no-clip.
+		clipBG, err := s.getClipBindGroup(groups[i].ClipRRect)
+		if err != nil {
+			return fmt.Errorf("get clip bind group for group %d: %w", i, err)
+		}
+		grpRes[i].clipBindGroup = clipBG
 
 		// SDF: shared buffer, per-group firstVertex + vertCount.
 		if o.sdfCount > 0 && combinedSdfRes != nil {
@@ -619,7 +654,7 @@ func (s *GPURenderSession) drainQueue() {
 	_, _ = s.device.Wait(fence, 1, 5*time.Second)
 }
 
-func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen // sequential resource cleanup across 6 tiers
+func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen,gocognit // sequential resource cleanup across 6 tiers
 	if s.sdfBindGroup != nil {
 		s.device.DestroyBindGroup(s.sdfBindGroup)
 		s.sdfBindGroup = nil
@@ -710,6 +745,34 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		b.destroy(s.device)
 	}
 	s.stencilBufPool = s.stencilBufPool[:0]
+
+	// Clip bind group pool.
+	for i, bg := range s.clipBindPool {
+		if bg != nil {
+			s.device.DestroyBindGroup(bg)
+			s.clipBindPool[i] = nil
+		}
+	}
+	s.clipBindPool = nil
+	for _, buf := range s.clipUniformPool {
+		if buf != nil {
+			s.device.DestroyBuffer(buf)
+		}
+	}
+	s.clipUniformPool = nil
+	s.clipPoolUsed = 0
+	if s.noClipBindGroup != nil {
+		s.device.DestroyBindGroup(s.noClipBindGroup)
+		s.noClipBindGroup = nil
+	}
+	if s.noClipUniformBuf != nil {
+		s.device.DestroyBuffer(s.noClipUniformBuf)
+		s.noClipUniformBuf = nil
+	}
+	if s.clipBindLayout != nil {
+		s.device.DestroyBindGroupLayout(s.clipBindLayout)
+		s.clipBindLayout = nil
+	}
 }
 
 // sdfFrameResources holds per-frame GPU resources for SDF rendering.
@@ -729,6 +792,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 	if s.sdfPipeline == nil {
 		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue)
 	}
+	s.sdfPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.sdfPipeline.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("SDF pipeline: %w", err)
 	}
@@ -736,6 +800,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 	if s.convexRenderer == nil {
 		s.convexRenderer = NewConvexRenderer(s.device, s.queue)
 	}
+	s.convexRenderer.SetClipBindLayout(s.clipBindLayout)
 	if err := s.convexRenderer.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("convex pipeline: %w", err)
 	}
@@ -743,6 +808,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 	if s.stencilRenderer == nil {
 		s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
 	}
+	s.stencilRenderer.SetClipBindLayout(s.clipBindLayout)
 	if s.stencilRenderer.nonZeroStencilPipeline == nil {
 		if err := s.stencilRenderer.createPipelines(); err != nil {
 			return fmt.Errorf("stencil pipelines: %w", err)
@@ -752,12 +818,126 @@ func (s *GPURenderSession) ensurePipelines() error {
 	return nil
 }
 
+// ensureClipBindLayout creates the shared bind group layout for the RRect
+// clip uniform at @group(1) @binding(0), plus the no-clip bind group that
+// is used when no RRect clip is active.
+func (s *GPURenderSession) ensureClipBindLayout() error {
+	if s.clipBindLayout != nil {
+		return nil
+	}
+
+	layout, err := s.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+		Label: "clip_bind_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create clip bind layout: %w", err)
+	}
+	s.clipBindLayout = layout
+
+	// Create the no-clip uniform buffer (clip_enabled=0.0).
+	noClip := NoClipParams()
+	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		Label: "clip_no_clip_uniform",
+		Size:  clipParamsSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return fmt.Errorf("create no-clip uniform buffer: %w", err)
+	}
+	if err := s.queue.WriteBuffer(buf, 0, noClip.Bytes()); err != nil {
+		s.device.DestroyBuffer(buf)
+		return fmt.Errorf("write no-clip uniform buffer: %w", err)
+	}
+	s.noClipUniformBuf = buf
+
+	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label:  "clip_no_clip_bind",
+		Layout: s.clipBindLayout,
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{
+				Buffer: buf.NativeHandle(), Offset: 0, Size: clipParamsSize,
+			}},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create no-clip bind group: %w", err)
+	}
+	s.noClipBindGroup = bg
+	return nil
+}
+
+// getClipBindGroup returns a bind group for the given ClipParams. If params
+// is nil, returns the shared no-clip bind group. Otherwise, allocates from
+// a pool of per-frame clip uniform buffers.
+func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (hal.BindGroup, error) {
+	if params == nil {
+		return s.noClipBindGroup, nil
+	}
+
+	// Reuse from pool if available.
+	idx := s.clipPoolUsed
+	if idx < len(s.clipUniformPool) {
+		// Reuse existing buffer, just update its contents.
+		if err := s.queue.WriteBuffer(s.clipUniformPool[idx], 0, params.Bytes()); err != nil {
+			return nil, fmt.Errorf("write clip uniform: %w", err)
+		}
+		s.clipPoolUsed++
+		return s.clipBindPool[idx], nil
+	}
+
+	// Grow pool: create new buffer and bind group.
+	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		Label: fmt.Sprintf("clip_uniform_%d", idx),
+		Size:  clipParamsSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create clip uniform buffer: %w", err)
+	}
+	if err := s.queue.WriteBuffer(buf, 0, params.Bytes()); err != nil {
+		s.device.DestroyBuffer(buf)
+		return nil, fmt.Errorf("write clip uniform: %w", err)
+	}
+	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		Label:  fmt.Sprintf("clip_bind_%d", idx),
+		Layout: s.clipBindLayout,
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0, Resource: gputypes.BufferBinding{
+				Buffer: buf.NativeHandle(), Offset: 0, Size: clipParamsSize,
+			}},
+		},
+	})
+	if err != nil {
+		s.device.DestroyBuffer(buf)
+		return nil, fmt.Errorf("create clip bind group: %w", err)
+	}
+	s.clipUniformPool = append(s.clipUniformPool, buf)
+	s.clipBindPool = append(s.clipBindPool, bg)
+	s.clipPoolUsed++
+	return bg, nil
+}
+
+// ClipBindLayout returns the shared clip bind group layout for @group(1).
+// Pipeline creation methods use this to include the clip layout in their
+// pipeline layouts. Must call ensureClipBindLayout() first.
+func (s *GPURenderSession) ClipBindLayout() hal.BindGroupLayout {
+	return s.clipBindLayout
+}
+
 // ensureTextPipeline creates the MSDF text pipeline on demand. Called only
 // when text batches are present. Returns error if shader compilation fails.
 func (s *GPURenderSession) ensureTextPipeline() error {
 	if s.textPipeline == nil {
 		s.textPipeline = NewMSDFTextPipeline(s.device, s.queue)
 	}
+	s.textPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.textPipeline.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("text pipeline: %w", err)
 	}
@@ -1209,6 +1389,7 @@ func (s *GPURenderSession) ensureGlyphMaskPipeline() error {
 	if s.glyphMaskPipeline == nil {
 		s.glyphMaskPipeline = NewGlyphMaskPipeline(s.device, s.queue)
 	}
+	s.glyphMaskPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.glyphMaskPipeline.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("glyph mask pipeline: %w", err)
 	}
@@ -1445,6 +1626,11 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	rp := encoder.BeginRenderPass(rpDesc)
 	s.applyScissorRect(rp)
 
+	// Bind no-clip at @group(1) for non-grouped path (no RRect clip).
+	if s.noClipBindGroup != nil {
+		rp.SetBindGroup(1, s.noClipBindGroup, nil)
+	}
+
 	// Tier 1: SDF shapes (no stencil interaction).
 	if sdfRes != nil && len(sdfShapes) > 0 {
 		s.sdfPipeline.RecordDraws(rp, sdfRes)
@@ -1640,6 +1826,11 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	rp := encoder.BeginRenderPass(rpDesc)
 	s.applyScissorRect(rp)
 
+	// Bind no-clip at @group(1) for non-grouped path (no RRect clip).
+	if s.noClipBindGroup != nil {
+		rp.SetBindGroup(1, s.noClipBindGroup, nil)
+	}
+
 	// Tier 1: SDF shapes (no stencil interaction).
 	if sdfRes != nil && len(sdfShapes) > 0 {
 		s.sdfPipeline.RecordDraws(rp, sdfRes)
@@ -1697,7 +1888,12 @@ func (s *GPURenderSession) encodeSubmitSurface(
 // recordGroupDraws records all tier draw commands for a single group into
 // the given render pass encoder. This is the inner loop of the grouped
 // encode methods — called once per scissor group within a single render pass.
-func (s *GPURenderSession) recordGroupDraws(rp hal.RenderPassEncoder, gr groupResources) {
+func (s *GPURenderSession) recordGroupDraws(rp hal.RenderPassEncoder, gr *groupResources) {
+	// Bind the clip uniform at @group(1) for all tiers in this group.
+	if gr.clipBindGroup != nil {
+		rp.SetBindGroup(1, gr.clipBindGroup, nil)
+	}
+
 	// Tier 1: SDF shapes (no stencil interaction).
 	if gr.sdfRes != nil && len(gr.sdfShapes) > 0 {
 		s.sdfPipeline.RecordDraws(rp, gr.sdfRes)
@@ -1858,9 +2054,9 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	rp := encoder.BeginRenderPass(rpDesc)
 
 	// Render each group with its scissor rect applied.
-	for _, gr := range grpRes {
-		s.applyGroupScissor(rp, gr.scissorRect, w, h)
-		s.recordGroupDraws(rp, gr)
+	for i := range grpRes {
+		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
+		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
 	rp.End()
@@ -1932,9 +2128,9 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	rp := encoder.BeginRenderPass(rpDesc)
 
 	// Render each group with its scissor rect applied.
-	for _, gr := range grpRes {
-		s.applyGroupScissor(rp, gr.scissorRect, w, h)
-		s.recordGroupDraws(rp, gr)
+	for i := range grpRes {
+		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
+		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
 	rp.End()

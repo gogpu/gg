@@ -72,6 +72,10 @@ type SDFRenderPipeline struct {
 	// The stencil test is Always/Keep (SDF shapes don't interact with stencil).
 	pipelineWithStencil hal.RenderPipeline
 
+	// Clip bind group layout for @group(1). Set by the session before
+	// pipeline creation. When non-nil, included in the pipeline layout.
+	clipBindLayout hal.BindGroupLayout
+
 	// MSAA and resolve textures for offscreen rendering (standalone mode).
 	// When used via GPURenderSession, these are nil -- the session owns textures.
 	msaaTex     hal.Texture
@@ -80,6 +84,13 @@ type SDFRenderPipeline struct {
 	resolveView hal.TextureView
 
 	width, height uint32
+}
+
+// SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
+// uniform. Must be called before ensurePipelineWithStencil. The layout is
+// owned by the session and must not be destroyed by the pipeline.
+func (p *SDFRenderPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
+	p.clipBindLayout = layout
 }
 
 // NewSDFRenderPipeline creates a new SDF render pipeline with the given device
@@ -295,9 +306,13 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 	}
 	p.uniformLayout = uniformLayout
 
+	bgLayouts := []hal.BindGroupLayout{p.uniformLayout}
+	if p.clipBindLayout != nil {
+		bgLayouts = append(bgLayouts, p.clipBindLayout)
+	}
 	pipeLayout, err := p.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
 		Label:            "sdf_render_pipe_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{p.uniformLayout},
+		BindGroupLayouts: bgLayouts,
 	})
 	if err != nil {
 		return fmt.Errorf("create pipeline layout: %w", err)

@@ -49,6 +49,11 @@ type StencilRenderer struct {
 	stencilPipeLayout hal.PipelineLayout
 	coverPipeLayout   hal.PipelineLayout
 
+	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
+	// Set by the session before createPipelines. Only the cover pipeline needs
+	// it (stencil fill has no color output, so clip is irrelevant there).
+	clipBindLayout hal.BindGroupLayout
+
 	// Render pipelines.
 	// nonZeroStencilPipeline implements the non-zero winding fill rule:
 	// front faces increment stencil, back faces decrement.
@@ -70,6 +75,13 @@ func NewStencilRenderer(device hal.Device, queue hal.Queue) *StencilRenderer {
 		device: device,
 		queue:  queue,
 	}
+}
+
+// SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
+// uniform. Must be called before createPipelines. The layout is owned by the
+// session and must not be destroyed by the renderer.
+func (sr *StencilRenderer) SetClipBindLayout(layout hal.BindGroupLayout) {
+	sr.clipBindLayout = layout
 }
 
 // EnsureTextures creates or recreates the MSAA color, stencil, and resolve textures

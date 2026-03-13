@@ -152,6 +152,11 @@ func (r *Recording) Playback(backend Backend) error {
 			backend.SetClip(path, c.Rule)
 		case ClearClipCommand:
 			backend.ClearClip()
+		case ClipRoundRectCommand:
+			// Convert RRect clip to a path for backends that don't
+			// natively support rounded rectangle clipping.
+			rrPath := gg.BuildPath().RoundRect(c.X, c.Y, c.W, c.H, c.Radius).Build()
+			backend.SetClip(rrPath, FillRuleNonZero)
 		case FillPathCommand:
 			path := r.resources.GetPath(c.Path)
 			brush := r.resources.GetBrush(c.Brush)
@@ -855,6 +860,14 @@ func (r *Recorder) ClipPreserve() {
 // ResetClip removes all clipping regions.
 func (r *Recorder) ResetClip() {
 	r.commands = append(r.commands, ClearClipCommand{})
+}
+
+// ClipRoundRect sets a rounded rectangle as the clipping region.
+// The rectangle is defined in user-space coordinates with uniform corner radius.
+func (r *Recorder) ClipRoundRect(x, y, w, h, radius float64) {
+	r.commands = append(r.commands, ClipRoundRectCommand{
+		X: x, Y: y, W: w, H: h, Radius: radius,
+	})
 }
 
 // --------------------------------------------------------------------------

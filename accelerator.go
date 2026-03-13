@@ -343,6 +343,30 @@ type ClipAware interface {
 	ClearClipRect()
 }
 
+// RRectClipAware is an optional interface for accelerators that support
+// GPU-accelerated rounded rectangle clipping via analytic SDF in fragment
+// shaders. When the Context has an active RRect clip region (ClipRoundRect),
+// it passes the clip parameters to the accelerator. The fragment shader
+// evaluates the RRect SDF per pixel and discards fragments outside the
+// rounded rectangle.
+//
+// This is a two-level clip strategy: the scissor rect (via ClipAware)
+// provides a free coarse clip to the bounding box, while the RRect SDF
+// provides fine per-pixel clipping with anti-aliased rounded corners.
+//
+// This covers ~95% of non-rectangular UI clipping (card views, dialogs,
+// avatars, pill buttons). Path-based clips require GPU-CLIP-003 (stencil).
+type RRectClipAware interface {
+	// SetClipRRect sets the rounded rectangle clip for subsequent GPU draw
+	// commands. Coordinates are in device pixels (float32). The clip region
+	// is defined by the rectangle (x, y, w, h) with uniform corner radius.
+	SetClipRRect(x, y, w, h, radius float32)
+
+	// ClearClipRRect removes the rounded rectangle clip, restoring full
+	// rendering for subsequent draw commands.
+	ClearClipRRect()
+}
+
 // SceneStatsTracker is an optional interface for accelerators that track
 // per-frame scene statistics for auto pipeline selection. The Context
 // does not call these methods directly — the accelerator uses them internally.

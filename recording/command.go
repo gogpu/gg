@@ -38,11 +38,12 @@ type CommandType uint8
 
 const (
 	// State commands
-	CmdSave         CommandType = iota // Save current state
-	CmdRestore                         // Restore previous state
-	CmdSetTransform                    // Set transformation matrix
-	CmdSetClip                         // Set clipping region
-	CmdClearClip                       // Clear clipping region
+	CmdSave          CommandType = iota // Save current state
+	CmdRestore                          // Restore previous state
+	CmdSetTransform                     // Set transformation matrix
+	CmdSetClip                          // Set clipping region
+	CmdClearClip                        // Clear clipping region
+	CmdClipRoundRect                    // Set rounded rectangle clipping region
 
 	// Drawing commands
 	CmdFillPath   // Fill a path
@@ -70,6 +71,7 @@ var commandTypeNames = [...]string{
 	CmdSetTransform:   "SetTransform",
 	CmdSetClip:        "SetClip",
 	CmdClearClip:      "ClearClip",
+	CmdClipRoundRect:  "ClipRoundRect",
 	CmdFillPath:       "FillPath",
 	CmdStrokePath:     "StrokePath",
 	CmdFillRect:       "FillRect",
@@ -179,6 +181,20 @@ type ClearClipCommand struct{}
 
 // Type implements Command.
 func (ClearClipCommand) Type() CommandType { return CmdClearClip }
+
+// ClipRoundRectCommand sets a rounded rectangle as the clipping region.
+// The rectangle is defined in user-space coordinates with a uniform corner radius.
+type ClipRoundRectCommand struct {
+	// X, Y is the top-left corner of the rectangle.
+	X, Y float64
+	// W, H is the width and height of the rectangle.
+	W, H float64
+	// Radius is the corner radius.
+	Radius float64
+}
+
+// Type implements Command.
+func (ClipRoundRectCommand) Type() CommandType { return CmdClipRoundRect }
 
 // --------------------------------------------------------------------------
 // Drawing Commands

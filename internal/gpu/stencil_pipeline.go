@@ -88,9 +88,13 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	}
 	sr.stencilPipeLayout = stencilPipeLayout
 
+	coverBGLayouts := []hal.BindGroupLayout{sr.uniformLayout}
+	if sr.clipBindLayout != nil {
+		coverBGLayouts = append(coverBGLayouts, sr.clipBindLayout)
+	}
 	coverPipeLayout, err := sr.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
 		Label:            "cover_pipe_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{sr.uniformLayout},
+		BindGroupLayouts: coverBGLayouts,
 	})
 	if err != nil {
 		return fmt.Errorf("create cover pipeline layout: %w", err)

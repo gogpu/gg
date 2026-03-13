@@ -1145,27 +1145,38 @@ func (c *Context) isClipActive() bool {
 	return c.clipStack != nil && c.clipStack.Depth() > 0
 }
 
-// setGPUClipRect sets the GPU scissor rect if a rectangular clip is active.
-// Returns a cleanup function that must be deferred to clear the scissor rect.
+// setGPUClipRect sets the GPU scissor rect and/or RRect clip if a clip region
+// is active. Returns a cleanup function that must be deferred to clear the
+// clip state. Handles three cases:
+//
+//  1. Rect-only clip → hardware scissor rect (free, zero per-pixel cost)
+//  2. RRect clip → scissor rect (bounding box) + SDF in fragment shader
+//  3. Path clip → not handled (returns no-op, CPU fallback)
+//
 // If no clip is active or the accelerator doesn't support ClipAware, the
 // returned function is a no-op.
 func (c *Context) setGPUClipRect() func() {
-	clipActive := c.isClipActive()
-	rectOnly := clipActive && c.clipStack.IsRectOnly()
-	if !clipActive {
-		return func() {}
-	}
-	if !rectOnly {
+	if !c.isClipActive() {
 		return func() {}
 	}
 	a := Accelerator()
 	if a == nil {
 		return func() {}
 	}
+
+	rectOnly := c.clipStack.IsRectOnly()
+	rrectOnly := c.clipStack.IsRRectOnly()
+
+	// Path clips are not GPU-accelerated (need mask texture or stencil).
+	if !rectOnly && !rrectOnly {
+		return func() {}
+	}
+
 	ca, ok := a.(ClipAware)
 	if !ok {
 		return func() {}
 	}
+
 	bounds := c.clipStack.Bounds()
 	// Convert float64 clip bounds to uint32 device pixel scissor rect.
 	// floor(x,y) for top-left, ceil(right,bottom) for full pixel coverage.
@@ -1177,6 +1188,25 @@ func (c *Context) setGPUClipRect() func() {
 		return func() {} // Zero-area clip — nothing to render
 	}
 	ca.SetClipRect(x0, y0, x1-x0, y1-y0)
+
+	// If there's an RRect clip, also set the analytic SDF clip.
+	if !rectOnly {
+		if rca, ok2 := a.(RRectClipAware); ok2 {
+			rrBounds, radius, hasRRect := c.clipStack.RRectBounds()
+			if hasRRect {
+				rca.SetClipRRect(
+					float32(rrBounds.X), float32(rrBounds.Y),
+					float32(rrBounds.W), float32(rrBounds.H),
+					float32(radius),
+				)
+				return func() {
+					ca.ClearClipRect()
+					rca.ClearClipRRect()
+				}
+			}
+		}
+	}
+
 	return func() { ca.ClearClipRect() }
 }
 

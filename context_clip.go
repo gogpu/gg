@@ -63,6 +63,49 @@ func (c *Context) ClipRect(x, y, w, h float64) {
 	c.clipStack.PushRect(rect)
 }
 
+// ClipRoundRect sets a rounded rectangle clipping region.
+// The rectangle is defined by (x, y, w, h) in user coordinates and the
+// corners are rounded with the given radius. The radius is clamped to
+// min(w, h)/2. If radius is zero, this is equivalent to ClipRect.
+//
+// On GPU, this uses a two-level clip strategy:
+//   - Scissor rect (hardware, free) for the bounding box
+//   - Analytic SDF in the fragment shader for the rounded corners
+//
+// On CPU, the SDF is evaluated per-pixel during coverage computation.
+func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
+	if radius <= 0 {
+		c.ClipRect(x, y, w, h)
+		return
+	}
+
+	if c.clipStack == nil {
+		c.initClipStack()
+	}
+
+	// Transform the rectangle corners.
+	p1 := c.matrix.TransformPoint(Pt(x, y))
+	p2 := c.matrix.TransformPoint(Pt(x+w, y+h))
+
+	// Create clip rectangle in device coordinates.
+	devX := math.Min(p1.X, p2.X)
+	devY := math.Min(p1.Y, p2.Y)
+	devW := math.Abs(p2.X - p1.X)
+	devH := math.Abs(p2.Y - p1.Y)
+
+	// Scale radius by the transform scale factor.
+	scaledRadius := radius * c.matrix.ScaleFactor()
+
+	// Clamp to half the smaller dimension.
+	maxRadius := math.Min(devW, devH) / 2
+	if scaledRadius > maxRadius {
+		scaledRadius = maxRadius
+	}
+
+	rect := clip.NewRect(devX, devY, devW, devH)
+	c.clipStack.PushRRect(rect, scaledRadius)
+}
+
 // ResetClip removes all clipping regions, restoring the full canvas as drawable.
 func (c *Context) ResetClip() {
 	if c.clipStack == nil {
