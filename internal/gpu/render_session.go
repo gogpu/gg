@@ -392,7 +392,7 @@ type groupResources struct {
 //
 // For frames with no scissor changes (single group with nil rect), this
 // behaves identically to the original RenderFrame.
-func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error {
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error { //nolint:gocognit,gocyclo,cyclop,funlen // sequential resource setup + group dispatch
 	if len(groups) == 0 {
 		return nil
 	}
@@ -423,47 +423,129 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		return fmt.Errorf("ensure pipelines: %w", err)
 	}
 
-	// Build GPU resources for each group.
-	grpRes := make([]groupResources, len(groups))
+	// Concatenate all items across groups into combined arrays, tracking
+	// per-group offsets. Resources are built ONCE from combined data to avoid
+	// overwriting shared GPU buffers (vertex, index, uniform) — all build*
+	// methods write to session-level shared buffers, so calling them per-group
+	// would overwrite previous groups' data.
+	var allSDF []SDFRenderShape
+	var allConvex []ConvexDrawCommand
+	var allStencil []StencilPathCommand
+	var allText []TextBatch
+	var allGlyph []GlyphMaskBatch
+
+	type groupOffset struct {
+		sdfStart, sdfCount         int
+		convexStart, convexCount   int
+		stencilStart, stencilCount int
+		textStart, textCount       int
+		glyphStart, glyphCount     int
+	}
+	gOff := make([]groupOffset, len(groups))
+
 	for i := range groups {
 		g := &groups[i]
-		grpRes[i].scissorRect = g.Rect
-		grpRes[i].sdfShapes = g.SDFShapes
-		grpRes[i].stencilPaths = g.StencilPaths
-
-		if len(g.SDFShapes) > 0 {
-			res, err := s.buildSDFResources(g.SDFShapes, w, h)
-			if err != nil {
-				return fmt.Errorf("build SDF resources (group %d): %w", i, err)
-			}
-			grpRes[i].sdfRes = res
+		gOff[i] = groupOffset{
+			sdfStart: len(allSDF), sdfCount: len(g.SDFShapes),
+			convexStart: len(allConvex), convexCount: len(g.ConvexCommands),
+			stencilStart: len(allStencil), stencilCount: len(g.StencilPaths),
+			textStart: len(allText), textCount: len(g.TextBatches),
+			glyphStart: len(allGlyph), glyphCount: len(g.GlyphMaskBatches),
 		}
+		allSDF = append(allSDF, g.SDFShapes...)
+		allConvex = append(allConvex, g.ConvexCommands...)
+		allStencil = append(allStencil, g.StencilPaths...)
+		allText = append(allText, g.TextBatches...)
+		allGlyph = append(allGlyph, g.GlyphMaskBatches...)
+	}
 
-		if len(g.ConvexCommands) > 0 {
-			res, err := s.buildConvexResources(g.ConvexCommands, w, h)
-			if err != nil {
-				return fmt.Errorf("build convex resources (group %d): %w", i, err)
-			}
-			grpRes[i].convexRes = res
-		}
-
-		stencilRes, err := s.buildStencilResourcesBatch(g.StencilPaths, w, h)
+	// Build combined resources (single buffer write per tier).
+	var combinedSdfRes *sdfFrameResources
+	if len(allSDF) > 0 {
+		res, err := s.buildSDFResources(allSDF, w, h)
 		if err != nil {
-			return fmt.Errorf("build stencil resources (group %d): %w", i, err)
+			return fmt.Errorf("build SDF resources: %w", err)
 		}
-		grpRes[i].stencilRes = stencilRes
+		combinedSdfRes = res
+	}
 
-		textRes, err := s.prepareTextResources(g.TextBatches)
+	var combinedConvexRes *convexFrameResources
+	if len(allConvex) > 0 {
+		res, err := s.buildConvexResources(allConvex, w, h)
+		if err != nil {
+			return fmt.Errorf("build convex resources: %w", err)
+		}
+		combinedConvexRes = res
+	}
+
+	var combinedStencilRes []*stencilCoverBuffers
+	if len(allStencil) > 0 {
+		res, err := s.buildStencilResourcesBatch(allStencil, w, h)
+		if err != nil {
+			return fmt.Errorf("build stencil resources: %w", err)
+		}
+		combinedStencilRes = res
+	}
+
+	var combinedTextRes *textFrameResources
+	if len(allText) > 0 {
+		res, err := s.prepareTextResources(allText)
 		if err != nil {
 			return err
 		}
-		grpRes[i].textRes = textRes
+		combinedTextRes = res
+	}
 
-		glyphMaskRes, err := s.prepareGlyphMaskResources(g.GlyphMaskBatches)
+	var combinedGlyphRes *glyphMaskFrameResources
+	if len(allGlyph) > 0 {
+		res, err := s.prepareGlyphMaskResources(allGlyph)
 		if err != nil {
 			return err
 		}
-		grpRes[i].glyphMaskRes = glyphMaskRes
+		combinedGlyphRes = res
+	}
+
+	// Create per-group resources as sub-ranges of the combined data.
+	grpRes := make([]groupResources, len(groups))
+	for i := range groups {
+		o := &gOff[i]
+		grpRes[i].scissorRect = groups[i].Rect
+		grpRes[i].stencilPaths = allStencil[o.stencilStart : o.stencilStart+o.stencilCount]
+
+		// SDF: shared buffer, per-group firstVertex + vertCount.
+		if o.sdfCount > 0 && combinedSdfRes != nil {
+			grpRes[i].sdfRes = &sdfFrameResources{
+				vertBuf:     combinedSdfRes.vertBuf,
+				uniformBuf:  combinedSdfRes.uniformBuf,
+				bindGroup:   combinedSdfRes.bindGroup,
+				firstVertex: uint32(o.sdfStart * 6), //nolint:gosec // bounded by shape count
+				vertCount:   uint32(o.sdfCount * 6), //nolint:gosec // bounded by shape count
+			}
+			grpRes[i].sdfShapes = allSDF[o.sdfStart : o.sdfStart+o.sdfCount]
+		}
+
+		// Convex: shared buffer, per-group firstVertex + vertCount.
+		if o.convexCount > 0 && combinedConvexRes != nil {
+			grpRes[i].convexRes = s.sliceConvexResources(
+				combinedConvexRes, allConvex, o.convexStart, o.convexCount)
+		}
+
+		// Stencil: per-path independent buffers, slice the combined array.
+		if o.stencilCount > 0 && len(combinedStencilRes) > 0 {
+			grpRes[i].stencilRes = combinedStencilRes[o.stencilStart : o.stencilStart+o.stencilCount]
+		}
+
+		// Text (MSDF): shared vertex/index buffers, slice drawCalls.
+		if o.textCount > 0 && combinedTextRes != nil {
+			grpRes[i].textRes = s.sliceTextResources(
+				combinedTextRes, allText, o.textStart, o.textCount)
+		}
+
+		// Glyph mask: shared vertex/index buffers, slice drawCalls.
+		if o.glyphCount > 0 && combinedGlyphRes != nil {
+			grpRes[i].glyphMaskRes = s.sliceGlyphMaskResources(
+				combinedGlyphRes, allGlyph, o.glyphStart, o.glyphCount)
+		}
 	}
 
 	if s.surfaceView != nil {
@@ -637,10 +719,11 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 
 // sdfFrameResources holds per-frame GPU resources for SDF rendering.
 type sdfFrameResources struct {
-	vertBuf    hal.Buffer
-	uniformBuf hal.Buffer
-	bindGroup  hal.BindGroup
-	vertCount  uint32
+	vertBuf     hal.Buffer
+	uniformBuf  hal.Buffer
+	bindGroup   hal.BindGroup
+	vertCount   uint32
+	firstVertex uint32 // offset into shared vertex buffer (for scissor group sub-ranges)
 }
 
 // ensurePipelines creates SDF, convex, and stencil pipelines if they don't
@@ -1654,6 +1737,87 @@ func (s *GPURenderSession) applyGroupScissor(rp hal.RenderPassEncoder, rect *[4]
 		rp.SetScissorRect(rect[0], rect[1], rect[2], rect[3])
 	} else {
 		rp.SetScissorRect(0, 0, w, h)
+	}
+}
+
+// sliceConvexResources creates a convexFrameResources referencing a sub-range
+// of the combined vertex buffer. Convex commands have variable vertex counts,
+// so firstVertex is computed by summing vertices of all commands before cmdStart.
+func (s *GPURenderSession) sliceConvexResources(
+	combined *convexFrameResources,
+	allCommands []ConvexDrawCommand,
+	cmdStart, cmdCount int,
+) *convexFrameResources {
+	firstVertex := convexVertexCount(allCommands[:cmdStart])
+	vertCount := convexVertexCount(allCommands[cmdStart : cmdStart+cmdCount])
+	if vertCount == 0 {
+		return nil
+	}
+	return &convexFrameResources{
+		vertBuf:     combined.vertBuf,
+		uniformBuf:  combined.uniformBuf,
+		bindGroup:   combined.bindGroup,
+		firstVertex: firstVertex,
+		vertCount:   vertCount,
+	}
+}
+
+// sliceTextResources creates a textFrameResources referencing a sub-range of
+// the combined drawCalls. Empty batches produce no drawCall, so the slice
+// boundaries are computed by counting non-empty batches.
+func (s *GPURenderSession) sliceTextResources(
+	combined *textFrameResources,
+	allBatches []TextBatch,
+	batchStart, batchCount int,
+) *textFrameResources {
+	dcStart := 0
+	for _, b := range allBatches[:batchStart] {
+		if len(b.Quads) > 0 {
+			dcStart++
+		}
+	}
+	dcCount := 0
+	for _, b := range allBatches[batchStart : batchStart+batchCount] {
+		if len(b.Quads) > 0 {
+			dcCount++
+		}
+	}
+	if dcCount == 0 {
+		return nil
+	}
+	return &textFrameResources{
+		vertBuf:   combined.vertBuf,
+		idxBuf:    combined.idxBuf,
+		drawCalls: combined.drawCalls[dcStart : dcStart+dcCount],
+	}
+}
+
+// sliceGlyphMaskResources creates a glyphMaskFrameResources referencing a
+// sub-range of the combined drawCalls. Same counting logic as text slicing.
+func (s *GPURenderSession) sliceGlyphMaskResources(
+	combined *glyphMaskFrameResources,
+	allBatches []GlyphMaskBatch,
+	batchStart, batchCount int,
+) *glyphMaskFrameResources {
+	dcStart := 0
+	for _, b := range allBatches[:batchStart] {
+		if len(b.Quads) > 0 {
+			dcStart++
+		}
+	}
+	dcCount := 0
+	for _, b := range allBatches[batchStart : batchStart+batchCount] {
+		if len(b.Quads) > 0 {
+			dcCount++
+		}
+	}
+	if dcCount == 0 {
+		return nil
+	}
+	return &glyphMaskFrameResources{
+		vertBuf:   combined.vertBuf,
+		idxBuf:    combined.idxBuf,
+		drawCalls: combined.drawCalls[dcStart : dcStart+dcCount],
 	}
 }
 
