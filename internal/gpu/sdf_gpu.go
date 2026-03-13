@@ -87,6 +87,13 @@ type SDFAccelerator struct {
 	velloAccel   *VelloAccelerator // Internal compute accelerator (Tier 5)
 	pipelineMode gg.PipelineMode   // Current pipeline mode (from Context)
 	sceneStats   gg.SceneStats     // Accumulated per-frame stats for Auto selection
+
+	// Scissor state: tracks the current clip rect and a timeline of scissor
+	// changes within a frame. Instead of flushing on every scissor change
+	// (which creates multiple render passes), we record scissor boundaries
+	// and replay them within a single render pass on Flush().
+	clipRect        *[4]uint32       // Current scissor rect (nil = full framebuffer)
+	scissorSegments []scissorSegment // Timeline of scissor changes within a frame
 }
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
@@ -108,52 +115,60 @@ func (a *SDFAccelerator) SetForceSDF(force bool) {
 }
 
 // SetClipRect sets the scissor rect for subsequent GPU draw commands.
-// The scissor rect is forwarded to the GPURenderSession, which applies
-// it to the render pass encoder via hal.RenderPassEncoder.SetScissorRect().
-//
-// If there are pending draw commands with a different (or no) scissor rect,
-// they are flushed first so each batch has consistent scissor state.
-// This matches Skia's approach: scissor change breaks the batch.
+// The scissor rect is recorded in the scissor timeline so that all
+// pending commands can be rendered in a single render pass on Flush(),
+// with per-batch scissor state changes. This avoids creating multiple
+// render passes per frame when clipping is used.
 func (a *SDFAccelerator) SetClipRect(x, y, w, h uint32) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// Flush pending commands that were queued with the previous scissor state.
-	a.flushOnScissorChange()
-	if a.session != nil {
-		a.session.SetScissorRect(x, y, w, h)
-	}
+	rect := [4]uint32{x, y, w, h}
+	a.clipRect = &rect
+	a.recordScissorSegment(&rect)
 }
 
 // ClearClipRect removes the scissor rect, restoring full-framebuffer
-// rendering for subsequent draw commands.
-//
-// Pending draw commands queued with the previous scissor rect are flushed
-// first so they render correctly clipped.
+// rendering for subsequent draw commands. The change is recorded in the
+// scissor timeline for deferred application during Flush().
 func (a *SDFAccelerator) ClearClipRect() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// Flush pending commands that were queued with the active scissor rect.
-	a.flushOnScissorChange()
-	if a.session != nil {
-		a.session.ClearScissorRect()
-	}
+	a.clipRect = nil
+	a.recordScissorSegment(nil)
 }
 
-// flushOnScissorChange flushes pending draw commands if any exist.
-// Called before changing the scissor rect to ensure each batch renders
-// with the correct scissor state. Must be called with a.mu held.
-func (a *SDFAccelerator) flushOnScissorChange() {
-	if a.pendingTarget == nil {
-		return // No pending commands — nothing to flush.
+// recordScissorSegment records a scissor state change in the timeline.
+// Each segment marks the current pending counts at the time of the change.
+// During Flush(), the timeline is used to slice pending arrays into groups,
+// each rendered with the correct scissor rect within a single render pass.
+// Must be called with a.mu held.
+func (a *SDFAccelerator) recordScissorSegment(rect *[4]uint32) {
+	// Copy the rect so it's immutable (caller may reuse the value).
+	var copied *[4]uint32
+	if rect != nil {
+		c := *rect
+		copied = &c
 	}
-	pending := len(a.pendingShapes) + len(a.pendingConvexCommands) +
-		len(a.pendingStencilPaths) + len(a.pendingTextBatches) +
-		len(a.pendingGlyphMaskBatches)
-	if pending == 0 {
-		return
-	}
-	// Flush with current scissor state before changing it.
-	_ = a.flushLocked(*a.pendingTarget)
+	a.scissorSegments = append(a.scissorSegments, scissorSegment{
+		rect:         copied,
+		sdfCount:     len(a.pendingShapes),
+		convexCount:  len(a.pendingConvexCommands),
+		stencilCount: len(a.pendingStencilPaths),
+		textCount:    len(a.pendingTextBatches),
+		glyphCount:   len(a.pendingGlyphMaskBatches),
+	})
+}
+
+// scissorSegment records a scissor state change along with the cumulative
+// pending counts at the time of the change. Used to slice pending arrays
+// into per-scissor groups during Flush().
+type scissorSegment struct {
+	rect         *[4]uint32 // nil = full framebuffer
+	sdfCount     int        // len(pendingShapes) at time of change
+	convexCount  int        // len(pendingConvexCommands) at time of change
+	stencilCount int        // len(pendingStencilPaths) at time of change
+	textCount    int        // len(pendingTextBatches) at time of change
+	glyphCount   int        // len(pendingGlyphMaskBatches) at time of change
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
@@ -211,6 +226,8 @@ func (a *SDFAccelerator) Close() {
 		a.glyphMaskEngine = nil
 	}
 	a.pendingTarget = nil
+	a.clipRect = nil
+	a.scissorSegments = nil
 	a.sceneStats = gg.SceneStats{}
 	if a.velloAccel != nil {
 		a.velloAccel.Close()
@@ -375,6 +392,8 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 func (a *SDFAccelerator) BeginFrame() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.clipRect = nil
+	a.scissorSegments = a.scissorSegments[:0]
 	if a.session != nil {
 		a.session.BeginFrame()
 	}
@@ -732,7 +751,82 @@ func (a *SDFAccelerator) PendingCount() int {
 	return len(a.pendingShapes) + len(a.pendingConvexCommands) + len(a.pendingStencilPaths) + len(a.pendingTextBatches) + len(a.pendingGlyphMaskBatches)
 }
 
-func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
+// buildScissorGroups slices the pending arrays into ScissorGroup entries
+// based on the recorded scissor timeline. Each group contains the subset
+// of shapes/commands/batches that were submitted under the same scissor
+// state, and the scissor rect to apply when rendering that group.
+//
+// If no scissor changes were recorded (common case: no clipping), returns
+// a single group covering all pending items with nil scissor (full framebuffer).
+func (a *SDFAccelerator) buildScissorGroups() []ScissorGroup {
+	// No scissor changes: single group with all items and no scissor.
+	if len(a.scissorSegments) == 0 {
+		return []ScissorGroup{{
+			Rect:             nil,
+			SDFShapes:        a.pendingShapes,
+			ConvexCommands:   a.pendingConvexCommands,
+			StencilPaths:     a.pendingStencilPaths,
+			TextBatches:      a.pendingTextBatches,
+			GlyphMaskBatches: a.pendingGlyphMaskBatches,
+		}}
+	}
+
+	var groups []ScissorGroup
+
+	// Items before the first scissor change use nil scissor (full framebuffer).
+	firstSeg := a.scissorSegments[0]
+	if firstSeg.sdfCount > 0 || firstSeg.convexCount > 0 || firstSeg.stencilCount > 0 ||
+		firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
+		groups = append(groups, ScissorGroup{
+			Rect:             nil,
+			SDFShapes:        a.pendingShapes[:firstSeg.sdfCount],
+			ConvexCommands:   a.pendingConvexCommands[:firstSeg.convexCount],
+			StencilPaths:     a.pendingStencilPaths[:firstSeg.stencilCount],
+			TextBatches:      a.pendingTextBatches[:firstSeg.textCount],
+			GlyphMaskBatches: a.pendingGlyphMaskBatches[:firstSeg.glyphCount],
+		})
+	}
+
+	// Each segment defines a scissor state and the start of its range.
+	for i, seg := range a.scissorSegments {
+		// End index is the start of the next segment, or len(pending).
+		var endSDF, endConvex, endStencil, endText, endGlyph int
+		if i+1 < len(a.scissorSegments) {
+			next := a.scissorSegments[i+1]
+			endSDF = next.sdfCount
+			endConvex = next.convexCount
+			endStencil = next.stencilCount
+			endText = next.textCount
+			endGlyph = next.glyphCount
+		} else {
+			endSDF = len(a.pendingShapes)
+			endConvex = len(a.pendingConvexCommands)
+			endStencil = len(a.pendingStencilPaths)
+			endText = len(a.pendingTextBatches)
+			endGlyph = len(a.pendingGlyphMaskBatches)
+		}
+
+		// Skip empty groups.
+		if seg.sdfCount == endSDF && seg.convexCount == endConvex &&
+			seg.stencilCount == endStencil && seg.textCount == endText &&
+			seg.glyphCount == endGlyph {
+			continue
+		}
+
+		groups = append(groups, ScissorGroup{
+			Rect:             seg.rect,
+			SDFShapes:        a.pendingShapes[seg.sdfCount:endSDF],
+			ConvexCommands:   a.pendingConvexCommands[seg.convexCount:endConvex],
+			StencilPaths:     a.pendingStencilPaths[seg.stencilCount:endStencil],
+			TextBatches:      a.pendingTextBatches[seg.textCount:endText],
+			GlyphMaskBatches: a.pendingGlyphMaskBatches[seg.glyphCount:endGlyph],
+		})
+	}
+
+	return groups
+}
+
+func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error { //nolint:cyclop,gocognit,gocyclo,funlen // sequential resource setup + group dispatch
 	if len(a.pendingShapes) == 0 && len(a.pendingConvexCommands) == 0 &&
 		len(a.pendingStencilPaths) == 0 && len(a.pendingTextBatches) == 0 &&
 		len(a.pendingGlyphMaskBatches) == 0 {
@@ -767,50 +861,84 @@ func (a *SDFAccelerator) flushLocked(target gg.GPURenderTarget) error {
 		a.session.SetStencilRenderer(a.stencilRenderer)
 	}
 
-	// Take ownership of pending data.
-	shapes := make([]SDFRenderShape, len(a.pendingShapes))
-	copy(shapes, a.pendingShapes)
+	// Build scissor groups from the timeline BEFORE taking ownership of data.
+	// The groups reference slices of the pending arrays (shallow copy).
+	groups := a.buildScissorGroups()
+
+	// Deep-copy each group's slices so we own the data, then clear pending.
+	ownedGroups := make([]ScissorGroup, len(groups))
+	for i := range groups {
+		g := &groups[i]
+		ownedGroups[i] = ScissorGroup{Rect: g.Rect}
+		if len(g.SDFShapes) > 0 {
+			ownedGroups[i].SDFShapes = make([]SDFRenderShape, len(g.SDFShapes))
+			copy(ownedGroups[i].SDFShapes, g.SDFShapes)
+		}
+		if len(g.ConvexCommands) > 0 {
+			ownedGroups[i].ConvexCommands = make([]ConvexDrawCommand, len(g.ConvexCommands))
+			copy(ownedGroups[i].ConvexCommands, g.ConvexCommands)
+		}
+		if len(g.StencilPaths) > 0 {
+			ownedGroups[i].StencilPaths = make([]StencilPathCommand, len(g.StencilPaths))
+			copy(ownedGroups[i].StencilPaths, g.StencilPaths)
+		}
+		if len(g.TextBatches) > 0 {
+			ownedGroups[i].TextBatches = make([]TextBatch, len(g.TextBatches))
+			copy(ownedGroups[i].TextBatches, g.TextBatches)
+		}
+		if len(g.GlyphMaskBatches) > 0 {
+			ownedGroups[i].GlyphMaskBatches = make([]GlyphMaskBatch, len(g.GlyphMaskBatches))
+			copy(ownedGroups[i].GlyphMaskBatches, g.GlyphMaskBatches)
+		}
+	}
+
+	// Clear pending state.
 	a.pendingShapes = a.pendingShapes[:0]
-
-	convexCmds := make([]ConvexDrawCommand, len(a.pendingConvexCommands))
-	copy(convexCmds, a.pendingConvexCommands)
 	a.pendingConvexCommands = a.pendingConvexCommands[:0]
-
-	paths := make([]StencilPathCommand, len(a.pendingStencilPaths))
-	copy(paths, a.pendingStencilPaths)
 	a.pendingStencilPaths = a.pendingStencilPaths[:0]
-
-	textBatches := make([]TextBatch, len(a.pendingTextBatches))
-	copy(textBatches, a.pendingTextBatches)
 	a.pendingTextBatches = a.pendingTextBatches[:0]
-
-	glyphMaskBatches := make([]GlyphMaskBatch, len(a.pendingGlyphMaskBatches))
-	copy(glyphMaskBatches, a.pendingGlyphMaskBatches)
 	a.pendingGlyphMaskBatches = a.pendingGlyphMaskBatches[:0]
+	a.scissorSegments = a.scissorSegments[:0]
 	a.pendingTarget = nil
 
+	// Collect all text and glyph mask batches across groups for atlas sync.
+	var allTextBatches []TextBatch
+	var allGlyphMaskBatches []GlyphMaskBatch
+	for i := range ownedGroups {
+		allTextBatches = append(allTextBatches, ownedGroups[i].TextBatches...)
+		allGlyphMaskBatches = append(allGlyphMaskBatches, ownedGroups[i].GlyphMaskBatches...)
+	}
+
 	// Upload dirty MSDF atlases to the GPU before rendering text.
-	if len(textBatches) > 0 && a.textEngine != nil {
+	if len(allTextBatches) > 0 && a.textEngine != nil {
 		if err := a.syncTextAtlases(); err != nil {
 			slogger().Warn("atlas sync failed", "err", err)
-			textBatches = nil
+			// Clear text batches from all groups on atlas failure.
+			for i := range ownedGroups {
+				ownedGroups[i].TextBatches = nil
+			}
 		}
 	}
 
 	// Upload dirty glyph mask atlas pages to GPU before rendering.
-	if len(glyphMaskBatches) > 0 && a.glyphMaskEngine != nil {
-		if err := a.syncGlyphMaskAtlases(glyphMaskBatches); err != nil {
+	if len(allGlyphMaskBatches) > 0 && a.glyphMaskEngine != nil {
+		if err := a.syncGlyphMaskAtlases(allGlyphMaskBatches); err != nil {
 			slogger().Warn("glyph mask atlas sync failed", "err", err)
-			glyphMaskBatches = nil
+			for i := range ownedGroups {
+				ownedGroups[i].GlyphMaskBatches = nil
+			}
 		}
 	}
 
-	err := a.session.RenderFrame(target, shapes, convexCmds, paths, textBatches, glyphMaskBatches...)
+	err := a.session.RenderFrameGrouped(target, ownedGroups)
 	if err != nil {
+		total := 0
+		for i := range ownedGroups {
+			total += len(ownedGroups[i].SDFShapes) + len(ownedGroups[i].ConvexCommands) + len(ownedGroups[i].StencilPaths) +
+				len(ownedGroups[i].TextBatches) + len(ownedGroups[i].GlyphMaskBatches)
+		}
 		slogger().Warn("render session error",
-			"shapes", len(shapes), "convex", len(convexCmds),
-			"paths", len(paths), "text", len(textBatches),
-			"glyphMask", len(glyphMaskBatches), "err", err)
+			"groups", len(ownedGroups), "totalItems", total, "err", err)
 	}
 	return err
 }

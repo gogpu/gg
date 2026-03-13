@@ -11,6 +11,24 @@ import (
 	"github.com/gogpu/wgpu/hal"
 )
 
+// ScissorGroup holds a subset of draw commands that share the same scissor
+// rect. During rendering, the scissor rect is applied before recording the
+// group's draws, allowing multiple scissor states within a single render pass.
+// This eliminates the need for multiple render pass submissions when clipping
+// is used (e.g., scroll views, panels), reducing GPU utilization from ~45%
+// to ~3% on Intel iGPUs.
+type ScissorGroup struct {
+	// Rect is the scissor rect in device pixels. nil means full framebuffer.
+	Rect *[4]uint32
+
+	// Per-tier draw command subsets for this scissor state.
+	SDFShapes        []SDFRenderShape
+	ConvexCommands   []ConvexDrawCommand
+	StencilPaths     []StencilPathCommand
+	TextBatches      []TextBatch
+	GlyphMaskBatches []GlyphMaskBatch
+}
+
 // StencilPathCommand holds a path and paint for stencil-then-cover rendering
 // within a unified render session. The vertices are pre-tessellated fan
 // triangles from FanTessellator.
@@ -353,6 +371,105 @@ func (s *GPURenderSession) RenderFrame(
 		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes)
 	}
 	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes, target)
+}
+
+// groupResources holds pre-built GPU resources for a single ScissorGroup.
+type groupResources struct {
+	scissorRect  *[4]uint32
+	sdfRes       *sdfFrameResources
+	sdfShapes    []SDFRenderShape
+	convexRes    *convexFrameResources
+	stencilRes   []*stencilCoverBuffers
+	stencilPaths []StencilPathCommand
+	textRes      *textFrameResources
+	glyphMaskRes *glyphMaskFrameResources
+}
+
+// RenderFrameGrouped renders multiple scissor groups in a single render pass.
+// Each group's draw commands are rendered with the group's scissor rect applied,
+// then the scissor is changed for the next group. This eliminates multiple
+// render pass submissions when clipping is used.
+//
+// For frames with no scissor changes (single group with nil rect), this
+// behaves identically to the original RenderFrame.
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	// Check if all groups are empty.
+	totalItems := 0
+	for i := range groups {
+		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
+			len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
+	}
+	if totalItems == 0 {
+		return nil
+	}
+
+	slogger().Debug("RenderFrameGrouped",
+		"groups", len(groups),
+		"totalItems", totalItems,
+		"surface", s.surfaceView != nil)
+
+	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
+	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
+		w, h = s.surfaceWidth, s.surfaceHeight
+	}
+	if err := s.EnsureTextures(w, h); err != nil {
+		return fmt.Errorf("ensure textures: %w", err)
+	}
+	if err := s.ensurePipelines(); err != nil {
+		return fmt.Errorf("ensure pipelines: %w", err)
+	}
+
+	// Build GPU resources for each group.
+	grpRes := make([]groupResources, len(groups))
+	for i := range groups {
+		g := &groups[i]
+		grpRes[i].scissorRect = g.Rect
+		grpRes[i].sdfShapes = g.SDFShapes
+		grpRes[i].stencilPaths = g.StencilPaths
+
+		if len(g.SDFShapes) > 0 {
+			res, err := s.buildSDFResources(g.SDFShapes, w, h)
+			if err != nil {
+				return fmt.Errorf("build SDF resources (group %d): %w", i, err)
+			}
+			grpRes[i].sdfRes = res
+		}
+
+		if len(g.ConvexCommands) > 0 {
+			res, err := s.buildConvexResources(g.ConvexCommands, w, h)
+			if err != nil {
+				return fmt.Errorf("build convex resources (group %d): %w", i, err)
+			}
+			grpRes[i].convexRes = res
+		}
+
+		stencilRes, err := s.buildStencilResourcesBatch(g.StencilPaths, w, h)
+		if err != nil {
+			return fmt.Errorf("build stencil resources (group %d): %w", i, err)
+		}
+		grpRes[i].stencilRes = stencilRes
+
+		textRes, err := s.prepareTextResources(g.TextBatches)
+		if err != nil {
+			return err
+		}
+		grpRes[i].textRes = textRes
+
+		glyphMaskRes, err := s.prepareGlyphMaskResources(g.GlyphMaskBatches)
+		if err != nil {
+			return err
+		}
+		grpRes[i].glyphMaskRes = glyphMaskRes
+	}
+
+	if s.surfaceView != nil {
+		return s.encodeSubmitSurfaceGrouped(w, h, grpRes)
+	}
+	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target)
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -1494,6 +1611,196 @@ func (s *GPURenderSession) encodeSubmitSurface(
 
 	// Mark that at least one render pass has been submitted this frame.
 	// Subsequent mid-frame flushes will use LoadOpLoad to preserve content.
+	s.frameRendered = true
+
+	return nil
+}
+
+// recordGroupDraws records all tier draw commands for a single group into
+// the given render pass encoder. This is the inner loop of the grouped
+// encode methods — called once per scissor group within a single render pass.
+func (s *GPURenderSession) recordGroupDraws(rp hal.RenderPassEncoder, gr groupResources) {
+	// Tier 1: SDF shapes (no stencil interaction).
+	if gr.sdfRes != nil && len(gr.sdfShapes) > 0 {
+		s.sdfPipeline.RecordDraws(rp, gr.sdfRes)
+	}
+
+	// Tier 2a: Convex polygon fast-path (no stencil interaction).
+	if gr.convexRes != nil {
+		s.convexRenderer.RecordDraws(rp, gr.convexRes)
+	}
+
+	// Tier 2b: Stencil-then-cover paths.
+	for i, bufs := range gr.stencilRes {
+		s.stencilRenderer.RecordPath(rp, bufs, gr.stencilPaths[i].FillRule)
+	}
+
+	// Tier 4: MSDF text (rendered after shapes).
+	if gr.textRes != nil && len(gr.textRes.drawCalls) > 0 {
+		s.textPipeline.RecordDraws(rp, gr.textRes)
+	}
+
+	// Tier 6: Glyph mask text (rendered last, on top of all other geometry).
+	if gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0 {
+		s.glyphMaskPipeline.RecordDraws(rp, gr.glyphMaskRes)
+	}
+}
+
+// applyGroupScissor sets or clears the scissor rect on the render pass for
+// a given group. When rect is nil, the scissor is reset to the full
+// framebuffer (w x h). When non-nil, the scissor clips to the given rect.
+func (s *GPURenderSession) applyGroupScissor(rp hal.RenderPassEncoder, rect *[4]uint32, w, h uint32) {
+	if rect != nil {
+		rp.SetScissorRect(rect[0], rect[1], rect[2], rect[3])
+	} else {
+		rp.SetScissorRect(0, 0, w, h)
+	}
+}
+
+// encodeSubmitReadbackGrouped encodes a single render pass with per-group
+// scissor state changes, then copies the resolve texture to a staging buffer
+// for CPU readback. This is the grouped version of encodeSubmitReadback.
+func (s *GPURenderSession) encodeSubmitReadbackGrouped(
+	w, h uint32,
+	grpRes []groupResources,
+	target gg.GPURenderTarget,
+) error {
+	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "session_encoder",
+	})
+	if err != nil {
+		return fmt.Errorf("create command encoder: %w", err)
+	}
+	if err := encoder.BeginEncoding("session_frame"); err != nil {
+		return fmt.Errorf("begin encoding: %w", err)
+	}
+
+	// Unified render pass descriptor with MSAA color + stencil + resolve.
+	rpDesc := &hal.RenderPassDescriptor{
+		Label: "session_unified_pass",
+		ColorAttachments: []hal.RenderPassColorAttachment{{
+			View:          s.textures.msaaView,
+			ResolveTarget: s.textures.resolveView,
+			LoadOp:        gputypes.LoadOpClear,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       gputypes.LoadOpClear,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     gputypes.LoadOpClear,
+			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilClearValue: 0,
+		},
+	}
+
+	rp := encoder.BeginRenderPass(rpDesc)
+
+	// Render each group with its scissor rect applied.
+	for _, gr := range grpRes {
+		s.applyGroupScissor(rp, gr.scissorRect, w, h)
+		s.recordGroupDraws(rp, gr)
+	}
+
+	rp.End()
+
+	// VK-LAYOUT-001: After MSAA resolve the texture is in
+	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
+	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
+	encoder.TransitionTextures([]hal.TextureBarrier{{
+		Texture: s.textures.resolveTex,
+		Usage: hal.TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageRenderAttachment,
+			NewUsage: gputypes.TextureUsageCopySrc,
+		},
+	}})
+
+	// Encode copy and submit, then read back pixels to the target.
+	return s.copySubmitAndReadback(encoder, w, h, target)
+}
+
+// encodeSubmitSurfaceGrouped encodes a single render pass with per-group
+// scissor state changes, resolving directly to the surface view. No readback
+// occurs. This is the grouped version of encodeSubmitSurface.
+func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
+	w, h uint32,
+	grpRes []groupResources,
+) error {
+	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		Label: "session_surface_encoder",
+	})
+	if err != nil {
+		return fmt.Errorf("create command encoder: %w", err)
+	}
+	if err := encoder.BeginEncoding("session_surface_frame"); err != nil {
+		return fmt.Errorf("begin encoding: %w", err)
+	}
+
+	// Surface render pass LoadOp: first pass clears, subsequent passes
+	// preserve existing content. This handles mid-frame flushes caused by
+	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
+	colorLoadOp := gputypes.LoadOpClear
+	stencilLoadOp := gputypes.LoadOpClear
+	depthLoadOp := gputypes.LoadOpClear
+	if s.frameRendered {
+		colorLoadOp = gputypes.LoadOpLoad
+		stencilLoadOp = gputypes.LoadOpLoad
+		depthLoadOp = gputypes.LoadOpLoad
+	}
+
+	rpDesc := &hal.RenderPassDescriptor{
+		Label: "session_surface_pass",
+		ColorAttachments: []hal.RenderPassColorAttachment{{
+			View:          s.textures.msaaView,
+			ResolveTarget: s.surfaceView,
+			LoadOp:        colorLoadOp,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       depthLoadOp,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     stencilLoadOp,
+			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilClearValue: 0,
+		},
+	}
+
+	rp := encoder.BeginRenderPass(rpDesc)
+
+	// Render each group with its scissor rect applied.
+	for _, gr := range grpRes {
+		s.applyGroupScissor(rp, gr.scissorRect, w, h)
+		s.recordGroupDraws(rp, gr)
+	}
+
+	rp.End()
+
+	// No CopyTextureToBuffer -- the surface is the resolve target.
+	cmdBuf, err := encoder.EndEncoding()
+	if err != nil {
+		return fmt.Errorf("end encoding: %w", err)
+	}
+
+	// Free the previous frame's command buffer. By now VSync has
+	// guaranteed the GPU finished with it.
+	if s.prevCmdBuf != nil {
+		s.device.FreeCommandBuffer(s.prevCmdBuf)
+	}
+
+	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+		s.prevCmdBuf = nil
+		return fmt.Errorf("submit: %w", err)
+	}
+
+	// Keep reference so next frame can free it after GPU is done.
+	s.prevCmdBuf = cmdBuf
+
+	// Mark that at least one render pass has been submitted this frame.
 	s.frameRendered = true
 
 	return nil
