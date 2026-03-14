@@ -22,6 +22,7 @@ package gpu
 import (
 	"github.com/gogpu/gg"
 	gpuimpl "github.com/gogpu/gg/internal/gpu"
+	"github.com/gogpu/gpucontext"
 )
 
 func init() {
@@ -41,11 +42,11 @@ func init() {
 // from an external provider (e.g., gogpu). This avoids creating a separate
 // GPU instance and enables efficient device sharing.
 //
-// The provider should be a gpucontext.DeviceProvider that also implements
-// gpucontext.HalProvider for direct HAL access.
+// The provider should be a gpucontext.DeviceProvider. The accelerator
+// type-asserts provider.Device() to *wgpu.Device for HAL access.
 //
 // Call this before drawing operations, typically from ggcanvas.New() or
 // manually after registering the accelerator.
-func SetDeviceProvider(provider any) error {
+func SetDeviceProvider(provider gpucontext.DeviceProvider) error {
 	return gg.SetAcceleratorDeviceProvider(provider)
 }

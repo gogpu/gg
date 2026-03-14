@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gg/text"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
 
@@ -321,24 +322,30 @@ func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
 }
 
 // SetDeviceProvider switches the accelerator to use a shared GPU device
-// from an external provider (e.g., gogpu). The provider must implement
-// HalDevice() any and HalQueue() any returning hal.Device and hal.Queue.
-func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
-	type halProvider interface {
-		HalDevice() any
-		HalQueue() any
+// from an external provider (e.g., gogpu). The provider's Device() must
+// return a *wgpu.Device (as gpucontext.Device) so we can access HalDevice()
+// and HalQueue() for direct HAL-level GPU operations.
+func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
+	dev := provider.Device()
+	if dev == nil {
+		return fmt.Errorf("gpu-sdf: provider Device is nil")
 	}
-	hp, ok := provider.(halProvider)
+
+	type halAccessor interface {
+		HalDevice() hal.Device
+		HalQueue() hal.Queue
+	}
+	ha, ok := dev.(halAccessor)
 	if !ok {
-		return fmt.Errorf("gpu-sdf: provider does not expose HAL types")
+		return fmt.Errorf("gpu-sdf: provider Device does not expose HAL types (got %T)", dev)
 	}
-	device, ok := hp.HalDevice().(hal.Device)
-	if !ok || device == nil {
-		return fmt.Errorf("gpu-sdf: provider HalDevice is not hal.Device")
+	device := ha.HalDevice()
+	if device == nil {
+		return fmt.Errorf("gpu-sdf: provider HalDevice is nil")
 	}
-	queue, ok := hp.HalQueue().(hal.Queue)
-	if !ok || queue == nil {
-		return fmt.Errorf("gpu-sdf: provider HalQueue is not hal.Queue")
+	queue := ha.HalQueue()
+	if queue == nil {
+		return fmt.Errorf("gpu-sdf: provider HalQueue is nil")
 	}
 
 	a.mu.Lock()
