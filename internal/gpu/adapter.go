@@ -819,5 +819,5 @@ func (e *halComputePassEncoder) End() {
 	if e.pass == nil {
 		return
 	}
-	e.pass.End()
+	_ = e.pass.End()
 }

@@ -584,12 +584,12 @@ func TestBuildConvexVerticesRegularPolygons(t *testing.T) {
 }
 
 func TestConvexFrameResourcesDestroy(t *testing.T) {
-	device, _, cleanup := createNoopDevice(t)
+	_, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
 	// Destroying nil resources should not panic.
 	r := &convexFrameResources{}
-	r.destroy(device)
+	r.destroy()
 
 	// Destroying with nil fields should be safe.
 	r2 := &convexFrameResources{
@@ -597,7 +597,7 @@ func TestConvexFrameResourcesDestroy(t *testing.T) {
 		uniformBuf: nil,
 		bindGroup:  nil,
 	}
-	r2.destroy(device)
+	r2.destroy()
 }
 
 // --- extractConvexPolygon tests ---

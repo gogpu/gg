@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-03-15
+
 ### Changed
 
 - **GPU internals: migrated from hal types to wgpu public API** — All stencil state
@@ -45,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Typed `DeviceProviderAware.SetDeviceProvider`** — Takes `gpucontext.DeviceProvider`
   instead of `any`. Zero `any` in the accelerator provider chain.
+
+### Dependencies
+
+- wgpu v0.20.2 → v0.21.0 (three-layer public API, proper type definitions)
+- gpucontext v0.9.0 → v0.10.0 (typed interfaces, HalProvider removed)
 
 ## [0.36.4] - 2026-03-13
 

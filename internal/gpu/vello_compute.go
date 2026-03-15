@@ -1164,7 +1164,7 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 		pass.SetPipeline(d.pipelines[sd.stage])
 		pass.SetBindGroup(0, bg, nil)
 		pass.Dispatch(wgCount, 1, 1)
-		pass.End()
+		_ = pass.End()
 
 		slogger().Debug("vello compute: dispatched stage",
 			"stage", sd.stage.String(),

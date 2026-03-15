@@ -320,7 +320,7 @@ type convexFrameResources struct {
 	firstVertex uint32 // offset into shared vertex buffer (for scissor group sub-ranges)
 }
 
-func (r *convexFrameResources) destroy(device *wgpu.Device) {
+func (r *convexFrameResources) destroy() {
 	if r.bindGroup != nil {
 		r.bindGroup.Release()
 	}

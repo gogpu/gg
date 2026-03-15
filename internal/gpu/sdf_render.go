@@ -505,7 +505,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	rp.SetBindGroup(0, bindGroup, nil)
 	rp.SetVertexBuffer(0, vertBuf, 0)
 	rp.Draw(vertexCount, 1, 0, 0)
-	rp.End()
+	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires

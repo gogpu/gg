@@ -177,7 +177,7 @@ type stencilCoverBuffers struct {
 }
 
 // destroy releases all GPU resources.
-func (b *stencilCoverBuffers) destroy(device *wgpu.Device) {
+func (b *stencilCoverBuffers) destroy() {
 	if b.coverBindGroup != nil {
 		b.coverBindGroup.Release()
 	}
@@ -237,7 +237,7 @@ func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.P
 	if err != nil {
 		return err
 	}
-	defer bufs.destroy(sr.device)
+	defer bufs.destroy()
 
 	// Encode, submit, and read back pixels.
 	return sr.encodeAndReadback(w, h, bufs, target, fillRule)
@@ -270,12 +270,12 @@ func (sr *StencilRenderer) createRenderBuffers(
 	// Vertex buffers.
 	b.fanVertBuf, err = sr.createAndUploadVertexBuffer("stencil_fan_verts", float32SliceToBytes(fanVerts))
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 	b.coverVertBuf, err = sr.createAndUploadVertexBuffer("stencil_cover_verts", float32SliceToBytes(coverQuad[:]))
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 
@@ -284,14 +284,14 @@ func (sr *StencilRenderer) createRenderBuffers(
 		"stencil_fill", makeStencilFillUniform(w, h), stencilFillUniformSize,
 	)
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 	b.coverUniBuf, b.coverBindGroup, err = sr.createUniformAndBindGroup(
 		"cover", makeCoverUniform(w, h, color), coverUniformSize,
 	)
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 
@@ -379,7 +379,7 @@ func (sr *StencilRenderer) encodeAndReadback(
 	rp.SetStencilReference(0)
 	rp.Draw(6, 1, 0, 0)
 
-	rp.End()
+	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires

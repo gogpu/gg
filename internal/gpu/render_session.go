@@ -739,7 +739,7 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		s.glyphMaskPipeline = nil
 	}
 	for _, b := range s.stencilBufPool {
-		b.destroy(s.device)
+		b.destroy()
 	}
 	s.stencilBufPool = s.stencilBufPool[:0]
 
@@ -1122,7 +1122,7 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 		// Stencil paths vary wildly per frame (different vertex counts, colors),
 		// so recreating is simpler than capacity tracking for 6 sub-buffers.
 		if s.stencilBufPool[i] != nil {
-			s.stencilBufPool[i].destroy(s.device)
+			s.stencilBufPool[i].destroy()
 			s.stencilBufPool[i] = nil
 		}
 		bufs, err := s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, color)
@@ -1130,7 +1130,7 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 			// Clean up buffers created in this batch.
 			for j := 0; j < i; j++ {
 				if s.stencilBufPool[j] != nil {
-					s.stencilBufPool[j].destroy(s.device)
+					s.stencilBufPool[j].destroy()
 					s.stencilBufPool[j] = nil
 				}
 			}
@@ -1633,7 +1633,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes, clipBG)
 	}
 
-	rp.End()
+	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
@@ -1832,7 +1832,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes, clipBG)
 	}
 
-	rp.End()
+	_ = rp.End()
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
 	cmdBuf, err := encoder.Finish()
@@ -2037,7 +2037,7 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
-	rp.End()
+	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
@@ -2111,7 +2111,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
-	rp.End()
+	_ = rp.End()
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
 	cmdBuf, err := encoder.Finish()
