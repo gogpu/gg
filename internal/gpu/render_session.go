@@ -1624,6 +1624,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	}
 
 	rp := encoder.BeginRenderPass(rpDesc)
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 	s.applyScissorRect(rp)
 
 	// Bind no-clip at @group(1) for non-grouped path (no RRect clip).
@@ -1771,7 +1772,7 @@ func (s *GPURenderSession) copySubmitAndReadback(
 // CopyTextureToBuffer, no ReadBuffer, no fence wait (presentation handles
 // synchronization).
 func (s *GPURenderSession) encodeSubmitSurface(
-	_, _ uint32,
+	w, h uint32,
 	sdfRes *sdfFrameResources,
 	sdfShapes []SDFRenderShape,
 	convexRes *convexFrameResources,
@@ -1824,6 +1825,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	}
 
 	rp := encoder.BeginRenderPass(rpDesc)
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 	s.applyScissorRect(rp)
 
 	// Clip bind group is passed to each RecordDraws (must be bound AFTER
@@ -2051,6 +2053,7 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	}
 
 	rp := encoder.BeginRenderPass(rpDesc)
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	// Render each group with its scissor rect applied.
 	for i := range grpRes {
@@ -2125,6 +2128,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	}
 
 	rp := encoder.BeginRenderPass(rpDesc)
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	// Render each group with its scissor rect applied.
 	for i := range grpRes {

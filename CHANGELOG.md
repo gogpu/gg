@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **macOS Metal: explicit SetViewport in all GPU render passes** — All 4 render pass
+  entry points (readback, surface, readback-grouped, surface-grouped) now call
+  `SetViewport(0, 0, w, h, 0, 1)` after `BeginRenderPass`. Previously relied on Metal's
+  default viewport which caused content offset on macOS — shapes appeared in the
+  lower-right corner or as a small bright spot. Defense-in-depth pattern matching Gio
+  and wgpu-rs. Fixes [gg#171](https://github.com/gogpu/gg/issues/171),
+  [ui#48](https://github.com/gogpu/ui/issues/48),
+  [ui#23](https://github.com/gogpu/ui/issues/23).
+
+- **`encodeSubmitSurface` now uses width/height parameters** — Previously discarded
+  `w, h` arguments (`_, _ uint32`). Now uses them for SetViewport.
+
+### Changed
+
+- **Updated naga v0.14.6 → v0.14.7** — Fixes Metal `buffer(0)` conflict when
+  `ClipParams` and `Uniforms` both mapped to `[[buffer(0)]]` in MSL output.
+
+- **Typed `DeviceProviderAware.SetDeviceProvider`** — Takes `gpucontext.DeviceProvider`
+  instead of `any`. Zero `any` in the accelerator provider chain.
+
 ## [0.36.4] - 2026-03-13
 
 ### Added
