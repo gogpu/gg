@@ -7,7 +7,7 @@ require (
 	github.com/gogpu/gpucontext v0.10.0
 	github.com/gogpu/gputypes v0.3.0
 	github.com/gogpu/naga v0.14.7
-	github.com/gogpu/wgpu v0.21.0
+	github.com/gogpu/wgpu v0.21.1
 	golang.org/x/image v0.37.0
 	golang.org/x/text v0.35.0
 )
