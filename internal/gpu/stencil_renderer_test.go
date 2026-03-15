@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 	"github.com/gogpu/wgpu/hal/noop"
 )
 
-// createNoopDevice creates a noop device and queue for testing.
+// createNoopDevice creates a noop-backed *wgpu.Device and *wgpu.Queue for testing.
 // Returns the device, queue, and a cleanup function.
-func createNoopDevice(t *testing.T) (hal.Device, hal.Queue, func()) {
+func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
 	api := noop.API{}
 	instance, err := api.CreateInstance(nil)
@@ -25,11 +25,27 @@ func createNoopDevice(t *testing.T) (hal.Device, hal.Queue, func()) {
 		instance.Destroy()
 		t.Fatalf("Open failed: %v", err)
 	}
-	cleanup := func() {
+
+	device, err := wgpu.NewDeviceFromHAL(
+		openDev.Device,
+		openDev.Queue,
+		gputypes.Features(0),
+		gputypes.DefaultLimits(),
+		"noop-test",
+	)
+	if err != nil {
 		openDev.Device.Destroy()
 		instance.Destroy()
+		t.Fatalf("NewDeviceFromHAL failed: %v", err)
 	}
-	return openDev.Device, openDev.Queue, cleanup
+
+	queue := device.Queue()
+
+	cleanup := func() {
+		device.Release()
+		instance.Destroy()
+	}
+	return device, queue, cleanup
 }
 
 func TestStencilRendererNew(t *testing.T) {

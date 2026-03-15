@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/naga"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // CompileShaderToSPIRV compiles WGSL source to SPIR-V uint32 slice.
@@ -32,23 +32,21 @@ func CompileShaderToSPIRV(wgslSource string) ([]uint32, error) {
 }
 
 // CreateShaderModule creates a HAL shader module from SPIR-V code.
-func CreateShaderModule(device hal.Device, label string, spirvCode []uint32) (hal.ShaderModule, error) {
-	return device.CreateShaderModule(&hal.ShaderModuleDescriptor{
+func CreateShaderModule(device *wgpu.Device, label string, spirvCode []uint32) (*wgpu.ShaderModule, error) {
+	return device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
 		Label: label,
-		Source: hal.ShaderSource{
-			SPIRV: spirvCode,
-		},
+		SPIRV: spirvCode,
 	})
 }
 
 // DestroyGPUResources safely destroys common GPU resources.
 // This is a helper for the cleanup pattern used by all GPU rasterizers.
 type GPUResources struct {
-	Device         hal.Device
-	ShaderModule   hal.ShaderModule
-	PipelineLayout hal.PipelineLayout
-	BindLayouts    []hal.BindGroupLayout
-	Pipelines      []hal.ComputePipeline
+	Device         *wgpu.Device
+	ShaderModule   *wgpu.ShaderModule
+	PipelineLayout *wgpu.PipelineLayout
+	BindLayouts    []*wgpu.BindGroupLayout
+	Pipelines      []*wgpu.ComputePipeline
 }
 
 // Destroy cleans up all GPU resources in the correct order.
@@ -60,24 +58,24 @@ func (r *GPUResources) Destroy() {
 	// Destroy pipelines first
 	for _, p := range r.Pipelines {
 		if p != nil {
-			r.Device.DestroyComputePipeline(p)
+			p.Release()
 		}
 	}
 
 	// Destroy pipeline layout
 	if r.PipelineLayout != nil {
-		r.Device.DestroyPipelineLayout(r.PipelineLayout)
+		r.PipelineLayout.Release()
 	}
 
 	// Destroy bind group layouts
 	for _, l := range r.BindLayouts {
 		if l != nil {
-			r.Device.DestroyBindGroupLayout(l)
+			l.Release()
 		}
 	}
 
 	// Destroy shader module
 	if r.ShaderModule != nil {
-		r.Device.DestroyShaderModule(r.ShaderModule)
+		r.ShaderModule.Release()
 	}
 }

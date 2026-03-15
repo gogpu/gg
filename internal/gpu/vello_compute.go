@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // =============================================================================
@@ -249,87 +249,87 @@ func (c VelloComputeConfig) toBytes() []byte {
 type VelloComputeBuffers struct {
 	// Config is the uniform buffer containing VelloComputeConfig.
 	// Bound at group(0) binding(0) in all stages.
-	Config hal.Buffer
+	Config *wgpu.Buffer
 
 	// Scene is the packed scene data buffer containing path tags, path data,
 	// draw tags, draw data, transforms, and styles as a flat u32 array.
 	// Bound as storage(read) in pathtag_reduce, pathtag_scan, draw_reduce,
 	// draw_leaf, coarse.
-	Scene hal.Buffer
+	Scene *wgpu.Buffer
 
 	// Reduced holds per-workgroup PathMonoid sums from pathtag_reduce.
 	// Size: ceil(n_tag_words / 256) * sizeof(PathMonoid).
 	// Written by pathtag_reduce, read by pathtag_scan.
-	Reduced hal.Buffer
+	Reduced *wgpu.Buffer
 
 	// TagMonoids holds per-tag-word PathMonoid exclusive prefix sums.
 	// Size: n_tag_words * sizeof(PathMonoid).
 	// Written by pathtag_scan.
-	TagMonoids hal.Buffer
+	TagMonoids *wgpu.Buffer
 
 	// DrawReduced holds per-workgroup DrawMonoid sums from draw_reduce.
 	// Size: ceil(n_drawobj / 256) * sizeof(DrawMonoid).
 	// Written by draw_reduce, read by draw_leaf.
-	DrawReduced hal.Buffer
+	DrawReduced *wgpu.Buffer
 
 	// DrawMonoids holds per-draw DrawMonoid exclusive prefix sums.
 	// Size: n_drawobj * sizeof(DrawMonoid).
 	// Written by draw_leaf, read by coarse.
-	DrawMonoids hal.Buffer
+	DrawMonoids *wgpu.Buffer
 
 	// Info holds extracted draw info (packed RGBA colors).
 	// Size: n_drawobj * sizeof(u32).
 	// Written by draw_leaf, read by coarse, fine.
-	Info hal.Buffer
+	Info *wgpu.Buffer
 
 	// Lines holds flattened line segments (LineSoup structs).
 	// Size: n_lines * sizeof(LineSoup) = n_lines * 5 * sizeof(u32).
 	// Read by path_count.
-	Lines hal.Buffer
+	Lines *wgpu.Buffer
 
 	// Paths holds per-path metadata (bounding box + tiles offset).
 	// Size: n_paths * sizeof(Path) = n_paths * 5 * sizeof(u32).
 	// Read by path_count, backdrop, coarse.
-	Paths hal.Buffer
+	Paths *wgpu.Buffer
 
 	// Tiles holds per-tile backdrop and segment count/index.
 	// Size: total_tiles * sizeof(Tile) = total_tiles * 2 * sizeof(u32).
 	// Written by path_count (atomics), modified by backdrop, read by coarse/fine.
-	Tiles hal.Buffer
+	Tiles *wgpu.Buffer
 
 	// SegCounts holds segment counts per tile for path_count.
 	// Size: estimated from segment count heuristic.
 	// Written by path_count.
-	SegCounts hal.Buffer
+	SegCounts *wgpu.Buffer
 
 	// Segments holds clipped path segments (PathSegment, tile-relative coordinates).
 	// Size: total_segments * sizeof(PathSegment) = total_segments * 5 * sizeof(f32).
 	// Written by path_count segment allocation, read by coarse, fine.
-	Segments hal.Buffer
+	Segments *wgpu.Buffer
 
 	// PTCL holds per-tile command lists as a flat u32 stream.
 	// Size: total_tiles * velloPTCLMaxPerTile * sizeof(u32).
 	// Written by coarse, read by fine.
-	PTCL hal.Buffer
+	PTCL *wgpu.Buffer
 
 	// BumpAlloc holds bump allocator counters for dynamic allocation.
 	// Used by path_count (segment counts) and coarse (PTCL offsets).
-	BumpAlloc hal.Buffer
+	BumpAlloc *wgpu.Buffer
 
 	// TilePTCLOffsets holds per-tile PTCL write positions.
 	// Size: total_tiles * sizeof(u32).
 	// Written by coarse.
-	TilePTCLOffsets hal.Buffer
+	TilePTCLOffsets *wgpu.Buffer
 
 	// PathStyles holds style flags per path (bit 1 = even-odd fill rule).
 	// Size: n_paths * sizeof(u32).
 	// Read by coarse.
-	PathStyles hal.Buffer
+	PathStyles *wgpu.Buffer
 
 	// Output holds the output pixel buffer (packed RGBA u32 per pixel).
 	// Size: target_width * target_height * sizeof(u32).
 	// Written by fine.
-	Output hal.Buffer
+	Output *wgpu.Buffer
 }
 
 // =============================================================================
@@ -359,22 +359,22 @@ type VelloComputeDispatcher struct {
 	mu sync.RWMutex
 
 	// device is the HAL device providing GPU resource creation.
-	device hal.Device
+	device *wgpu.Device
 
 	// queue is the HAL queue for command submission and buffer writes.
-	queue hal.Queue
+	queue *wgpu.Queue
 
 	// pipelines are the compiled compute pipelines, one per stage.
-	pipelines [VelloStageCount]hal.ComputePipeline
+	pipelines [VelloStageCount]*wgpu.ComputePipeline
 
 	// pipelineLayouts are the pipeline layouts, one per stage.
-	pipelineLayouts [VelloStageCount]hal.PipelineLayout
+	pipelineLayouts [VelloStageCount]*wgpu.PipelineLayout
 
 	// bgLayouts are the bind group layouts, one per stage.
-	bgLayouts [VelloStageCount]hal.BindGroupLayout
+	bgLayouts [VelloStageCount]*wgpu.BindGroupLayout
 
 	// shaderModules are the compiled shader modules, one per stage.
-	shaderModules [VelloStageCount]hal.ShaderModule
+	shaderModules [VelloStageCount]*wgpu.ShaderModule
 
 	// shaderSources are the embedded WGSL shader sources, indexed by stage.
 	shaderSources [VelloStageCount]string
@@ -389,7 +389,7 @@ type VelloComputeDispatcher struct {
 // NewVelloComputeDispatcher creates a new dispatcher attached to the given
 // HAL device and queue. The dispatcher must be initialized with Init()
 // before Dispatch() can be called.
-func NewVelloComputeDispatcher(device hal.Device, queue hal.Queue) *VelloComputeDispatcher {
+func NewVelloComputeDispatcher(device *wgpu.Device, queue *wgpu.Queue) *VelloComputeDispatcher {
 	d := &VelloComputeDispatcher{
 		device: device,
 		queue:  queue,
@@ -565,9 +565,9 @@ func (d *VelloComputeDispatcher) Init() error {
 		stageName := fmt.Sprintf("vello_%s", i)
 
 		// 1. Create shader module from WGSL source.
-		module, err := d.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-			Label:  stageName,
-			Source: hal.ShaderSource{WGSL: src},
+		module, err := d.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+			Label: stageName,
+			WGSL:  src,
 		})
 		if err != nil {
 			d.destroyPartialInit(i)
@@ -577,7 +577,7 @@ func (d *VelloComputeDispatcher) Init() error {
 
 		// 2. Create bind group layout for this stage's bindings.
 		entries := stageBindGroupLayoutEntries(i)
-		bgLayout, err := d.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+		bgLayout, err := d.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 			Label:   stageName + "_bgl",
 			Entries: entries,
 		})
@@ -588,9 +588,9 @@ func (d *VelloComputeDispatcher) Init() error {
 		d.bgLayouts[i] = bgLayout
 
 		// 3. Create pipeline layout.
-		pipelineLayout, err := d.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+		pipelineLayout, err := d.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 			Label:            stageName + "_pl",
-			BindGroupLayouts: []hal.BindGroupLayout{bgLayout},
+			BindGroupLayouts: []*wgpu.BindGroupLayout{bgLayout},
 		})
 		if err != nil {
 			d.destroyPartialInit(i + 1)
@@ -599,13 +599,11 @@ func (d *VelloComputeDispatcher) Init() error {
 		d.pipelineLayouts[i] = pipelineLayout
 
 		// 4. Create compute pipeline.
-		pipeline, err := d.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-			Label:  stageName,
-			Layout: pipelineLayout,
-			Compute: hal.ComputeState{
-				Module:     module,
-				EntryPoint: "main",
-			},
+		pipeline, err := d.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+			Label:      stageName,
+			Layout:     pipelineLayout,
+			Module:     module,
+			EntryPoint: "main",
 		})
 		if err != nil {
 			d.destroyPartialInit(i + 1)
@@ -631,19 +629,19 @@ func (d *VelloComputeDispatcher) Init() error {
 func (d *VelloComputeDispatcher) destroyPartialInit(upTo VelloComputeStage) {
 	for j := VelloComputeStage(0); j < upTo; j++ {
 		if d.pipelines[j] != nil {
-			d.device.DestroyComputePipeline(d.pipelines[j])
+			d.pipelines[j].Release()
 			d.pipelines[j] = nil
 		}
 		if d.pipelineLayouts[j] != nil {
-			d.device.DestroyPipelineLayout(d.pipelineLayouts[j])
+			d.pipelineLayouts[j].Release()
 			d.pipelineLayouts[j] = nil
 		}
 		if d.bgLayouts[j] != nil {
-			d.device.DestroyBindGroupLayout(d.bgLayouts[j])
+			d.bgLayouts[j].Release()
 			d.bgLayouts[j] = nil
 		}
 		if d.shaderModules[j] != nil {
-			d.device.DestroyShaderModule(d.shaderModules[j])
+			d.shaderModules[j].Release()
 			d.shaderModules[j] = nil
 		}
 	}
@@ -657,19 +655,19 @@ func (d *VelloComputeDispatcher) Close() {
 
 	for i := VelloComputeStage(0); i < VelloStageCount; i++ {
 		if d.pipelines[i] != nil {
-			d.device.DestroyComputePipeline(d.pipelines[i])
+			d.pipelines[i].Release()
 			d.pipelines[i] = nil
 		}
 		if d.pipelineLayouts[i] != nil {
-			d.device.DestroyPipelineLayout(d.pipelineLayouts[i])
+			d.pipelineLayouts[i].Release()
 			d.pipelineLayouts[i] = nil
 		}
 		if d.bgLayouts[i] != nil {
-			d.device.DestroyBindGroupLayout(d.bgLayouts[i])
+			d.bgLayouts[i].Release()
 			d.bgLayouts[i] = nil
 		}
 		if d.shaderModules[i] != nil {
-			d.device.DestroyShaderModule(d.shaderModules[i])
+			d.shaderModules[i].Release()
 			d.shaderModules[i] = nil
 		}
 	}
@@ -787,12 +785,12 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 }
 
 // createVelloBuffer creates a single GPU buffer with a minimum size guarantee.
-func (d *VelloComputeDispatcher) createVelloBuffer(label string, size uint64, usage gputypes.BufferUsage) (hal.Buffer, error) {
+func (d *VelloComputeDispatcher) createVelloBuffer(label string, size uint64, usage gputypes.BufferUsage) (*wgpu.Buffer, error) {
 	const minBufSize = 4
 	if size < minBufSize {
 		size = minBufSize
 	}
-	return d.device.CreateBuffer(&hal.BufferDescriptor{
+	return d.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: label,
 		Size:  size,
 		Usage: usage,
@@ -845,7 +843,7 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 
 	// bufSpec maps a label and size to a target pointer, usage flags, and zero-init flag.
 	type bufSpec struct {
-		target   *hal.Buffer
+		target   **wgpu.Buffer
 		label    string
 		size     uint64
 		usage    gputypes.BufferUsage
@@ -909,9 +907,9 @@ func (d *VelloComputeDispatcher) DestroyBuffers(bufs *VelloComputeBuffers) {
 		return
 	}
 
-	destroyBuf := func(b hal.Buffer) {
+	destroyBuf := func(b *wgpu.Buffer) {
 		if b != nil {
-			d.device.DestroyBuffer(b)
+			b.Release()
 		}
 	}
 
@@ -939,28 +937,26 @@ func (d *VelloComputeDispatcher) DestroyBuffers(bufs *VelloComputeBuffers) {
 
 // stageBindGroupEntries returns the bind group entries for a given stage,
 // mapping each binding index to the correct buffer from VelloComputeBuffers.
-func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) []gputypes.BindGroupEntry {
-	entry := func(binding uint32, buf hal.Buffer) gputypes.BindGroupEntry {
-		return gputypes.BindGroupEntry{
+func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) []wgpu.BindGroupEntry {
+	entry := func(binding uint32, buf *wgpu.Buffer) wgpu.BindGroupEntry {
+		return wgpu.BindGroupEntry{
 			Binding: binding,
-			Resource: gputypes.BufferBinding{
-				Buffer: buf.NativeHandle(),
-				Offset: 0,
-				Size:   0, // 0 = entire buffer
-			},
+			Buffer:  buf,
+			Offset:  0,
+			Size:    0, // 0 = entire buffer
 		}
 	}
 
 	switch stage {
 	case VelloStagePathtagReduce:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Scene),
 			entry(2, bufs.Reduced),
 		}
 
 	case VelloStagePathtagScan:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Scene),
 			entry(2, bufs.Reduced),
@@ -968,14 +964,14 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 		}
 
 	case VelloStageDrawReduce:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Scene),
 			entry(2, bufs.DrawReduced),
 		}
 
 	case VelloStageDrawLeaf:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Scene),
 			entry(2, bufs.DrawReduced),
@@ -984,7 +980,7 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 		}
 
 	case VelloStagePathCount:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Lines),
 			entry(2, bufs.Paths),
@@ -994,14 +990,14 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 		}
 
 	case VelloStageBackdrop:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Paths),
 			entry(2, bufs.Tiles),
 		}
 
 	case VelloStageCoarse:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.Scene),
 			entry(2, bufs.DrawMonoids),
@@ -1015,7 +1011,7 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 		}
 
 	case VelloStagePathTiling:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.BumpAlloc),
 			entry(2, bufs.SegCounts),
@@ -1026,7 +1022,7 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 		}
 
 	case VelloStageFine:
-		return []gputypes.BindGroupEntry{
+		return []wgpu.BindGroupEntry{
 			entry(0, bufs.Config),
 			entry(1, bufs.PTCL),
 			entry(2, bufs.Segments),
@@ -1041,22 +1037,20 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 
 // dispatchResources tracks per-frame GPU resources for cleanup.
 type dispatchResources struct {
-	device     hal.Device
-	bindGroups []hal.BindGroup
-	cmdBuf     hal.CommandBuffer
-	fence      hal.Fence
+	device     *wgpu.Device
+	bindGroups []*wgpu.BindGroup
+	cmdBuf     *wgpu.CommandBuffer
+	fence      *wgpu.Fence
 }
 
 // cleanup destroys all tracked per-frame resources.
 func (r *dispatchResources) cleanup() {
 	if r.fence != nil {
-		r.device.DestroyFence(r.fence)
+		r.fence.Release()
 	}
-	if r.cmdBuf != nil {
-		r.device.FreeCommandBuffer(r.cmdBuf)
-	}
+	// cmdBuf is consumed by Submit; no explicit free needed.
 	for _, g := range r.bindGroups {
-		r.device.DestroyBindGroup(g)
+		g.Release()
 	}
 }
 
@@ -1136,15 +1130,11 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 	bufs *VelloComputeBuffers,
 	stages []stageDispatch,
 ) error {
-	encoder, err := d.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := d.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "vello_compute",
 	})
 	if err != nil {
 		return fmt.Errorf("vello compute: create command encoder: %w", err)
-	}
-
-	if err := encoder.BeginEncoding("vello_compute"); err != nil {
-		return fmt.Errorf("vello compute: begin encoding: %w", err)
 	}
 
 	for _, sd := range stages {
@@ -1153,7 +1143,7 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 			continue
 		}
 
-		bg, bgErr := d.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		bg, bgErr := d.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:   fmt.Sprintf("vello_%s_bg", sd.stage),
 			Layout:  d.bgLayouts[sd.stage],
 			Entries: stageBindGroupEntries(sd.stage, bufs),
@@ -1164,9 +1154,13 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 		}
 		res.bindGroups = append(res.bindGroups, bg)
 
-		pass := encoder.BeginComputePass(&hal.ComputePassDescriptor{
+		pass, cpErr := encoder.BeginComputePass(&wgpu.ComputePassDescriptor{
 			Label: fmt.Sprintf("vello_%s", sd.stage),
 		})
+		if cpErr != nil {
+			encoder.DiscardEncoding()
+			return fmt.Errorf("vello compute: begin compute pass for %s: %w", sd.stage, cpErr)
+		}
 		pass.SetPipeline(d.pipelines[sd.stage])
 		pass.SetBindGroup(0, bg, nil)
 		pass.Dispatch(wgCount, 1, 1)
@@ -1178,7 +1172,7 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 			"workgroups", wgCount)
 	}
 
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("vello compute: end encoding: %w", err)
 	}
@@ -1200,11 +1194,11 @@ func (d *VelloComputeDispatcher) submitAndWait(res *dispatchResources) error {
 	}
 	res.fence = fence
 
-	if err := d.queue.Submit([]hal.CommandBuffer{res.cmdBuf}, fence, 1); err != nil {
+	if err := d.queue.SubmitWithFence([]*wgpu.CommandBuffer{res.cmdBuf}, fence, 1); err != nil {
 		return fmt.Errorf("vello compute: submit: %w", err)
 	}
 
-	ok, err := d.device.Wait(fence, 1, velloFenceTimeout)
+	ok, err := d.device.WaitForFence(fence, 1, velloFenceTimeout)
 	if err != nil {
 		return fmt.Errorf("vello compute: wait for GPU: %w", err)
 	}

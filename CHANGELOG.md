@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **GPU internals: migrated from hal types to wgpu public API** — All stencil state
+  types (`StencilFaceState`, `StencilOperation` constants), texture barrier types
+  (`TextureBarrier`, `TextureUsageTransition`), and copy types (`BufferTextureCopy`,
+  `ImageCopyTexture`) now use `wgpu.*` instead of `wgpu/hal.*`. Zero `hal` imports
+  remain in production GPU code (7 files changed).
+
+- **GPU standalone init: uses wgpu public API** — `SDFAccelerator` and
+  `VelloAccelerator` standalone GPU initialization now uses `wgpu.CreateInstance()` →
+  `RequestAdapter()` → `RequestDevice()` instead of direct `hal.GetBackend()` access.
+  The `halInstance hal.Instance` field replaced with `instance *wgpu.Instance`.
+
+- **Logger propagation through wgpu API** — `setLogger()` now calls
+  `wgpu.SetLogger()` instead of `hal.SetLogger()`, maintaining full stack logging
+  (gg → wgpu → core → hal → GPU backends) without importing `wgpu/hal`.
+
 ### Fixed
 
 - **macOS Metal: explicit SetViewport in all GPU render passes** — All 4 render pass

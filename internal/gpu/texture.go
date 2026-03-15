@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Texture errors.
@@ -35,7 +35,7 @@ var (
 
 // Texture represents a GPU texture resource.
 //
-// Texture wraps a hal.Texture and provides Go-idiomatic access with
+// Texture wraps a *wgpu.Texture and provides Go-idiomatic access with
 // lazy default view creation using sync.Once. This follows the wgpu pattern
 // where textures have a default view that is created on-demand.
 //
@@ -55,10 +55,10 @@ type Texture struct {
 	mu sync.RWMutex
 
 	// halTexture is the underlying texture handle.
-	halTexture hal.Texture
+	halTexture *wgpu.Texture
 
 	// device is the parent device.
-	device hal.Device
+	device *wgpu.Device
 
 	// descriptor holds the texture configuration (immutable after creation).
 	descriptor TextureDescriptor
@@ -114,7 +114,7 @@ type TextureDescriptor struct {
 //   - desc: The texture descriptor (copied)
 //
 // Returns the new Texture.
-func NewTexture(halTexture hal.Texture, device hal.Device, desc *TextureDescriptor) *Texture {
+func NewTexture(halTexture *wgpu.Texture, device *wgpu.Device, desc *TextureDescriptor) *Texture {
 	return &Texture{
 		halTexture: halTexture,
 		device:     device,
@@ -189,7 +189,7 @@ func (t *Texture) IsDestroyed() bool {
 // Returns nil if the texture has been destroyed.
 // Use with caution - the caller should ensure the texture is not destroyed
 // while the handle is in use.
-func (t *Texture) Raw() hal.Texture {
+func (t *Texture) Raw() *wgpu.Texture {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	if t.destroyed {
@@ -250,7 +250,7 @@ func (t *Texture) createDefaultView() (*TextureView, error) {
 	}
 
 	// Create default view descriptor - use zero values to inherit from texture
-	halDesc := &hal.TextureViewDescriptor{
+	halDesc := &wgpu.TextureViewDescriptor{
 		Label:           t.descriptor.Label + " (default view)",
 		Format:          gputypes.TextureFormatUndefined, // Inherit from texture
 		Dimension:       gputypes.TextureViewDimensionUndefined,
@@ -315,7 +315,7 @@ func (t *Texture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) 
 	}
 
 	// Convert to descriptor
-	halDesc := &hal.TextureViewDescriptor{
+	halDesc := &wgpu.TextureViewDescriptor{
 		Label:           desc.Label,
 		Format:          desc.Format,
 		Dimension:       desc.Dimension,
@@ -368,7 +368,7 @@ func (t *Texture) Destroy() {
 
 	// Destroy the texture
 	if device != nil && halTex != nil {
-		device.DestroyTexture(halTex)
+		halTex.Release()
 	}
 }
 
@@ -388,13 +388,13 @@ type TextureView struct {
 	mu sync.RWMutex
 
 	// halView is the underlying texture view handle.
-	halView hal.TextureView
+	halView *wgpu.TextureView
 
 	// texture is the parent texture (retained reference).
 	texture *Texture
 
 	// device is the device (retained for destruction).
-	device hal.Device
+	device *wgpu.Device
 
 	// descriptor holds the view configuration.
 	descriptor TextureViewDescriptor
@@ -502,7 +502,7 @@ func (v *TextureView) IsDestroyed() bool {
 // Returns nil if the view has been destroyed.
 // Use with caution - the caller should ensure the view is not destroyed
 // while the handle is in use.
-func (v *TextureView) Raw() hal.TextureView {
+func (v *TextureView) Raw() *wgpu.TextureView {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if v.destroyed {
@@ -540,12 +540,12 @@ func (v *TextureView) destroy() {
 	v.mu.Unlock()
 
 	if device != nil && halView != nil {
-		device.DestroyTextureView(halView)
+		halView.Release()
 	}
 }
 
-// halViewDescToViewDesc converts a hal.TextureViewDescriptor to TextureViewDescriptor.
-func halViewDescToViewDesc(halDesc *hal.TextureViewDescriptor, tex *Texture) TextureViewDescriptor {
+// halViewDescToViewDesc converts a wgpu.TextureViewDescriptor to TextureViewDescriptor.
+func halViewDescToViewDesc(halDesc *wgpu.TextureViewDescriptor, tex *Texture) TextureViewDescriptor {
 	desc := TextureViewDescriptor{
 		Label:           halDesc.Label,
 		Format:          halDesc.Format,
@@ -607,7 +607,7 @@ func textureViewDimensionFromTexture(dim gputypes.TextureDimension) gputypes.Tex
 //   - The descriptor is nil
 //   - Texture dimensions are invalid
 //   - Texture creation fails
-func CreateCoreTexture(device hal.Device, desc *TextureDescriptor) (*Texture, error) {
+func CreateCoreTexture(device *wgpu.Device, desc *TextureDescriptor) (*Texture, error) {
 	if device == nil {
 		return nil, ErrNilHALDevice
 	}
@@ -639,9 +639,9 @@ func CreateCoreTexture(device hal.Device, desc *TextureDescriptor) (*Texture, er
 	}
 
 	// Convert to descriptor
-	halDesc := &hal.TextureDescriptor{
+	halDesc := &wgpu.TextureDescriptor{
 		Label: desc.Label,
-		Size: hal.Extent3D{
+		Size: wgpu.Extent3D{
 			Width:              desc.Size.Width,
 			Height:             desc.Size.Height,
 			DepthOrArrayLayers: depthOrArrayLayers,
@@ -688,7 +688,7 @@ func CreateCoreTexture(device hal.Device, desc *TextureDescriptor) (*Texture, er
 // Returns the new Texture and nil on success.
 // Returns nil and an error if creation fails.
 func CreateCoreTextureSimple(
-	device hal.Device,
+	device *wgpu.Device,
 	width, height uint32,
 	format gputypes.TextureFormat,
 	usage gputypes.TextureUsage,

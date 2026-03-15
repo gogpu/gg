@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 func TestSDFRenderPipelineCreation(t *testing.T) {
@@ -242,9 +242,9 @@ func TestSDFRenderShaderCompilation(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	module, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "test_sdf_render",
-		Source: hal.ShaderSource{WGSL: sdfRenderShaderSource},
+	module, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "test_sdf_render",
+		WGSL:  sdfRenderShaderSource,
 	})
 	if err != nil {
 		t.Fatalf("shader compilation failed: %v", err)

@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 //go:embed shaders/fine.wgsl
@@ -84,21 +84,21 @@ func FillRuleToGPU(rule scene.FillStyle) uint32 {
 type GPUFineRasterizer struct {
 	mu sync.Mutex
 
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Compute pipelines
-	finePipeline      hal.ComputePipeline
-	fineSolidPipeline hal.ComputePipeline
-	clearPipeline     hal.ComputePipeline
+	finePipeline      *wgpu.ComputePipeline
+	fineSolidPipeline *wgpu.ComputePipeline
+	clearPipeline     *wgpu.ComputePipeline
 
 	// Shader module (cached)
-	shaderModule hal.ShaderModule
+	shaderModule *wgpu.ShaderModule
 
 	// Pipeline layout and bind group layouts
-	pipelineLayout   hal.PipelineLayout
-	inputBindLayout  hal.BindGroupLayout
-	outputBindLayout hal.BindGroupLayout
+	pipelineLayout   *wgpu.PipelineLayout
+	inputBindLayout  *wgpu.BindGroupLayout
+	outputBindLayout *wgpu.BindGroupLayout
 
 	// Compiled SPIR-V (cached for verification)
 	spirvCode []uint32
@@ -114,7 +114,7 @@ type GPUFineRasterizer struct {
 
 // NewGPUFineRasterizer creates a new GPU fine rasterizer.
 // Returns an error if GPU compute is not supported.
-func NewGPUFineRasterizer(device hal.Device, queue hal.Queue, width, height uint16) (*GPUFineRasterizer, error) {
+func NewGPUFineRasterizer(device *wgpu.Device, queue *wgpu.Queue, width, height uint16) (*GPUFineRasterizer, error) {
 	if device == nil || queue == nil {
 		return nil, fmt.Errorf("gpu_fine: device and queue are required")
 	}
@@ -176,7 +176,7 @@ func (r *GPUFineRasterizer) init() error {
 // createBindGroupLayouts creates the bind group layouts for the pipeline.
 func (r *GPUFineRasterizer) createBindGroupLayouts() error {
 	// Input bind group layout (group 0)
-	inputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	inputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "fine_input_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -216,7 +216,7 @@ func (r *GPUFineRasterizer) createBindGroupLayouts() error {
 	r.inputBindLayout = inputLayout
 
 	// Output bind group layout (group 1)
-	outputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	outputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "fine_output_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -238,9 +238,9 @@ func (r *GPUFineRasterizer) createBindGroupLayouts() error {
 
 // createPipelineLayout creates the pipeline layout.
 func (r *GPUFineRasterizer) createPipelineLayout() error {
-	layout, err := r.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	layout, err := r.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "fine_pipeline_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
+		BindGroupLayouts: []*wgpu.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_fine: failed to create pipeline layout: %w", err)
@@ -252,13 +252,11 @@ func (r *GPUFineRasterizer) createPipelineLayout() error {
 // createPipelines creates the compute pipelines.
 func (r *GPUFineRasterizer) createPipelines() error {
 	// Main fine rasterization pipeline
-	finePipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "fine_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_fine",
-		},
+	finePipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "fine_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_fine",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_fine: failed to create fine pipeline: %w", err)
@@ -266,13 +264,11 @@ func (r *GPUFineRasterizer) createPipelines() error {
 	r.finePipeline = finePipeline
 
 	// Solid tile pipeline
-	solidPipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "fine_solid_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_fine_solid",
-		},
+	solidPipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "fine_solid_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_fine_solid",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_fine: failed to create solid pipeline: %w", err)
@@ -280,13 +276,11 @@ func (r *GPUFineRasterizer) createPipelines() error {
 	r.fineSolidPipeline = solidPipeline
 
 	// Clear coverage pipeline
-	clearPipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "clear_coverage_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_clear_coverage",
-		},
+	clearPipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "clear_coverage_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_clear_coverage",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_fine: failed to create clear pipeline: %w", err)
@@ -623,37 +617,37 @@ func (r *GPUFineRasterizer) Destroy() {
 
 	// Destroy pipelines
 	if r.finePipeline != nil {
-		r.device.DestroyComputePipeline(r.finePipeline)
+		r.finePipeline.Release()
 		r.finePipeline = nil
 	}
 	if r.fineSolidPipeline != nil {
-		r.device.DestroyComputePipeline(r.fineSolidPipeline)
+		r.fineSolidPipeline.Release()
 		r.fineSolidPipeline = nil
 	}
 	if r.clearPipeline != nil {
-		r.device.DestroyComputePipeline(r.clearPipeline)
+		r.clearPipeline.Release()
 		r.clearPipeline = nil
 	}
 
 	// Destroy pipeline layout
 	if r.pipelineLayout != nil {
-		r.device.DestroyPipelineLayout(r.pipelineLayout)
+		r.pipelineLayout.Release()
 		r.pipelineLayout = nil
 	}
 
 	// Destroy bind group layouts
 	if r.inputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.inputBindLayout)
+		r.inputBindLayout.Release()
 		r.inputBindLayout = nil
 	}
 	if r.outputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.outputBindLayout)
+		r.outputBindLayout.Release()
 		r.outputBindLayout = nil
 	}
 
 	// Destroy shader module
 	if r.shaderModule != nil {
-		r.device.DestroyShaderModule(r.shaderModule)
+		r.shaderModule.Release()
 		r.shaderModule = nil
 	}
 

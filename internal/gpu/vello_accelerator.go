@@ -19,7 +19,7 @@ import (
 	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 
 	// Import Vulkan backend so it registers via init().
 	_ "github.com/gogpu/wgpu/hal/vulkan"
@@ -38,9 +38,9 @@ import (
 type VelloAccelerator struct {
 	mu sync.Mutex
 
-	instance hal.Instance
-	device   hal.Device
-	queue    hal.Queue
+	instance *wgpu.Instance // standalone mode only; nil when using external device
+	device   *wgpu.Device
+	queue    *wgpu.Queue
 
 	dispatcher *VelloComputeDispatcher
 
@@ -85,11 +85,11 @@ func (a *VelloAccelerator) Close() {
 
 	if !a.externalDevice {
 		if a.device != nil {
-			a.device.Destroy()
+			a.device.Release()
 			a.device = nil
 		}
 		if a.instance != nil {
-			a.instance.Destroy()
+			a.instance.Release()
 			a.instance = nil
 		}
 	} else {
@@ -131,22 +131,16 @@ func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider)
 		return fmt.Errorf("vello-compute: provider Device is nil")
 	}
 
-	type halAccessor interface {
-		HalDevice() hal.Device
-		HalQueue() hal.Queue
-	}
-	ha, ok := dev.(halAccessor)
+	wgpuDev, ok := dev.(*wgpu.Device)
 	if !ok {
-		return fmt.Errorf("vello-compute: provider Device does not expose HAL types (got %T)", dev)
+		return fmt.Errorf("vello-compute: provider Device is not *wgpu.Device (got %T)", dev)
 	}
-	device := ha.HalDevice()
-	if device == nil {
-		return fmt.Errorf("vello-compute: provider HalDevice is nil")
+	wgpuQueue := wgpuDev.Queue()
+	if wgpuQueue == nil {
+		return fmt.Errorf("vello-compute: provider Queue is nil")
 	}
-	queue := ha.HalQueue()
-	if queue == nil {
-		return fmt.Errorf("vello-compute: provider HalQueue is nil")
-	}
+	device := wgpuDev
+	queue := wgpuQueue
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -157,10 +151,10 @@ func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider)
 		a.dispatcher = nil
 	}
 	if !a.externalDevice && a.device != nil {
-		a.device.Destroy()
+		a.device.Release()
 	}
 	if a.instance != nil {
-		a.instance.Destroy()
+		a.instance.Release()
 		a.instance = nil
 	}
 
@@ -730,9 +724,9 @@ func (a *VelloAccelerator) uploadPathAuxData(
 // readbackBuffer copies a GPU output buffer to a staging buffer and reads the
 // result back to CPU memory. The output buffer has CopySrc usage but not MapRead;
 // a temporary staging buffer with MapRead|CopyDst is created for the transfer.
-func (a *VelloAccelerator) readbackBuffer(outputBuffer hal.Buffer, size uint64) ([]byte, error) {
+func (a *VelloAccelerator) readbackBuffer(outputBuffer *wgpu.Buffer, size uint64) ([]byte, error) {
 	// Create staging buffer for readback.
-	stagingBuffer, err := a.device.CreateBuffer(&hal.BufferDescriptor{
+	stagingBuffer, err := a.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "vello_staging_readback",
 		Size:  size,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
@@ -740,42 +734,36 @@ func (a *VelloAccelerator) readbackBuffer(outputBuffer hal.Buffer, size uint64) 
 	if err != nil {
 		return nil, fmt.Errorf("create staging buffer: %w", err)
 	}
-	defer a.device.DestroyBuffer(stagingBuffer)
+	defer stagingBuffer.Release()
 
 	// Record copy command.
-	encoder, err := a.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := a.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "vello_readback",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create readback encoder: %w", err)
 	}
 
-	if err := encoder.BeginEncoding("vello_readback"); err != nil {
-		return nil, fmt.Errorf("begin readback encoding: %w", err)
-	}
+	encoder.CopyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, size)
 
-	encoder.CopyBufferToBuffer(outputBuffer, stagingBuffer, []hal.BufferCopy{
-		{SrcOffset: 0, DstOffset: 0, Size: size},
-	})
-
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return nil, fmt.Errorf("end readback encoding: %w", err)
 	}
-	defer a.device.FreeCommandBuffer(cmdBuf)
+	// cmdBuf freed after fence wait
 
 	// Submit and wait.
 	fence, err := a.device.CreateFence()
 	if err != nil {
 		return nil, fmt.Errorf("create readback fence: %w", err)
 	}
-	defer a.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := a.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if err := a.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
 		return nil, fmt.Errorf("submit readback: %w", err)
 	}
 
-	ok, err := a.device.Wait(fence, 1, velloFenceTimeout)
+	ok, err := a.device.WaitForFence(fence, 1, velloFenceTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("wait for readback: %w", err)
 	}
@@ -1211,39 +1199,27 @@ func (a *VelloAccelerator) InitStandalone() error {
 // This is the fallback path when no external device is provided via
 // SetDeviceProvider (e.g., when gg is used without gogpu).
 func (a *VelloAccelerator) initGPU() error {
-	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
-	if !ok {
-		return fmt.Errorf("vulkan backend not available")
-	}
-	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{Flags: 0})
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
+		Backends: wgpu.BackendsVulkan,
+	})
 	if err != nil {
 		return fmt.Errorf("create instance: %w", err)
 	}
 	a.instance = instance
 
-	adapters := instance.EnumerateAdapters(nil)
-	if len(adapters) == 0 {
-		return fmt.Errorf("no GPU adapters found")
-	}
-
-	var selected *hal.ExposedAdapter
-	for i := range adapters {
-		if adapters[i].Info.DeviceType == gputypes.DeviceTypeDiscreteGPU ||
-			adapters[i].Info.DeviceType == gputypes.DeviceTypeIntegratedGPU {
-			selected = &adapters[i]
-			break
-		}
-	}
-	if selected == nil {
-		selected = &adapters[0]
-	}
-
-	openDev, err := selected.Adapter.Open(gputypes.Features(0), gputypes.DefaultLimits())
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		PowerPreference: wgpu.PowerPreferenceHighPerformance,
+	})
 	if err != nil {
-		return fmt.Errorf("open device: %w", err)
+		return fmt.Errorf("request adapter: %w", err)
 	}
-	a.device = openDev.Device
-	a.queue = openDev.Queue
+
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "gg-vello"})
+	if err != nil {
+		return fmt.Errorf("request device: %w", err)
+	}
+	a.device = device
+	a.queue = device.Queue()
 
 	// Create dispatcher with the standalone device/queue.
 	dispatcher := NewVelloComputeDispatcher(a.device, a.queue)
@@ -1255,6 +1231,6 @@ func (a *VelloAccelerator) initGPU() error {
 	a.dispatcher = dispatcher
 
 	a.gpuReady = true
-	slogger().Info("vello-compute: GPU initialized (standalone)", "adapter", selected.Info.Name)
+	slogger().Info("vello-compute: GPU initialized (standalone)", "adapter", adapter.Info().Name)
 	return nil
 }

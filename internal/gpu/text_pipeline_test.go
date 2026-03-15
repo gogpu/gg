@@ -176,9 +176,10 @@ func TestTextPipelineConfig(t *testing.T) {
 	})
 }
 
-// TestNewTextPipeline tests pipeline creation with HAL device and queue.
+// TestNewTextPipeline tests pipeline creation with noop device and queue.
 func TestNewTextPipeline(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	t.Run("with default config", func(t *testing.T) {
 		pipeline, err := NewTextPipelineDefault(device, nil)

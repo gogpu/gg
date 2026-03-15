@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 //go:embed shaders/sdf_render.wgsl
@@ -57,31 +57,31 @@ const sdfRenderAAMargin = 1.5
 // For unified rendering via GPURenderSession, pipelineWithStencil is used
 // when the render pass includes a depth/stencil attachment.
 type SDFRenderPipeline struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// GPU objects for the render pipeline.
-	shader        hal.ShaderModule
-	uniformLayout hal.BindGroupLayout
-	pipeLayout    hal.PipelineLayout
-	pipeline      hal.RenderPipeline
+	shader        *wgpu.ShaderModule
+	uniformLayout *wgpu.BindGroupLayout
+	pipeLayout    *wgpu.PipelineLayout
+	pipeline      *wgpu.RenderPipeline
 
 	// Session-compatible pipeline variant with depth/stencil state.
 	// This is used when the SDF pipeline participates in a unified render
 	// pass that includes a stencil attachment (for stencil-then-cover paths).
 	// The stencil test is Always/Keep (SDF shapes don't interact with stencil).
-	pipelineWithStencil hal.RenderPipeline
+	pipelineWithStencil *wgpu.RenderPipeline
 
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
-	clipBindLayout hal.BindGroupLayout
+	clipBindLayout *wgpu.BindGroupLayout
 
 	// MSAA and resolve textures for offscreen rendering (standalone mode).
 	// When used via GPURenderSession, these are nil -- the session owns textures.
-	msaaTex     hal.Texture
-	msaaView    hal.TextureView
-	resolveTex  hal.Texture
-	resolveView hal.TextureView
+	msaaTex     *wgpu.Texture
+	msaaView    *wgpu.TextureView
+	resolveTex  *wgpu.Texture
+	resolveView *wgpu.TextureView
 
 	width, height uint32
 }
@@ -89,14 +89,14 @@ type SDFRenderPipeline struct {
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
 // uniform. Must be called before ensurePipelineWithStencil. The layout is
 // owned by the session and must not be destroyed by the pipeline.
-func (p *SDFRenderPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
+func (p *SDFRenderPipeline) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	p.clipBindLayout = layout
 }
 
 // NewSDFRenderPipeline creates a new SDF render pipeline with the given device
 // and queue. The render pipeline and textures are not created until
 // ensureReady is called with the desired dimensions.
-func NewSDFRenderPipeline(device hal.Device, queue hal.Queue) *SDFRenderPipeline {
+func NewSDFRenderPipeline(device *wgpu.Device, queue *wgpu.Queue) *SDFRenderPipeline {
 	return &SDFRenderPipeline{
 		device: device,
 		queue:  queue,
@@ -140,7 +140,7 @@ func (p *SDFRenderPipeline) RenderShapes(target gg.GPURenderTarget, shapes []SDF
 	if err != nil {
 		return fmt.Errorf("create vertex buffer: %w", err)
 	}
-	defer p.device.DestroyBuffer(vertBuf)
+	defer vertBuf.Release()
 
 	uniformData := makeSDFRenderUniform(w, h)
 	uniformBuf, err := p.createAndUploadBuffer("sdf_render_uniform", uniformData,
@@ -148,21 +148,19 @@ func (p *SDFRenderPipeline) RenderShapes(target gg.GPURenderTarget, shapes []SDF
 	if err != nil {
 		return fmt.Errorf("create uniform buffer: %w", err)
 	}
-	defer p.device.DestroyBuffer(uniformBuf)
+	defer uniformBuf.Release()
 
-	bindGroup, err := p.device.CreateBindGroup(&hal.BindGroupDescriptor{
+	bindGroup, err := p.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label:  "sdf_render_bind",
 		Layout: p.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: uniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
-			}},
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: uniformBuf, Offset: 0, Size: sdfRenderUniformSize},
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("create bind group: %w", err)
 	}
-	defer p.device.DestroyBindGroup(bindGroup)
+	defer bindGroup.Release()
 
 	// Encode render pass + readback.
 	return p.encodeAndReadback(w, h, vertBuf, vertexCount, bindGroup, target)
@@ -189,10 +187,10 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	}
 	p.destroyTextures()
 
-	size := hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
+	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
 	// MSAA color texture (4x samples, BGRA8Unorm).
-	msaaTex, err := p.device.CreateTexture(&hal.TextureDescriptor{
+	msaaTex, err := p.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "sdf_render_msaa",
 		Size:          size,
 		MipLevelCount: 1,
@@ -206,7 +204,7 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	}
 	p.msaaTex = msaaTex
 
-	msaaView, err := p.device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
+	msaaView, err := p.device.CreateTextureView(msaaTex, &wgpu.TextureViewDescriptor{
 		Label:         "sdf_render_msaa_view",
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -220,7 +218,7 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	p.msaaView = msaaView
 
 	// Single-sample resolve target (CopySrc for readback).
-	resolveTex, err := p.device.CreateTexture(&hal.TextureDescriptor{
+	resolveTex, err := p.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "sdf_render_resolve",
 		Size:          size,
 		MipLevelCount: 1,
@@ -235,7 +233,7 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 	}
 	p.resolveTex = resolveTex
 
-	resolveView, err := p.device.CreateTextureView(resolveTex, &hal.TextureViewDescriptor{
+	resolveView, err := p.device.CreateTextureView(resolveTex, &wgpu.TextureViewDescriptor{
 		Label:         "sdf_render_resolve_view",
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -256,19 +254,19 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 // destroyTextures releases all texture resources and resets dimensions.
 func (p *SDFRenderPipeline) destroyTextures() {
 	if p.resolveView != nil {
-		p.device.DestroyTextureView(p.resolveView)
+		p.resolveView.Release()
 		p.resolveView = nil
 	}
 	if p.resolveTex != nil {
-		p.device.DestroyTexture(p.resolveTex)
+		p.resolveTex.Release()
 		p.resolveTex = nil
 	}
 	if p.msaaView != nil {
-		p.device.DestroyTextureView(p.msaaView)
+		p.msaaView.Release()
 		p.msaaView = nil
 	}
 	if p.msaaTex != nil {
-		p.device.DestroyTexture(p.msaaTex)
+		p.msaaTex.Release()
 		p.msaaTex = nil
 	}
 	p.width = 0
@@ -282,16 +280,16 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 		return fmt.Errorf("sdf_render shader source is empty")
 	}
 
-	shader, err := p.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "sdf_render_shader",
-		Source: hal.ShaderSource{WGSL: sdfRenderShaderSource},
+	shader, err := p.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "sdf_render_shader",
+		WGSL:  sdfRenderShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile sdf_render shader: %w", err)
 	}
 	p.shader = shader
 
-	uniformLayout, err := p.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	uniformLayout, err := p.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "sdf_render_uniform_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -306,11 +304,11 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 	}
 	p.uniformLayout = uniformLayout
 
-	bgLayouts := []hal.BindGroupLayout{p.uniformLayout}
+	bgLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
 	if p.clipBindLayout != nil {
 		bgLayouts = append(bgLayouts, p.clipBindLayout)
 	}
-	pipeLayout, err := p.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "sdf_render_pipe_layout",
 		BindGroupLayouts: bgLayouts,
 	})
@@ -320,15 +318,15 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 	p.pipeLayout = pipeLayout
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "sdf_render_pipeline",
 		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
 			Buffers:    sdfRenderVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -376,15 +374,15 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl //
 	}
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "sdf_render_pipeline_with_stencil",
 		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
 			Buffers:    sdfRenderVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -395,21 +393,21 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl //
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
 			StencilReadMask:  0x00,
 			StencilWriteMask: 0x00,
@@ -437,7 +435,7 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl //
 //
 // The resources parameter holds pre-built vertex buffer, uniform buffer,
 // and bind group for the current frame.
-func (p *SDFRenderPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *sdfFrameResources, clipBG hal.BindGroup) {
+func (p *SDFRenderPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *sdfFrameResources, clipBG *wgpu.BindGroup) {
 	rp.SetPipeline(p.pipelineWithStencil)
 	rp.SetBindGroup(0, resources.bindGroup, nil)
 	if clipBG != nil {
@@ -453,23 +451,23 @@ func (p *SDFRenderPipeline) destroyPipeline() {
 		return
 	}
 	if p.pipelineWithStencil != nil {
-		p.device.DestroyRenderPipeline(p.pipelineWithStencil)
+		p.pipelineWithStencil.Release()
 		p.pipelineWithStencil = nil
 	}
 	if p.pipeline != nil {
-		p.device.DestroyRenderPipeline(p.pipeline)
+		p.pipeline.Release()
 		p.pipeline = nil
 	}
 	if p.pipeLayout != nil {
-		p.device.DestroyPipelineLayout(p.pipeLayout)
+		p.pipeLayout.Release()
 		p.pipeLayout = nil
 	}
 	if p.uniformLayout != nil {
-		p.device.DestroyBindGroupLayout(p.uniformLayout)
+		p.uniformLayout.Release()
 		p.uniformLayout = nil
 	}
 	if p.shader != nil {
-		p.device.DestroyShaderModule(p.shader)
+		p.shader.Release()
 		p.shader = nil
 	}
 }
@@ -477,23 +475,19 @@ func (p *SDFRenderPipeline) destroyPipeline() {
 // encodeAndReadback encodes the SDF render pass, copies the resolve texture
 // to a staging buffer, submits, waits, and reads back pixels.
 func (p *SDFRenderPipeline) encodeAndReadback(
-	w, h uint32, vertBuf hal.Buffer, vertexCount uint32,
-	bindGroup hal.BindGroup, target gg.GPURenderTarget,
+	w, h uint32, vertBuf *wgpu.Buffer, vertexCount uint32,
+	bindGroup *wgpu.BindGroup, target gg.GPURenderTarget,
 ) error {
-	encoder, err := p.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := p.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "sdf_render_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("sdf_render"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Render pass with MSAA resolve.
-	rpDesc := &hal.RenderPassDescriptor{
+	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "sdf_render_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
 				View:          p.msaaView,
 				ResolveTarget: p.resolveView,
@@ -503,7 +497,10 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 			},
 		},
 	}
-	rp := encoder.BeginRenderPass(rpDesc)
+	rp, rpErr := encoder.BeginRenderPass(rpDesc)
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 	rp.SetPipeline(p.pipeline)
 	rp.SetBindGroup(0, bindGroup, nil)
 	rp.SetVertexBuffer(0, vertBuf, 0)
@@ -514,9 +511,9 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
 	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
 	// This is a no-op on Metal, GLES, software, and noop backends.
-	encoder.TransitionTextures([]hal.TextureBarrier{{
+	encoder.TransitionTextures([]wgpu.TextureBarrier{{
 		Texture: p.resolveTex,
-		Usage: hal.TextureUsageTransition{
+		Usage: wgpu.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageRenderAttachment,
 			NewUsage: gputypes.TextureUsageCopySrc,
 		},
@@ -524,7 +521,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 
 	// Copy resolve texture to staging buffer for readback.
 	pixelBufSize := uint64(w) * uint64(h) * 4
-	stagingBuf, err := p.device.CreateBuffer(&hal.BufferDescriptor{
+	stagingBuf, err := p.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "sdf_render_staging",
 		Size:  pixelBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
@@ -533,31 +530,31 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 		encoder.DiscardEncoding()
 		return fmt.Errorf("create staging buffer: %w", err)
 	}
-	defer p.device.DestroyBuffer(stagingBuf)
+	defer stagingBuf.Release()
 
-	encoder.CopyTextureToBuffer(p.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
-		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
-		TextureBase:  hal.ImageCopyTexture{Texture: p.resolveTex, MipLevel: 0},
-		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+	encoder.CopyTextureToBuffer(p.resolveTex, stagingBuf, []wgpu.BufferTextureCopy{{
+		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		TextureBase:  wgpu.ImageCopyTexture{Texture: p.resolveTex, MipLevel: 0},
+		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
 
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
-	defer p.device.FreeCommandBuffer(cmdBuf)
+	// cmdBuf freed after fence wait
 
 	// Submit and wait.
 	fence, err := p.device.CreateFence()
 	if err != nil {
 		return fmt.Errorf("create fence: %w", err)
 	}
-	defer p.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := p.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if err := p.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := p.device.Wait(fence, 1, 5*time.Second)
+	fenceOK, err := p.device.WaitForFence(fence, 1, 5*time.Second)
 	if err != nil || !fenceOK {
 		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
 	}
@@ -572,8 +569,8 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 }
 
 // createAndUploadBuffer creates a GPU buffer and uploads data.
-func (p *SDFRenderPipeline) createAndUploadBuffer(label string, data []byte, usage gputypes.BufferUsage) (hal.Buffer, error) {
-	buf, err := p.device.CreateBuffer(&hal.BufferDescriptor{
+func (p *SDFRenderPipeline) createAndUploadBuffer(label string, data []byte, usage gputypes.BufferUsage) (*wgpu.Buffer, error) {
+	buf, err := p.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: label,
 		Size:  uint64(len(data)),
 		Usage: usage,
@@ -582,7 +579,7 @@ func (p *SDFRenderPipeline) createAndUploadBuffer(label string, data []byte, usa
 		return nil, fmt.Errorf("create %s: %w", label, err)
 	}
 	if err := p.queue.WriteBuffer(buf, 0, data); err != nil {
-		p.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, fmt.Errorf("write %s: %w", label, err)
 	}
 	return buf, nil

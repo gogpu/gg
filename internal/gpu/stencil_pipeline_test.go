@@ -5,7 +5,7 @@ package gpu
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 func TestStencilPipelineCreation(t *testing.T) {
@@ -159,9 +159,9 @@ func TestShaderCompilation(t *testing.T) {
 		t.Fatal("stencil fill shader source is empty")
 	}
 
-	stencilModule, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "test_stencil_fill",
-		Source: hal.ShaderSource{WGSL: stencilFillShaderSource},
+	stencilModule, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "test_stencil_fill",
+		WGSL:  stencilFillShaderSource,
 	})
 	if err != nil {
 		t.Fatalf("stencil fill shader compilation failed: %v", err)
@@ -175,9 +175,9 @@ func TestShaderCompilation(t *testing.T) {
 		t.Fatal("cover shader source is empty")
 	}
 
-	coverModule, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "test_cover",
-		Source: hal.ShaderSource{WGSL: coverShaderSource},
+	coverModule, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "test_cover",
+		WGSL:  coverShaderSource,
 	})
 	if err != nil {
 		t.Fatalf("cover shader compilation failed: %v", err)

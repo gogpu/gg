@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // nopHandler silently discards all log records.
@@ -30,14 +30,14 @@ func init() {
 // All logging in internal/gpu goes through this function.
 func slogger() *slog.Logger { return loggerPtr.Load() }
 
-// setLogger updates the package-level logger and propagates to wgpu HAL.
+// setLogger updates the package-level logger and propagates to the wgpu stack.
 // Called from SDFAccelerator.SetLogger when gg.SetLogger propagates.
 // This ensures a single gg.SetLogger() call enables logging across the
-// entire stack: gg → internal/gpu → wgpu/hal → Metal/Vulkan backends.
+// entire stack: gg → internal/gpu → wgpu → core → hal → GPU backends.
 func setLogger(l *slog.Logger) {
 	if l == nil {
 		l = slog.New(nopHandler{})
 	}
 	loggerPtr.Store(l)
-	hal.SetLogger(l)
+	wgpu.SetLogger(l)
 }

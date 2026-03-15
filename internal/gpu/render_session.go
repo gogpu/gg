@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // ScissorGroup holds a subset of draw commands that share the same scissor
@@ -93,8 +93,8 @@ const (
 //	  +-- Single submit + fence wait
 //	  +-- Single readback (offscreen) or resolve to surface (direct)
 type GPURenderSession struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Shared textures (MSAA 4x color + depth/stencil + 1x resolve).
 	textures textureSet
@@ -108,41 +108,41 @@ type GPURenderSession struct {
 
 	// Surface rendering mode fields. When surfaceView is non-nil, the session
 	// renders directly to the surface instead of reading back to CPU.
-	surfaceView   hal.TextureView
+	surfaceView   *wgpu.TextureView
 	surfaceWidth  uint32
 	surfaceHeight uint32
 
 	// Persistent per-frame GPU buffers (survive across frames).
 	// Grow-only: reallocated only when data exceeds current capacity.
-	sdfVertBuf       hal.Buffer
+	sdfVertBuf       *wgpu.Buffer
 	sdfVertBufCap    uint64
-	sdfUniformBuf    hal.Buffer
-	sdfBindGroup     hal.BindGroup
-	convexVertBuf    hal.Buffer
+	sdfUniformBuf    *wgpu.Buffer
+	sdfBindGroup     *wgpu.BindGroup
+	convexVertBuf    *wgpu.Buffer
 	convexVertBufCap uint64
-	convexUniformBuf hal.Buffer
-	convexBindGroup  hal.BindGroup
+	convexUniformBuf *wgpu.Buffer
+	convexBindGroup  *wgpu.BindGroup
 
 	// Tier 4: MSDF text persistent buffers.
-	textVertBuf    hal.Buffer
+	textVertBuf    *wgpu.Buffer
 	textVertBufCap uint64
-	textIdxBuf     hal.Buffer
+	textIdxBuf     *wgpu.Buffer
 	textIdxBufCap  uint64
 	// Per-batch uniform buffers and bind groups (pool, grows as needed).
-	textUniformBufs []hal.Buffer
-	textBindGroups  []hal.BindGroup
+	textUniformBufs []*wgpu.Buffer
+	textBindGroups  []*wgpu.BindGroup
 	// Atlas texture and view for current frame's text rendering.
-	textAtlasTex  hal.Texture
-	textAtlasView hal.TextureView
+	textAtlasTex  *wgpu.Texture
+	textAtlasView *wgpu.TextureView
 
 	// Tier 6: Glyph mask text persistent buffers.
 	glyphMaskPipeline    *GlyphMaskPipeline
-	glyphMaskVertBuf     hal.Buffer
+	glyphMaskVertBuf     *wgpu.Buffer
 	glyphMaskVertBufCap  uint64
-	glyphMaskIdxBuf      hal.Buffer
+	glyphMaskIdxBuf      *wgpu.Buffer
 	glyphMaskIdxBufCap   uint64
-	glyphMaskUniformBufs []hal.Buffer
-	glyphMaskBindGroups  []hal.BindGroup
+	glyphMaskUniformBufs []*wgpu.Buffer
+	glyphMaskBindGroups  []*wgpu.BindGroup
 
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
@@ -153,7 +153,7 @@ type GPURenderSession struct {
 
 	// In-flight command buffer from the previous surface frame. Freed at
 	// the start of the next frame, when VSync guarantees the GPU is done.
-	prevCmdBuf hal.CommandBuffer
+	prevCmdBuf *wgpu.CommandBuffer
 
 	// frameRendered tracks whether at least one render pass has been
 	// submitted to the surface in the current frame. When true, subsequent
@@ -174,18 +174,18 @@ type GPURenderSession struct {
 	// RRect clip bind group infrastructure. All 5 pipelines share the same
 	// clip bind group layout at @group(1) @binding(0). A no-clip bind group
 	// (clip_enabled=0.0) is created once and reused for groups without RRect clip.
-	clipBindLayout   hal.BindGroupLayout
-	noClipUniformBuf hal.Buffer
-	noClipBindGroup  hal.BindGroup
+	clipBindLayout   *wgpu.BindGroupLayout
+	noClipUniformBuf *wgpu.Buffer
+	noClipBindGroup  *wgpu.BindGroup
 	// Pool of per-group clip uniform buffers and bind groups.
-	clipUniformPool []hal.Buffer
-	clipBindPool    []hal.BindGroup
+	clipUniformPool []*wgpu.Buffer
+	clipBindPool    []*wgpu.BindGroup
 	clipPoolUsed    int // number of pool entries used in current frame
 }
 
 // NewGPURenderSession creates a new render session with the given device and
 // queue. Textures and pipelines are not allocated until RenderFrame is called.
-func NewGPURenderSession(device hal.Device, queue hal.Queue) *GPURenderSession {
+func NewGPURenderSession(device *wgpu.Device, queue *wgpu.Queue) *GPURenderSession {
 	return &GPURenderSession{
 		device: device,
 		queue:  queue,
@@ -203,7 +203,7 @@ func NewGPURenderSession(device hal.Device, queue hal.Queue) *GPURenderSession {
 //
 // Call with nil view to return to offscreen mode. The caller retains
 // ownership of the surface view -- the session will not destroy it.
-func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height uint32) {
+func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, height uint32) {
 	// If switching modes or resizing, invalidate cached textures so they
 	// are recreated on the next RenderFrame call.
 	modeChanged := (view == nil) != (s.surfaceView == nil)
@@ -216,7 +216,7 @@ func (s *GPURenderSession) SetSurfaceTarget(view hal.TextureView, width, height 
 			s.device.FreeCommandBuffer(s.prevCmdBuf)
 			s.prevCmdBuf = nil
 		}
-		s.textures.destroyTextures(s.device)
+		s.textures.destroyTextures()
 	}
 
 	// Detect new frame: swapchain creates a new TextureView each frame
@@ -270,7 +270,7 @@ func (s *GPURenderSession) ClearScissorRect() {
 
 // applyScissorRect applies the current scissor rect (if any) to the given
 // render pass encoder. Call this after BeginRenderPass and before draw calls.
-func (s *GPURenderSession) applyScissorRect(rp hal.RenderPassEncoder) {
+func (s *GPURenderSession) applyScissorRect(rp *wgpu.RenderPassEncoder) {
 	if s.scissorRect != nil {
 		rp.SetScissorRect(s.scissorRect[0], s.scissorRect[1], s.scissorRect[2], s.scissorRect[3])
 	}
@@ -396,7 +396,7 @@ func (s *GPURenderSession) RenderFrame(
 // groupResources holds pre-built GPU resources for a single ScissorGroup.
 type groupResources struct {
 	scissorRect   *[4]uint32
-	clipBindGroup hal.BindGroup // @group(1) bind group for RRect clip (or no-clip)
+	clipBindGroup *wgpu.BindGroup // @group(1) bind group for RRect clip (or no-clip)
 	sdfRes        *sdfFrameResources
 	sdfShapes     []SDFRenderShape
 	convexRes     *convexFrameResources
@@ -591,7 +591,7 @@ func (s *GPURenderSession) prepareTextResources(textBatches []TextBatch) (*textF
 		return nil, nil //nolint:nilnil // no text to render
 	}
 	if err := s.ensureTextPipeline(); err != nil {
-		hal.Logger().Warn("text pipeline init failed", "err", err)
+		slogger().Warn("text pipeline init failed", "err", err)
 		return nil, nil //nolint:nilnil // non-fatal, skip text
 	}
 	res, err := s.buildTextResources(textBatches)
@@ -619,7 +619,7 @@ func (s *GPURenderSession) Destroy() {
 		s.prevCmdBuf = nil
 	}
 	s.destroyPersistentBuffers()
-	s.textures.destroyTextures(s.device)
+	s.textures.destroyTextures()
 	s.surfaceView = nil
 	s.surfaceWidth = 0
 	s.surfaceHeight = 0
@@ -633,107 +633,104 @@ func (s *GPURenderSession) drainQueue() {
 	if err != nil {
 		return
 	}
-	defer s.device.DestroyFence(fence)
+	defer fence.Release()
 
-	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_drain",
 	})
 	if err != nil {
 		return
 	}
-	if err := encoder.BeginEncoding("drain"); err != nil {
-		return
-	}
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return
 	}
-	defer s.device.FreeCommandBuffer(cmdBuf)
+	// cmdBuf freed after fence wait
 
-	_ = s.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1)
-	_, _ = s.device.Wait(fence, 1, 5*time.Second)
+	_ = s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1)
+	_, _ = s.device.WaitForFence(fence, 1, 5*time.Second)
 }
 
 func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen,gocognit // sequential resource cleanup across 6 tiers
 	if s.sdfBindGroup != nil {
-		s.device.DestroyBindGroup(s.sdfBindGroup)
+		s.sdfBindGroup.Release()
 		s.sdfBindGroup = nil
 	}
 	if s.sdfUniformBuf != nil {
-		s.device.DestroyBuffer(s.sdfUniformBuf)
+		s.sdfUniformBuf.Release()
 		s.sdfUniformBuf = nil
 	}
 	if s.sdfVertBuf != nil {
-		s.device.DestroyBuffer(s.sdfVertBuf)
+		s.sdfVertBuf.Release()
 		s.sdfVertBuf = nil
 		s.sdfVertBufCap = 0
 	}
 	if s.convexBindGroup != nil {
-		s.device.DestroyBindGroup(s.convexBindGroup)
+		s.convexBindGroup.Release()
 		s.convexBindGroup = nil
 	}
 	if s.convexUniformBuf != nil {
-		s.device.DestroyBuffer(s.convexUniformBuf)
+		s.convexUniformBuf.Release()
 		s.convexUniformBuf = nil
 	}
 	if s.convexVertBuf != nil {
-		s.device.DestroyBuffer(s.convexVertBuf)
+		s.convexVertBuf.Release()
 		s.convexVertBuf = nil
 		s.convexVertBufCap = 0
 	}
 	// Tier 4: Text per-batch pools.
 	for i, bg := range s.textBindGroups {
 		if bg != nil {
-			s.device.DestroyBindGroup(bg)
+			bg.Release()
 			s.textBindGroups[i] = nil
 		}
 	}
 	s.textBindGroups = nil
 	for _, buf := range s.textUniformBufs {
 		if buf != nil {
-			s.device.DestroyBuffer(buf)
+			buf.Release()
 		}
 	}
 	s.textUniformBufs = nil
 	if s.textIdxBuf != nil {
-		s.device.DestroyBuffer(s.textIdxBuf)
+		s.textIdxBuf.Release()
 		s.textIdxBuf = nil
 		s.textIdxBufCap = 0
 	}
 	if s.textVertBuf != nil {
-		s.device.DestroyBuffer(s.textVertBuf)
+		s.textVertBuf.Release()
 		s.textVertBuf = nil
 		s.textVertBufCap = 0
 	}
 	if s.textAtlasView != nil {
-		s.device.DestroyTextureView(s.textAtlasView)
+		s.textAtlasView.Release()
 		s.textAtlasView = nil
 	}
 	if s.textAtlasTex != nil {
-		s.device.DestroyTexture(s.textAtlasTex)
+		s.textAtlasTex.Release()
 		s.textAtlasTex = nil
 	}
 	// Tier 6: Glyph mask text per-batch pools.
 	for i, bg := range s.glyphMaskBindGroups {
 		if bg != nil {
-			s.device.DestroyBindGroup(bg)
+			bg.Release()
 			s.glyphMaskBindGroups[i] = nil
 		}
 	}
 	s.glyphMaskBindGroups = nil
 	for _, buf := range s.glyphMaskUniformBufs {
 		if buf != nil {
-			s.device.DestroyBuffer(buf)
+			buf.Release()
 		}
 	}
 	s.glyphMaskUniformBufs = nil
 	if s.glyphMaskIdxBuf != nil {
-		s.device.DestroyBuffer(s.glyphMaskIdxBuf)
+		s.glyphMaskIdxBuf.Release()
 		s.glyphMaskIdxBuf = nil
 		s.glyphMaskIdxBufCap = 0
 	}
 	if s.glyphMaskVertBuf != nil {
-		s.device.DestroyBuffer(s.glyphMaskVertBuf)
+		s.glyphMaskVertBuf.Release()
 		s.glyphMaskVertBuf = nil
 		s.glyphMaskVertBufCap = 0
 	}
@@ -749,37 +746,37 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	// Clip bind group pool.
 	for i, bg := range s.clipBindPool {
 		if bg != nil {
-			s.device.DestroyBindGroup(bg)
+			bg.Release()
 			s.clipBindPool[i] = nil
 		}
 	}
 	s.clipBindPool = nil
 	for _, buf := range s.clipUniformPool {
 		if buf != nil {
-			s.device.DestroyBuffer(buf)
+			buf.Release()
 		}
 	}
 	s.clipUniformPool = nil
 	s.clipPoolUsed = 0
 	if s.noClipBindGroup != nil {
-		s.device.DestroyBindGroup(s.noClipBindGroup)
+		s.noClipBindGroup.Release()
 		s.noClipBindGroup = nil
 	}
 	if s.noClipUniformBuf != nil {
-		s.device.DestroyBuffer(s.noClipUniformBuf)
+		s.noClipUniformBuf.Release()
 		s.noClipUniformBuf = nil
 	}
 	if s.clipBindLayout != nil {
-		s.device.DestroyBindGroupLayout(s.clipBindLayout)
+		s.clipBindLayout.Release()
 		s.clipBindLayout = nil
 	}
 }
 
 // sdfFrameResources holds per-frame GPU resources for SDF rendering.
 type sdfFrameResources struct {
-	vertBuf     hal.Buffer
-	uniformBuf  hal.Buffer
-	bindGroup   hal.BindGroup
+	vertBuf     *wgpu.Buffer
+	uniformBuf  *wgpu.Buffer
+	bindGroup   *wgpu.BindGroup
 	vertCount   uint32
 	firstVertex uint32 // offset into shared vertex buffer (for scissor group sub-ranges)
 }
@@ -826,7 +823,7 @@ func (s *GPURenderSession) ensureClipBindLayout() error {
 		return nil
 	}
 
-	layout, err := s.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	layout, err := s.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "clip_bind_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -843,7 +840,7 @@ func (s *GPURenderSession) ensureClipBindLayout() error {
 
 	// Create the no-clip uniform buffer (clip_enabled=0.0).
 	noClip := NoClipParams()
-	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+	buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "clip_no_clip_uniform",
 		Size:  clipParamsSize,
 		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
@@ -852,18 +849,16 @@ func (s *GPURenderSession) ensureClipBindLayout() error {
 		return fmt.Errorf("create no-clip uniform buffer: %w", err)
 	}
 	if err := s.queue.WriteBuffer(buf, 0, noClip.Bytes()); err != nil {
-		s.device.DestroyBuffer(buf)
+		buf.Release()
 		return fmt.Errorf("write no-clip uniform buffer: %w", err)
 	}
 	s.noClipUniformBuf = buf
 
-	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label:  "clip_no_clip_bind",
 		Layout: s.clipBindLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: buf.NativeHandle(), Offset: 0, Size: clipParamsSize,
-			}},
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Offset: 0, Size: clipParamsSize},
 		},
 	})
 	if err != nil {
@@ -876,7 +871,7 @@ func (s *GPURenderSession) ensureClipBindLayout() error {
 // getClipBindGroup returns a bind group for the given ClipParams. If params
 // is nil, returns the shared no-clip bind group. Otherwise, allocates from
 // a pool of per-frame clip uniform buffers.
-func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (hal.BindGroup, error) {
+func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (*wgpu.BindGroup, error) {
 	if params == nil {
 		return s.noClipBindGroup, nil
 	}
@@ -893,7 +888,7 @@ func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (hal.BindGroup, 
 	}
 
 	// Grow pool: create new buffer and bind group.
-	buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+	buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: fmt.Sprintf("clip_uniform_%d", idx),
 		Size:  clipParamsSize,
 		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
@@ -902,20 +897,18 @@ func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (hal.BindGroup, 
 		return nil, fmt.Errorf("create clip uniform buffer: %w", err)
 	}
 	if err := s.queue.WriteBuffer(buf, 0, params.Bytes()); err != nil {
-		s.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, fmt.Errorf("write clip uniform: %w", err)
 	}
-	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label:  fmt.Sprintf("clip_bind_%d", idx),
 		Layout: s.clipBindLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: buf.NativeHandle(), Offset: 0, Size: clipParamsSize,
-			}},
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Offset: 0, Size: clipParamsSize},
 		},
 	})
 	if err != nil {
-		s.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, fmt.Errorf("create clip bind group: %w", err)
 	}
 	s.clipUniformPool = append(s.clipUniformPool, buf)
@@ -927,7 +920,7 @@ func (s *GPURenderSession) getClipBindGroup(params *ClipParams) (hal.BindGroup, 
 // ClipBindLayout returns the shared clip bind group layout for @group(1).
 // Pipeline creation methods use this to include the clip layout in their
 // pipeline layouts. Must call ensureClipBindLayout() first.
-func (s *GPURenderSession) ClipBindLayout() hal.BindGroupLayout {
+func (s *GPURenderSession) ClipBindLayout() *wgpu.BindGroupLayout {
 	return s.clipBindLayout
 }
 
@@ -955,14 +948,14 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 
 	if s.sdfVertBuf == nil || s.sdfVertBufCap < vertSize {
 		if s.sdfBindGroup != nil {
-			s.device.DestroyBindGroup(s.sdfBindGroup)
+			s.sdfBindGroup.Release()
 			s.sdfBindGroup = nil
 		}
 		if s.sdfVertBuf != nil {
-			s.device.DestroyBuffer(s.sdfVertBuf)
+			s.sdfVertBuf.Release()
 		}
 		allocSize := vertSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_sdf_verts",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
@@ -981,7 +974,7 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 
 	uniformData := makeSDFRenderUniform(w, h)
 	if s.sdfUniformBuf == nil {
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_sdf_uniform",
 			Size:  sdfRenderUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
@@ -992,7 +985,7 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 		s.sdfUniformBuf = buf
 		// Bind group must be recreated with the new uniform buffer.
 		if s.sdfBindGroup != nil {
-			s.device.DestroyBindGroup(s.sdfBindGroup)
+			s.sdfBindGroup.Release()
 			s.sdfBindGroup = nil
 		}
 	}
@@ -1001,13 +994,11 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 	}
 
 	if s.sdfBindGroup == nil {
-		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:  "session_sdf_bind",
 			Layout: s.sdfPipeline.uniformLayout,
-			Entries: []gputypes.BindGroupEntry{
-				{Binding: 0, Resource: gputypes.BufferBinding{
-					Buffer: s.sdfUniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
-				}},
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: s.sdfUniformBuf, Offset: 0, Size: sdfRenderUniformSize},
 			},
 		})
 		if err != nil {
@@ -1038,14 +1029,14 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 
 	if s.convexVertBuf == nil || s.convexVertBufCap < vertSize {
 		if s.convexBindGroup != nil {
-			s.device.DestroyBindGroup(s.convexBindGroup)
+			s.convexBindGroup.Release()
 			s.convexBindGroup = nil
 		}
 		if s.convexVertBuf != nil {
-			s.device.DestroyBuffer(s.convexVertBuf)
+			s.convexVertBuf.Release()
 		}
 		allocSize := vertSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_convex_verts",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
@@ -1064,7 +1055,7 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 
 	uniformData := makeSDFRenderUniform(w, h) // Same 16-byte viewport layout.
 	if s.convexUniformBuf == nil {
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_convex_uniform",
 			Size:  sdfRenderUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
@@ -1074,7 +1065,7 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 		}
 		s.convexUniformBuf = buf
 		if s.convexBindGroup != nil {
-			s.device.DestroyBindGroup(s.convexBindGroup)
+			s.convexBindGroup.Release()
 			s.convexBindGroup = nil
 		}
 	}
@@ -1083,13 +1074,11 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 	}
 
 	if s.convexBindGroup == nil {
-		bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:  "session_convex_bind",
 			Layout: s.convexRenderer.uniformLayout,
-			Entries: []gputypes.BindGroupEntry{
-				{Binding: 0, Resource: gputypes.BufferBinding{
-					Buffer: s.convexUniformBuf.NativeHandle(), Offset: 0, Size: sdfRenderUniformSize,
-				}},
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: s.convexUniformBuf, Offset: 0, Size: sdfRenderUniformSize},
 			},
 		})
 		if err != nil {
@@ -1165,7 +1154,7 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 
 	// The bind group requires an atlas texture view.
 	if s.textAtlasView == nil {
-		hal.Logger().Warn("text atlas view is nil, skipping text rendering")
+		slogger().Warn("text atlas view is nil, skipping text rendering")
 		return nil, nil //nolint:nilnil // no atlas uploaded yet
 	}
 
@@ -1190,10 +1179,10 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 	if s.textVertBuf == nil || s.textVertBufCap < vertSize {
 		s.invalidateTextBindGroups()
 		if s.textVertBuf != nil {
-			s.device.DestroyBuffer(s.textVertBuf)
+			s.textVertBuf.Release()
 		}
 		allocSize := vertSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_text_verts",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
@@ -1217,10 +1206,10 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 	if s.textIdxBuf == nil || s.textIdxBufCap < idxSize {
 		s.invalidateTextBindGroups()
 		if s.textIdxBuf != nil {
-			s.device.DestroyBuffer(s.textIdxBuf)
+			s.textIdxBuf.Release()
 		}
 		allocSize := idxSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_text_indices",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
@@ -1258,19 +1247,13 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 
 		// Ensure bind group exists for this batch.
 		if s.textBindGroups[i] == nil {
-			bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+			bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 				Label:  fmt.Sprintf("session_text_bind_%d", i),
 				Layout: s.textPipeline.uniformLayout,
-				Entries: []gputypes.BindGroupEntry{
-					{Binding: 0, Resource: gputypes.BufferBinding{
-						Buffer: s.textUniformBufs[i].NativeHandle(), Offset: 0, Size: textUniformSize,
-					}},
-					{Binding: 1, Resource: gputypes.TextureViewBinding{
-						TextureView: s.textAtlasView.NativeHandle(),
-					}},
-					{Binding: 2, Resource: gputypes.SamplerBinding{
-						Sampler: s.textPipeline.sampler.NativeHandle(),
-					}},
+				Entries: []wgpu.BindGroupEntry{
+					{Binding: 0, Buffer: s.textUniformBufs[i], Offset: 0, Size: textUniformSize},
+					{Binding: 1, TextureView: s.textAtlasView},
+					{Binding: 2, Sampler: s.textPipeline.sampler},
 				},
 			})
 			if err != nil {
@@ -1302,13 +1285,13 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 // least n entries. Existing entries are preserved.
 func (s *GPURenderSession) ensureTextBatchPools(n int) {
 	for len(s.textUniformBufs) < n {
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: fmt.Sprintf("session_text_uniform_%d", len(s.textUniformBufs)),
 			Size:  textUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
-			hal.Logger().Warn("failed to create text uniform buffer", "err", err)
+			slogger().Warn("failed to create text uniform buffer", "err", err)
 			return
 		}
 		s.textUniformBufs = append(s.textUniformBufs, buf)
@@ -1321,7 +1304,7 @@ func (s *GPURenderSession) ensureTextBatchPools(n int) {
 func (s *GPURenderSession) invalidateTextBindGroups() {
 	for i, bg := range s.textBindGroups {
 		if bg != nil {
-			s.device.DestroyBindGroup(bg)
+			bg.Release()
 			s.textBindGroups[i] = nil
 		}
 	}
@@ -1333,12 +1316,12 @@ func (s *GPURenderSession) invalidateTextBindGroups() {
 //
 // Call this after uploading atlas data to the GPU (e.g., from
 // TextRenderer.SyncAtlases). The atlas view is used in the text bind group.
-func (s *GPURenderSession) SetTextAtlas(tex hal.Texture, view hal.TextureView) {
+func (s *GPURenderSession) SetTextAtlas(tex *wgpu.Texture, view *wgpu.TextureView) {
 	if s.textAtlasView != nil {
-		s.device.DestroyTextureView(s.textAtlasView)
+		s.textAtlasView.Release()
 	}
 	if s.textAtlasTex != nil {
-		s.device.DestroyTexture(s.textAtlasTex)
+		s.textAtlasTex.Release()
 	}
 	s.textAtlasTex = tex
 	s.textAtlasView = view
@@ -1354,7 +1337,7 @@ func (s *GPURenderSession) TextPipelineRef() *MSDFTextPipeline {
 
 // TextAtlasView returns the current text atlas texture view, or nil if no
 // atlas has been uploaded yet.
-func (s *GPURenderSession) TextAtlasView() hal.TextureView {
+func (s *GPURenderSession) TextAtlasView() *wgpu.TextureView {
 	return s.textAtlasView
 }
 
@@ -1373,7 +1356,7 @@ func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (
 		return nil, nil //nolint:nilnil // no glyph mask text to render
 	}
 	if err := s.ensureGlyphMaskPipeline(); err != nil {
-		hal.Logger().Warn("glyph mask pipeline init failed", "err", err)
+		slogger().Warn("glyph mask pipeline init failed", "err", err)
 		return nil, nil //nolint:nilnil // non-fatal, skip glyph mask text
 	}
 	res, err := s.buildGlyphMaskResources(batches)
@@ -1427,10 +1410,10 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 		// Note: no bind group invalidation needed here — glyph mask bind groups
 		// reference (uniform, atlas texture, sampler), not vertex/index buffers.
 		if s.glyphMaskVertBuf != nil {
-			s.device.DestroyBuffer(s.glyphMaskVertBuf)
+			s.glyphMaskVertBuf.Release()
 		}
 		allocSize := vertSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_glyph_mask_verts",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
@@ -1453,10 +1436,10 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 
 	if s.glyphMaskIdxBuf == nil || s.glyphMaskIdxBufCap < idxSize {
 		if s.glyphMaskIdxBuf != nil {
-			s.device.DestroyBuffer(s.glyphMaskIdxBuf)
+			s.glyphMaskIdxBuf.Release()
 		}
 		allocSize := idxSize * 2
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_glyph_mask_indices",
 			Size:  allocSize,
 			Usage: gputypes.BufferUsageIndex | gputypes.BufferUsageCopyDst,
@@ -1498,7 +1481,7 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 			// The caller (SDFAccelerator) must have synced atlas textures
 			// before calling RenderFrame, so PageTextureView should be valid.
 			// If not, skip this batch.
-			hal.Logger().Warn("glyph mask bind group nil, skipping batch",
+			slogger().Warn("glyph mask bind group nil, skipping batch",
 				"index", i, "nQuads", nQuads, "totalBatches", len(batches),
 				"poolLen", len(s.glyphMaskBindGroups))
 			continue
@@ -1527,13 +1510,13 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 // at least n entries. Existing entries are preserved.
 func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 	for len(s.glyphMaskUniformBufs) < n {
-		buf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: fmt.Sprintf("session_glyph_mask_uniform_%d", len(s.glyphMaskUniformBufs)),
 			Size:  glyphMaskUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
-			hal.Logger().Warn("failed to create glyph mask uniform buffer", "err", err)
+			slogger().Warn("failed to create glyph mask uniform buffer", "err", err)
 			return
 		}
 		s.glyphMaskUniformBufs = append(s.glyphMaskUniformBufs, buf)
@@ -1544,7 +1527,7 @@ func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 // SetGlyphMaskAtlasView creates or updates the bind group for a glyph mask
 // batch at the given index, binding the provided atlas texture view. This must
 // be called after syncing atlas textures and before RenderFrame.
-func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView hal.TextureView) {
+func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu.TextureView) {
 	if s.glyphMaskPipeline == nil || atlasView == nil {
 		return
 	}
@@ -1554,26 +1537,20 @@ func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView hal.T
 	}
 	// Destroy old bind group if it exists.
 	if s.glyphMaskBindGroups[batchIndex] != nil {
-		s.device.DestroyBindGroup(s.glyphMaskBindGroups[batchIndex])
+		s.glyphMaskBindGroups[batchIndex].Release()
 		s.glyphMaskBindGroups[batchIndex] = nil
 	}
-	bg, err := s.device.CreateBindGroup(&hal.BindGroupDescriptor{
+	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label:  fmt.Sprintf("session_glyph_mask_bind_%d", batchIndex),
 		Layout: s.glyphMaskPipeline.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: s.glyphMaskUniformBufs[batchIndex].NativeHandle(), Offset: 0, Size: glyphMaskUniformSize,
-			}},
-			{Binding: 1, Resource: gputypes.TextureViewBinding{
-				TextureView: atlasView.NativeHandle(),
-			}},
-			{Binding: 2, Resource: gputypes.SamplerBinding{
-				Sampler: s.glyphMaskPipeline.sampler.NativeHandle(),
-			}},
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: s.glyphMaskUniformBufs[batchIndex], Offset: 0, Size: glyphMaskUniformSize},
+			{Binding: 1, TextureView: atlasView},
+			{Binding: 2, Sampler: s.glyphMaskPipeline.sampler},
 		},
 	})
 	if err != nil {
-		hal.Logger().Warn("failed to create glyph mask bind group", "index", batchIndex, "err", err)
+		slogger().Warn("failed to create glyph mask bind group", "index", batchIndex, "err", err)
 		return
 	}
 	s.glyphMaskBindGroups[batchIndex] = bg
@@ -1592,27 +1569,23 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	glyphMaskRes *glyphMaskFrameResources,
 	target gg.GPURenderTarget,
 ) error {
-	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("session_frame"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
-	rpDesc := &hal.RenderPassDescriptor{
+	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_unified_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
 			ResolveTarget: s.textures.resolveView,
 			LoadOp:        gputypes.LoadOpClear,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}},
-		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
@@ -1623,7 +1596,10 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		},
 	}
 
-	rp := encoder.BeginRenderPass(rpDesc)
+	rp, rpErr := encoder.BeginRenderPass(rpDesc)
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 	s.applyScissorRect(rp)
 
@@ -1663,9 +1639,9 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
 	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
 	// This is a no-op on Metal, GLES, software, and noop backends.
-	encoder.TransitionTextures([]hal.TextureBarrier{{
+	encoder.TransitionTextures([]wgpu.TextureBarrier{{
 		Texture: s.textures.resolveTex,
-		Usage: hal.TextureUsageTransition{
+		Usage: wgpu.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageRenderAttachment,
 			NewUsage: gputypes.TextureUsageCopySrc,
 		},
@@ -1680,7 +1656,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 // into the render target. This is the second half of encodeSubmitReadback,
 // extracted for readability.
 func (s *GPURenderSession) copySubmitAndReadback(
-	encoder hal.CommandEncoder, w, h uint32, target gg.GPURenderTarget,
+	encoder *wgpu.CommandEncoder, w, h uint32, target gg.GPURenderTarget,
 ) error {
 	// Copy resolve texture to staging buffer for CPU readback.
 	// WebGPU (and DX12) requires BytesPerRow aligned to 256 bytes.
@@ -1689,7 +1665,7 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	alignedBytesPerRow := (bytesPerRow + copyPitchAlignment - 1) &^ (copyPitchAlignment - 1)
 	stagingBufSize := uint64(alignedBytesPerRow) * uint64(h)
 
-	stagingBuf, err := s.device.CreateBuffer(&hal.BufferDescriptor{
+	stagingBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "session_staging",
 		Size:  stagingBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
@@ -1698,43 +1674,43 @@ func (s *GPURenderSession) copySubmitAndReadback(
 		encoder.DiscardEncoding()
 		return fmt.Errorf("create staging buffer: %w", err)
 	}
-	defer s.device.DestroyBuffer(stagingBuf)
+	defer stagingBuf.Release()
 
-	encoder.CopyTextureToBuffer(s.textures.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
-		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: alignedBytesPerRow, RowsPerImage: h},
-		TextureBase:  hal.ImageCopyTexture{Texture: s.textures.resolveTex, MipLevel: 0},
-		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+	encoder.CopyTextureToBuffer(s.textures.resolveTex, stagingBuf, []wgpu.BufferTextureCopy{{
+		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: alignedBytesPerRow, RowsPerImage: h},
+		TextureBase:  wgpu.ImageCopyTexture{Texture: s.textures.resolveTex, MipLevel: 0},
+		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
 
 	// Transition resolve texture back to RenderAttachment so the next frame's
 	// render pass End() can transition from RENDER_TARGET → RESOLVE_DEST.
 	// Without this, the texture remains in COPY_SOURCE and the next resolve
 	// barrier (which expects RENDER_TARGET) would be invalid on DX12.
-	encoder.TransitionTextures([]hal.TextureBarrier{{
+	encoder.TransitionTextures([]wgpu.TextureBarrier{{
 		Texture: s.textures.resolveTex,
-		Usage: hal.TextureUsageTransition{
+		Usage: wgpu.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageCopySrc,
 			NewUsage: gputypes.TextureUsageRenderAttachment,
 		},
 	}})
 
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
-	defer s.device.FreeCommandBuffer(cmdBuf)
+	// cmdBuf freed after fence wait
 
 	// Submit and wait.
 	fence, err := s.device.CreateFence()
 	if err != nil {
 		return fmt.Errorf("create fence: %w", err)
 	}
-	defer s.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := s.device.Wait(fence, 1, 5*time.Second)
+	fenceOK, err := s.device.WaitForFence(fence, 1, 5*time.Second)
 	if err != nil || !fenceOK {
 		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
 	}
@@ -1781,16 +1757,12 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	textRes *textFrameResources,
 	glyphMaskRes *glyphMaskFrameResources,
 ) error {
-	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_surface_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("session_surface_frame"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Surface render pass LoadOp: first pass clears, subsequent passes
 	// preserve existing content. This handles mid-frame flushes caused by
 	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
@@ -1804,16 +1776,16 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		depthLoadOp = gputypes.LoadOpLoad
 	}
 
-	rpDesc := &hal.RenderPassDescriptor{
+	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_surface_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
 			ResolveTarget: s.surfaceView,
 			LoadOp:        colorLoadOp,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}},
-		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       depthLoadOp,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
@@ -1824,7 +1796,10 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		},
 	}
 
-	rp := encoder.BeginRenderPass(rpDesc)
+	rp, rpErr := encoder.BeginRenderPass(rpDesc)
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 	s.applyScissorRect(rp)
 
@@ -1860,7 +1835,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	rp.End()
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
@@ -1871,7 +1846,9 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
+	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
+	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, nil, 0); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
@@ -1889,7 +1866,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 // recordGroupDraws records all tier draw commands for a single group into
 // the given render pass encoder. This is the inner loop of the grouped
 // encode methods — called once per scissor group within a single render pass.
-func (s *GPURenderSession) recordGroupDraws(rp hal.RenderPassEncoder, gr *groupResources) {
+func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *groupResources) {
 	// Clip bind group is passed to each RecordDraws so it is bound at @group(1)
 	// AFTER SetPipeline and BEFORE Draw. Vulkan requires a valid pipeline
 	// layout when calling vkCmdBindDescriptorSets.
@@ -1924,7 +1901,7 @@ func (s *GPURenderSession) recordGroupDraws(rp hal.RenderPassEncoder, gr *groupR
 // applyGroupScissor sets or clears the scissor rect on the render pass for
 // a given group. When rect is nil, the scissor is reset to the full
 // framebuffer (w x h). When non-nil, the scissor clips to the given rect.
-func (s *GPURenderSession) applyGroupScissor(rp hal.RenderPassEncoder, rect *[4]uint32, w, h uint32) {
+func (s *GPURenderSession) applyGroupScissor(rp *wgpu.RenderPassEncoder, rect *[4]uint32, w, h uint32) {
 	if rect != nil {
 		rp.SetScissorRect(rect[0], rect[1], rect[2], rect[3])
 	} else {
@@ -2021,27 +1998,23 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	grpRes []groupResources,
 	target gg.GPURenderTarget,
 ) error {
-	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("session_frame"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
-	rpDesc := &hal.RenderPassDescriptor{
+	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_unified_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
 			ResolveTarget: s.textures.resolveView,
 			LoadOp:        gputypes.LoadOpClear,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}},
-		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
@@ -2052,7 +2025,10 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 		},
 	}
 
-	rp := encoder.BeginRenderPass(rpDesc)
+	rp, rpErr := encoder.BeginRenderPass(rpDesc)
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	// Render each group with its scissor rect applied.
@@ -2066,9 +2042,9 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
 	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
-	encoder.TransitionTextures([]hal.TextureBarrier{{
+	encoder.TransitionTextures([]wgpu.TextureBarrier{{
 		Texture: s.textures.resolveTex,
-		Usage: hal.TextureUsageTransition{
+		Usage: wgpu.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageRenderAttachment,
 			NewUsage: gputypes.TextureUsageCopySrc,
 		},
@@ -2085,16 +2061,12 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	w, h uint32,
 	grpRes []groupResources,
 ) error {
-	encoder, err := s.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_surface_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("session_surface_frame"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Surface render pass LoadOp: first pass clears, subsequent passes
 	// preserve existing content. This handles mid-frame flushes caused by
 	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
@@ -2107,16 +2079,16 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		depthLoadOp = gputypes.LoadOpLoad
 	}
 
-	rpDesc := &hal.RenderPassDescriptor{
+	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_surface_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
 			ResolveTarget: s.surfaceView,
 			LoadOp:        colorLoadOp,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}},
-		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       depthLoadOp,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
@@ -2127,7 +2099,10 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		},
 	}
 
-	rp := encoder.BeginRenderPass(rpDesc)
+	rp, rpErr := encoder.BeginRenderPass(rpDesc)
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	// Render each group with its scissor rect applied.
@@ -2139,7 +2114,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	rp.End()
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
@@ -2150,7 +2125,9 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	if err := s.queue.Submit([]hal.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
+	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
+	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, nil, 0); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}

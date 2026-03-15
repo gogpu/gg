@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // textureSet holds a set of MSAA color, depth/stencil, and resolve textures
@@ -18,12 +18,12 @@ import (
 //   - Depth/stencil: 4x samples, Depth24PlusStencil8, RenderAttachment
 //   - Resolve: 1x sample, BGRA8Unorm, RenderAttachment | CopySrc
 type textureSet struct {
-	msaaTex     hal.Texture
-	msaaView    hal.TextureView
-	stencilTex  hal.Texture
-	stencilView hal.TextureView
-	resolveTex  hal.Texture
-	resolveView hal.TextureView
+	msaaTex     *wgpu.Texture
+	msaaView    *wgpu.TextureView
+	stencilTex  *wgpu.Texture
+	stencilView *wgpu.TextureView
+	resolveTex  *wgpu.Texture
+	resolveView *wgpu.TextureView
 	width       uint32
 	height      uint32
 }
@@ -32,16 +32,16 @@ type textureSet struct {
 // differ from the current size. If dimensions match and textures exist,
 // this is a no-op. The labelPrefix parameter distinguishes GPU debug labels
 // between different owners (e.g., "session" vs "stencil").
-func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix string) error {
+func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPrefix string) error {
 	if ts.width == w && ts.height == h && ts.msaaTex != nil {
 		return nil
 	}
-	ts.destroyTextures(device)
+	ts.destroyTextures()
 
-	size := hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
+	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
 	// MSAA color texture (4x samples, BGRA8Unorm).
-	msaaTex, err := device.CreateTexture(&hal.TextureDescriptor{
+	msaaTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_msaa_color",
 		Size:          size,
 		MipLevelCount: 1,
@@ -55,7 +55,7 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 	}
 	ts.msaaTex = msaaTex
 
-	msaaView, err := device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
+	msaaView, err := device.CreateTextureView(msaaTex, &wgpu.TextureViewDescriptor{
 		Label:         labelPrefix + "_msaa_color_view",
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -63,13 +63,13 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 		MipLevelCount: 1,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create MSAA color view: %w", err)
 	}
 	ts.msaaView = msaaView
 
 	// Depth/stencil texture (4x samples, Depth24PlusStencil8).
-	stencilTex, err := device.CreateTexture(&hal.TextureDescriptor{
+	stencilTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_depth_stencil",
 		Size:          size,
 		MipLevelCount: 1,
@@ -79,12 +79,12 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create depth/stencil texture: %w", err)
 	}
 	ts.stencilTex = stencilTex
 
-	stencilView, err := device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
+	stencilView, err := device.CreateTextureView(stencilTex, &wgpu.TextureViewDescriptor{
 		Label:         labelPrefix + "_depth_stencil_view",
 		Format:        gputypes.TextureFormatDepth24PlusStencil8,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -92,13 +92,13 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 		MipLevelCount: 1,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create depth/stencil view: %w", err)
 	}
 	ts.stencilView = stencilView
 
 	// Single-sample resolve target (CopySrc for readback).
-	resolveTex, err := device.CreateTexture(&hal.TextureDescriptor{
+	resolveTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_resolve",
 		Size:          size,
 		MipLevelCount: 1,
@@ -108,12 +108,12 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create resolve texture: %w", err)
 	}
 	ts.resolveTex = resolveTex
 
-	resolveView, err := device.CreateTextureView(resolveTex, &hal.TextureViewDescriptor{
+	resolveView, err := device.CreateTextureView(resolveTex, &wgpu.TextureViewDescriptor{
 		Label:         labelPrefix + "_resolve_view",
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -121,7 +121,7 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 		MipLevelCount: 1,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create resolve view: %w", err)
 	}
 	ts.resolveView = resolveView
@@ -143,16 +143,16 @@ func (ts *textureSet) ensureTextures(device hal.Device, w, h uint32, labelPrefix
 //
 // If a resolve texture exists from a previous offscreen mode, it is destroyed.
 // If dimensions match and textures exist, this is a no-op.
-func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labelPrefix string) error {
+func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, labelPrefix string) error {
 	if ts.width == w && ts.height == h && ts.msaaTex != nil {
 		return nil
 	}
-	ts.destroyTextures(device)
+	ts.destroyTextures()
 
-	size := hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
+	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
 	// MSAA color texture (4x samples, BGRA8Unorm).
-	msaaTex, err := device.CreateTexture(&hal.TextureDescriptor{
+	msaaTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_msaa_color",
 		Size:          size,
 		MipLevelCount: 1,
@@ -166,7 +166,7 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 	}
 	ts.msaaTex = msaaTex
 
-	msaaView, err := device.CreateTextureView(msaaTex, &hal.TextureViewDescriptor{
+	msaaView, err := device.CreateTextureView(msaaTex, &wgpu.TextureViewDescriptor{
 		Label:         labelPrefix + "_msaa_color_view",
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -174,13 +174,13 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 		MipLevelCount: 1,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create MSAA color view: %w", err)
 	}
 	ts.msaaView = msaaView
 
 	// Depth/stencil texture (4x samples, Depth24PlusStencil8).
-	stencilTex, err := device.CreateTexture(&hal.TextureDescriptor{
+	stencilTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_depth_stencil",
 		Size:          size,
 		MipLevelCount: 1,
@@ -190,12 +190,12 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 		Usage:         gputypes.TextureUsageRenderAttachment,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create depth/stencil texture: %w", err)
 	}
 	ts.stencilTex = stencilTex
 
-	stencilView, err := device.CreateTextureView(stencilTex, &hal.TextureViewDescriptor{
+	stencilView, err := device.CreateTextureView(stencilTex, &wgpu.TextureViewDescriptor{
 		Label:         labelPrefix + "_depth_stencil_view",
 		Format:        gputypes.TextureFormatDepth24PlusStencil8,
 		Dimension:     gputypes.TextureViewDimension2D,
@@ -203,7 +203,7 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 		MipLevelCount: 1,
 	})
 	if err != nil {
-		ts.destroyTextures(device)
+		ts.destroyTextures()
 		return fmt.Errorf("create depth/stencil view: %w", err)
 	}
 	ts.stencilView = stencilView
@@ -220,29 +220,29 @@ func (ts *textureSet) ensureSurfaceTextures(device hal.Device, w, h uint32, labe
 }
 
 // destroyTextures releases all texture resources and resets dimensions.
-func (ts *textureSet) destroyTextures(device hal.Device) {
+func (ts *textureSet) destroyTextures() {
 	if ts.resolveView != nil {
-		device.DestroyTextureView(ts.resolveView)
+		ts.resolveView.Release()
 		ts.resolveView = nil
 	}
 	if ts.resolveTex != nil {
-		device.DestroyTexture(ts.resolveTex)
+		ts.resolveTex.Release()
 		ts.resolveTex = nil
 	}
 	if ts.stencilView != nil {
-		device.DestroyTextureView(ts.stencilView)
+		ts.stencilView.Release()
 		ts.stencilView = nil
 	}
 	if ts.stencilTex != nil {
-		device.DestroyTexture(ts.stencilTex)
+		ts.stencilTex.Release()
 		ts.stencilTex = nil
 	}
 	if ts.msaaView != nil {
-		device.DestroyTextureView(ts.msaaView)
+		ts.msaaView.Release()
 		ts.msaaView = nil
 	}
 	if ts.msaaTex != nil {
-		device.DestroyTexture(ts.msaaTex)
+		ts.msaaTex.Release()
 		ts.msaaTex = nil
 	}
 	ts.width = 0

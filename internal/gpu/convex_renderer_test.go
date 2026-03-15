@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 func TestConvexRendererCreation(t *testing.T) {
@@ -152,9 +152,9 @@ func TestConvexRendererShaderCompilation(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	module, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "test_convex_shader",
-		Source: hal.ShaderSource{WGSL: convexShaderSource},
+	module, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "test_convex_shader",
+		WGSL:  convexShaderSource,
 	})
 	if err != nil {
 		t.Fatalf("shader compilation failed: %v", err)

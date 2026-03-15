@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Buffer errors.
@@ -126,7 +126,7 @@ func (s BufferMapAsyncStatus) String() string {
 
 // Buffer represents a GPU buffer resource.
 //
-// Buffer wraps a hal.Buffer and provides Go-idiomatic access with
+// Buffer wraps a *wgpu.Buffer and provides Go-idiomatic access with
 // async buffer mapping support. This follows the wgpu pattern where
 // buffer mapping is asynchronous and requires device polling.
 //
@@ -147,10 +147,10 @@ type Buffer struct {
 	mu sync.RWMutex
 
 	// halBuffer is the underlying buffer handle.
-	halBuffer hal.Buffer
+	halBuffer *wgpu.Buffer
 
 	// device is the parent device.
-	device hal.Device
+	device *wgpu.Device
 
 	// descriptor holds the buffer configuration (immutable after creation).
 	descriptor BufferDescriptor
@@ -203,7 +203,7 @@ type BufferDescriptor struct {
 //   - desc: The buffer descriptor (copied)
 //
 // Returns the new Buffer.
-func NewBuffer(halBuffer hal.Buffer, device hal.Device, desc *BufferDescriptor) *Buffer {
+func NewBuffer(halBuffer *wgpu.Buffer, device *wgpu.Device, desc *BufferDescriptor) *Buffer {
 	buf := &Buffer{
 		halBuffer:  halBuffer,
 		device:     device,
@@ -261,7 +261,7 @@ func (b *Buffer) IsDestroyed() bool {
 // Returns nil if the buffer has been destroyed.
 // Use with caution - the caller should ensure the buffer is not destroyed
 // while the handle is in use.
-func (b *Buffer) Raw() hal.Buffer {
+func (b *Buffer) Raw() *wgpu.Buffer {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	if b.destroyed {
@@ -543,7 +543,7 @@ func (b *Buffer) Destroy() {
 
 	// Destroy the buffer
 	if device != nil && halBuf != nil {
-		device.DestroyBuffer(halBuf)
+		halBuf.Release()
 	}
 }
 
@@ -566,7 +566,7 @@ func (b *Buffer) Destroy() {
 //   - The descriptor is nil
 //   - Buffer size is invalid
 //   - Buffer creation fails
-func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
+func CreateBuffer(device *wgpu.Device, desc *BufferDescriptor) (*Buffer, error) {
 	if device == nil {
 		return nil, ErrNilHALDevice
 	}
@@ -598,7 +598,7 @@ func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
 	alignedSize := (desc.Size + copyBufferAlignment - 1) &^ (copyBufferAlignment - 1)
 
 	// Convert to descriptor
-	halDesc := &hal.BufferDescriptor{
+	halDesc := &wgpu.BufferDescriptor{
 		Label:            desc.Label,
 		Size:             alignedSize,
 		Usage:            desc.Usage,
@@ -631,7 +631,7 @@ func CreateBuffer(device hal.Device, desc *BufferDescriptor) (*Buffer, error) {
 // Returns the new Buffer and nil on success.
 // Returns nil and an error if creation fails.
 func CreateBufferSimple(
-	device hal.Device,
+	device *wgpu.Device,
 	size uint64,
 	usage gputypes.BufferUsage,
 	label string,
@@ -661,7 +661,7 @@ func CreateBufferSimple(
 // Returns the new Buffer and nil on success.
 // Returns nil and an error if creation fails.
 func CreateStagingBuffer(
-	device hal.Device,
+	device *wgpu.Device,
 	size uint64,
 	forUpload bool,
 	label string,
