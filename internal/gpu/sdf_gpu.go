@@ -422,10 +422,22 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 		a.session.SetSurfaceTarget(nil, 0, 0)
 		return
 	}
+	// The view parameter may be either a direct hal.TextureView (used when gg
+	// creates its own GPU resources) or a *wgpu.TextureView (passed from gogpu
+	// via ggcanvas.RenderDirect). In the latter case, we extract the underlying
+	// hal.TextureView through the halTextureViewAccessor interface.
 	halView, ok := view.(hal.TextureView)
 	if !ok {
-		slogger().Warn("SetSurfaceTarget: view is not hal.TextureView")
-		return
+		type halTextureViewAccessor interface {
+			HalTextureView() hal.TextureView
+		}
+		if hva, ok2 := view.(halTextureViewAccessor); ok2 {
+			halView = hva.HalTextureView()
+		}
+		if halView == nil {
+			slogger().Warn("SetSurfaceTarget: view is not hal.TextureView and has no HalTextureView() accessor")
+			return
+		}
 	}
 	a.session.SetSurfaceTarget(halView, width, height)
 	slogger().Debug("SetSurfaceTarget configured", "width", width, "height", height)
