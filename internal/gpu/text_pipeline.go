@@ -13,7 +13,7 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text/msdf"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Embedded MSDF text shader source.
@@ -70,33 +70,33 @@ const textUniformSize = 96
 //	MSDFTextPipeline owns shader, layout, pipeline, sampler
 //	bind groups are created per atlas texture (uniform + texture + sampler)
 type MSDFTextPipeline struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// GPU objects for the render pipeline.
-	shader        hal.ShaderModule
-	uniformLayout hal.BindGroupLayout
-	pipeLayout    hal.PipelineLayout
-	pipeline      hal.RenderPipeline
+	shader        *wgpu.ShaderModule
+	uniformLayout *wgpu.BindGroupLayout
+	pipeLayout    *wgpu.PipelineLayout
+	pipeline      *wgpu.RenderPipeline
 
 	// Session-compatible pipeline variant with depth/stencil state.
 	// Used when text participates in a unified render pass that includes
 	// a stencil attachment (for stencil-then-cover paths).
 	// Stencil test is Always/Keep (text does not interact with stencil).
-	pipelineWithStencil hal.RenderPipeline
+	pipelineWithStencil *wgpu.RenderPipeline
 
 	// Default sampler for MSDF textures (linear filtering).
-	sampler hal.Sampler
+	sampler *wgpu.Sampler
 
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before ensurePipelineWithStencil.
-	clipBindLayout hal.BindGroupLayout
+	clipBindLayout *wgpu.BindGroupLayout
 }
 
 // NewMSDFTextPipeline creates a new MSDF text pipeline with the given device
 // and queue. The render pipeline and GPU objects are not created until
 // ensurePipeline or ensurePipelineWithStencil is called.
-func NewMSDFTextPipeline(device hal.Device, queue hal.Queue) *MSDFTextPipeline {
+func NewMSDFTextPipeline(device *wgpu.Device, queue *wgpu.Queue) *MSDFTextPipeline {
 	return &MSDFTextPipeline{
 		device: device,
 		queue:  queue,
@@ -106,7 +106,7 @@ func NewMSDFTextPipeline(device hal.Device, queue hal.Queue) *MSDFTextPipeline {
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
 // uniform. Must be called before ensurePipelineWithStencil. The layout is
 // owned by the session and must not be destroyed by the pipeline.
-func (p *MSDFTextPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
+func (p *MSDFTextPipeline) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	p.clipBindLayout = layout
 }
 
@@ -115,7 +115,7 @@ func (p *MSDFTextPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
 func (p *MSDFTextPipeline) Destroy() {
 	p.destroyPipeline()
 	if p.sampler != nil {
-		p.device.DestroySampler(p.sampler)
+		p.sampler.Release()
 		p.sampler = nil
 	}
 }
@@ -127,9 +127,9 @@ func (p *MSDFTextPipeline) createPipeline() error {
 		return fmt.Errorf("msdf_text shader source is empty")
 	}
 
-	shader, err := p.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "msdf_text_shader",
-		Source: hal.ShaderSource{WGSL: msdfTextShaderSource},
+	shader, err := p.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "msdf_text_shader",
+		WGSL:  msdfTextShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile msdf_text shader: %w", err)
@@ -140,7 +140,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 	//   Binding 0: TextUniforms (uniform buffer, vertex+fragment)
 	//   Binding 1: MSDF atlas texture (texture_2d, fragment)
 	//   Binding 2: Sampler (fragment)
-	uniformLayout, err := p.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	uniformLayout, err := p.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "msdf_text_uniform_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -168,11 +168,11 @@ func (p *MSDFTextPipeline) createPipeline() error {
 	}
 	p.uniformLayout = uniformLayout
 
-	textBGLayouts := []hal.BindGroupLayout{p.uniformLayout}
+	textBGLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
 	if p.clipBindLayout != nil {
 		textBGLayouts = append(textBGLayouts, p.clipBindLayout)
 	}
-	pipeLayout, err := p.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "msdf_text_pipe_layout",
 		BindGroupLayouts: textBGLayouts,
 	})
@@ -183,7 +183,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 
 	// Create sampler for MSDF textures (linear filtering for smooth
 	// distance field interpolation).
-	sampler, err := p.device.CreateSampler(&hal.SamplerDescriptor{
+	sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
 		Label:        "msdf_text_sampler",
 		AddressModeU: gputypes.AddressModeClampToEdge,
 		AddressModeV: gputypes.AddressModeClampToEdge,
@@ -199,15 +199,15 @@ func (p *MSDFTextPipeline) createPipeline() error {
 	p.sampler = sampler
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "msdf_text_pipeline",
 		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
 			Buffers:    textVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -256,15 +256,15 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 	}
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "msdf_text_pipeline_with_stencil",
 		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
 			Buffers:    textVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -275,21 +275,21 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
 			StencilReadMask:  0x00,
 			StencilWriteMask: 0x00,
@@ -317,7 +317,7 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 //
 // The resources parameter holds pre-built vertex/index buffers, uniform buffer,
 // and bind group for the current frame.
-func (p *MSDFTextPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *textFrameResources, clipBG hal.BindGroup) {
+func (p *MSDFTextPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *textFrameResources, clipBG *wgpu.BindGroup) {
 	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
@@ -342,23 +342,23 @@ func (p *MSDFTextPipeline) destroyPipeline() {
 		return
 	}
 	if p.pipelineWithStencil != nil {
-		p.device.DestroyRenderPipeline(p.pipelineWithStencil)
+		p.pipelineWithStencil.Release()
 		p.pipelineWithStencil = nil
 	}
 	if p.pipeline != nil {
-		p.device.DestroyRenderPipeline(p.pipeline)
+		p.pipeline.Release()
 		p.pipeline = nil
 	}
 	if p.pipeLayout != nil {
-		p.device.DestroyPipelineLayout(p.pipeLayout)
+		p.pipeLayout.Release()
 		p.pipeLayout = nil
 	}
 	if p.uniformLayout != nil {
-		p.device.DestroyBindGroupLayout(p.uniformLayout)
+		p.uniformLayout.Release()
 		p.uniformLayout = nil
 	}
 	if p.shader != nil {
-		p.device.DestroyShaderModule(p.shader)
+		p.shader.Release()
 		p.shader = nil
 	}
 }
@@ -368,12 +368,12 @@ func (p *MSDFTextPipeline) destroyPipeline() {
 type textDrawCall struct {
 	indexOffset uint32 // first index in the shared index buffer
 	indexCount  uint32 // number of indices for this batch
-	bindGroup   hal.BindGroup
+	bindGroup   *wgpu.BindGroup
 }
 
 type textFrameResources struct {
-	vertBuf   hal.Buffer
-	idxBuf    hal.Buffer
+	vertBuf   *wgpu.Buffer
+	idxBuf    *wgpu.Buffer
 	drawCalls []textDrawCall
 }
 
@@ -654,8 +654,8 @@ type TextPipeline struct {
 	mu sync.RWMutex
 
 	// GPU device and queue references (hal interfaces)
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Underlying real pipeline (nil until Init)
 	real *MSDFTextPipeline
@@ -669,7 +669,7 @@ type TextPipeline struct {
 
 // NewTextPipeline creates a new text rendering pipeline.
 // The pipeline must be initialized before use.
-func NewTextPipeline(device hal.Device, queue hal.Queue, config TextPipelineConfig) (*TextPipeline, error) {
+func NewTextPipeline(device *wgpu.Device, queue *wgpu.Queue, config TextPipelineConfig) (*TextPipeline, error) {
 	if config.InitialQuadCapacity <= 0 {
 		config.InitialQuadCapacity = DefaultTextPipelineConfig().InitialQuadCapacity
 	}
@@ -688,7 +688,7 @@ func NewTextPipeline(device hal.Device, queue hal.Queue, config TextPipelineConf
 }
 
 // NewTextPipelineDefault creates a text pipeline with default configuration.
-func NewTextPipelineDefault(device hal.Device, queue hal.Queue) (*TextPipeline, error) {
+func NewTextPipelineDefault(device *wgpu.Device, queue *wgpu.Queue) (*TextPipeline, error) {
 	return NewTextPipeline(device, queue, DefaultTextPipelineConfig())
 }
 
@@ -841,8 +841,8 @@ type TextRenderer struct {
 	mu sync.RWMutex
 
 	// GPU resources
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Pipeline (legacy wrapper)
 	pipeline *TextPipeline
@@ -850,9 +850,9 @@ type TextRenderer struct {
 	// Atlas management
 	atlasManager *msdf.AtlasManager
 
-	// Cached atlas textures (hal.Texture + hal.TextureView)
-	atlasTextures     []hal.Texture
-	atlasTextureViews []hal.TextureView
+	// Cached atlas textures (*wgpu.Texture + *wgpu.TextureView)
+	atlasTextures     []*wgpu.Texture
+	atlasTextureViews []*wgpu.TextureView
 
 	// State
 	initialized bool
@@ -877,7 +877,7 @@ func DefaultTextRendererConfig() TextRendererConfig {
 
 // NewTextRenderer creates a new text renderer with the given HAL device and
 // queue. The renderer manages a TextPipeline and AtlasManager internally.
-func NewTextRenderer(device hal.Device, queue hal.Queue, config TextRendererConfig) (*TextRenderer, error) {
+func NewTextRenderer(device *wgpu.Device, queue *wgpu.Queue, config TextRendererConfig) (*TextRenderer, error) {
 	if device == nil {
 		return nil, ErrNilHALDevice
 	}
@@ -943,9 +943,9 @@ func (r *TextRenderer) SyncAtlases() error {
 
 		// Create or recreate texture.
 		if r.atlasTextures[idx] == nil {
-			tex, err := r.device.CreateTexture(&hal.TextureDescriptor{
+			tex, err := r.device.CreateTexture(&wgpu.TextureDescriptor{
 				Label:         fmt.Sprintf("msdf_atlas_%d", idx),
-				Size:          hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+				Size:          wgpu.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
 				MipLevelCount: 1,
 				SampleCount:   1,
 				Dimension:     gputypes.TextureDimension2D,
@@ -957,7 +957,7 @@ func (r *TextRenderer) SyncAtlases() error {
 			}
 			r.atlasTextures[idx] = tex
 
-			view, err := r.device.CreateTextureView(tex, &hal.TextureViewDescriptor{
+			view, err := r.device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
 				Label:         fmt.Sprintf("msdf_atlas_%d_view", idx),
 				Format:        gputypes.TextureFormatRGBA8Unorm,
 				Dimension:     gputypes.TextureViewDimension2D,
@@ -975,20 +975,20 @@ func (r *TextRenderer) SyncAtlases() error {
 
 		// Upload to GPU via queue.WriteTexture.
 		if err := r.queue.WriteTexture(
-			&hal.ImageCopyTexture{
+			&wgpu.ImageCopyTexture{
 				Texture:  r.atlasTextures[idx],
 				MipLevel: 0,
 			},
 			rgbaData,
-			&hal.ImageDataLayout{
+			&wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  atlasSize * 4,
 				RowsPerImage: atlasSize,
 			},
-			&hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+			&wgpu.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
 		); err != nil {
-			r.device.DestroyTextureView(r.atlasTextureViews[idx])
-			r.device.DestroyTexture(r.atlasTextures[idx])
+			r.atlasTextureViews[idx].Release()
+			r.atlasTextures[idx].Release()
 			r.atlasTextureViews[idx] = nil
 			r.atlasTextures[idx] = nil
 			return fmt.Errorf("upload text atlas %d: %w", idx, err)
@@ -1023,7 +1023,7 @@ func (r *TextRenderer) Close() {
 	// Close texture views.
 	for _, v := range r.atlasTextureViews {
 		if v != nil {
-			r.device.DestroyTextureView(v)
+			v.Release()
 		}
 	}
 	r.atlasTextureViews = nil
@@ -1031,7 +1031,7 @@ func (r *TextRenderer) Close() {
 	// Close textures.
 	for _, t := range r.atlasTextures {
 		if t != nil {
-			r.device.DestroyTexture(t)
+			t.Release()
 		}
 	}
 	r.atlasTextures = nil

@@ -10,8 +10,9 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gg/text"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 
 	// Import Vulkan backend so it registers via init().
 	_ "github.com/gogpu/wgpu/hal/vulkan"
@@ -35,9 +36,9 @@ import (
 type SDFAccelerator struct {
 	mu sync.Mutex
 
-	instance hal.Instance
-	device   hal.Device
-	queue    hal.Queue
+	instance *wgpu.Instance // standalone mode only; nil when using external device
+	device   *wgpu.Device
+	queue    *wgpu.Queue
 
 	// Unified render session managing shared textures and frame encoding.
 	session *GPURenderSession
@@ -297,11 +298,11 @@ func (a *SDFAccelerator) Close() {
 	}
 	if !a.externalDevice {
 		if a.device != nil {
-			a.device.Destroy()
+			a.device.Release()
 			a.device = nil
 		}
 		if a.instance != nil {
-			a.instance.Destroy()
+			a.instance.Release()
 			a.instance = nil
 		}
 	} else {
@@ -321,25 +322,25 @@ func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
 }
 
 // SetDeviceProvider switches the accelerator to use a shared GPU device
-// from an external provider (e.g., gogpu). The provider must implement
-// HalDevice() any and HalQueue() any returning hal.Device and hal.Queue.
-func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
-	type halProvider interface {
-		HalDevice() any
-		HalQueue() any
+// from an external provider (e.g., gogpu). The provider's Device() must
+// return a *wgpu.Device (as gpucontext.Device) so we can access HalDevice()
+// and HalQueue() for direct HAL-level GPU operations.
+func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
+	dev := provider.Device()
+	if dev == nil {
+		return fmt.Errorf("gpu-sdf: provider Device is nil")
 	}
-	hp, ok := provider.(halProvider)
+
+	wgpuDev, ok := dev.(*wgpu.Device)
 	if !ok {
-		return fmt.Errorf("gpu-sdf: provider does not expose HAL types")
+		return fmt.Errorf("gpu-sdf: provider Device is not *wgpu.Device (got %T)", dev)
 	}
-	device, ok := hp.HalDevice().(hal.Device)
-	if !ok || device == nil {
-		return fmt.Errorf("gpu-sdf: provider HalDevice is not hal.Device")
+	wgpuQueue := wgpuDev.Queue()
+	if wgpuQueue == nil {
+		return fmt.Errorf("gpu-sdf: provider Queue is nil")
 	}
-	queue, ok := hp.HalQueue().(hal.Queue)
-	if !ok || queue == nil {
-		return fmt.Errorf("gpu-sdf: provider HalQueue is not hal.Queue")
-	}
+	device := wgpuDev
+	queue := wgpuQueue
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -362,10 +363,10 @@ func (a *SDFAccelerator) SetDeviceProvider(provider any) error {
 		a.stencilRenderer = nil
 	}
 	if !a.externalDevice && a.device != nil {
-		a.device.Destroy()
+		a.device.Release()
 	}
 	if a.instance != nil {
-		a.instance.Destroy()
+		a.instance.Release()
 		a.instance = nil
 	}
 
@@ -415,10 +416,22 @@ func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
 		a.session.SetSurfaceTarget(nil, 0, 0)
 		return
 	}
-	halView, ok := view.(hal.TextureView)
+	// The view parameter may be either a direct *wgpu.TextureView (used when gg
+	// creates its own GPU resources) or a *wgpu.TextureView (passed from gogpu
+	// via ggcanvas.RenderDirect). In the latter case, we extract the underlying
+	// *wgpu.TextureView through the halTextureViewAccessor interface.
+	halView, ok := view.(*wgpu.TextureView)
 	if !ok {
-		slogger().Warn("SetSurfaceTarget: view is not hal.TextureView")
-		return
+		type halTextureViewAccessor interface {
+			HalTextureView() *wgpu.TextureView
+		}
+		if hva, ok2 := view.(halTextureViewAccessor); ok2 {
+			halView = hva.HalTextureView()
+		}
+		if halView == nil {
+			slogger().Warn("SetSurfaceTarget: view is not *wgpu.TextureView and has no HalTextureView() accessor")
+			return
+		}
 	}
 	a.session.SetSurfaceTarget(halView, width, height)
 	slogger().Debug("SetSurfaceTarget configured", "width", width, "height", height)
@@ -1003,9 +1016,9 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 		atlasSize := uint32(size) //nolint:gosec // atlas size always fits uint32
 
 		// Create the GPU texture for this atlas page.
-		tex, err := a.device.CreateTexture(&hal.TextureDescriptor{
+		tex, err := a.device.CreateTexture(&wgpu.TextureDescriptor{
 			Label:         fmt.Sprintf("msdf_atlas_%d", idx),
-			Size:          hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+			Size:          wgpu.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
 			MipLevelCount: 1,
 			SampleCount:   1,
 			Dimension:     gputypes.TextureDimension2D,
@@ -1016,7 +1029,7 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 			return fmt.Errorf("create atlas texture %d: %w", idx, err)
 		}
 
-		view, err := a.device.CreateTextureView(tex, &hal.TextureViewDescriptor{
+		view, err := a.device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
 			Label:         fmt.Sprintf("msdf_atlas_%d_view", idx),
 			Format:        gputypes.TextureFormatRGBA8Unorm,
 			Dimension:     gputypes.TextureViewDimension2D,
@@ -1024,22 +1037,22 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 			MipLevelCount: 1,
 		})
 		if err != nil {
-			a.device.DestroyTexture(tex)
+			tex.Release()
 			return fmt.Errorf("create atlas texture view %d: %w", idx, err)
 		}
 
 		// Upload RGBA data to the GPU texture.
 		if err := a.queue.WriteTexture(
-			&hal.ImageCopyTexture{Texture: tex, MipLevel: 0},
+			&wgpu.ImageCopyTexture{Texture: tex, MipLevel: 0},
 			rgbaData,
-			&hal.ImageDataLayout{
+			&wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  atlasSize * 4,
 				RowsPerImage: atlasSize,
 			},
-			&hal.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
+			&wgpu.Extent3D{Width: atlasSize, Height: atlasSize, DepthOrArrayLayers: 1},
 		); err != nil {
-			a.device.DestroyTexture(tex)
+			tex.Release()
 			return fmt.Errorf("upload atlas texture %d: %w", idx, err)
 		}
 
@@ -1151,36 +1164,27 @@ func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
 }
 
 func (a *SDFAccelerator) initGPU() error {
-	backend, ok := hal.GetBackend(gputypes.BackendVulkan)
-	if !ok {
-		return fmt.Errorf("vulkan backend not available")
-	}
-	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{Flags: 0})
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
+		Backends: wgpu.BackendsVulkan,
+	})
 	if err != nil {
 		return fmt.Errorf("create instance: %w", err)
 	}
 	a.instance = instance
-	adapters := instance.EnumerateAdapters(nil)
-	if len(adapters) == 0 {
-		return fmt.Errorf("no GPU adapters found")
-	}
-	var selected *hal.ExposedAdapter
-	for i := range adapters {
-		if adapters[i].Info.DeviceType == gputypes.DeviceTypeDiscreteGPU ||
-			adapters[i].Info.DeviceType == gputypes.DeviceTypeIntegratedGPU {
-			selected = &adapters[i]
-			break
-		}
-	}
-	if selected == nil {
-		selected = &adapters[0]
-	}
-	openDev, err := selected.Adapter.Open(gputypes.Features(0), gputypes.DefaultLimits())
+
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		PowerPreference: wgpu.PowerPreferenceHighPerformance,
+	})
 	if err != nil {
-		return fmt.Errorf("open device: %w", err)
+		return fmt.Errorf("request adapter: %w", err)
 	}
-	a.device = openDev.Device
-	a.queue = openDev.Queue
+
+	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "gg-sdf"})
+	if err != nil {
+		return fmt.Errorf("request device: %w", err)
+	}
+	a.device = device
+	a.queue = device.Queue()
 
 	// Create pipelines and session.
 	a.sdfRenderPipeline = NewSDFRenderPipeline(a.device, a.queue)
@@ -1196,7 +1200,7 @@ func (a *SDFAccelerator) initGPU() error {
 	// Initialize internal VelloAccelerator for compute routing.
 	a.initVelloAccelerator(a.device, a.queue)
 
-	slogger().Info("GPU accelerator initialized", "adapter", selected.Info.Name)
+	slogger().Info("GPU accelerator initialized", "adapter", adapter.Info().Name)
 	return nil
 }
 
@@ -1204,7 +1208,7 @@ func (a *SDFAccelerator) initGPU() error {
 // device from the provided HAL device/queue. This is called lazily from
 // SetDeviceProvider or initGPU. Failures are non-fatal — compute just
 // won't be available.
-func (a *SDFAccelerator) initVelloAccelerator(device hal.Device, queue hal.Queue) {
+func (a *SDFAccelerator) initVelloAccelerator(device *wgpu.Device, queue *wgpu.Queue) {
 	va := &VelloAccelerator{}
 	va.device = device
 	va.queue = queue

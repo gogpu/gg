@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 //go:embed shaders/flatten.wgsl
@@ -86,21 +86,21 @@ type GPUCursorState struct {
 type GPUFlattenRasterizer struct {
 	mu sync.Mutex
 
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Compute pipelines
-	preparePipeline      hal.ComputePipeline
-	flattenPipeline      hal.ComputePipeline
-	clearCounterPipeline hal.ComputePipeline
+	preparePipeline      *wgpu.ComputePipeline
+	flattenPipeline      *wgpu.ComputePipeline
+	clearCounterPipeline *wgpu.ComputePipeline
 
 	// Shader module (cached)
-	shaderModule hal.ShaderModule
+	shaderModule *wgpu.ShaderModule
 
 	// Pipeline layout and bind group layouts
-	pipelineLayout   hal.PipelineLayout
-	inputBindLayout  hal.BindGroupLayout
-	outputBindLayout hal.BindGroupLayout
+	pipelineLayout   *wgpu.PipelineLayout
+	inputBindLayout  *wgpu.BindGroupLayout
+	outputBindLayout *wgpu.BindGroupLayout
 
 	// Compiled SPIR-V (cached for verification)
 	spirvCode []uint32
@@ -121,7 +121,7 @@ type GPUFlattenRasterizer struct {
 // NewGPUFlattenRasterizer creates a new GPU flatten rasterizer.
 // maxPaths: Maximum number of path elements to process
 // maxSegments: Maximum number of output segments
-func NewGPUFlattenRasterizer(device hal.Device, queue hal.Queue, maxPaths, maxSegments int) (*GPUFlattenRasterizer, error) {
+func NewGPUFlattenRasterizer(device *wgpu.Device, queue *wgpu.Queue, maxPaths, maxSegments int) (*GPUFlattenRasterizer, error) {
 	if device == nil || queue == nil {
 		return nil, fmt.Errorf("gpu_flatten: device and queue are required")
 	}
@@ -192,7 +192,7 @@ func (r *GPUFlattenRasterizer) init() error {
 // createBindGroupLayouts creates the bind group layouts for the pipeline.
 func (r *GPUFlattenRasterizer) createBindGroupLayouts() error {
 	// Input bind group layout (group 0)
-	inputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	inputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "flatten_input_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -240,7 +240,7 @@ func (r *GPUFlattenRasterizer) createBindGroupLayouts() error {
 	r.inputBindLayout = inputLayout
 
 	// Output bind group layout (group 1)
-	outputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	outputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "flatten_output_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -276,9 +276,9 @@ func (r *GPUFlattenRasterizer) createBindGroupLayouts() error {
 
 // createPipelineLayout creates the pipeline layout.
 func (r *GPUFlattenRasterizer) createPipelineLayout() error {
-	layout, err := r.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	layout, err := r.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "flatten_pipeline_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
+		BindGroupLayouts: []*wgpu.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_flatten: failed to create pipeline layout: %w", err)
@@ -290,13 +290,11 @@ func (r *GPUFlattenRasterizer) createPipelineLayout() error {
 // createPipelines creates the compute pipelines.
 func (r *GPUFlattenRasterizer) createPipelines() error {
 	// Prepare pipeline (count segments)
-	preparePipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "flatten_prepare_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_flatten_prepare",
-		},
+	preparePipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "flatten_prepare_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_flatten_prepare",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_flatten: failed to create prepare pipeline: %w", err)
@@ -304,13 +302,11 @@ func (r *GPUFlattenRasterizer) createPipelines() error {
 	r.preparePipeline = preparePipeline
 
 	// Flatten pipeline (generate segments)
-	flattenPipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "flatten_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_flatten",
-		},
+	flattenPipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "flatten_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_flatten",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_flatten: failed to create flatten pipeline: %w", err)
@@ -318,13 +314,11 @@ func (r *GPUFlattenRasterizer) createPipelines() error {
 	r.flattenPipeline = flattenPipeline
 
 	// Clear counter pipeline
-	clearPipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "flatten_clear_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_clear_counter",
-		},
+	clearPipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "flatten_clear_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_clear_counter",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_flatten: failed to create clear pipeline: %w", err)
@@ -630,37 +624,37 @@ func (r *GPUFlattenRasterizer) Destroy() {
 
 	// Destroy pipelines
 	if r.preparePipeline != nil {
-		r.device.DestroyComputePipeline(r.preparePipeline)
+		r.preparePipeline.Release()
 		r.preparePipeline = nil
 	}
 	if r.flattenPipeline != nil {
-		r.device.DestroyComputePipeline(r.flattenPipeline)
+		r.flattenPipeline.Release()
 		r.flattenPipeline = nil
 	}
 	if r.clearCounterPipeline != nil {
-		r.device.DestroyComputePipeline(r.clearCounterPipeline)
+		r.clearCounterPipeline.Release()
 		r.clearCounterPipeline = nil
 	}
 
 	// Destroy pipeline layout
 	if r.pipelineLayout != nil {
-		r.device.DestroyPipelineLayout(r.pipelineLayout)
+		r.pipelineLayout.Release()
 		r.pipelineLayout = nil
 	}
 
 	// Destroy bind group layouts
 	if r.inputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.inputBindLayout)
+		r.inputBindLayout.Release()
 		r.inputBindLayout = nil
 	}
 	if r.outputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.outputBindLayout)
+		r.outputBindLayout.Release()
 		r.outputBindLayout = nil
 	}
 
 	// Destroy shader module
 	if r.shaderModule != nil {
-		r.device.DestroyShaderModule(r.shaderModule)
+		r.shaderModule.Release()
 		r.shaderModule = nil
 	}
 

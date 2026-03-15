@@ -5,64 +5,25 @@ package gpu
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
-// =============================================================================
-// Mock Buffer for Testing
-// =============================================================================
-
-// mockHALBuffer is a test double for hal.Buffer.
-type mockHALBuffer struct {
-	size   uint64
-	usage  gputypes.BufferUsage
-	label  string
-	mapped bool
-}
-
-// Destroy implements hal.Resource.
-func (b *mockHALBuffer) Destroy() {}
-
-// NativeHandle implements hal.NativeHandle.
-func (b *mockHALBuffer) NativeHandle() uintptr { return 0 }
-
-// =============================================================================
-// Extended mockHALDevice for Buffer Tests
-// =============================================================================
-
-// bufferMockHALDevice extends mockHALDevice with buffer creation.
-type bufferMockHALDevice struct {
-	mockHALDevice
-
-	createBufferFunc  func(*hal.BufferDescriptor) (hal.Buffer, error)
-	destroyBufferFunc func(hal.Buffer)
-
-	buffersCreated   int32
-	buffersDestroyed int32
-}
-
-func (d *bufferMockHALDevice) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
-	atomic.AddInt32(&d.buffersCreated, 1)
-	if d.createBufferFunc != nil {
-		return d.createBufferFunc(desc)
+// createNoopBuffer creates a real wgpu.Buffer via the noop device for testing.
+func createNoopBuffer(t *testing.T, device *wgpu.Device, size uint64, usage gputypes.BufferUsage, mapped bool) *wgpu.Buffer {
+	t.Helper()
+	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label:            "noop-test-buffer",
+		Size:             size,
+		Usage:            usage,
+		MappedAtCreation: mapped,
+	})
+	if err != nil {
+		t.Fatalf("device.CreateBuffer failed: %v", err)
 	}
-	return &mockHALBuffer{
-		size:   desc.Size,
-		usage:  desc.Usage,
-		label:  desc.Label,
-		mapped: desc.MappedAtCreation,
-	}, nil
-}
-
-func (d *bufferMockHALDevice) DestroyBuffer(buffer hal.Buffer) {
-	atomic.AddInt32(&d.buffersDestroyed, 1)
-	if d.destroyBufferFunc != nil {
-		d.destroyBufferFunc(buffer)
-	}
+	return buf
 }
 
 // =============================================================================
@@ -70,8 +31,10 @@ func (d *bufferMockHALDevice) DestroyBuffer(buffer hal.Buffer) {
 // =============================================================================
 
 func TestNewBuffer(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageVertex, false)
 	desc := &BufferDescriptor{
 		Label: "test-buffer",
 		Size:  1024,
@@ -101,8 +64,10 @@ func TestNewBuffer(t *testing.T) {
 }
 
 func TestNewBuffer_MappedAtCreation(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 512, usage: gputypes.BufferUsageMapWrite, mapped: true}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 512, gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopySrc, true)
 	desc := &BufferDescriptor{
 		Label:            "mapped-buffer",
 		Size:             512,
@@ -122,8 +87,10 @@ func TestNewBuffer_MappedAtCreation(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_MapAsync_Success(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "map-test",
 		Size:  1024,
@@ -164,8 +131,10 @@ func TestBuffer_MapAsync_Success(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_WriteMode(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 512, usage: gputypes.BufferUsageMapWrite}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 512, gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopySrc, false)
 	desc := &BufferDescriptor{
 		Label: "write-map-test",
 		Size:  512,
@@ -191,8 +160,10 @@ func TestBuffer_MapAsync_WriteMode(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopyDst, true)
 	desc := &BufferDescriptor{
 		Label:            "already-mapped",
 		Size:             1024,
@@ -216,8 +187,10 @@ func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_UsageMismatch(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageVertex, false)
 	desc := &BufferDescriptor{
 		Label: "usage-mismatch",
 		Size:  1024,
@@ -240,8 +213,10 @@ func TestBuffer_MapAsync_UsageMismatch(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
@@ -294,8 +269,10 @@ func TestBuffer_MapAsync_RangeValidation(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_NilCallback(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "nil-callback",
 		Size:  1024,
@@ -312,8 +289,10 @@ func TestBuffer_MapAsync_NilCallback(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_AfterDestroy(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "destroyed",
 		Size:  1024,
@@ -335,8 +314,10 @@ func TestBuffer_MapAsync_AfterDestroy(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_GetMappedRange_Success(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "range-test",
 		Size:  1024,
@@ -360,8 +341,10 @@ func TestBuffer_GetMappedRange_Success(t *testing.T) {
 }
 
 func TestBuffer_GetMappedRange_PartialMap(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "partial-map",
 		Size:  1024,
@@ -391,8 +374,10 @@ func TestBuffer_GetMappedRange_PartialMap(t *testing.T) {
 }
 
 func TestBuffer_GetMappedRange_NotMapped(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "not-mapped",
 		Size:  1024,
@@ -409,8 +394,10 @@ func TestBuffer_GetMappedRange_NotMapped(t *testing.T) {
 }
 
 func TestBuffer_GetMappedRange_Pending(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "pending",
 		Size:  1024,
@@ -434,8 +421,10 @@ func TestBuffer_GetMappedRange_Pending(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_Unmap_Success(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "unmap-test",
 		Size:  1024,
@@ -459,8 +448,10 @@ func TestBuffer_Unmap_Success(t *testing.T) {
 }
 
 func TestBuffer_Unmap_Pending(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "unmap-pending",
 		Size:  1024,
@@ -488,8 +479,10 @@ func TestBuffer_Unmap_Pending(t *testing.T) {
 }
 
 func TestBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "already-unmapped",
 		Size:  1024,
@@ -506,8 +499,10 @@ func TestBuffer_Unmap_AlreadyUnmapped(t *testing.T) {
 }
 
 func TestBuffer_Unmap_AfterDestroy(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "unmap-destroyed",
 		Size:  1024,
@@ -529,8 +524,10 @@ func TestBuffer_Unmap_AfterDestroy(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_Destroy(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageVertex, false)
 	desc := &BufferDescriptor{
 		Label: "destroy-test",
 		Size:  1024,
@@ -546,14 +543,13 @@ func TestBuffer_Destroy(t *testing.T) {
 	if buf.Raw() != nil {
 		t.Error("Raw() should return nil after Destroy()")
 	}
-	if device.buffersDestroyed != 1 {
-		t.Errorf("buffersDestroyed = %d, want 1", device.buffersDestroyed)
-	}
 }
 
 func TestBuffer_Destroy_Idempotent(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageVertex, false)
 	desc := &BufferDescriptor{
 		Label: "idempotent-destroy",
 		Size:  1024,
@@ -562,20 +558,21 @@ func TestBuffer_Destroy_Idempotent(t *testing.T) {
 
 	buf := NewBuffer(halBuf, device, desc)
 
-	// Destroy multiple times
+	// Destroy multiple times — should not panic
 	buf.Destroy()
 	buf.Destroy()
 	buf.Destroy()
 
-	// Should only destroy once
-	if device.buffersDestroyed != 1 {
-		t.Errorf("buffersDestroyed = %d, want 1", device.buffersDestroyed)
+	if !buf.IsDestroyed() {
+		t.Error("IsDestroyed = false after Destroy()")
 	}
 }
 
 func TestBuffer_Destroy_WhilePending(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "destroy-pending",
 		Size:  1024,
@@ -595,9 +592,6 @@ func TestBuffer_Destroy_WhilePending(t *testing.T) {
 	if callbackStatus != BufferMapAsyncStatusDestroyedBeforeCallback {
 		t.Errorf("Callback status = %v, want DestroyedBeforeCallback", callbackStatus)
 	}
-	if device.buffersDestroyed != 1 {
-		t.Errorf("buffersDestroyed = %d, want 1", device.buffersDestroyed)
-	}
 }
 
 // =============================================================================
@@ -605,8 +599,10 @@ func TestBuffer_Destroy_WhilePending(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopyDst|gputypes.BufferUsageCopySrc, false)
 	desc := &BufferDescriptor{
 		Label: "concurrent",
 		Size:  1024,
@@ -639,8 +635,10 @@ func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 }
 
 func TestBuffer_ConcurrentGetMappedRange(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "concurrent-read",
 		Size:  1024,
@@ -680,7 +678,9 @@ func TestBuffer_ConcurrentGetMappedRange(t *testing.T) {
 // =============================================================================
 
 func TestCreateBuffer(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &BufferDescriptor{
 		Label: "created-buffer",
 		Size:  1024,
@@ -696,9 +696,6 @@ func TestCreateBuffer(t *testing.T) {
 	}
 	if buf.Label() != "created-buffer" {
 		t.Errorf("Label = %q, want %q", buf.Label(), "created-buffer")
-	}
-	if device.buffersCreated != 1 {
-		t.Errorf("buffersCreated = %d, want 1", device.buffersCreated)
 	}
 }
 
@@ -716,7 +713,8 @@ func TestCreateBuffer_NilDevice(t *testing.T) {
 }
 
 func TestCreateBuffer_NilDescriptor(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	_, err := CreateBuffer(device, nil)
 	if err == nil {
@@ -725,7 +723,9 @@ func TestCreateBuffer_NilDescriptor(t *testing.T) {
 }
 
 func TestCreateBuffer_ZeroSize(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &BufferDescriptor{
 		Label: "zero-size",
 		Size:  0,
@@ -739,7 +739,9 @@ func TestCreateBuffer_ZeroSize(t *testing.T) {
 }
 
 func TestCreateBuffer_ZeroUsage(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &BufferDescriptor{
 		Label: "zero-usage",
 		Size:  1024,
@@ -753,7 +755,9 @@ func TestCreateBuffer_ZeroUsage(t *testing.T) {
 }
 
 func TestCreateBuffer_SizeAlignment(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &BufferDescriptor{
 		Label: "alignment-test",
 		Size:  1001, // Not aligned to 4 bytes
@@ -772,7 +776,8 @@ func TestCreateBuffer_SizeAlignment(t *testing.T) {
 }
 
 func TestCreateBufferSimple(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	buf, err := CreateBufferSimple(device, 2048, gputypes.BufferUsageStorage, "simple-buffer")
 	if err != nil {
@@ -790,7 +795,8 @@ func TestCreateBufferSimple(t *testing.T) {
 }
 
 func TestCreateStagingBuffer_Upload(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	buf, err := CreateStagingBuffer(device, 4096, true, "upload-staging")
 	if err != nil {
@@ -809,7 +815,8 @@ func TestCreateStagingBuffer_Upload(t *testing.T) {
 }
 
 func TestCreateStagingBuffer_Readback(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	buf, err := CreateStagingBuffer(device, 4096, false, "readback-staging")
 	if err != nil {
@@ -878,8 +885,10 @@ func TestBufferMapAsyncStatus_String(t *testing.T) {
 // =============================================================================
 
 func TestBuffer_Descriptor(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 2048, usage: gputypes.BufferUsageUniform}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 2048, gputypes.BufferUsageUniform, false)
 	desc := &BufferDescriptor{
 		Label: "descriptor-test",
 		Size:  2048,
@@ -901,8 +910,10 @@ func TestBuffer_Descriptor(t *testing.T) {
 }
 
 func TestBuffer_Raw_AfterDestroy(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageVertex}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageVertex, false)
 	desc := &BufferDescriptor{
 		Label: "raw-destroy-test",
 		Size:  1024,
@@ -925,8 +936,10 @@ func TestBuffer_Raw_AfterDestroy(t *testing.T) {
 }
 
 func TestBuffer_MapAsync_InvalidMode(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "invalid-mode",
 		Size:  1024,
@@ -949,8 +962,10 @@ func TestBuffer_MapAsync_InvalidMode(t *testing.T) {
 }
 
 func TestBuffer_PollMapAsync_NotPending(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "poll-not-pending",
 		Size:  1024,
@@ -966,8 +981,10 @@ func TestBuffer_PollMapAsync_NotPending(t *testing.T) {
 }
 
 func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "poll-destroyed",
 		Size:  1024,
@@ -1004,8 +1021,10 @@ func TestBuffer_PollMapAsync_DestroyedDuringPending(t *testing.T) {
 }
 
 func TestBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
-	device := &bufferMockHALDevice{}
-	halBuf := &mockHALBuffer{size: 1024, usage: gputypes.BufferUsageMapRead}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, false)
 	desc := &BufferDescriptor{
 		Label: "range-destroy",
 		Size:  1024,
@@ -1029,7 +1048,9 @@ func TestBuffer_GetMappedRange_AfterDestroy(t *testing.T) {
 }
 
 func TestCreateBuffer_MappedAtCreationValidation(t *testing.T) {
-	device := &bufferMockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &BufferDescriptor{
 		Label:            "mapped-validation",
 		Size:             1024,
@@ -1043,20 +1064,5 @@ func TestCreateBuffer_MappedAtCreationValidation(t *testing.T) {
 	}
 }
 
-func TestCreateBuffer_HALError(t *testing.T) {
-	device := &bufferMockHALDevice{
-		createBufferFunc: func(_ *hal.BufferDescriptor) (hal.Buffer, error) {
-			return nil, errors.New("HAL creation failed")
-		},
-	}
-	desc := &BufferDescriptor{
-		Label: "hal-error",
-		Size:  1024,
-		Usage: gputypes.BufferUsageVertex,
-	}
-
-	_, err := CreateBuffer(device, desc)
-	if err == nil {
-		t.Error("CreateBuffer should fail when HAL creation fails")
-	}
-}
+// NOTE: TestCreateBuffer_HALError removed — cannot inject HAL errors with concrete wgpu types.
+// HAL error paths are tested in wgpu's own test suite.

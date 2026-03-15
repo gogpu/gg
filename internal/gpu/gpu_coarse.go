@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 //go:embed shaders/coarse.wgsl
@@ -33,20 +33,20 @@ type GPUCoarseConfig struct {
 type GPUCoarseRasterizer struct {
 	mu sync.Mutex
 
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Compute pipelines
-	coarsePipeline hal.ComputePipeline
-	clearPipeline  hal.ComputePipeline
+	coarsePipeline *wgpu.ComputePipeline
+	clearPipeline  *wgpu.ComputePipeline
 
 	// Shader module (cached)
-	shaderModule hal.ShaderModule
+	shaderModule *wgpu.ShaderModule
 
 	// Pipeline layout and bind group layouts
-	pipelineLayout   hal.PipelineLayout
-	inputBindLayout  hal.BindGroupLayout
-	outputBindLayout hal.BindGroupLayout
+	pipelineLayout   *wgpu.PipelineLayout
+	inputBindLayout  *wgpu.BindGroupLayout
+	outputBindLayout *wgpu.BindGroupLayout
 
 	// Compiled SPIR-V (cached for verification)
 	spirvCode []uint32
@@ -66,7 +66,7 @@ type GPUCoarseRasterizer struct {
 
 // NewGPUCoarseRasterizer creates a new GPU coarse rasterizer.
 // Returns an error if GPU compute is not supported.
-func NewGPUCoarseRasterizer(device hal.Device, queue hal.Queue, width, height uint16) (*GPUCoarseRasterizer, error) {
+func NewGPUCoarseRasterizer(device *wgpu.Device, queue *wgpu.Queue, width, height uint16) (*GPUCoarseRasterizer, error) {
 	if device == nil || queue == nil {
 		return nil, fmt.Errorf("gpu_coarse: device and queue are required")
 	}
@@ -130,7 +130,7 @@ func (r *GPUCoarseRasterizer) init() error {
 // createBindGroupLayouts creates the bind group layouts for the pipeline.
 func (r *GPUCoarseRasterizer) createBindGroupLayouts() error {
 	// Input bind group layout (group 0)
-	inputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	inputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "coarse_input_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -156,7 +156,7 @@ func (r *GPUCoarseRasterizer) createBindGroupLayouts() error {
 	r.inputBindLayout = inputLayout
 
 	// Output bind group layout (group 1)
-	outputLayout, err := r.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	outputLayout, err := r.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "coarse_output_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -185,9 +185,9 @@ func (r *GPUCoarseRasterizer) createBindGroupLayouts() error {
 
 // createPipelineLayout creates the pipeline layout.
 func (r *GPUCoarseRasterizer) createPipelineLayout() error {
-	layout, err := r.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	layout, err := r.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "coarse_pipeline_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
+		BindGroupLayouts: []*wgpu.BindGroupLayout{r.inputBindLayout, r.outputBindLayout},
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_coarse: failed to create pipeline layout: %w", err)
@@ -199,13 +199,11 @@ func (r *GPUCoarseRasterizer) createPipelineLayout() error {
 // createPipelines creates the compute pipelines.
 func (r *GPUCoarseRasterizer) createPipelines() error {
 	// Main coarse rasterization pipeline
-	coarsePipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "coarse_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_coarse",
-		},
+	coarsePipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "coarse_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_coarse",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_coarse: failed to create coarse pipeline: %w", err)
@@ -213,13 +211,11 @@ func (r *GPUCoarseRasterizer) createPipelines() error {
 	r.coarsePipeline = coarsePipeline
 
 	// Clear counter pipeline
-	clearPipeline, err := r.device.CreateComputePipeline(&hal.ComputePipelineDescriptor{
-		Label:  "coarse_clear_pipeline",
-		Layout: r.pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     r.shaderModule,
-			EntryPoint: "cs_clear_counter",
-		},
+	clearPipeline, err := r.device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
+		Label:      "coarse_clear_pipeline",
+		Layout:     r.pipelineLayout,
+		Module:     r.shaderModule,
+		EntryPoint: "cs_clear_counter",
 	})
 	if err != nil {
 		return fmt.Errorf("gpu_coarse: failed to create clear pipeline: %w", err)
@@ -622,33 +618,33 @@ func (r *GPUCoarseRasterizer) Destroy() {
 
 	// Destroy pipelines
 	if r.coarsePipeline != nil {
-		r.device.DestroyComputePipeline(r.coarsePipeline)
+		r.coarsePipeline.Release()
 		r.coarsePipeline = nil
 	}
 	if r.clearPipeline != nil {
-		r.device.DestroyComputePipeline(r.clearPipeline)
+		r.clearPipeline.Release()
 		r.clearPipeline = nil
 	}
 
 	// Destroy pipeline layout
 	if r.pipelineLayout != nil {
-		r.device.DestroyPipelineLayout(r.pipelineLayout)
+		r.pipelineLayout.Release()
 		r.pipelineLayout = nil
 	}
 
 	// Destroy bind group layouts
 	if r.inputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.inputBindLayout)
+		r.inputBindLayout.Release()
 		r.inputBindLayout = nil
 	}
 	if r.outputBindLayout != nil {
-		r.device.DestroyBindGroupLayout(r.outputBindLayout)
+		r.outputBindLayout.Release()
 		r.outputBindLayout = nil
 	}
 
 	// Destroy shader module
 	if r.shaderModule != nil {
-		r.device.DestroyShaderModule(r.shaderModule)
+		r.shaderModule.Release()
 		r.shaderModule = nil
 	}
 

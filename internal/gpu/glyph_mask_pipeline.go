@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Embedded glyph mask shader source.
@@ -53,34 +53,34 @@ const glyphMaskUniformSize = 80
 //	GlyphMaskPipeline owns shader, layout, pipeline, sampler
 //	bind groups are created per atlas texture (uniform + texture + sampler)
 type GlyphMaskPipeline struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// GPU objects for the render pipeline.
-	shader        hal.ShaderModule
-	uniformLayout hal.BindGroupLayout
-	pipeLayout    hal.PipelineLayout
-	pipeline      hal.RenderPipeline
+	shader        *wgpu.ShaderModule
+	uniformLayout *wgpu.BindGroupLayout
+	pipeLayout    *wgpu.PipelineLayout
+	pipeline      *wgpu.RenderPipeline
 
 	// Session-compatible pipeline variant with depth/stencil state.
 	// Used when text participates in a unified render pass that includes
 	// a stencil attachment (for stencil-then-cover paths).
 	// Stencil test is Always/Keep (text does not interact with stencil).
-	pipelineWithStencil hal.RenderPipeline
+	pipelineWithStencil *wgpu.RenderPipeline
 
 	// Default sampler for R8 atlas textures (linear filtering for smooth
 	// alpha interpolation at subpixel positions).
-	sampler hal.Sampler
+	sampler *wgpu.Sampler
 
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before ensurePipelineWithStencil.
-	clipBindLayout hal.BindGroupLayout
+	clipBindLayout *wgpu.BindGroupLayout
 }
 
 // NewGlyphMaskPipeline creates a new glyph mask pipeline with the given device
 // and queue. The render pipeline and GPU objects are not created until
 // ensurePipelineWithStencil is called.
-func NewGlyphMaskPipeline(device hal.Device, queue hal.Queue) *GlyphMaskPipeline {
+func NewGlyphMaskPipeline(device *wgpu.Device, queue *wgpu.Queue) *GlyphMaskPipeline {
 	return &GlyphMaskPipeline{
 		device: device,
 		queue:  queue,
@@ -90,7 +90,7 @@ func NewGlyphMaskPipeline(device hal.Device, queue hal.Queue) *GlyphMaskPipeline
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
 // uniform. Must be called before ensurePipelineWithStencil. The layout is
 // owned by the session and must not be destroyed by the pipeline.
-func (p *GlyphMaskPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
+func (p *GlyphMaskPipeline) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	p.clipBindLayout = layout
 }
 
@@ -99,7 +99,7 @@ func (p *GlyphMaskPipeline) SetClipBindLayout(layout hal.BindGroupLayout) {
 func (p *GlyphMaskPipeline) Destroy() {
 	p.destroyPipeline()
 	if p.sampler != nil {
-		p.device.DestroySampler(p.sampler)
+		p.sampler.Release()
 		p.sampler = nil
 	}
 }
@@ -118,9 +118,9 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 		return fmt.Errorf("glyph_mask shader source is empty")
 	}
 
-	shader, err := p.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "glyph_mask_shader",
-		Source: hal.ShaderSource{WGSL: glyphMaskShaderSource},
+	shader, err := p.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "glyph_mask_shader",
+		WGSL:  glyphMaskShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile glyph_mask shader: %w", err)
@@ -131,7 +131,7 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 	//   Binding 0: GlyphMaskUniforms (uniform buffer, vertex+fragment)
 	//   Binding 1: R8 atlas texture (texture_2d, fragment)
 	//   Binding 2: Sampler (fragment)
-	uniformLayout, err := p.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	uniformLayout, err := p.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "glyph_mask_uniform_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -159,11 +159,11 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 	}
 	p.uniformLayout = uniformLayout
 
-	glyphBGLayouts := []hal.BindGroupLayout{p.uniformLayout}
+	glyphBGLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
 	if p.clipBindLayout != nil {
 		glyphBGLayouts = append(glyphBGLayouts, p.clipBindLayout)
 	}
-	pipeLayout, err := p.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "glyph_mask_pipe_layout",
 		BindGroupLayouts: glyphBGLayouts,
 	})
@@ -174,7 +174,7 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 
 	// Create sampler for R8 atlas textures (linear filtering for smooth
 	// alpha interpolation at fractional positions).
-	sampler, err := p.device.CreateSampler(&hal.SamplerDescriptor{
+	sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
 		Label:        "glyph_mask_sampler",
 		AddressModeU: gputypes.AddressModeClampToEdge,
 		AddressModeV: gputypes.AddressModeClampToEdge,
@@ -208,15 +208,15 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 	}
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := p.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "glyph_mask_pipeline_with_stencil",
 		Layout: p.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
 			Buffers:    glyphMaskVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -227,21 +227,21 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
 			StencilReadMask:  0x00,
 			StencilWriteMask: 0x00,
@@ -269,7 +269,7 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 //
 // The resources parameter holds pre-built vertex/index buffers, uniform buffer,
 // and bind group for the current frame.
-func (p *GlyphMaskPipeline) RecordDraws(rp hal.RenderPassEncoder, resources *glyphMaskFrameResources, clipBG hal.BindGroup) {
+func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *glyphMaskFrameResources, clipBG *wgpu.BindGroup) {
 	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
@@ -294,23 +294,23 @@ func (p *GlyphMaskPipeline) destroyPipeline() {
 		return
 	}
 	if p.pipelineWithStencil != nil {
-		p.device.DestroyRenderPipeline(p.pipelineWithStencil)
+		p.pipelineWithStencil.Release()
 		p.pipelineWithStencil = nil
 	}
 	if p.pipeline != nil {
-		p.device.DestroyRenderPipeline(p.pipeline)
+		p.pipeline.Release()
 		p.pipeline = nil
 	}
 	if p.pipeLayout != nil {
-		p.device.DestroyPipelineLayout(p.pipeLayout)
+		p.pipeLayout.Release()
 		p.pipeLayout = nil
 	}
 	if p.uniformLayout != nil {
-		p.device.DestroyBindGroupLayout(p.uniformLayout)
+		p.uniformLayout.Release()
 		p.uniformLayout = nil
 	}
 	if p.shader != nil {
-		p.device.DestroyShaderModule(p.shader)
+		p.shader.Release()
 		p.shader = nil
 	}
 }
@@ -321,13 +321,13 @@ func (p *GlyphMaskPipeline) destroyPipeline() {
 type glyphMaskDrawCall struct {
 	indexOffset uint32 // first index in the shared index buffer
 	indexCount  uint32 // number of indices for this draw
-	bindGroup   hal.BindGroup
+	bindGroup   *wgpu.BindGroup
 }
 
 // glyphMaskFrameResources holds per-frame GPU resources for glyph mask rendering.
 type glyphMaskFrameResources struct {
-	vertBuf   hal.Buffer
-	idxBuf    hal.Buffer
+	vertBuf   *wgpu.Buffer
+	idxBuf    *wgpu.Buffer
 	drawCalls []glyphMaskDrawCall
 }
 

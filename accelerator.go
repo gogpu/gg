@@ -3,6 +3,8 @@ package gg
 import (
 	"errors"
 	"sync"
+
+	"github.com/gogpu/gpucontext"
 )
 
 // ErrFallbackToCPU indicates the GPU accelerator cannot handle this operation.
@@ -99,8 +101,14 @@ type GPUAccelerator interface {
 // GPU resources with an external provider (e.g., gogpu window).
 // When SetDeviceProvider is called, the accelerator reuses the provided GPU
 // device instead of creating its own.
+//
+// The provider's Device() returns gpucontext.Device which consumers
+// type-assert to *wgpu.Device for full HAL access:
+//
+//	dev := provider.Device().(*wgpu.Device)
+//	halDevice := dev.HalDevice()
 type DeviceProviderAware interface {
-	SetDeviceProvider(provider any) error
+	SetDeviceProvider(provider gpucontext.DeviceProvider) error
 }
 
 // SurfaceTargetAware is an optional interface for accelerators that support
@@ -251,9 +259,9 @@ func CloseAccelerator() {
 // accelerator, enabling GPU device sharing. If no accelerator is registered
 // or it doesn't support device sharing, this is a no-op.
 //
-// The provider should implement HalDevice() any and HalQueue() any methods
-// that return wgpu/hal types.
-func SetAcceleratorDeviceProvider(provider any) error {
+// The provider's Device() returns gpucontext.Device; accelerators type-assert
+// to *wgpu.Device to obtain HAL access for GPU operations.
+func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 	a := Accelerator()
 	if a == nil {
 		return nil

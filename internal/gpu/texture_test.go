@@ -5,183 +5,33 @@ package gpu
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // =============================================================================
-// Mock Types for Testing
-// =============================================================================
-
-// mockHALDevice is a test double for hal.Device.
-type mockHALDevice struct {
-	createTextureFunc      func(*hal.TextureDescriptor) (hal.Texture, error)
-	createTextureViewFunc  func(hal.Texture, *hal.TextureViewDescriptor) (hal.TextureView, error)
-	destroyTextureFunc     func(hal.Texture)
-	destroyTextureViewFunc func(hal.TextureView)
-
-	// Track calls for verification
-	texturesCreated     int32
-	textureViewsCreated int32
-	texturesDestroyed   int32
-	viewsDestroyed      int32
-}
-
-//nolint:nilnil // Mock: intentionally returns nil for unused interface methods.
-func (d *mockHALDevice) CreateBuffer(_ *hal.BufferDescriptor) (hal.Buffer, error) {
-	return nil, nil
-}
-
-func (d *mockHALDevice) DestroyBuffer(_ hal.Buffer) {}
-
-func (d *mockHALDevice) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
-	atomic.AddInt32(&d.texturesCreated, 1)
-	if d.createTextureFunc != nil {
-		return d.createTextureFunc(desc)
-	}
-	return &mockHALTexture{
-		width:  desc.Size.Width,
-		height: desc.Size.Height,
-		format: desc.Format,
-	}, nil
-}
-
-func (d *mockHALDevice) DestroyTexture(texture hal.Texture) {
-	atomic.AddInt32(&d.texturesDestroyed, 1)
-	if d.destroyTextureFunc != nil {
-		d.destroyTextureFunc(texture)
-	}
-}
-
-func (d *mockHALDevice) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
-	atomic.AddInt32(&d.textureViewsCreated, 1)
-	if d.createTextureViewFunc != nil {
-		return d.createTextureViewFunc(texture, desc)
-	}
-	return &mockHALTextureView{
-		texture: texture,
-		label:   desc.Label,
-	}, nil
-}
-
-func (d *mockHALDevice) DestroyTextureView(view hal.TextureView) {
-	atomic.AddInt32(&d.viewsDestroyed, 1)
-	if d.destroyTextureViewFunc != nil {
-		d.destroyTextureViewFunc(view)
-	}
-}
-
-// Implement remaining hal.Device interface methods as no-ops.
-// All return nil,nil as mocks - these are not called in texture tests.
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateSampler(_ *hal.SamplerDescriptor) (hal.Sampler, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroySampler(_ hal.Sampler) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateBindGroupLayout(_ *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyBindGroupLayout(_ hal.BindGroupLayout) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateBindGroup(_ *hal.BindGroupDescriptor) (hal.BindGroup, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyBindGroup(_ hal.BindGroup) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreatePipelineLayout(_ *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyPipelineLayout(_ hal.PipelineLayout) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateShaderModule(_ *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyShaderModule(_ hal.ShaderModule) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateRenderPipeline(_ *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyRenderPipeline(_ hal.RenderPipeline) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateComputePipeline(_ *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyComputePipeline(_ hal.ComputePipeline) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateCommandEncoder(_ *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	return nil, nil
-}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateFence() (hal.Fence, error) { return nil, nil }
-func (d *mockHALDevice) DestroyFence(_ hal.Fence)        {}
-func (d *mockHALDevice) Wait(_ hal.Fence, _ uint64, _ time.Duration) (bool, error) {
-	return true, nil
-}
-func (d *mockHALDevice) ResetFence(_ hal.Fence) error             { return nil }
-func (d *mockHALDevice) GetFenceStatus(_ hal.Fence) (bool, error) { return true, nil }
-func (d *mockHALDevice) FreeCommandBuffer(_ hal.CommandBuffer)    {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateRenderBundleEncoder(_ *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyRenderBundle(_ hal.RenderBundle) {}
-
-//nolint:nilnil // Mock: unused interface methods.
-func (d *mockHALDevice) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
-	return nil, nil
-}
-func (d *mockHALDevice) DestroyQuerySet(_ hal.QuerySet) {}
-
-func (d *mockHALDevice) WaitIdle() error { return nil }
-func (d *mockHALDevice) Destroy()        {}
-
-// mockHALTexture is a test double for hal.Texture.
-type mockHALTexture struct {
-	width  uint32
-	height uint32
-	format gputypes.TextureFormat
-}
-
-// Destroy implements hal.Resource.
-func (t *mockHALTexture) Destroy() {}
-
-// NativeHandle implements hal.NativeHandle.
-func (t *mockHALTexture) NativeHandle() uintptr { return 0 }
-
-// mockHALTextureView is a test double for hal.TextureView.
-type mockHALTextureView struct {
-	texture hal.Texture
-	label   string
-}
-
-// Destroy implements hal.Resource.
-func (v *mockHALTextureView) Destroy() {}
-
-// NativeHandle implements hal.NativeHandle.
-func (v *mockHALTextureView) NativeHandle() uintptr { return 0 }
-
-// =============================================================================
-// Texture Tests
+// Texture Tests (using noop device)
 // =============================================================================
 
 func TestNewTexture(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256, format: gputypes.TextureFormatRGBA8Unorm}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	halTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "raw-texture",
+		Size:          wgpu.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding | gputypes.TextureUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("device.CreateTexture failed: %v", err)
+	}
+
 	desc := &TextureDescriptor{
 		Label: "test-texture",
 		Size: gputypes.Extent3D{
@@ -219,23 +69,18 @@ func TestNewTexture(t *testing.T) {
 }
 
 func TestTexture_GetDefaultView(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 512, height: 512}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              512,
-			Height:             512,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 4,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 512, 512,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	// Get default view
 	view1, err := tex.GetDefaultView()
@@ -248,9 +93,6 @@ func TestTexture_GetDefaultView(t *testing.T) {
 	if !view1.IsDefault() {
 		t.Error("view.IsDefault() = false, want true")
 	}
-	if device.textureViewsCreated != 1 {
-		t.Errorf("textureViewsCreated = %d, want 1", device.textureViewsCreated)
-	}
 
 	// Get default view again - should return same instance
 	view2, err := tex.GetDefaultView()
@@ -260,29 +102,21 @@ func TestTexture_GetDefaultView(t *testing.T) {
 	if view2 != view1 {
 		t.Error("GetDefaultView returned different view on second call")
 	}
-	if device.textureViewsCreated != 1 {
-		t.Errorf("textureViewsCreated = %d, want 1 (should not create again)", device.textureViewsCreated)
-	}
 }
 
 func TestTexture_GetDefaultView_Concurrent(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "concurrent-test",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"concurrent-test",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	const numGoroutines = 10
 	var wg sync.WaitGroup
@@ -309,17 +143,13 @@ func TestTexture_GetDefaultView_Concurrent(t *testing.T) {
 			t.Errorf("goroutine %d: got different view than goroutine 0", i)
 		}
 	}
-
-	// Should only create one view
-	if device.textureViewsCreated != 1 {
-		t.Errorf("textureViewsCreated = %d, want 1", device.textureViewsCreated)
-	}
 }
 
 func TestTexture_CreateView(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 512, height: 512}
-	desc := &TextureDescriptor{
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	tex, err := CreateCoreTexture(device, &TextureDescriptor{
 		Label: "test-texture",
 		Size: gputypes.Extent3D{
 			Width:              512,
@@ -331,9 +161,10 @@ func TestTexture_CreateView(t *testing.T) {
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatRGBA8Unorm,
 		Usage:         gputypes.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		t.Fatalf("CreateCoreTexture failed: %v", err)
 	}
-
-	tex := NewTexture(halTex, device, desc)
 
 	// Create custom view
 	viewDesc := &TextureViewDescriptor{
@@ -372,23 +203,18 @@ func TestTexture_CreateView(t *testing.T) {
 }
 
 func TestTexture_CreateView_NilDescriptor(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	// CreateView with nil descriptor should return default view
 	view, err := tex.CreateView(nil)
@@ -404,23 +230,18 @@ func TestTexture_CreateView_NilDescriptor(t *testing.T) {
 }
 
 func TestTexture_Destroy(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	// Get default view first
 	_, _ = tex.GetDefaultView()
@@ -434,66 +255,50 @@ func TestTexture_Destroy(t *testing.T) {
 	if tex.Raw() != nil {
 		t.Error("Raw() should return nil after Destroy()")
 	}
-	if device.texturesDestroyed != 1 {
-		t.Errorf("texturesDestroyed = %d, want 1", device.texturesDestroyed)
-	}
-	if device.viewsDestroyed != 1 {
-		t.Errorf("viewsDestroyed = %d, want 1 (default view should be destroyed)", device.viewsDestroyed)
-	}
 }
 
 func TestTexture_Destroy_Idempotent(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
 	}
 
-	tex := NewTexture(halTex, device, desc)
-
-	// Destroy multiple times
+	// Destroy multiple times — should not panic
 	tex.Destroy()
 	tex.Destroy()
 	tex.Destroy()
 
-	// Should only destroy once
-	if device.texturesDestroyed != 1 {
-		t.Errorf("texturesDestroyed = %d, want 1", device.texturesDestroyed)
+	if !tex.IsDestroyed() {
+		t.Error("IsDestroyed = false after Destroy()")
 	}
 }
 
 func TestTexture_GetDefaultView_AfterDestroy(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
 	}
 
-	tex := NewTexture(halTex, device, desc)
 	tex.Destroy()
 
 	// GetDefaultView after destroy should fail
-	_, err := tex.GetDefaultView()
+	_, err = tex.GetDefaultView()
 	if !errors.Is(err, ErrTextureDestroyed) {
 		t.Errorf("GetDefaultView after Destroy: got %v, want ErrTextureDestroyed", err)
 	}
@@ -504,23 +309,18 @@ func TestTexture_GetDefaultView_AfterDestroy(t *testing.T) {
 // =============================================================================
 
 func TestTextureView_Destroy_NonDefault(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	// Create a custom view
 	view, _ := tex.CreateView(&TextureViewDescriptor{
@@ -533,29 +333,21 @@ func TestTextureView_Destroy_NonDefault(t *testing.T) {
 	if !view.IsDestroyed() {
 		t.Error("view.IsDestroyed() = false after Destroy()")
 	}
-	if device.viewsDestroyed != 1 {
-		t.Errorf("viewsDestroyed = %d, want 1", device.viewsDestroyed)
-	}
 }
 
 func TestTextureView_Destroy_Default_NoOp(t *testing.T) {
-	device := &mockHALDevice{}
-	halTex := &mockHALTexture{width: 256, height: 256}
-	desc := &TextureDescriptor{
-		Label: "test-texture",
-		Size: gputypes.Extent3D{
-			Width:              256,
-			Height:             256,
-			DepthOrArrayLayers: 1,
-		},
-		MipLevelCount: 1,
-		SampleCount:   1,
-		Dimension:     gputypes.TextureDimension2D,
-		Format:        gputypes.TextureFormatRGBA8Unorm,
-		Usage:         gputypes.TextureUsageTextureBinding,
-	}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
-	tex := NewTexture(halTex, device, desc)
+	tex, err := CreateCoreTextureSimple(
+		device, 256, 256,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureUsageTextureBinding,
+		"test-texture",
+	)
+	if err != nil {
+		t.Fatalf("CreateCoreTextureSimple failed: %v", err)
+	}
 
 	// Get default view
 	defaultView, _ := tex.GetDefaultView()
@@ -566,9 +358,6 @@ func TestTextureView_Destroy_Default_NoOp(t *testing.T) {
 	if defaultView.IsDestroyed() {
 		t.Error("default view should not be destroyed via public Destroy()")
 	}
-	if device.viewsDestroyed != 0 {
-		t.Errorf("viewsDestroyed = %d, want 0", device.viewsDestroyed)
-	}
 }
 
 // =============================================================================
@@ -576,7 +365,9 @@ func TestTextureView_Destroy_Default_NoOp(t *testing.T) {
 // =============================================================================
 
 func TestCreateCoreTexture(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &TextureDescriptor{
 		Label: "created-texture",
 		Size: gputypes.Extent3D{
@@ -604,9 +395,6 @@ func TestCreateCoreTexture(t *testing.T) {
 	if tex.Height() != 512 {
 		t.Errorf("Height = %d, want 512", tex.Height())
 	}
-	if device.texturesCreated != 1 {
-		t.Errorf("texturesCreated = %d, want 1", device.texturesCreated)
-	}
 }
 
 func TestCreateCoreTexture_NilDevice(t *testing.T) {
@@ -626,7 +414,8 @@ func TestCreateCoreTexture_NilDevice(t *testing.T) {
 }
 
 func TestCreateCoreTexture_NilDescriptor(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	_, err := CreateCoreTexture(device, nil)
 	if err == nil {
@@ -635,7 +424,8 @@ func TestCreateCoreTexture_NilDescriptor(t *testing.T) {
 }
 
 func TestCreateCoreTexture_InvalidSize(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	tests := []struct {
 		name   string
@@ -667,7 +457,9 @@ func TestCreateCoreTexture_InvalidSize(t *testing.T) {
 }
 
 func TestCreateCoreTexture_DefaultValues(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	desc := &TextureDescriptor{
 		Label: "defaults-test",
 		Size: gputypes.Extent3D{
@@ -699,7 +491,8 @@ func TestCreateCoreTexture_DefaultValues(t *testing.T) {
 }
 
 func TestCreateCoreTextureSimple(t *testing.T) {
-	device := &mockHALDevice{}
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
 
 	tex, err := CreateCoreTextureSimple(
 		device,

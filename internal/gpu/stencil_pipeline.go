@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Embedded WGSL shader sources for stencil-then-cover rendering.
@@ -43,18 +43,18 @@ const vertexStride = 8
 // It is shared by both fill rules.
 func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipeline descriptors are inherently verbose
 	// Compile shaders.
-	stencilShader, err := sr.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "stencil_fill_shader",
-		Source: hal.ShaderSource{WGSL: stencilFillShaderSource},
+	stencilShader, err := sr.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "stencil_fill_shader",
+		WGSL:  stencilFillShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile stencil fill shader: %w", err)
 	}
 	sr.stencilFillShader = stencilShader
 
-	coverShader, err := sr.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "cover_shader",
-		Source: hal.ShaderSource{WGSL: coverShaderSource},
+	coverShader, err := sr.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "cover_shader",
+		WGSL:  coverShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile cover shader: %w", err)
@@ -63,7 +63,7 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 
 	// Create bind group layout shared by both pipelines.
 	// One uniform buffer at group(0) binding(0), visible to vertex + fragment stages.
-	uniformLayout, err := sr.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	uniformLayout, err := sr.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "stencil_cover_uniform_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -79,20 +79,20 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	sr.uniformLayout = uniformLayout
 
 	// Create pipeline layouts.
-	stencilPipeLayout, err := sr.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	stencilPipeLayout, err := sr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "stencil_fill_pipe_layout",
-		BindGroupLayouts: []hal.BindGroupLayout{sr.uniformLayout},
+		BindGroupLayouts: []*wgpu.BindGroupLayout{sr.uniformLayout},
 	})
 	if err != nil {
 		return fmt.Errorf("create stencil pipeline layout: %w", err)
 	}
 	sr.stencilPipeLayout = stencilPipeLayout
 
-	coverBGLayouts := []hal.BindGroupLayout{sr.uniformLayout}
+	coverBGLayouts := []*wgpu.BindGroupLayout{sr.uniformLayout}
 	if sr.clipBindLayout != nil {
 		coverBGLayouts = append(coverBGLayouts, sr.clipBindLayout)
 	}
-	coverPipeLayout, err := sr.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	coverPipeLayout, err := sr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "cover_pipe_layout",
 		BindGroupLayouts: coverBGLayouts,
 	})
@@ -134,15 +134,15 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	// Color writes are suppressed (WriteMask=None) since this pass only
 	// updates the stencil buffer. A dummy fragment shader is included for
 	// backend compatibility.
-	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{ //nolint:dupl // NonZero vs EvenOdd differ only in stencil ops
+	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{ //nolint:dupl // NonZero vs EvenOdd differ only in stencil ops
 		Label:  "stencil_fill_pipeline",
 		Layout: sr.stencilPipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
 			EntryPoint: "vs_main",
 			Buffers:    vertexBufferLayout,
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -152,21 +152,21 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationIncrementWrap,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationIncrementWrap,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationDecrementWrap,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationDecrementWrap,
 			},
 			StencilReadMask:  0xFF,
 			StencilWriteMask: 0xFF,
@@ -184,15 +184,15 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	// Even-odd fill rule: both front and back faces invert the stencil value.
 	// A pixel with odd winding count has stencil != 0 (inside), even count
 	// wraps back to 0 (outside). Same shader and layout as the non-zero variant.
-	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{ //nolint:dupl // EvenOdd vs NonZero differ only in stencil ops
+	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{ //nolint:dupl // EvenOdd vs NonZero differ only in stencil ops
 		Label:  "stencil_fill_even_odd_pipeline",
 		Layout: sr.stencilPipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
 			EntryPoint: "vs_main",
 			Buffers:    vertexBufferLayout,
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -202,21 +202,21 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationInvert,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationInvert,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationInvert,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationInvert,
 			},
 			StencilReadMask:  0xFF,
 			StencilWriteMask: 0xFF,
@@ -235,15 +235,15 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	// PassOp=Zero resets stencil to 0 after coloring, clearing it for the
 	// next path. Premultiplied alpha blending composites the fill color.
 	premulBlend := gputypes.BlendStatePremultiplied()
-	nonZeroCoverPipeline, err := sr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	nonZeroCoverPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "cover_pipeline",
 		Layout: sr.coverPipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     sr.coverShader,
 			EntryPoint: "vs_main",
 			Buffers:    vertexBufferLayout,
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     sr.coverShader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -254,21 +254,21 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionNotEqual,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationZero,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationZero,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionNotEqual,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationZero,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationZero,
 			},
 			StencilReadMask:  0xFF,
 			StencilWriteMask: 0xFF,
@@ -291,35 +291,35 @@ func (sr *StencilRenderer) destroyPipelines() {
 		return
 	}
 	if sr.nonZeroCoverPipeline != nil {
-		sr.device.DestroyRenderPipeline(sr.nonZeroCoverPipeline)
+		sr.nonZeroCoverPipeline.Release()
 		sr.nonZeroCoverPipeline = nil
 	}
 	if sr.evenOddStencilPipeline != nil {
-		sr.device.DestroyRenderPipeline(sr.evenOddStencilPipeline)
+		sr.evenOddStencilPipeline.Release()
 		sr.evenOddStencilPipeline = nil
 	}
 	if sr.nonZeroStencilPipeline != nil {
-		sr.device.DestroyRenderPipeline(sr.nonZeroStencilPipeline)
+		sr.nonZeroStencilPipeline.Release()
 		sr.nonZeroStencilPipeline = nil
 	}
 	if sr.coverPipeLayout != nil {
-		sr.device.DestroyPipelineLayout(sr.coverPipeLayout)
+		sr.coverPipeLayout.Release()
 		sr.coverPipeLayout = nil
 	}
 	if sr.stencilPipeLayout != nil {
-		sr.device.DestroyPipelineLayout(sr.stencilPipeLayout)
+		sr.stencilPipeLayout.Release()
 		sr.stencilPipeLayout = nil
 	}
 	if sr.uniformLayout != nil {
-		sr.device.DestroyBindGroupLayout(sr.uniformLayout)
+		sr.uniformLayout.Release()
 		sr.uniformLayout = nil
 	}
 	if sr.coverShader != nil {
-		sr.device.DestroyShaderModule(sr.coverShader)
+		sr.coverShader.Release()
 		sr.coverShader = nil
 	}
 	if sr.stencilFillShader != nil {
-		sr.device.DestroyShaderModule(sr.stencilFillShader)
+		sr.stencilFillShader.Release()
 		sr.stencilFillShader = nil
 	}
 }

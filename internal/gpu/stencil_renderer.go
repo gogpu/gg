@@ -11,7 +11,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // sampleCount is the MSAA sample count used for stencil-then-cover rendering.
@@ -34,43 +34,43 @@ const sampleCount = 4
 // attachment resolves to the single-sample resolve texture, which can be read back
 // to the CPU via CopySrc usage.
 type StencilRenderer struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Shared MSAA color + depth/stencil + resolve textures.
 	textures textureSet
 
 	// Shader modules for stencil-then-cover rendering.
-	stencilFillShader hal.ShaderModule
-	coverShader       hal.ShaderModule
+	stencilFillShader *wgpu.ShaderModule
+	coverShader       *wgpu.ShaderModule
 
 	// Bind group layout and pipeline layouts shared by both passes.
-	uniformLayout     hal.BindGroupLayout
-	stencilPipeLayout hal.PipelineLayout
-	coverPipeLayout   hal.PipelineLayout
+	uniformLayout     *wgpu.BindGroupLayout
+	stencilPipeLayout *wgpu.PipelineLayout
+	coverPipeLayout   *wgpu.PipelineLayout
 
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before createPipelines. Only the cover pipeline needs
 	// it (stencil fill has no color output, so clip is irrelevant there).
-	clipBindLayout hal.BindGroupLayout
+	clipBindLayout *wgpu.BindGroupLayout
 
 	// Render pipelines.
 	// nonZeroStencilPipeline implements the non-zero winding fill rule:
 	// front faces increment stencil, back faces decrement.
-	nonZeroStencilPipeline hal.RenderPipeline
+	nonZeroStencilPipeline *wgpu.RenderPipeline
 
 	// evenOddStencilPipeline implements the even-odd fill rule:
 	// both front and back faces invert the stencil value.
-	evenOddStencilPipeline hal.RenderPipeline
+	evenOddStencilPipeline *wgpu.RenderPipeline
 
 	// nonZeroCoverPipeline draws the fill color where stencil != 0,
 	// then resets stencil to zero via PassOp. Shared by both fill rules.
-	nonZeroCoverPipeline hal.RenderPipeline
+	nonZeroCoverPipeline *wgpu.RenderPipeline
 }
 
 // NewStencilRenderer creates a new StencilRenderer with the given device and queue.
 // Textures are not allocated until EnsureTextures is called with the desired dimensions.
-func NewStencilRenderer(device hal.Device, queue hal.Queue) *StencilRenderer {
+func NewStencilRenderer(device *wgpu.Device, queue *wgpu.Queue) *StencilRenderer {
 	return &StencilRenderer{
 		device: device,
 		queue:  queue,
@@ -80,7 +80,7 @@ func NewStencilRenderer(device hal.Device, queue hal.Queue) *StencilRenderer {
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
 // uniform. Must be called before createPipelines. The layout is owned by the
 // session and must not be destroyed by the renderer.
-func (sr *StencilRenderer) SetClipBindLayout(layout hal.BindGroupLayout) {
+func (sr *StencilRenderer) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	sr.clipBindLayout = layout
 }
 
@@ -106,7 +106,7 @@ func (sr *StencilRenderer) Destroy() {
 
 // destroyTextures releases all texture views and textures, resetting dimensions to zero.
 func (sr *StencilRenderer) destroyTextures() {
-	sr.textures.destroyTextures(sr.device)
+	sr.textures.destroyTextures()
 }
 
 // RenderPassDescriptor returns a configured render pass descriptor for
@@ -122,13 +122,13 @@ func (sr *StencilRenderer) destroyTextures() {
 //
 // EnsureTextures must be called before this method. Returns nil if textures
 // have not been allocated.
-func (sr *StencilRenderer) RenderPassDescriptor() *hal.RenderPassDescriptor {
+func (sr *StencilRenderer) RenderPassDescriptor() *wgpu.RenderPassDescriptor {
 	if sr.textures.msaaView == nil || sr.textures.stencilView == nil || sr.textures.resolveView == nil {
 		return nil
 	}
-	return &hal.RenderPassDescriptor{
+	return &wgpu.RenderPassDescriptor{
 		Label: "stencil_cover_pass",
-		ColorAttachments: []hal.RenderPassColorAttachment{
+		ColorAttachments: []wgpu.RenderPassColorAttachment{
 			{
 				View:          sr.textures.msaaView,
 				ResolveTarget: sr.textures.resolveView,
@@ -137,7 +137,7 @@ func (sr *StencilRenderer) RenderPassDescriptor() *hal.RenderPassDescriptor {
 				ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 			},
 		},
-		DepthStencilAttachment: &hal.RenderPassDepthStencilAttachment{
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              sr.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
@@ -153,7 +153,7 @@ func (sr *StencilRenderer) RenderPassDescriptor() *hal.RenderPassDescriptor {
 // This texture contains the final rendered output after MSAA resolve and
 // has CopySrc usage for GPU-to-CPU readback.
 // Returns nil if textures have not been allocated via EnsureTextures.
-func (sr *StencilRenderer) ResolveTexture() hal.Texture {
+func (sr *StencilRenderer) ResolveTexture() *wgpu.Texture {
 	return sr.textures.resolveTex
 }
 
@@ -167,34 +167,34 @@ func (sr *StencilRenderer) Size() (uint32, uint32) {
 // stencil-then-cover render pass. Created by createRenderBuffers and cleaned
 // up via destroy.
 type stencilCoverBuffers struct {
-	fanVertBuf       hal.Buffer
-	coverVertBuf     hal.Buffer
-	stencilUniBuf    hal.Buffer
-	coverUniBuf      hal.Buffer
-	stencilBindGroup hal.BindGroup
-	coverBindGroup   hal.BindGroup
+	fanVertBuf       *wgpu.Buffer
+	coverVertBuf     *wgpu.Buffer
+	stencilUniBuf    *wgpu.Buffer
+	coverUniBuf      *wgpu.Buffer
+	stencilBindGroup *wgpu.BindGroup
+	coverBindGroup   *wgpu.BindGroup
 	fanVertexCount   uint32
 }
 
 // destroy releases all GPU resources.
-func (b *stencilCoverBuffers) destroy(device hal.Device) {
+func (b *stencilCoverBuffers) destroy() {
 	if b.coverBindGroup != nil {
-		device.DestroyBindGroup(b.coverBindGroup)
+		b.coverBindGroup.Release()
 	}
 	if b.stencilBindGroup != nil {
-		device.DestroyBindGroup(b.stencilBindGroup)
+		b.stencilBindGroup.Release()
 	}
 	if b.coverUniBuf != nil {
-		device.DestroyBuffer(b.coverUniBuf)
+		b.coverUniBuf.Release()
 	}
 	if b.stencilUniBuf != nil {
-		device.DestroyBuffer(b.stencilUniBuf)
+		b.stencilUniBuf.Release()
 	}
 	if b.coverVertBuf != nil {
-		device.DestroyBuffer(b.coverVertBuf)
+		b.coverVertBuf.Release()
 	}
 	if b.fanVertBuf != nil {
-		device.DestroyBuffer(b.fanVertBuf)
+		b.fanVertBuf.Release()
 	}
 }
 
@@ -237,7 +237,7 @@ func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.P
 	if err != nil {
 		return err
 	}
-	defer bufs.destroy(sr.device)
+	defer bufs.destroy()
 
 	// Encode, submit, and read back pixels.
 	return sr.encodeAndReadback(w, h, bufs, target, fillRule)
@@ -270,12 +270,12 @@ func (sr *StencilRenderer) createRenderBuffers(
 	// Vertex buffers.
 	b.fanVertBuf, err = sr.createAndUploadVertexBuffer("stencil_fan_verts", float32SliceToBytes(fanVerts))
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 	b.coverVertBuf, err = sr.createAndUploadVertexBuffer("stencil_cover_verts", float32SliceToBytes(coverQuad[:]))
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 
@@ -284,14 +284,14 @@ func (sr *StencilRenderer) createRenderBuffers(
 		"stencil_fill", makeStencilFillUniform(w, h), stencilFillUniformSize,
 	)
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 	b.coverUniBuf, b.coverBindGroup, err = sr.createUniformAndBindGroup(
 		"cover", makeCoverUniform(w, h, color), coverUniformSize,
 	)
 	if err != nil {
-		b.destroy(sr.device)
+		b.destroy()
 		return nil, err
 	}
 
@@ -299,8 +299,8 @@ func (sr *StencilRenderer) createRenderBuffers(
 }
 
 // createAndUploadVertexBuffer creates a vertex buffer and uploads data.
-func (sr *StencilRenderer) createAndUploadVertexBuffer(label string, data []byte) (hal.Buffer, error) {
-	buf, err := sr.device.CreateBuffer(&hal.BufferDescriptor{
+func (sr *StencilRenderer) createAndUploadVertexBuffer(label string, data []byte) (*wgpu.Buffer, error) {
+	buf, err := sr.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: label, Size: uint64(len(data)),
 		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
 	})
@@ -308,7 +308,7 @@ func (sr *StencilRenderer) createAndUploadVertexBuffer(label string, data []byte
 		return nil, fmt.Errorf("create %s buffer: %w", label, err)
 	}
 	if err := sr.queue.WriteBuffer(buf, 0, data); err != nil {
-		sr.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, fmt.Errorf("write %s buffer: %w", label, err)
 	}
 	return buf, nil
@@ -318,8 +318,8 @@ func (sr *StencilRenderer) createAndUploadVertexBuffer(label string, data []byte
 // a bind group with a single buffer binding at group(0) binding(0).
 func (sr *StencilRenderer) createUniformAndBindGroup(
 	label string, data []byte, size uint64,
-) (hal.Buffer, hal.BindGroup, error) {
-	buf, err := sr.device.CreateBuffer(&hal.BufferDescriptor{
+) (*wgpu.Buffer, *wgpu.BindGroup, error) {
+	buf, err := sr.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: label + "_uniform", Size: size,
 		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 	})
@@ -327,20 +327,18 @@ func (sr *StencilRenderer) createUniformAndBindGroup(
 		return nil, nil, fmt.Errorf("create %s uniform: %w", label, err)
 	}
 	if err := sr.queue.WriteBuffer(buf, 0, data); err != nil {
-		sr.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, nil, fmt.Errorf("write %s uniform: %w", label, err)
 	}
 
-	bg, err := sr.device.CreateBindGroup(&hal.BindGroupDescriptor{
+	bg, err := sr.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label: label + "_bind", Layout: sr.uniformLayout,
-		Entries: []gputypes.BindGroupEntry{
-			{Binding: 0, Resource: gputypes.BufferBinding{
-				Buffer: buf.NativeHandle(), Offset: 0, Size: size,
-			}},
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Offset: 0, Size: size},
 		},
 	})
 	if err != nil {
-		sr.device.DestroyBuffer(buf)
+		buf.Release()
 		return nil, nil, fmt.Errorf("create %s bind group: %w", label, err)
 	}
 	return buf, bg, nil
@@ -352,18 +350,17 @@ func (sr *StencilRenderer) createUniformAndBindGroup(
 func (sr *StencilRenderer) encodeAndReadback(
 	w, h uint32, bufs *stencilCoverBuffers, target gg.GPURenderTarget, fillRule gg.FillRule,
 ) error {
-	encoder, err := sr.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := sr.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "stencil_cover_encoder",
 	})
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
-	if err := encoder.BeginEncoding("stencil_cover"); err != nil {
-		return fmt.Errorf("begin encoding: %w", err)
-	}
-
 	// Render pass: stencil fill + cover in a single pass.
-	rp := encoder.BeginRenderPass(sr.RenderPassDescriptor())
+	rp, rpErr := encoder.BeginRenderPass(sr.RenderPassDescriptor())
+	if rpErr != nil {
+		return fmt.Errorf("begin render pass: %w", rpErr)
+	}
 
 	// Select stencil pipeline based on fill rule.
 	stencilPipeline := sr.nonZeroStencilPipeline
@@ -382,15 +379,15 @@ func (sr *StencilRenderer) encodeAndReadback(
 	rp.SetStencilReference(0)
 	rp.Draw(6, 1, 0, 0)
 
-	rp.End()
+	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
 	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
 	// This is a no-op on Metal, GLES, software, and noop backends.
-	encoder.TransitionTextures([]hal.TextureBarrier{{
+	encoder.TransitionTextures([]wgpu.TextureBarrier{{
 		Texture: sr.textures.resolveTex,
-		Usage: hal.TextureUsageTransition{
+		Usage: wgpu.TextureUsageTransition{
 			OldUsage: gputypes.TextureUsageRenderAttachment,
 			NewUsage: gputypes.TextureUsageCopySrc,
 		},
@@ -398,7 +395,7 @@ func (sr *StencilRenderer) encodeAndReadback(
 
 	// Copy resolve texture to staging buffer for CPU readback.
 	pixelBufSize := uint64(w) * uint64(h) * 4
-	stagingBuf, err := sr.device.CreateBuffer(&hal.BufferDescriptor{
+	stagingBuf, err := sr.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "stencil_staging", Size: pixelBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 	})
@@ -406,19 +403,19 @@ func (sr *StencilRenderer) encodeAndReadback(
 		encoder.DiscardEncoding()
 		return fmt.Errorf("create staging buffer: %w", err)
 	}
-	defer sr.device.DestroyBuffer(stagingBuf)
+	defer stagingBuf.Release()
 
-	encoder.CopyTextureToBuffer(sr.textures.resolveTex, stagingBuf, []hal.BufferTextureCopy{{
-		BufferLayout: hal.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
-		TextureBase:  hal.ImageCopyTexture{Texture: sr.textures.resolveTex, MipLevel: 0},
-		Size:         hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+	encoder.CopyTextureToBuffer(sr.textures.resolveTex, stagingBuf, []wgpu.BufferTextureCopy{{
+		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		TextureBase:  wgpu.ImageCopyTexture{Texture: sr.textures.resolveTex, MipLevel: 0},
+		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
 
-	cmdBuf, err := encoder.EndEncoding()
+	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
-	defer sr.device.FreeCommandBuffer(cmdBuf)
+	// cmdBuf freed after fence wait
 
 	return sr.submitAndReadback(cmdBuf, stagingBuf, pixelBufSize, target)
 }
@@ -426,19 +423,19 @@ func (sr *StencilRenderer) encodeAndReadback(
 // submitAndReadback submits the command buffer, waits for GPU completion,
 // reads back pixel data, and converts BGRA to RGBA into the target buffer.
 func (sr *StencilRenderer) submitAndReadback(
-	cmdBuf hal.CommandBuffer, stagingBuf hal.Buffer,
+	cmdBuf *wgpu.CommandBuffer, stagingBuf *wgpu.Buffer,
 	pixelBufSize uint64, target gg.GPURenderTarget,
 ) error {
 	fence, err := sr.device.CreateFence()
 	if err != nil {
 		return fmt.Errorf("create fence: %w", err)
 	}
-	defer sr.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := sr.queue.Submit([]hal.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if err := sr.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := sr.device.Wait(fence, 1, 5*time.Second)
+	fenceOK, err := sr.device.WaitForFence(fence, 1, 5*time.Second)
 	if err != nil || !fenceOK {
 		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
 	}
@@ -462,7 +459,7 @@ func (sr *StencilRenderer) submitAndReadback(
 // The bufs parameter holds pre-built vertex buffers, uniform buffers, and
 // bind groups for the current path. The fill rule selects between non-zero
 // and even-odd stencil pipelines.
-func (sr *StencilRenderer) RecordPath(rp hal.RenderPassEncoder, bufs *stencilCoverBuffers, fillRule gg.FillRule, clipBG hal.BindGroup) {
+func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilCoverBuffers, fillRule gg.FillRule, clipBG *wgpu.BindGroup) {
 	// Select stencil pipeline based on fill rule.
 	stencilPipeline := sr.nonZeroStencilPipeline
 	if fillRule == gg.FillRuleEvenOdd {

@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gogpu/gg/internal/gpucore"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // HALAdapter implements gpucore.GPUAdapter using gogpu/wgpu/hal directly.
@@ -20,8 +21,8 @@ import (
 // All resource operations are protected by a mutex.
 type HALAdapter struct {
 	mu     sync.RWMutex
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// Adapter limits and capabilities
 	limits       gputypes.Limits
@@ -33,23 +34,23 @@ type HALAdapter struct {
 	nextID atomic.Uint64
 
 	// Resource tracking maps gpucore IDs to hal resources
-	buffers          map[gpucore.BufferID]hal.Buffer
-	textures         map[gpucore.TextureID]hal.Texture
-	shaderModules    map[gpucore.ShaderModuleID]hal.ShaderModule
-	computePipelines map[gpucore.ComputePipelineID]hal.ComputePipeline
-	bindGroupLayouts map[gpucore.BindGroupLayoutID]hal.BindGroupLayout
-	pipelineLayouts  map[gpucore.PipelineLayoutID]hal.PipelineLayout
-	bindGroups       map[gpucore.BindGroupID]hal.BindGroup
+	buffers          map[gpucore.BufferID]*wgpu.Buffer
+	textures         map[gpucore.TextureID]*wgpu.Texture
+	shaderModules    map[gpucore.ShaderModuleID]*wgpu.ShaderModule
+	computePipelines map[gpucore.ComputePipelineID]*wgpu.ComputePipeline
+	bindGroupLayouts map[gpucore.BindGroupLayoutID]*wgpu.BindGroupLayout
+	pipelineLayouts  map[gpucore.PipelineLayoutID]*wgpu.PipelineLayout
+	bindGroups       map[gpucore.BindGroupID]*wgpu.BindGroup
 
 	// Command encoder for current frame
-	encoder    hal.CommandEncoder
+	encoder    *wgpu.CommandEncoder
 	hasEncoder bool
 }
 
 // NewHALAdapter creates a new HALAdapter wrapping the given device and queue.
 // The limits parameter provides the adapter's capability limits.
 // If limits is nil, default limits are used.
-func NewHALAdapter(device hal.Device, queue hal.Queue, limits *gputypes.Limits) *HALAdapter {
+func NewHALAdapter(device *wgpu.Device, queue *wgpu.Queue, limits *gputypes.Limits) *HALAdapter {
 	var lim gputypes.Limits
 	if limits != nil {
 		lim = *limits
@@ -64,13 +65,13 @@ func NewHALAdapter(device hal.Device, queue hal.Queue, limits *gputypes.Limits) 
 		hasCompute:       true, // Assume compute support by default
 		maxBufferSz:      lim.MaxBufferSize,
 		maxWorkgroup:     [3]uint32{lim.MaxComputeWorkgroupSizeX, lim.MaxComputeWorkgroupSizeY, lim.MaxComputeWorkgroupSizeZ},
-		buffers:          make(map[gpucore.BufferID]hal.Buffer),
-		textures:         make(map[gpucore.TextureID]hal.Texture),
-		shaderModules:    make(map[gpucore.ShaderModuleID]hal.ShaderModule),
-		computePipelines: make(map[gpucore.ComputePipelineID]hal.ComputePipeline),
-		bindGroupLayouts: make(map[gpucore.BindGroupLayoutID]hal.BindGroupLayout),
-		pipelineLayouts:  make(map[gpucore.PipelineLayoutID]hal.PipelineLayout),
-		bindGroups:       make(map[gpucore.BindGroupID]hal.BindGroup),
+		buffers:          make(map[gpucore.BufferID]*wgpu.Buffer),
+		textures:         make(map[gpucore.TextureID]*wgpu.Texture),
+		shaderModules:    make(map[gpucore.ShaderModuleID]*wgpu.ShaderModule),
+		computePipelines: make(map[gpucore.ComputePipelineID]*wgpu.ComputePipeline),
+		bindGroupLayouts: make(map[gpucore.BindGroupLayoutID]*wgpu.BindGroupLayout),
+		pipelineLayouts:  make(map[gpucore.PipelineLayoutID]*wgpu.PipelineLayout),
+		bindGroups:       make(map[gpucore.BindGroupID]*wgpu.BindGroup),
 	}
 
 	// Start ID generation at 1 (0 is invalid)
@@ -109,11 +110,9 @@ func (a *HALAdapter) CreateShaderModule(spirv []uint32, label string) (gpucore.S
 		return gpucore.InvalidID, fmt.Errorf("empty SPIR-V bytecode")
 	}
 
-	desc := &hal.ShaderModuleDescriptor{
+	desc := &wgpu.ShaderModuleDescriptor{
 		Label: label,
-		Source: hal.ShaderSource{
-			SPIRV: spirv,
-		},
+		SPIRV: spirv,
 	}
 
 	module, err := a.device.CreateShaderModule(desc)
@@ -140,7 +139,7 @@ func (a *HALAdapter) DestroyShaderModule(id gpucore.ShaderModuleID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyShaderModule(module)
+		module.Release()
 	}
 }
 
@@ -152,7 +151,7 @@ func (a *HALAdapter) CreateBuffer(size int, usage gpucore.BufferUsage) (gpucore.
 		return gpucore.InvalidID, fmt.Errorf("buffer size must be positive")
 	}
 
-	desc := &hal.BufferDescriptor{
+	desc := &wgpu.BufferDescriptor{
 		Label: "",
 		Size:  uint64(size),
 		Usage: convertBufferUsage(usage),
@@ -182,7 +181,7 @@ func (a *HALAdapter) DestroyBuffer(id gpucore.BufferID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyBuffer(buffer)
+		buffer.Release()
 	}
 }
 
@@ -194,7 +193,7 @@ func (a *HALAdapter) WriteBuffer(id gpucore.BufferID, offset uint64, data []byte
 
 	if ok && len(data) > 0 {
 		if err := a.queue.WriteBuffer(buffer, offset, data); err != nil {
-			hal.Logger().Warn("WriteBuffer failed", "error", err)
+			slogger().Warn("WriteBuffer failed", "error", err)
 		}
 	}
 }
@@ -211,7 +210,7 @@ func (a *HALAdapter) ReadBuffer(id gpucore.BufferID, offset, size uint64) ([]byt
 	}
 
 	// Create a staging buffer for readback
-	stagingDesc := &hal.BufferDescriptor{
+	stagingDesc := &wgpu.BufferDescriptor{
 		Label:            "staging-readback",
 		Size:             size,
 		Usage:            gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
@@ -222,48 +221,37 @@ func (a *HALAdapter) ReadBuffer(id gpucore.BufferID, offset, size uint64) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("failed to create staging buffer: %w", err)
 	}
-	defer a.device.DestroyBuffer(stagingBuffer)
+	defer stagingBuffer.Release()
 
 	// Create command encoder for copy
-	encoder, err := a.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+	encoder, err := a.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "buffer-read-encoder",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create command encoder: %w", err)
 	}
 
-	if err := encoder.BeginEncoding("buffer-read"); err != nil {
-		return nil, fmt.Errorf("failed to begin encoding: %w", err)
-	}
-
 	// Copy from source buffer to staging buffer
-	encoder.CopyBufferToBuffer(buffer, stagingBuffer, []hal.BufferCopy{
-		{
-			SrcOffset: offset,
-			DstOffset: 0,
-			Size:      size,
-		},
-	})
+	encoder.CopyBufferToBuffer(buffer, offset, stagingBuffer, 0, size)
 
-	cmdBuffer, err := encoder.EndEncoding()
+	cmdBuffer, err := encoder.Finish()
 	if err != nil {
 		return nil, fmt.Errorf("failed to end encoding: %w", err)
 	}
-	defer cmdBuffer.Destroy()
 
 	// Submit and wait
 	fence, err := a.device.CreateFence()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fence: %w", err)
 	}
-	defer a.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := a.queue.Submit([]hal.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+	if err := a.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
 		return nil, fmt.Errorf("failed to submit commands: %w", err)
 	}
 
-	// Wait for completion (timeout 5 seconds)
-	_, err = a.device.Wait(fence, 1, 5_000_000_000)
+	// Wait for completion (5 seconds)
+	_, err = a.device.WaitForFence(fence, 1, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to wait for fence: %w", err)
 	}
@@ -286,9 +274,9 @@ func (a *HALAdapter) CreateTexture(width, height int, format gpucore.TextureForm
 		return gpucore.InvalidID, fmt.Errorf("texture dimensions exceed maximum (%d)", maxDim)
 	}
 
-	desc := &hal.TextureDescriptor{
+	desc := &wgpu.TextureDescriptor{
 		Label: "",
-		Size: hal.Extent3D{
+		Size: wgpu.Extent3D{
 			Width:              uint32(width),
 			Height:             uint32(height),
 			DepthOrArrayLayers: 1,
@@ -324,7 +312,7 @@ func (a *HALAdapter) DestroyTexture(id gpucore.TextureID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyTexture(texture)
+		texture.Release()
 	}
 }
 
@@ -342,28 +330,28 @@ func (a *HALAdapter) WriteTexture(id gpucore.TextureID, data []byte) {
 	// For now, assume RGBA8 format and calculate dimensions from data size
 	// This is a simplified implementation
 
-	dst := &hal.ImageCopyTexture{
+	dst := &wgpu.ImageCopyTexture{
 		Texture:  texture,
 		MipLevel: 0,
-		Origin:   hal.Origin3D{X: 0, Y: 0, Z: 0},
+		Origin:   wgpu.Origin3D{X: 0, Y: 0, Z: 0},
 		Aspect:   gputypes.TextureAspectAll,
 	}
 
 	// Placeholder dimensions - real implementation needs texture metadata
-	layout := &hal.ImageDataLayout{
+	layout := &wgpu.ImageDataLayout{
 		Offset:       0,
 		BytesPerRow:  0, // Will be calculated based on texture width
 		RowsPerImage: 0,
 	}
 
-	size := &hal.Extent3D{
+	size := &wgpu.Extent3D{
 		Width:              0, // Placeholder
 		Height:             0,
 		DepthOrArrayLayers: 1,
 	}
 
 	if err := a.queue.WriteTexture(dst, data, layout, size); err != nil {
-		hal.Logger().Warn("WriteTexture failed", "error", err)
+		slogger().Warn("WriteTexture failed", "error", err)
 	}
 }
 
@@ -395,7 +383,7 @@ func (a *HALAdapter) CreateBindGroupLayout(desc *gpucore.BindGroupLayoutDesc) (g
 		halEntries[i] = convertBindGroupLayoutEntry(entry)
 	}
 
-	halDesc := &hal.BindGroupLayoutDescriptor{
+	halDesc := &wgpu.BindGroupLayoutDescriptor{
 		Label:   desc.Label,
 		Entries: halEntries,
 	}
@@ -424,14 +412,14 @@ func (a *HALAdapter) DestroyBindGroupLayout(id gpucore.BindGroupLayoutID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyBindGroupLayout(layout)
+		layout.Release()
 	}
 }
 
 // CreatePipelineLayout creates a pipeline layout.
 func (a *HALAdapter) CreatePipelineLayout(layouts []gpucore.BindGroupLayoutID) (gpucore.PipelineLayoutID, error) {
 	a.mu.RLock()
-	halLayouts := make([]hal.BindGroupLayout, len(layouts))
+	halLayouts := make([]*wgpu.BindGroupLayout, len(layouts))
 	for i, id := range layouts {
 		layout, ok := a.bindGroupLayouts[id]
 		if !ok {
@@ -442,7 +430,7 @@ func (a *HALAdapter) CreatePipelineLayout(layouts []gpucore.BindGroupLayoutID) (
 	}
 	a.mu.RUnlock()
 
-	halDesc := &hal.PipelineLayoutDescriptor{
+	halDesc := &wgpu.PipelineLayoutDescriptor{
 		Label:            "",
 		BindGroupLayouts: halLayouts,
 	}
@@ -471,7 +459,7 @@ func (a *HALAdapter) DestroyPipelineLayout(id gpucore.PipelineLayoutID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyPipelineLayout(layout)
+		layout.Release()
 	}
 }
 
@@ -493,13 +481,11 @@ func (a *HALAdapter) CreateComputePipeline(desc *gpucore.ComputePipelineDesc) (g
 		return gpucore.InvalidID, fmt.Errorf("shader module %d not found", desc.ShaderModule)
 	}
 
-	halDesc := &hal.ComputePipelineDescriptor{
-		Label:  desc.Label,
-		Layout: pipelineLayout,
-		Compute: hal.ComputeState{
-			Module:     shaderModule,
-			EntryPoint: desc.EntryPoint,
-		},
+	halDesc := &wgpu.ComputePipelineDescriptor{
+		Label:      desc.Label,
+		Layout:     pipelineLayout,
+		Module:     shaderModule,
+		EntryPoint: desc.EntryPoint,
 	}
 
 	pipeline, err := a.device.CreateComputePipeline(halDesc)
@@ -526,7 +512,7 @@ func (a *HALAdapter) DestroyComputePipeline(id gpucore.ComputePipelineID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyComputePipeline(pipeline)
+		pipeline.Release()
 	}
 }
 
@@ -539,7 +525,7 @@ func (a *HALAdapter) CreateBindGroup(layout gpucore.BindGroupLayoutID, entries [
 		return gpucore.InvalidID, fmt.Errorf("bind group layout %d not found", layout)
 	}
 
-	halEntries := make([]gputypes.BindGroupEntry, len(entries))
+	halEntries := make([]wgpu.BindGroupEntry, len(entries))
 	for i, entry := range entries {
 		halEntry, err := a.convertBindGroupEntry(entry)
 		if err != nil {
@@ -550,7 +536,7 @@ func (a *HALAdapter) CreateBindGroup(layout gpucore.BindGroupLayoutID, entries [
 	}
 	a.mu.RUnlock()
 
-	halDesc := &hal.BindGroupDescriptor{
+	halDesc := &wgpu.BindGroupDescriptor{
 		Label:   "",
 		Layout:  halLayout,
 		Entries: halEntries,
@@ -580,7 +566,7 @@ func (a *HALAdapter) DestroyBindGroup(id gpucore.BindGroupID) {
 	a.mu.Unlock()
 
 	if ok {
-		a.device.DestroyBindGroup(group)
+		group.Release()
 	}
 }
 
@@ -593,15 +579,11 @@ func (a *HALAdapter) BeginComputePass() gpucore.ComputePassEncoder {
 
 	// Create a new encoder if we don't have one
 	if !a.hasEncoder {
-		encoder, err := a.device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{
+		encoder, err := a.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 			Label: "compute-encoder",
 		})
 		if err != nil {
 			// Return a no-op encoder on error
-			return &halComputePassEncoder{adapter: a}
-		}
-
-		if err := encoder.BeginEncoding("compute-pass"); err != nil {
 			return &halComputePassEncoder{adapter: a}
 		}
 
@@ -610,9 +592,12 @@ func (a *HALAdapter) BeginComputePass() gpucore.ComputePassEncoder {
 	}
 
 	// Begin compute pass
-	halPass := a.encoder.BeginComputePass(&hal.ComputePassDescriptor{
+	halPass, cpErr := a.encoder.BeginComputePass(&wgpu.ComputePassDescriptor{
 		Label: "compute",
 	})
+	if cpErr != nil {
+		return &halComputePassEncoder{adapter: a}
+	}
 
 	return &halComputePassEncoder{
 		adapter: a,
@@ -629,7 +614,7 @@ func (a *HALAdapter) Submit() {
 		return
 	}
 
-	cmdBuffer, err := a.encoder.EndEncoding()
+	cmdBuffer, err := a.encoder.Finish()
 	if err != nil {
 		a.encoder = nil
 		a.hasEncoder = false
@@ -637,10 +622,10 @@ func (a *HALAdapter) Submit() {
 	}
 
 	// Submit without fence (fire and forget)
-	_ = a.queue.Submit([]hal.CommandBuffer{cmdBuffer}, nil, 0)
+	_ = a.queue.Submit(cmdBuffer)
 
 	// Clean up
-	cmdBuffer.Destroy()
+	// cmdBuffer consumed by Submit
 	a.encoder = nil
 	a.hasEncoder = false
 }
@@ -655,14 +640,14 @@ func (a *HALAdapter) WaitIdle() {
 	if err != nil {
 		return
 	}
-	defer a.device.DestroyFence(fence)
+	defer fence.Release()
 
-	if err := a.queue.Submit(nil, fence, 1); err != nil {
+	if err := a.queue.SubmitWithFence(nil, fence, 1); err != nil {
 		return
 	}
 
 	// Wait for fence (5 second timeout)
-	_, _ = a.device.Wait(fence, 1, 5_000_000_000)
+	_, _ = a.device.WaitForFence(fence, 1, 5*time.Second)
 }
 
 // === Type Conversion Helpers ===
@@ -760,10 +745,10 @@ func convertBindGroupLayoutEntry(entry gpucore.BindGroupLayoutEntry) gputypes.Bi
 	return result
 }
 
-// convertBindGroupEntry converts gpucore.BindGroupEntry to gputypes.BindGroupEntry.
+// convertBindGroupEntry converts gpucore.BindGroupEntry to wgpu.BindGroupEntry.
 // Must be called with mu.RLock held.
-func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (gputypes.BindGroupEntry, error) {
-	result := gputypes.BindGroupEntry{
+func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (wgpu.BindGroupEntry, error) {
+	result := wgpu.BindGroupEntry{
 		Binding: entry.Binding,
 	}
 
@@ -773,29 +758,12 @@ func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (gputyp
 		if !ok {
 			return result, fmt.Errorf("buffer %d not found", entry.Buffer)
 		}
-
-		// Get buffer handle - this is a placeholder since hal.Buffer doesn't expose handle directly
-		// In a real implementation, we'd need to track buffer handles or use type assertions
-		_ = buffer
-
-		result.Resource = gputypes.BufferBinding{
-			Buffer: uintptr(entry.Buffer), // Use gpucore ID as placeholder
-			Offset: entry.Offset,
-			Size:   entry.Size,
-		}
-	} else if entry.Texture != gpucore.InvalidID {
-		texture, ok := a.textures[entry.Texture]
-		if !ok {
-			return result, fmt.Errorf("texture %d not found", entry.Texture)
-		}
-
-		// Create texture view for binding
-		_ = texture
-
-		result.Resource = gputypes.TextureViewBinding{
-			TextureView: uintptr(entry.Texture), // Placeholder
-		}
+		result.Buffer = buffer
+		result.Offset = entry.Offset
+		result.Size = entry.Size
 	}
+	// Note: texture bindings would use result.TextureView with a *wgpu.TextureView.
+	// Currently gpucore doesn't support texture view bindings through this path.
 
 	return result, nil
 }
@@ -805,7 +773,7 @@ func (a *HALAdapter) convertBindGroupEntry(entry gpucore.BindGroupEntry) (gputyp
 // halComputePassEncoder implements gpucore.ComputePassEncoder.
 type halComputePassEncoder struct {
 	adapter *HALAdapter
-	pass    hal.ComputePassEncoder
+	pass    *wgpu.ComputePassEncoder
 }
 
 // SetPipeline sets the active compute pipeline.
@@ -851,5 +819,5 @@ func (e *halComputePassEncoder) End() {
 	if e.pass == nil {
 		return
 	}
-	e.pass.End()
+	_ = e.pass.End()
 }

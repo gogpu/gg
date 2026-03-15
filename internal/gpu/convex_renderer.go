@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 //go:embed shaders/convex.wgsl
@@ -61,36 +61,36 @@ type ConvexDrawCommand struct {
 // which includes a depth/stencil state that ignores the stencil buffer
 // (Compare=Always, all ops=Keep, masks=0x00).
 type ConvexRenderer struct {
-	device hal.Device
-	queue  hal.Queue
+	device *wgpu.Device
+	queue  *wgpu.Queue
 
 	// GPU objects for the render pipeline.
-	shader        hal.ShaderModule
-	uniformLayout hal.BindGroupLayout
-	pipeLayout    hal.PipelineLayout
-	pipeline      hal.RenderPipeline
+	shader        *wgpu.ShaderModule
+	uniformLayout *wgpu.BindGroupLayout
+	pipeLayout    *wgpu.PipelineLayout
+	pipeline      *wgpu.RenderPipeline
 
 	// Session-compatible pipeline variant with depth/stencil state.
 	// Used when this renderer participates in a unified render pass that
 	// includes a stencil attachment (for stencil-then-cover paths).
 	// The stencil test is Always/Keep (convex draws don't interact with stencil).
-	pipelineWithStencil hal.RenderPipeline
+	pipelineWithStencil *wgpu.RenderPipeline
 
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
-	clipBindLayout hal.BindGroupLayout
+	clipBindLayout *wgpu.BindGroupLayout
 }
 
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
 // uniform. Must be called before ensurePipelineWithStencil.
-func (cr *ConvexRenderer) SetClipBindLayout(layout hal.BindGroupLayout) {
+func (cr *ConvexRenderer) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	cr.clipBindLayout = layout
 }
 
 // NewConvexRenderer creates a new convex polygon renderer with the given
 // device and queue. Pipelines are not created until ensurePipeline or
 // ensurePipelineWithStencil is called.
-func NewConvexRenderer(device hal.Device, queue hal.Queue) *ConvexRenderer {
+func NewConvexRenderer(device *wgpu.Device, queue *wgpu.Queue) *ConvexRenderer {
 	return &ConvexRenderer{
 		device: device,
 		queue:  queue,
@@ -129,15 +129,15 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // G
 	}
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := cr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := cr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "convex_pipeline_with_stencil",
 		Layout: cr.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     cr.shader,
 			EntryPoint: "vs_main",
 			Buffers:    convexVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     cr.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -148,21 +148,21 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // G
 				},
 			},
 		},
-		DepthStencil: &hal.DepthStencilState{
+		DepthStencil: &wgpu.DepthStencilState{
 			Format:            gputypes.TextureFormatDepth24PlusStencil8,
 			DepthWriteEnabled: false,
 			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: hal.StencilFaceState{
+			StencilFront: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
-			StencilBack: hal.StencilFaceState{
+			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      hal.StencilOperationKeep,
-				DepthFailOp: hal.StencilOperationKeep,
-				PassOp:      hal.StencilOperationKeep,
+				FailOp:      wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep,
+				PassOp:      wgpu.StencilOperationKeep,
 			},
 			StencilReadMask:  0x00,
 			StencilWriteMask: 0x00,
@@ -190,7 +190,7 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // G
 //
 // The resources parameter holds pre-built vertex buffer, uniform buffer, and
 // bind group for the current frame. This is a no-op if resources is nil.
-func (cr *ConvexRenderer) RecordDraws(rp hal.RenderPassEncoder, resources *convexFrameResources, clipBG hal.BindGroup) {
+func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *convexFrameResources, clipBG *wgpu.BindGroup) {
 	if resources == nil || resources.vertCount == 0 {
 		return
 	}
@@ -210,16 +210,16 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 		return fmt.Errorf("convex shader source is empty")
 	}
 
-	shader, err := cr.device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "convex_shader",
-		Source: hal.ShaderSource{WGSL: convexShaderSource},
+	shader, err := cr.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "convex_shader",
+		WGSL:  convexShaderSource,
 	})
 	if err != nil {
 		return fmt.Errorf("compile convex shader: %w", err)
 	}
 	cr.shader = shader
 
-	uniformLayout, err := cr.device.CreateBindGroupLayout(&hal.BindGroupLayoutDescriptor{
+	uniformLayout, err := cr.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "convex_uniform_layout",
 		Entries: []gputypes.BindGroupLayoutEntry{
 			{
@@ -234,11 +234,11 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 	}
 	cr.uniformLayout = uniformLayout
 
-	bgLayouts := []hal.BindGroupLayout{cr.uniformLayout}
+	bgLayouts := []*wgpu.BindGroupLayout{cr.uniformLayout}
 	if cr.clipBindLayout != nil {
 		bgLayouts = append(bgLayouts, cr.clipBindLayout)
 	}
-	pipeLayout, err := cr.device.CreatePipelineLayout(&hal.PipelineLayoutDescriptor{
+	pipeLayout, err := cr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "convex_pipe_layout",
 		BindGroupLayouts: bgLayouts,
 	})
@@ -248,15 +248,15 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 	cr.pipeLayout = pipeLayout
 
 	premulBlend := gputypes.BlendStatePremultiplied()
-	pipeline, err := cr.device.CreateRenderPipeline(&hal.RenderPipelineDescriptor{
+	pipeline, err := cr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "convex_pipeline",
 		Layout: cr.pipeLayout,
-		Vertex: hal.VertexState{
+		Vertex: wgpu.VertexState{
 			Module:     cr.shader,
 			EntryPoint: "vs_main",
 			Buffers:    convexVertexLayout(),
 		},
-		Fragment: &hal.FragmentState{
+		Fragment: &wgpu.FragmentState{
 			Module:     cr.shader,
 			EntryPoint: "fs_main",
 			Targets: []gputypes.ColorTargetState{
@@ -290,45 +290,45 @@ func (cr *ConvexRenderer) destroyPipeline() {
 		return
 	}
 	if cr.pipelineWithStencil != nil {
-		cr.device.DestroyRenderPipeline(cr.pipelineWithStencil)
+		cr.pipelineWithStencil.Release()
 		cr.pipelineWithStencil = nil
 	}
 	if cr.pipeline != nil {
-		cr.device.DestroyRenderPipeline(cr.pipeline)
+		cr.pipeline.Release()
 		cr.pipeline = nil
 	}
 	if cr.pipeLayout != nil {
-		cr.device.DestroyPipelineLayout(cr.pipeLayout)
+		cr.pipeLayout.Release()
 		cr.pipeLayout = nil
 	}
 	if cr.uniformLayout != nil {
-		cr.device.DestroyBindGroupLayout(cr.uniformLayout)
+		cr.uniformLayout.Release()
 		cr.uniformLayout = nil
 	}
 	if cr.shader != nil {
-		cr.device.DestroyShaderModule(cr.shader)
+		cr.shader.Release()
 		cr.shader = nil
 	}
 }
 
 // convexFrameResources holds per-frame GPU resources for convex rendering.
 type convexFrameResources struct {
-	vertBuf     hal.Buffer
-	uniformBuf  hal.Buffer
-	bindGroup   hal.BindGroup
+	vertBuf     *wgpu.Buffer
+	uniformBuf  *wgpu.Buffer
+	bindGroup   *wgpu.BindGroup
 	vertCount   uint32
 	firstVertex uint32 // offset into shared vertex buffer (for scissor group sub-ranges)
 }
 
-func (r *convexFrameResources) destroy(device hal.Device) {
+func (r *convexFrameResources) destroy() {
 	if r.bindGroup != nil {
-		device.DestroyBindGroup(r.bindGroup)
+		r.bindGroup.Release()
 	}
 	if r.uniformBuf != nil {
-		device.DestroyBuffer(r.uniformBuf)
+		r.uniformBuf.Release()
 	}
 	if r.vertBuf != nil {
-		device.DestroyBuffer(r.vertBuf)
+		r.vertBuf.Release()
 	}
 }
 

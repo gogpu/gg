@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 func TestConvexRendererCreation(t *testing.T) {
@@ -152,9 +152,9 @@ func TestConvexRendererShaderCompilation(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	module, err := device.CreateShaderModule(&hal.ShaderModuleDescriptor{
-		Label:  "test_convex_shader",
-		Source: hal.ShaderSource{WGSL: convexShaderSource},
+	module, err := device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "test_convex_shader",
+		WGSL:  convexShaderSource,
 	})
 	if err != nil {
 		t.Fatalf("shader compilation failed: %v", err)
@@ -584,12 +584,12 @@ func TestBuildConvexVerticesRegularPolygons(t *testing.T) {
 }
 
 func TestConvexFrameResourcesDestroy(t *testing.T) {
-	device, _, cleanup := createNoopDevice(t)
+	_, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
 	// Destroying nil resources should not panic.
 	r := &convexFrameResources{}
-	r.destroy(device)
+	r.destroy()
 
 	// Destroying with nil fields should be safe.
 	r2 := &convexFrameResources{
@@ -597,7 +597,7 @@ func TestConvexFrameResourcesDestroy(t *testing.T) {
 		uniformBuf: nil,
 		bindGroup:  nil,
 	}
-	r2.destroy(device)
+	r2.destroy()
 }
 
 // --- extractConvexPolygon tests ---

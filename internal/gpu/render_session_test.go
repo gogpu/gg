@@ -7,7 +7,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 func TestRenderSessionCreation(t *testing.T) {
@@ -472,13 +472,13 @@ func TestSDFRenderPipelineDestroyWithStencilVariant(t *testing.T) {
 }
 
 // createMockSurfaceView creates a texture and view that simulates a window
-// surface for testing surface rendering mode. The caller must destroy the
-// texture and view when done.
-func createMockSurfaceView(t *testing.T, device hal.Device, w, h uint32) (hal.Texture, hal.TextureView) {
+// surface for testing surface rendering mode. The caller must release the
+// texture view when done.
+func createMockSurfaceView(t *testing.T, device *wgpu.Device, w, h uint32) (*wgpu.Texture, *wgpu.TextureView) {
 	t.Helper()
-	tex, err := device.CreateTexture(&hal.TextureDescriptor{
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "mock_surface",
-		Size:          hal.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+		Size:          wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
 		SampleCount:   1,
 		Dimension:     gputypes.TextureDimension2D,
@@ -488,11 +488,11 @@ func createMockSurfaceView(t *testing.T, device hal.Device, w, h uint32) (hal.Te
 	if err != nil {
 		t.Fatalf("create mock surface texture: %v", err)
 	}
-	view, err := device.CreateTextureView(tex, &hal.TextureViewDescriptor{
+	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
 		Label: "mock_surface_view",
 	})
 	if err != nil {
-		device.DestroyTexture(tex)
+		tex.Release()
 		t.Fatalf("create mock surface view: %v", err)
 	}
 	return tex, view
@@ -512,8 +512,8 @@ func TestRenderSessionSurfaceMode(t *testing.T) {
 
 	// Set surface target.
 	tex, view := createMockSurfaceView(t, device, 800, 600)
-	defer device.DestroyTextureView(view)
-	defer device.DestroyTexture(tex)
+	defer view.Release()
+	defer tex.Release()
 
 	s.SetSurfaceTarget(view, 800, 600)
 
@@ -563,8 +563,8 @@ func TestRenderSessionSurfaceModeReset(t *testing.T) {
 
 	// Enter surface mode.
 	tex, view := createMockSurfaceView(t, device, 640, 480)
-	defer device.DestroyTextureView(view)
-	defer device.DestroyTexture(tex)
+	defer view.Release()
+	defer tex.Release()
 
 	s.SetSurfaceTarget(view, 640, 480)
 	if s.RenderMode() != RenderModeSurface {
@@ -612,8 +612,8 @@ func TestRenderSessionSurfaceModeTextures(t *testing.T) {
 	defer s.Destroy()
 
 	tex, view := createMockSurfaceView(t, device, 1024, 768)
-	defer device.DestroyTextureView(view)
-	defer device.DestroyTexture(tex)
+	defer view.Release()
+	defer tex.Release()
 
 	s.SetSurfaceTarget(view, 1024, 768)
 
@@ -659,8 +659,8 @@ func TestRenderSessionSurfaceModeResize(t *testing.T) {
 	defer s.Destroy()
 
 	tex1, view1 := createMockSurfaceView(t, device, 800, 600)
-	defer device.DestroyTextureView(view1)
-	defer device.DestroyTexture(tex1)
+	defer view1.Release()
+	defer tex1.Release()
 
 	s.SetSurfaceTarget(view1, 800, 600)
 
@@ -676,8 +676,8 @@ func TestRenderSessionSurfaceModeResize(t *testing.T) {
 
 	// Simulate window resize: new surface view with different dimensions.
 	tex2, view2 := createMockSurfaceView(t, device, 1920, 1080)
-	defer device.DestroyTextureView(view2)
-	defer device.DestroyTexture(tex2)
+	defer view2.Release()
+	defer tex2.Release()
 
 	s.SetSurfaceTarget(view2, 1920, 1080)
 
@@ -717,8 +717,8 @@ func TestRenderSessionSurfaceModeStencilPaths(t *testing.T) {
 	defer s.Destroy()
 
 	tex, view := createMockSurfaceView(t, device, 400, 300)
-	defer device.DestroyTextureView(view)
-	defer device.DestroyTexture(tex)
+	defer view.Release()
+	defer tex.Release()
 
 	s.SetSurfaceTarget(view, 400, 300)
 
@@ -760,8 +760,8 @@ func TestRenderSessionDestroyClearsSurface(t *testing.T) {
 	s := NewGPURenderSession(device, queue)
 
 	tex, view := createMockSurfaceView(t, device, 640, 480)
-	defer device.DestroyTextureView(view)
-	defer device.DestroyTexture(tex)
+	defer view.Release()
+	defer tex.Release()
 
 	s.SetSurfaceTarget(view, 640, 480)
 	if s.RenderMode() != RenderModeSurface {

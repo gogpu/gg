@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // Pipeline cache errors.
@@ -92,7 +92,7 @@ func NewPipelineCacheCore() *PipelineCacheCore {
 //
 //nolint:dupl // Intentional pattern: same double-check locking for both render and compute pipelines
 func (c *PipelineCacheCore) GetOrCreateRenderPipeline(
-	device hal.Device,
+	device *wgpu.Device,
 	desc *RenderPipelineDescriptor,
 ) (*RenderPipeline, error) {
 	if desc == nil {
@@ -150,7 +150,7 @@ func (c *PipelineCacheCore) GetOrCreateRenderPipeline(
 //
 //nolint:dupl // Intentional pattern: same double-check locking for both render and compute pipelines
 func (c *PipelineCacheCore) GetOrCreateComputePipeline(
-	device hal.Device,
+	device *wgpu.Device,
 	desc *ComputePipelineDescriptor,
 ) (*ComputePipeline, error) {
 	if desc == nil {
@@ -406,7 +406,7 @@ type ShaderModule struct {
 	codeHash uint64
 
 	// halModule is the underlying shader module (when available).
-	halModule hal.ShaderModule
+	halModule *wgpu.ShaderModule
 
 	// destroyed indicates whether the module has been destroyed.
 	destroyed bool
@@ -422,7 +422,7 @@ type ShaderModule struct {
 //   - label: Debug label.
 //   - code: SPIR-V bytecode.
 //   - halModule: The underlying module (may be nil for testing).
-func NewShaderModule(id uint64, label string, code []byte, halModule hal.ShaderModule) *ShaderModule {
+func NewShaderModule(id uint64, label string, code []byte, halModule *wgpu.ShaderModule) *ShaderModule {
 	return &ShaderModule{
 		id:        id,
 		label:     label,
@@ -447,7 +447,7 @@ func (m *ShaderModule) CodeHash() uint64 {
 }
 
 // Raw returns the underlying shader module.
-func (m *ShaderModule) Raw() hal.ShaderModule {
+func (m *ShaderModule) Raw() *wgpu.ShaderModule {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.destroyed {
@@ -624,7 +624,7 @@ func nextPipelineID() uint64 {
 // createRenderPipeline creates a new render pipeline from a descriptor.
 //
 // This is called by GetOrCreateRenderPipeline when a cache miss occurs.
-func createRenderPipeline(device hal.Device, desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
+func createRenderPipeline(device *wgpu.Device, desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
 	if desc.VertexShader == nil {
 		return nil, ErrPipelineCacheNilShader
 	}
@@ -647,14 +647,14 @@ func createRenderPipeline(device hal.Device, desc *RenderPipelineDescriptor) (*R
 	}
 
 	// TODO: When pipeline creation is implemented, create actual pipeline:
-	// halDesc := &hal.RenderPipelineDescriptor{
+	// halDesc := &wgpu.RenderPipelineDescriptor{
 	//     Label: desc.Label,
-	//     Vertex: hal.VertexState{
+	//     Vertex: wgpu.VertexState{
 	//         Module:     desc.VertexShader.Raw(),
 	//         EntryPoint: vertexEntry,
 	//         Buffers:    convertVertexBufferLayouts(desc.VertexBufferLayouts),
 	//     },
-	//     Fragment: &hal.FragmentState{
+	//     Fragment: &wgpu.FragmentState{
 	//         Module:     desc.FragmentShader.Raw(),
 	//         EntryPoint: fragmentEntry,
 	//         Targets: []hal.ColorTargetState{{
@@ -695,7 +695,7 @@ func createRenderPipeline(device hal.Device, desc *RenderPipelineDescriptor) (*R
 // createComputePipeline creates a new compute pipeline from a descriptor.
 //
 // This is called by GetOrCreateComputePipeline when a cache miss occurs.
-func createComputePipeline(device hal.Device, desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
+func createComputePipeline(device *wgpu.Device, desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
 	if desc.ComputeShader == nil {
 		return nil, ErrPipelineCacheNilShader
 	}
@@ -707,7 +707,7 @@ func createComputePipeline(device hal.Device, desc *ComputePipelineDescriptor) (
 	}
 
 	// TODO: When pipeline creation is implemented, create actual pipeline:
-	// halDesc := &hal.ComputePipelineDescriptor{
+	// halDesc := &wgpu.ComputePipelineDescriptor{
 	//     Label: desc.Label,
 	//     Compute: hal.ProgrammableStageDescriptor{
 	//         Module:     desc.ComputeShader.Raw(),

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg/scene"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // DefaultGPUSegmentThreshold is the minimum number of segments to use GPU.
@@ -51,8 +51,8 @@ type HybridFineRasterizer struct {
 // HybridFineRasterizerConfig configures the hybrid rasterizer.
 type HybridFineRasterizerConfig struct {
 	// Device and Queue for GPU operations (nil to use CPU only)
-	Device hal.Device
-	Queue  hal.Queue
+	Device *wgpu.Device
+	Queue  *wgpu.Queue
 
 	// SegmentThreshold is the minimum segments to use GPU (0 = use default)
 	SegmentThreshold int
@@ -255,7 +255,7 @@ func (h *HybridFineRasterizer) Stats() GPURasterizerStats {
 // CheckGPUComputeSupport checks if GPU compute shaders are supported.
 // This can be used to determine if GPU rasterization is viable before
 // creating a rasterizer.
-func CheckGPUComputeSupport(device hal.Device) bool {
+func CheckGPUComputeSupport(device *wgpu.Device) bool {
 	if device == nil {
 		return false
 	}
@@ -309,8 +309,8 @@ func (s PipelineStage) String() string {
 // HybridPipelineConfig configures the hybrid pipeline.
 type HybridPipelineConfig struct {
 	// Device and Queue for GPU operations (nil to use CPU only)
-	Device hal.Device
-	Queue  hal.Queue
+	Device *wgpu.Device
+	Queue  *wgpu.Queue
 
 	// Stage-specific thresholds (0 = use defaults)
 	FlattenThreshold int // Min path elements for GPU flatten

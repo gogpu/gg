@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.37.0] - 2026-03-15
+
+### Changed
+
+- **GPU internals: migrated from hal types to wgpu public API** — All stencil state
+  types (`StencilFaceState`, `StencilOperation` constants), texture barrier types
+  (`TextureBarrier`, `TextureUsageTransition`), and copy types (`BufferTextureCopy`,
+  `ImageCopyTexture`) now use `wgpu.*` instead of `wgpu/hal.*`. Zero `hal` imports
+  remain in production GPU code (7 files changed).
+
+- **GPU standalone init: uses wgpu public API** — `SDFAccelerator` and
+  `VelloAccelerator` standalone GPU initialization now uses `wgpu.CreateInstance()` →
+  `RequestAdapter()` → `RequestDevice()` instead of direct `hal.GetBackend()` access.
+  The `halInstance hal.Instance` field replaced with `instance *wgpu.Instance`.
+
+- **Logger propagation through wgpu API** — `setLogger()` now calls
+  `wgpu.SetLogger()` instead of `hal.SetLogger()`, maintaining full stack logging
+  (gg → wgpu → core → hal → GPU backends) without importing `wgpu/hal`.
+
+### Fixed
+
+- **macOS Metal: explicit SetViewport in all GPU render passes** — All 4 render pass
+  entry points (readback, surface, readback-grouped, surface-grouped) now call
+  `SetViewport(0, 0, w, h, 0, 1)` after `BeginRenderPass`. Previously relied on Metal's
+  default viewport which caused content offset on macOS — shapes appeared in the
+  lower-right corner or as a small bright spot. Defense-in-depth pattern matching Gio
+  and wgpu-rs. Fixes [gg#171](https://github.com/gogpu/gg/issues/171),
+  [ui#48](https://github.com/gogpu/ui/issues/48),
+  [ui#23](https://github.com/gogpu/ui/issues/23).
+
+- **`encodeSubmitSurface` now uses width/height parameters** — Previously discarded
+  `w, h` arguments (`_, _ uint32`). Now uses them for SetViewport.
+
+### Changed
+
+- **Updated naga v0.14.6 → v0.14.7** — Fixes Metal `buffer(0)` conflict when
+  `ClipParams` and `Uniforms` both mapped to `[[buffer(0)]]` in MSL output.
+
+- **Typed `DeviceProviderAware.SetDeviceProvider`** — Takes `gpucontext.DeviceProvider`
+  instead of `any`. Zero `any` in the accelerator provider chain.
+
+### Dependencies
+
+- wgpu v0.20.2 → v0.21.0 (three-layer public API, proper type definitions)
+- gpucontext v0.9.0 → v0.10.0 (typed interfaces, HalProvider removed)
+
 ## [0.36.4] - 2026-03-13
 
 ### Added

@@ -11,7 +11,7 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu"
 )
 
 // GlyphMaskEngine manages the CPU-rasterized glyph mask atlas and produces
@@ -38,8 +38,8 @@ type GlyphMaskEngine struct {
 	lcdFilter text.LCDFilter
 
 	// GPU textures for atlas pages. Index matches atlas page index.
-	pageTextures []hal.Texture
-	pageViews    []hal.TextureView
+	pageTextures []*wgpu.Texture
+	pageViews    []*wgpu.TextureView
 }
 
 // NewGlyphMaskEngine creates a new glyph mask engine with the default atlas
@@ -241,7 +241,7 @@ func (e *GlyphMaskEngine) LayoutText(
 // SyncAtlasTextures uploads dirty atlas pages to the GPU as R8 textures.
 // Must be called before rendering any glyph mask batches. Creates new
 // textures on first use and re-uploads data when pages are modified.
-func (e *GlyphMaskEngine) SyncAtlasTextures(device hal.Device, queue hal.Queue) error {
+func (e *GlyphMaskEngine) SyncAtlasTextures(device *wgpu.Device, queue *wgpu.Queue) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -266,9 +266,9 @@ func (e *GlyphMaskEngine) SyncAtlasTextures(device hal.Device, queue hal.Queue) 
 
 		// Create texture on first use.
 		if e.pageTextures[idx] == nil {
-			tex, err := device.CreateTexture(&hal.TextureDescriptor{
+			tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 				Label:         fmt.Sprintf("glyph_mask_atlas_%d", idx),
-				Size:          hal.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
+				Size:          wgpu.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
 				MipLevelCount: 1,
 				SampleCount:   1,
 				Dimension:     gputypes.TextureDimension2D,
@@ -280,7 +280,7 @@ func (e *GlyphMaskEngine) SyncAtlasTextures(device hal.Device, queue hal.Queue) 
 			}
 			e.pageTextures[idx] = tex
 
-			view, err := device.CreateTextureView(tex, &hal.TextureViewDescriptor{
+			view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
 				Label:         fmt.Sprintf("glyph_mask_atlas_%d_view", idx),
 				Format:        gputypes.TextureFormatR8Unorm,
 				Dimension:     gputypes.TextureViewDimension2D,
@@ -295,17 +295,17 @@ func (e *GlyphMaskEngine) SyncAtlasTextures(device hal.Device, queue hal.Queue) 
 
 		// Upload R8 data. R8 format = 1 byte per pixel, so BytesPerRow = width.
 		if err := queue.WriteTexture(
-			&hal.ImageCopyTexture{
+			&wgpu.ImageCopyTexture{
 				Texture:  e.pageTextures[idx],
 				MipLevel: 0,
 			},
 			r8Data,
-			&hal.ImageDataLayout{
+			&wgpu.ImageDataLayout{
 				Offset:       0,
 				BytesPerRow:  size,
 				RowsPerImage: size,
 			},
-			&hal.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
+			&wgpu.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
 		); err != nil {
 			return fmt.Errorf("upload glyph mask atlas %d: %w", idx, err)
 		}
@@ -318,7 +318,7 @@ func (e *GlyphMaskEngine) SyncAtlasTextures(device hal.Device, queue hal.Queue) 
 
 // PageTextureView returns the GPU texture view for the given atlas page.
 // Returns nil if the page has not been uploaded.
-func (e *GlyphMaskEngine) PageTextureView(index int) hal.TextureView {
+func (e *GlyphMaskEngine) PageTextureView(index int) *wgpu.TextureView {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if index < 0 || index >= len(e.pageViews) {
@@ -328,20 +328,20 @@ func (e *GlyphMaskEngine) PageTextureView(index int) hal.TextureView {
 }
 
 // Destroy releases all GPU textures held by the engine.
-func (e *GlyphMaskEngine) Destroy(device hal.Device) {
+func (e *GlyphMaskEngine) Destroy(device *wgpu.Device) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	for _, v := range e.pageViews {
 		if v != nil {
-			device.DestroyTextureView(v)
+			v.Release()
 		}
 	}
 	e.pageViews = nil
 
 	for _, t := range e.pageTextures {
 		if t != nil {
-			device.DestroyTexture(t)
+			t.Release()
 		}
 	}
 	e.pageTextures = nil
