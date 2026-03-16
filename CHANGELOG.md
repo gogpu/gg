@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.4] - 2026-03-16
+
+### Fixed
+
+- **Separate device scale from user CTM (Cairo/Skia/Blend2D pattern)** — `c.matrix`
+  now contains only user transforms (starts as `Identity()`). Device scale is stored
+  in a separate `deviceMatrix` field and applied at rendering boundaries via
+  `totalMatrix()`. Paths are stored in user-space. This fixes:
+  - `GetCurrentPoint()` returning device-space coordinates instead of user-space
+    with `DeviceScale > 1.0` ([#218](https://github.com/gogpu/gg/issues/218))
+  - `Identity()` resetting to `Scale(2,2)` instead of pure identity on HiDPI
+  - `GetTransform()` exposing device scale in the returned matrix
+  - Clip stack bounds/path coordinate space mismatch on Retina displays
+  - `glyphMaskDeviceSize()` double-counting device scale through `c.matrix.E`
+  - Zero behavioral change at `DeviceScale=1.0` (common case, zero overhead)
+
+### Testing
+
+- **Test coverage 77.4% → 81.5%** — enterprise-grade test suite for awesome-go submission.
+  Key improvements: `internal/path` 27%→98%, `internal/clip` 71%→83%, `surface` 61%→85%,
+  `recording/backends/raster` 55%→81%, `recording` 82%→91%, `scene` 77%→82%,
+  `text/emoji` 44%→53%, root `gg` package 87%→92%.
+  Tests focus on coordinate space consistency, round-trip correctness, edge cases,
+  and regression guards — not coverage padding.
+
+### Discovered
+
+- **`dashQuad`/`dashCubic` off-by-one iteration bug** (`software.go:887`) — flattened
+  points array uses x,y pairs starting from index 0, but the loop started at index 1
+  with step 2, reading misaligned coordinates. Can cause index-out-of-bounds panic.
+
 ## [0.37.3] - 2026-03-16
 
 ### Added
