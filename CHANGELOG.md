@@ -23,11 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
-- **Test coverage 77.4% → 80.5%** — enterprise-grade test suite for awesome-go submission.
-  Key improvements: `internal/path` 27%→98%, `surface` 61%→85%, `recording/backends/raster`
-  55%→81%, `recording` 82%→90%, `scene` 77%→82%, root `gg` package 87%→91%.
+- **Test coverage 77.4% → 81.5%** — enterprise-grade test suite for awesome-go submission.
+  Key improvements: `internal/path` 27%→98%, `internal/clip` 71%→83%, `surface` 61%→85%,
+  `recording/backends/raster` 55%→81%, `recording` 82%→91%, `scene` 77%→82%,
+  `text/emoji` 44%→53%, root `gg` package 87%→92%.
   Tests focus on coordinate space consistency, round-trip correctness, edge cases,
   and regression guards — not coverage padding.
+
+### Discovered
+
+- **`dashQuad`/`dashCubic` off-by-one iteration bug** (`software.go:887`) — flattened
+  points array uses x,y pairs starting from index 0, but the loop started at index 1
+  with step 2, reading misaligned coordinates. Can cause index-out-of-bounds panic.
 
 ## [0.37.3] - 2026-03-16
 

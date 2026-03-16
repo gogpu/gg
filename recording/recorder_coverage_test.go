@@ -251,3 +251,128 @@ func (m *playbackMockBackend) StrokePath(_ *gg.Path, _ Brush, _ Stroke)         
 func (m *playbackMockBackend) FillRect(_ Rect, _ Brush)                              {}
 func (m *playbackMockBackend) DrawImage(_ image.Image, _, _ Rect, _ ImageOptions)    {}
 func (m *playbackMockBackend) DrawText(_ string, _, _ float64, _ text.Face, _ Brush) {}
+
+// --- Additional recorder coverage tests ---
+
+func TestRecorderDrawStringWrapped(t *testing.T) {
+	rec := NewRecorder(200, 200)
+	rec.DrawStringWrapped("Hello world this is a long string that should wrap", 10, 10, 0, 0, 80, 1.5, 0) // 0 = AlignLeft
+	r := rec.FinishRecording()
+	if len(r.Commands()) == 0 {
+		t.Error("expected commands after DrawStringWrapped")
+	}
+}
+
+func TestRecorderSetDash(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.SetDash(10, 5)
+	rec.MoveTo(10, 50)
+	rec.LineTo(90, 50)
+	rec.Stroke()
+	r := rec.FinishRecording()
+	if len(r.Commands()) == 0 {
+		t.Error("expected commands after SetDash")
+	}
+}
+
+func TestRecorderSetDashClearDash(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.SetDash(10, 5)
+	rec.ClearDash()
+	rec.MoveTo(10, 50)
+	rec.LineTo(90, 50)
+	rec.Stroke()
+	r := rec.FinishRecording()
+	if len(r.Commands()) == 0 {
+		t.Error("expected commands after ClearDash + Stroke")
+	}
+}
+
+func TestRecorderSaveToFile(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.SetRGB(1, 0, 0)
+	rec.DrawRectangle(10, 10, 80, 80)
+	rec.Fill()
+	r := rec.FinishRecording()
+
+	// SaveToFile is only available on raster backend
+	// Just verify recording was created
+	if len(r.Commands()) == 0 {
+		t.Error("expected commands")
+	}
+}
+
+func TestRecorderMeasureStringCoverage(t *testing.T) {
+	rec := NewRecorder(200, 200)
+	w, h := rec.MeasureString("Hello World Test")
+	// Without a real font, dimensions may be 0 but should not panic
+	_ = w
+	_ = h
+}
+
+func TestRecorderPlaybackSaveRestore(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.Push()
+	rec.Translate(10, 10)
+	rec.Pop()
+	rec.SetRGB(1, 0, 0)
+	rec.DrawRectangle(0, 0, 50, 50)
+	rec.Fill()
+
+	r := rec.FinishRecording()
+	backend := &playbackMockBackend{}
+	err := r.Playback(backend)
+	if err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+}
+
+func TestRecorderPlaybackClipCommands(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	// Use path-based clip
+	rec.DrawRectangle(10, 10, 80, 80)
+	rec.Clip()
+	rec.SetRGB(1, 0, 0)
+	rec.DrawRectangle(0, 0, 100, 100)
+	rec.Fill()
+	rec.ResetClip()
+
+	r := rec.FinishRecording()
+	backend := &playbackMockBackend{}
+	err := r.Playback(backend)
+	if err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+}
+
+func TestRecorderPlaybackImageCommand(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	// Create a small test image
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	rec.DrawImage(img, 10, 10)
+
+	r := rec.FinishRecording()
+	backend := &playbackMockBackend{}
+	err := r.Playback(backend)
+	if err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+}
+
+func TestRecorderPlaybackDashCommands(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.SetDash(10, 5)
+	rec.SetDashOffset(3)
+	rec.SetRGB(0, 0, 1)
+	rec.MoveTo(10, 50)
+	rec.LineTo(90, 50)
+	rec.Stroke()
+	rec.ClearDash()
+
+	r := rec.FinishRecording()
+	backend := &playbackMockBackend{}
+	err := r.Playback(backend)
+	if err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+}

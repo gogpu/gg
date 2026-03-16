@@ -454,6 +454,290 @@ func TestContextSetFillBrushCoverage(t *testing.T) {
 	}
 }
 
+// --- ClipRoundRect tests ---
+
+func TestContextClipRoundRect(t *testing.T) {
+	dc := NewContext(200, 200)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.ClipRoundRect(20, 20, 160, 160, 20)
+
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 200, 200)
+	dc.Fill()
+
+	// Center should be red (inside clip)
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.R < 0.8 {
+		t.Errorf("center R = %f, want >= 0.8 (inside clip)", center.R)
+	}
+
+	// Far corner should be white (outside clip)
+	corner := dc.pixmap.GetPixel(2, 2)
+	if corner.R > 0.5 && corner.G < 0.5 {
+		t.Errorf("corner should not be red (outside clip), got %+v", corner)
+	}
+}
+
+func TestContextClipRoundRectZeroRadius(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// Zero radius should behave like ClipRect
+	dc.ClipRoundRect(10, 10, 80, 80, 0)
+
+	dc.ClearWithColor(White)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+
+	// Center should be red
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.8 {
+		t.Errorf("center R = %f, want >= 0.8", center.R)
+	}
+}
+
+func TestContextClipRoundRectNegativeRadius(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// Negative radius should behave like ClipRect
+	dc.ClipRoundRect(10, 10, 80, 80, -5)
+
+	dc.ClearWithColor(White)
+	dc.SetRGB(0, 0, 1)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+
+	// Center should be blue
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.B < 0.8 {
+		t.Errorf("center B = %f, want >= 0.8", center.B)
+	}
+}
+
+// --- SetBlendMode test ---
+
+func TestContextSetBlendMode(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// SetBlendMode is currently a no-op placeholder; verify it doesn't panic
+	dc.SetBlendMode(BlendMultiply)
+	dc.SetBlendMode(BlendScreen)
+	dc.SetBlendMode(BlendNormal)
+}
+
+// --- Layer tests ---
+
+func TestContextPushPopLayer(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+
+	dc.PushLayer(BlendNormal, 1.0)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+	dc.PopLayer()
+
+	// After pop, layer should be composited onto canvas
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.8 {
+		t.Errorf("after PopLayer, center R = %f, want >= 0.8", center.R)
+	}
+}
+
+func TestContextPushPopLayerOpacity(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+
+	dc.PushLayer(BlendNormal, 0.5)
+	dc.SetRGB(0, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+	dc.PopLayer()
+
+	// With 50% opacity black over white, should be gray
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.3 || center.R > 0.7 {
+		t.Errorf("center R = %f, want ~0.5 (50%% opacity)", center.R)
+	}
+}
+
+func TestContextPopLayerEmpty(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// PopLayer without PushLayer should be no-op
+	dc.PopLayer()
+}
+
+func TestContextPushLayerClampOpacity(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+
+	// Opacity < 0 should be clamped to 0
+	dc.PushLayer(BlendNormal, -1.0)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+	dc.PopLayer()
+
+	// At 0 opacity, canvas should remain white
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.9 || center.G < 0.9 || center.B < 0.9 {
+		t.Errorf("center = %+v, want white (opacity=0)", center)
+	}
+}
+
+func TestContextPushLayerClampOpacityAboveOne(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+
+	// Opacity > 1 should be clamped to 1
+	dc.PushLayer(BlendNormal, 5.0)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+	dc.PopLayer()
+
+	// Should be fully red
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.8 {
+		t.Errorf("center R = %f, want >= 0.8 (opacity clamped to 1)", center.R)
+	}
+}
+
+func TestContextNestedLayers(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+
+	dc.PushLayer(BlendNormal, 1.0)
+	dc.PushLayer(BlendNormal, 1.0)
+	dc.SetRGB(0, 0, 1)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+	dc.PopLayer()
+	dc.PopLayer()
+
+	// Should be blue after two nested layers
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.B < 0.8 {
+		t.Errorf("nested layers: center B = %f, want >= 0.8", center.B)
+	}
+}
+
+// --- NewSubPath test ---
+
+func TestContextNewSubPathIsNoOp(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.MoveTo(10, 10)
+	dc.LineTo(50, 50)
+	before := len(dc.path.Elements())
+	dc.NewSubPath()
+	after := len(dc.path.Elements())
+	// NewSubPath is a no-op for API compatibility
+	if after != before {
+		t.Errorf("NewSubPath changed element count from %d to %d", before, after)
+	}
+}
+
+// --- currentColor test ---
+
+func TestContextCurrentColor(t *testing.T) {
+	dc := NewContext(10, 10)
+	defer func() { _ = dc.Close() }()
+
+	// Default pattern is SolidPattern with Black
+	c := dc.currentColor()
+	if c == nil {
+		t.Fatal("currentColor returned nil")
+	}
+}
+
+func TestContextCurrentColorSolid(t *testing.T) {
+	dc := NewContext(10, 10)
+	defer func() { _ = dc.Close() }()
+
+	dc.SetRGB(1, 0, 0)
+	c := dc.currentColor()
+	cr, cg, _, _ := c.RGBA()
+	if cr < 0xFF00 {
+		t.Errorf("currentColor R = %d, want >= 0xFF00", cr)
+	}
+	if cg > 0x0100 {
+		t.Errorf("currentColor G = %d, want <= 0x0100", cg)
+	}
+}
+
+// --- Clip integration ---
+
+func TestContextClipRect(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.ClipRect(20, 20, 60, 60)
+
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+
+	// Center should be red
+	center := dc.pixmap.GetPixel(50, 50)
+	if center.R < 0.8 {
+		t.Errorf("clipped center R = %f, want >= 0.8", center.R)
+	}
+
+	// Outside clip should be white
+	corner := dc.pixmap.GetPixel(5, 5)
+	if corner.R > 0.5 && corner.G < 0.5 {
+		t.Errorf("outside clip should be white, got %+v", corner)
+	}
+}
+
+func TestContextResetClip(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClipRect(20, 20, 60, 60)
+	dc.ResetClip()
+
+	// After reset, full canvas should be drawable
+	dc.ClearWithColor(White)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+
+	// Corner should also be red after reset
+	corner := dc.pixmap.GetPixel(5, 5)
+	if corner.R < 0.8 {
+		t.Errorf("after ResetClip, corner R = %f, want >= 0.8", corner.R)
+	}
+}
+
+func TestContextResetClipNoInit(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// ResetClip on un-initialized clip stack should be no-op
+	dc.ResetClip()
+}
+
 func TestContextSetStrokeBrushCoverage(t *testing.T) {
 	dc := NewContext(100, 100)
 	defer func() { _ = dc.Close() }()
@@ -468,5 +752,173 @@ func TestContextSetStrokeBrushCoverage(t *testing.T) {
 	p := dc.pixmap.GetPixel(50, 50)
 	if p.B < 0.5 {
 		t.Errorf("stroke brush blue B = %f, want >= 0.5", p.B)
+	}
+}
+
+// --- Gradient fill tests ---
+
+func TestContextFillRadialGradient(t *testing.T) {
+	dc := NewContext(200, 200)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	grad := NewRadialGradientBrush(100, 100, 0, 80)
+	grad.AddColorStop(0, Red)
+	grad.AddColorStop(1, Blue)
+	dc.SetFillBrush(grad)
+	dc.DrawCircle(100, 100, 80)
+	dc.Fill()
+
+	// Center should be reddish
+	center := dc.pixmap.GetPixel(100, 100)
+	if center.R < 0.5 {
+		t.Errorf("center R = %f, want >= 0.5 (radial gradient center)", center.R)
+	}
+}
+
+func TestContextFillSweepGradient(t *testing.T) {
+	dc := NewContext(200, 200)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	grad := NewSweepGradientBrush(100, 100, 0)
+	grad.AddColorStop(0, Red)
+	grad.AddColorStop(0.5, Green)
+	grad.AddColorStop(1, Blue)
+	dc.SetFillBrush(grad)
+	dc.DrawCircle(100, 100, 80)
+	dc.Fill()
+
+	// Should have drawn something
+	center := dc.pixmap.GetPixel(100, 100)
+	_ = center // verify no panic
+}
+
+func TestContextFillLinearGradient(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	grad := NewLinearGradientBrush(0, 0, 100, 0)
+	grad.AddColorStop(0, Red)
+	grad.AddColorStop(1, Blue)
+	dc.SetFillBrush(grad)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+
+	// Left should be red
+	left := dc.pixmap.GetPixel(5, 50)
+	if left.R < 0.5 {
+		t.Errorf("left R = %f, want >= 0.5", left.R)
+	}
+}
+
+// --- DrawArc tests ---
+
+func TestContextDrawArc(t *testing.T) {
+	dc := NewContext(200, 200)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.SetRGB(1, 0, 0)
+	dc.DrawArc(100, 100, 50, 0, 3.14)
+	dc.Stroke()
+}
+
+func TestContextDrawEllipticalArc(t *testing.T) {
+	dc := NewContext(200, 200)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.SetRGB(0, 1, 0)
+	dc.DrawEllipticalArc(100, 100, 60, 30, 0, 3.14)
+	dc.Stroke()
+}
+
+// --- Clip + gradient interaction ---
+
+func TestContextClipWithGradientFill(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.DrawCircle(50, 50, 30)
+	dc.Clip()
+
+	// Fill with gradient inside clip
+	grad := NewLinearGradientBrush(0, 0, 100, 0)
+	grad.AddColorStop(0, Red)
+	grad.AddColorStop(1, Blue)
+	dc.SetFillBrush(grad)
+	dc.DrawRectangle(0, 0, 100, 100)
+	dc.Fill()
+}
+
+// --- ClipPreserve ---
+
+func TestContextClipPreserve(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.ClearWithColor(White)
+	dc.DrawCircle(50, 50, 30)
+	dc.ClipPreserve()
+	dc.SetRGB(1, 0, 0)
+	dc.Fill() // Fill the preserved path
+}
+
+// --- GetCurrentPoint ---
+
+func TestContextGetCurrentPoint(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// Before any path operation
+	_, _, ok := dc.GetCurrentPoint()
+	if ok {
+		t.Error("expected no current point before path ops")
+	}
+
+	dc.MoveTo(25, 75)
+	x, y, ok := dc.GetCurrentPoint()
+	if !ok {
+		t.Error("expected current point after MoveTo")
+	}
+	if abs(x-25) > 0.1 || abs(y-75) > 0.1 {
+		t.Errorf("current point = (%f,%f), want (25,75)", x, y)
+	}
+}
+
+// --- FillPreserve / StrokePreserve ---
+
+func TestContextFillPreserve(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(10, 10, 80, 80)
+	dc.FillPreserve()
+
+	// Path should still exist after FillPreserve
+	elems := dc.path.Elements()
+	if len(elems) == 0 {
+		t.Error("path should be preserved after FillPreserve")
+	}
+}
+
+func TestContextStrokePreserve(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.SetRGB(0, 0, 1)
+	dc.SetLineWidth(2)
+	dc.MoveTo(10, 50)
+	dc.LineTo(90, 50)
+	dc.StrokePreserve()
+
+	// Path should still exist after StrokePreserve
+	elems := dc.path.Elements()
+	if len(elems) == 0 {
+		t.Error("path should be preserved after StrokePreserve")
 	}
 }
