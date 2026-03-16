@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.4] - 2026-03-16
+
+### Fixed
+
+- **Separate device scale from user CTM (Cairo/Skia/Blend2D pattern)** — `c.matrix`
+  now contains only user transforms (starts as `Identity()`). Device scale is stored
+  in a separate `deviceMatrix` field and applied at rendering boundaries via
+  `totalMatrix()`. Paths are stored in user-space. This fixes:
+  - `GetCurrentPoint()` returning device-space coordinates instead of user-space
+    with `DeviceScale > 1.0` ([#218](https://github.com/gogpu/gg/issues/218))
+  - `Identity()` resetting to `Scale(2,2)` instead of pure identity on HiDPI
+  - `GetTransform()` exposing device scale in the returned matrix
+  - Clip stack bounds/path coordinate space mismatch on Retina displays
+  - `glyphMaskDeviceSize()` double-counting device scale through `c.matrix.E`
+  - Zero behavioral change at `DeviceScale=1.0` (common case, zero overhead)
+
 ## [0.37.3] - 2026-03-16
 
 ### Added

@@ -114,7 +114,7 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	}
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
-	err := ta.DrawText(target, c.face, s, x, y, col, c.matrix, c.deviceScale)
+	err := ta.DrawText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale)
 	return err == nil
 }
 
@@ -138,7 +138,7 @@ func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
 	}
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
-	err := gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.matrix, c.deviceScale)
+	err := gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale)
 	return err == nil
 }
 
@@ -391,6 +391,8 @@ func (c *Context) drawStringCPU(s string, x, y float64) {
 
 	// Tier 1: Uniform positive scale ≤256px → bitmap at device size (Strategy A).
 	// Skia threshold: kSkSideTooBigForAtlas = 256.
+	// deviceSize here is in user-scaled units; drawStringScaled multiplies by
+	// c.deviceScale to get the physical pixel size for the face.
 	if m.B == 0 && m.D == 0 && m.A == m.E && m.A > 0 {
 		deviceSize := c.face.Size() * m.A
 		if deviceSize > 0 && deviceSize <= 256 {
@@ -406,7 +408,7 @@ func (c *Context) drawStringCPU(s string, x, y float64) {
 // drawStringBitmap renders text via the bitmap rasterizer at the transformed position.
 // This is the fast path for identity/translation-only CTMs where no quality loss occurs.
 func (c *Context) drawStringBitmap(s string, x, y float64) {
-	p := c.matrix.TransformPoint(Pt(x, y))
+	p := c.totalMatrix().TransformPoint(Pt(x, y))
 	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, c.face, p.X, p.Y, c.currentColor())
 }
@@ -420,8 +422,9 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 		c.drawStringBitmap(s, x, y) // MultiFace fallback
 		return
 	}
-	deviceFace := source.Face(deviceSize)
-	p := c.matrix.TransformPoint(Pt(x, y))
+	// Scale deviceSize by deviceScale for actual physical pixel rendering.
+	deviceFace := source.Face(deviceSize * c.deviceScale)
+	p := c.totalMatrix().TransformPoint(Pt(x, y))
 	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, deviceFace, p.X, p.Y, c.currentColor())
 }
@@ -515,7 +518,7 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 		return
 	}
 
-	devicePath := path.Transform(c.matrix)
+	devicePath := path.Transform(c.totalMatrix())
 
 	// Route through the normal fill pipeline (doFill) so GPU accelerator
 	// can render to the surface when SurfaceTarget is active. Without this,

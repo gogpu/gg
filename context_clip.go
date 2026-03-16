@@ -14,8 +14,10 @@ func (c *Context) Clip() {
 		c.initClipStack()
 	}
 
-	// Convert gg.PathElement to clip.PathElement
-	elements := convertPathElements(c.path.Elements())
+	// Path elements are in user-space; clip stack operates in device-space.
+	// Transform through deviceMatrix to get device coordinates.
+	devicePath := c.deviceSpacePath()
+	elements := convertPathElements(devicePath.Elements())
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
@@ -32,8 +34,9 @@ func (c *Context) ClipPreserve() {
 		c.initClipStack()
 	}
 
-	// Convert gg.PathElement to clip.PathElement
-	elements := convertPathElements(c.path.Elements())
+	// Path elements are in user-space; clip stack operates in device-space.
+	devicePath := c.deviceSpacePath()
+	elements := convertPathElements(devicePath.Elements())
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
@@ -48,9 +51,10 @@ func (c *Context) ClipRect(x, y, w, h float64) {
 		c.initClipStack()
 	}
 
-	// Transform the rectangle corners
-	p1 := c.matrix.TransformPoint(Pt(x, y))
-	p2 := c.matrix.TransformPoint(Pt(x+w, y+h))
+	// Transform the rectangle corners to device coordinates.
+	tm := c.totalMatrix()
+	p1 := tm.TransformPoint(Pt(x, y))
+	p2 := tm.TransformPoint(Pt(x+w, y+h))
 
 	// Create clip rectangle in device coordinates
 	rect := clip.NewRect(
@@ -83,9 +87,10 @@ func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
 		c.initClipStack()
 	}
 
-	// Transform the rectangle corners.
-	p1 := c.matrix.TransformPoint(Pt(x, y))
-	p2 := c.matrix.TransformPoint(Pt(x+w, y+h))
+	// Transform the rectangle corners to device coordinates.
+	tm := c.totalMatrix()
+	p1 := tm.TransformPoint(Pt(x, y))
+	p2 := tm.TransformPoint(Pt(x+w, y+h))
 
 	// Create clip rectangle in device coordinates.
 	devX := math.Min(p1.X, p2.X)
@@ -93,8 +98,8 @@ func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
 	devW := math.Abs(p2.X - p1.X)
 	devH := math.Abs(p2.Y - p1.Y)
 
-	// Scale radius by the transform scale factor.
-	scaledRadius := radius * c.matrix.ScaleFactor()
+	// Scale radius by the total transform scale factor.
+	scaledRadius := radius * tm.ScaleFactor()
 
 	// Clamp to half the smaller dimension.
 	maxRadius := math.Min(devW, devH) / 2
@@ -112,14 +117,14 @@ func (c *Context) ResetClip() {
 		return
 	}
 
-	// Reset to canvas bounds
-	bounds := clip.NewRect(0, 0, float64(c.width), float64(c.height))
+	// Reset to physical pixel bounds (clip stack operates in device-space).
+	bounds := clip.NewRect(0, 0, float64(c.pixmap.Width()), float64(c.pixmap.Height()))
 	c.clipStack.Reset(bounds)
 }
 
-// initClipStack initializes the clip stack with canvas bounds.
+// initClipStack initializes the clip stack with canvas bounds in device-space.
 func (c *Context) initClipStack() {
-	bounds := clip.NewRect(0, 0, float64(c.width), float64(c.height))
+	bounds := clip.NewRect(0, 0, float64(c.pixmap.Width()), float64(c.pixmap.Height()))
 	c.clipStack = clip.NewClipStack(bounds)
 }
 

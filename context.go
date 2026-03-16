@@ -36,8 +36,8 @@ type Context struct {
 	clipStack *clip.ClipStack // Clipping stack
 
 	// Transform and state stack
-	matrix         Matrix
-	baseMatrix     Matrix // device scale transform (Identity when scale=1.0)
+	matrix         Matrix // user transform (starts as Identity, user-space only)
+	deviceMatrix   Matrix // device scale transform (Identity when scale=1.0, NEVER modified by user)
 	stack          []Matrix
 	clipStackDepth []int // Tracks clip stack depth for each Push/Pop
 
@@ -114,11 +114,11 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		renderer = sr
 	}
 
-	// Base matrix: when scale != 1.0, apply a permanent scale transform
-	// so user coordinates are automatically mapped to physical pixels.
-	baseMatrix := Identity()
+	// Device matrix: maps user coordinates to physical pixels.
+	// User matrix starts as Identity — user transforms never include device scale.
+	deviceMatrix := Identity()
 	if scale != 1.0 {
-		baseMatrix = Scale(scale, scale)
+		deviceMatrix = Scale(scale, scale)
 	}
 
 	if scale != 1.0 {
@@ -137,8 +137,8 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		renderer:       renderer,
 		path:           NewPath(),
 		paint:          NewPaint(),
-		matrix:         baseMatrix,
-		baseMatrix:     baseMatrix,
+		matrix:         Identity(),
+		deviceMatrix:   deviceMatrix,
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
 		pipelineMode:   options.pipelineMode,
@@ -175,7 +175,7 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 		path:           NewPath(),
 		paint:          NewPaint(),
 		matrix:         Identity(),
-		baseMatrix:     Identity(),
+		deviceMatrix:   Identity(),
 		stack:          make([]Matrix, 0, 8),
 		clipStackDepth: make([]int, 0, 8),
 		pipelineMode:   options.pipelineMode,
@@ -347,19 +347,11 @@ func (c *Context) SetDeviceScale(scale float64) {
 		sr.SetDeviceScale(float32(scale))
 	}
 
-	// Update base matrix
-	c.baseMatrix = Identity()
+	// Update device matrix. User matrix (c.matrix) is NOT touched —
+	// it contains only user transforms and is independent of device scale.
+	c.deviceMatrix = Identity()
 	if scale != 1.0 {
-		c.baseMatrix = Scale(scale, scale)
-	}
-
-	// Update current matrix: remove old base scale, apply new one.
-	// If the user had additional transforms, preserve them.
-	if oldScale != 1.0 {
-		invOld := Scale(1.0/oldScale, 1.0/oldScale)
-		c.matrix = c.baseMatrix.Multiply(invOld.Multiply(c.matrix))
-	} else {
-		c.matrix = c.baseMatrix.Multiply(c.matrix)
+		c.deviceMatrix = Scale(scale, scale)
 	}
 
 	// Reset clip stack (clip regions are in pixel coordinates)
@@ -668,12 +660,11 @@ func (c *Context) Pop() {
 	}
 }
 
-// Identity resets the transformation matrix to the base matrix.
-// When device scale is 1.0, this is the identity matrix.
-// When device scale is > 1.0, this preserves the base scale transform
-// so drawing operations continue to map logical to physical coordinates.
+// Identity resets the user transformation matrix to the identity matrix.
+// Device scale is applied separately at rendering boundaries (not in the CTM),
+// so Identity() always resets to a pure identity matrix regardless of scale.
 func (c *Context) Identity() {
-	c.matrix = c.baseMatrix
+	c.matrix = Identity()
 }
 
 // Translate applies a translation to the transformation matrix.
@@ -735,6 +726,27 @@ func (c *Context) TransformPoint(x, y float64) (float64, float64) {
 func (c *Context) InvertY() {
 	c.Translate(0, float64(c.height))
 	c.Scale(1, -1)
+}
+
+// totalMatrix returns the combined device + user transform matrix.
+// Used at rendering boundaries where device-space coordinates are needed.
+// At scale=1.0, this is identical to c.matrix (zero overhead).
+func (c *Context) totalMatrix() Matrix {
+	if c.deviceMatrix.IsIdentity() {
+		return c.matrix
+	}
+	return c.deviceMatrix.Multiply(c.matrix)
+}
+
+// deviceSpacePath returns the current path transformed to device-space.
+// Path coordinates are in user-space (transformed by c.matrix only).
+// The renderer operates in device-space, so we apply deviceMatrix here.
+// At scale=1.0, returns the original path (zero copy).
+func (c *Context) deviceSpacePath() *Path {
+	if c.deviceMatrix.IsIdentity() {
+		return c.path
+	}
+	return c.path.Transform(c.deviceMatrix)
 }
 
 // SetPixel sets a single pixel.
@@ -1082,7 +1094,16 @@ func (c *Context) doFill() error {
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
 
+	// Transform path to device-space for rendering.
+	// At scale=1.0 this is a zero-copy no-op.
+	devicePath := c.deviceSpacePath()
+
+	// Temporarily swap c.path to device-space for GPU tryGPUOp
+	// (which reads c.path for shape detection and path rendering).
+	origPath := c.path
+	c.path = devicePath
 	ok, cpuMode := c.tryGPUFillWithMode(mode)
+	c.path = origPath
 	if ok {
 		return nil
 	}
@@ -1098,18 +1119,25 @@ func (c *Context) doFill() error {
 	c.applyClipToPaint()
 	defer func() { c.paint.ClipCoverage = nil }()
 
-	return c.renderer.Fill(c.pixmap, c.path, c.paint)
+	return c.renderer.Fill(c.pixmap, devicePath, c.paint)
 }
 
 // doStroke performs the stroke operation respecting the current RasterizerMode.
 func (c *Context) doStroke() error {
-	c.paint.TransformScale = c.matrix.ScaleFactor()
+	c.paint.TransformScale = c.totalMatrix().ScaleFactor()
 	mode := c.rasterizerMode
 
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
 
+	// Transform path to device-space for rendering.
+	devicePath := c.deviceSpacePath()
+
+	// Temporarily swap c.path to device-space for GPU tryGPUOp.
+	origPath := c.path
+	c.path = devicePath
 	ok, cpuMode := c.tryGPUStrokeWithMode(mode)
+	c.path = origPath
 	if ok {
 		return nil
 	}
@@ -1124,7 +1152,7 @@ func (c *Context) doStroke() error {
 	c.applyClipToPaint()
 	defer func() { c.paint.ClipCoverage = nil }()
 
-	return c.renderer.Stroke(c.pixmap, c.path, c.paint)
+	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)
 }
 
 // applyClipToPaint sets the ClipCoverage function on the paint when a clip
