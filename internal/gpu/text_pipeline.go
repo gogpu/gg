@@ -91,6 +91,10 @@ type MSDFTextPipeline struct {
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before ensurePipelineWithStencil.
 	clipBindLayout *wgpu.BindGroupLayout
+	// pipeLayoutHasClip tracks whether the current pipeLayout was created
+	// with clipBindLayout included. If clipBindLayout is set after the
+	// layout was created, the pipeline must be recreated.
+	pipeLayoutHasClip bool
 }
 
 // NewMSDFTextPipeline creates a new MSDF text pipeline with the given device
@@ -169,7 +173,8 @@ func (p *MSDFTextPipeline) createPipeline() error {
 	p.uniformLayout = uniformLayout
 
 	textBGLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
-	if p.clipBindLayout != nil {
+	hasClip := p.clipBindLayout != nil
+	if hasClip {
 		textBGLayouts = append(textBGLayouts, p.clipBindLayout)
 	}
 	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -180,6 +185,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 		return fmt.Errorf("create msdf_text pipeline layout: %w", err)
 	}
 	p.pipeLayout = pipeLayout
+	p.pipeLayoutHasClip = hasClip
 
 	// Create sampler for MSDF textures (linear filtering for smooth
 	// distance field interpolation).
@@ -247,6 +253,15 @@ func (p *MSDFTextPipeline) createPipeline() error {
 func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 	// Ensure base resources exist (shader, layouts, sampler).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
+		if err := p.createPipeline(); err != nil {
+			return err
+		}
+	}
+	// If the pipeline layout was created without clip but clip is now set,
+	// destroy and recreate so the layout includes @group(1). Without this,
+	// SetBindGroup(1, clipBG) crashes on AMD/NVIDIA (Intel tolerates it).
+	if p.clipBindLayout != nil && !p.pipeLayoutHasClip {
+		p.destroyPipeline()
 		if err := p.createPipeline(); err != nil {
 			return err
 		}
@@ -352,6 +367,7 @@ func (p *MSDFTextPipeline) destroyPipeline() {
 	if p.pipeLayout != nil {
 		p.pipeLayout.Release()
 		p.pipeLayout = nil
+		p.pipeLayoutHasClip = false
 	}
 	if p.uniformLayout != nil {
 		p.uniformLayout.Release()

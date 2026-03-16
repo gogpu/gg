@@ -53,6 +53,10 @@ type StencilRenderer struct {
 	// Set by the session before createPipelines. Only the cover pipeline needs
 	// it (stencil fill has no color output, so clip is irrelevant there).
 	clipBindLayout *wgpu.BindGroupLayout
+	// coverPipeLayoutHasClip tracks whether coverPipeLayout was created with
+	// clipBindLayout included. If clip is set after creation, pipelines must
+	// be recreated to avoid SetBindGroup(1) crashes on AMD/NVIDIA.
+	coverPipeLayoutHasClip bool
 
 	// Render pipelines.
 	// nonZeroStencilPipeline implements the non-zero winding fill rule:

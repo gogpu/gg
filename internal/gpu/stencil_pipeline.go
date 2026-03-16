@@ -89,7 +89,8 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	sr.stencilPipeLayout = stencilPipeLayout
 
 	coverBGLayouts := []*wgpu.BindGroupLayout{sr.uniformLayout}
-	if sr.clipBindLayout != nil {
+	hasClip := sr.clipBindLayout != nil
+	if hasClip {
 		coverBGLayouts = append(coverBGLayouts, sr.clipBindLayout)
 	}
 	coverPipeLayout, err := sr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -100,6 +101,7 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		return fmt.Errorf("create cover pipeline layout: %w", err)
 	}
 	sr.coverPipeLayout = coverPipeLayout
+	sr.coverPipeLayoutHasClip = hasClip
 
 	// Shared vertex buffer layout: float32x2 position at location(0).
 	vertexBufferLayout := []gputypes.VertexBufferLayout{
@@ -305,6 +307,7 @@ func (sr *StencilRenderer) destroyPipelines() {
 	if sr.coverPipeLayout != nil {
 		sr.coverPipeLayout.Release()
 		sr.coverPipeLayout = nil
+		sr.coverPipeLayoutHasClip = false
 	}
 	if sr.stencilPipeLayout != nil {
 		sr.stencilPipeLayout.Release()

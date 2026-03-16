@@ -79,6 +79,10 @@ type ConvexRenderer struct {
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
 	clipBindLayout *wgpu.BindGroupLayout
+	// pipeLayoutHasClip tracks whether the current pipeLayout was created
+	// with clipBindLayout included. If clipBindLayout is set after the
+	// layout was created, the pipeline must be recreated.
+	pipeLayoutHasClip bool
 }
 
 // SetClipBindLayout sets the bind group layout for the @group(1) RRect clip
@@ -120,6 +124,15 @@ func (cr *ConvexRenderer) ensurePipeline() error {
 func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
 	// Ensure base resources exist (shader, layouts).
 	if cr.shader == nil || cr.uniformLayout == nil || cr.pipeLayout == nil {
+		if err := cr.createPipeline(); err != nil {
+			return err
+		}
+	}
+	// If the pipeline layout was created without clip but clip is now set,
+	// destroy and recreate so the layout includes @group(1). Without this,
+	// SetBindGroup(1, clipBG) crashes on AMD/NVIDIA (Intel tolerates it).
+	if cr.clipBindLayout != nil && !cr.pipeLayoutHasClip {
+		cr.destroyPipeline()
 		if err := cr.createPipeline(); err != nil {
 			return err
 		}
@@ -235,7 +248,8 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 	cr.uniformLayout = uniformLayout
 
 	bgLayouts := []*wgpu.BindGroupLayout{cr.uniformLayout}
-	if cr.clipBindLayout != nil {
+	hasClip := cr.clipBindLayout != nil
+	if hasClip {
 		bgLayouts = append(bgLayouts, cr.clipBindLayout)
 	}
 	pipeLayout, err := cr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -245,6 +259,7 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 	if err != nil {
 		return fmt.Errorf("create convex pipeline layout: %w", err)
 	}
+	cr.pipeLayoutHasClip = hasClip
 	cr.pipeLayout = pipeLayout
 
 	premulBlend := gputypes.BlendStatePremultiplied()
@@ -300,6 +315,7 @@ func (cr *ConvexRenderer) destroyPipeline() {
 	if cr.pipeLayout != nil {
 		cr.pipeLayout.Release()
 		cr.pipeLayout = nil
+		cr.pipeLayoutHasClip = false
 	}
 	if cr.uniformLayout != nil {
 		cr.uniformLayout.Release()

@@ -800,3 +800,199 @@ func TestStencilRendererRecordPath(t *testing.T) {
 		t.Error("expected non-nil nonZeroCoverPipeline")
 	}
 }
+
+// TestEnsurePipelines_ClipLayoutRecreation verifies that pipelines created
+// without a clip bind layout are recreated when the clip layout is set.
+// This prevents Vulkan crashes on AMD/NVIDIA when SetBindGroup(1, ...) is
+// called with a pipeline whose layout only has 1 descriptor set.
+func TestEnsurePipelines_ClipLayoutRecreation(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	// Step 1: Create SDF pipeline and force pipeline creation WITHOUT clip layout.
+	sdf := NewSDFRenderPipeline(device, queue)
+	defer sdf.Destroy()
+
+	// Trigger base pipeline creation (shader, layouts, pipeLayout) without clip.
+	if err := sdf.createPipeline(); err != nil {
+		t.Fatalf("initial createPipeline failed: %v", err)
+	}
+	if sdf.pipeLayout == nil {
+		t.Fatal("expected non-nil pipeLayout after createPipeline")
+	}
+	if sdf.pipeLayoutHasClip {
+		t.Fatal("expected pipeLayoutHasClip=false after createPipeline without clip")
+	}
+	oldPipeLayout := sdf.pipeLayout
+
+	// Step 2: Set clip layout and call ensurePipelineWithStencil.
+	// This should detect the mismatch and recreate.
+	clipLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "test_clip_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create clip layout: %v", err)
+	}
+	defer clipLayout.Release()
+
+	sdf.SetClipBindLayout(clipLayout)
+	if err := sdf.ensurePipelineWithStencil(); err != nil {
+		t.Fatalf("ensurePipelineWithStencil failed: %v", err)
+	}
+
+	// Pipeline layout should have been recreated.
+	if sdf.pipeLayout == oldPipeLayout {
+		t.Error("expected pipeLayout to be recreated after clip layout was set")
+	}
+	if !sdf.pipeLayoutHasClip {
+		t.Error("expected pipeLayoutHasClip=true after recreation")
+	}
+	if sdf.pipelineWithStencil == nil {
+		t.Error("expected non-nil pipelineWithStencil")
+	}
+}
+
+// TestEnsurePipelines_ConvexClipRecreation verifies the same clip layout
+// recreation behavior for the ConvexRenderer.
+func TestEnsurePipelines_ConvexClipRecreation(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	cr := NewConvexRenderer(device, queue)
+	defer cr.Destroy()
+
+	// Create pipeline without clip.
+	if err := cr.createPipeline(); err != nil {
+		t.Fatalf("initial createPipeline failed: %v", err)
+	}
+	if cr.pipeLayoutHasClip {
+		t.Fatal("expected pipeLayoutHasClip=false")
+	}
+
+	// Set clip layout and ensure recreation.
+	clipLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "test_clip_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create clip layout: %v", err)
+	}
+	defer clipLayout.Release()
+
+	cr.SetClipBindLayout(clipLayout)
+	if err := cr.ensurePipelineWithStencil(); err != nil {
+		t.Fatalf("ensurePipelineWithStencil failed: %v", err)
+	}
+
+	if !cr.pipeLayoutHasClip {
+		t.Error("expected pipeLayoutHasClip=true after recreation")
+	}
+	if cr.pipelineWithStencil == nil {
+		t.Error("expected non-nil pipelineWithStencil")
+	}
+}
+
+// TestEnsurePipelines_StencilClipRecreation verifies clip layout recreation
+// for the StencilRenderer's cover pipeline.
+func TestEnsurePipelines_StencilClipRecreation(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	sr := NewStencilRenderer(device, queue)
+	defer sr.Destroy()
+
+	// Create pipelines without clip.
+	if err := sr.createPipelines(); err != nil {
+		t.Fatalf("initial createPipelines failed: %v", err)
+	}
+	if sr.coverPipeLayoutHasClip {
+		t.Fatal("expected coverPipeLayoutHasClip=false")
+	}
+
+	// Set clip layout and trigger recreation via session's ensurePipelines path.
+	clipLayout, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "test_clip_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create clip layout: %v", err)
+	}
+	defer clipLayout.Release()
+
+	sr.SetClipBindLayout(clipLayout)
+
+	// Destroy old pipelines and recreate (mimics session's ensurePipelines).
+	sr.destroyPipelines()
+	if err := sr.createPipelines(); err != nil {
+		t.Fatalf("createPipelines with clip failed: %v", err)
+	}
+
+	if !sr.coverPipeLayoutHasClip {
+		t.Error("expected coverPipeLayoutHasClip=true after recreation")
+	}
+}
+
+// TestRenderSessionEnsurePipelines_FullFlow verifies the complete session
+// pipeline creation flow: ensureClipBindLayout + ensurePipelines creates
+// all pipelines with clip layout from the start.
+func TestRenderSessionEnsurePipelines_FullFlow(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	// Simulate the normal RenderFrame flow.
+	if err := s.ensureClipBindLayout(); err != nil {
+		t.Fatalf("ensureClipBindLayout failed: %v", err)
+	}
+	if s.clipBindLayout == nil {
+		t.Fatal("expected non-nil clipBindLayout")
+	}
+	if s.noClipBindGroup == nil {
+		t.Fatal("expected non-nil noClipBindGroup")
+	}
+
+	if err := s.ensurePipelines(); err != nil {
+		t.Fatalf("ensurePipelines failed: %v", err)
+	}
+
+	// All pipelines should have clip layout.
+	if s.sdfPipeline == nil {
+		t.Fatal("expected non-nil sdfPipeline")
+	}
+	if !s.sdfPipeline.pipeLayoutHasClip {
+		t.Error("SDF pipeline should have clip layout")
+	}
+	if s.convexRenderer == nil {
+		t.Fatal("expected non-nil convexRenderer")
+	}
+	if !s.convexRenderer.pipeLayoutHasClip {
+		t.Error("convex pipeline should have clip layout")
+	}
+	if s.stencilRenderer == nil {
+		t.Fatal("expected non-nil stencilRenderer")
+	}
+	if !s.stencilRenderer.coverPipeLayoutHasClip {
+		t.Error("stencil cover pipeline should have clip layout")
+	}
+}

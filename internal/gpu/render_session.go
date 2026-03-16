@@ -806,7 +806,10 @@ func (s *GPURenderSession) ensurePipelines() error {
 		s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
 	}
 	s.stencilRenderer.SetClipBindLayout(s.clipBindLayout)
-	if s.stencilRenderer.nonZeroStencilPipeline == nil {
+	// Recreate stencil pipelines if cover layout was created without clip.
+	if s.stencilRenderer.nonZeroStencilPipeline == nil ||
+		(s.clipBindLayout != nil && !s.stencilRenderer.coverPipeLayoutHasClip) {
+		s.stencilRenderer.destroyPipelines()
 		if err := s.stencilRenderer.createPipelines(); err != nil {
 			return fmt.Errorf("stencil pipelines: %w", err)
 		}

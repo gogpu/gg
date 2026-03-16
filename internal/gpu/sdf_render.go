@@ -75,6 +75,10 @@ type SDFRenderPipeline struct {
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
 	clipBindLayout *wgpu.BindGroupLayout
+	// pipeLayoutHasClip tracks whether the current pipeLayout was created
+	// with clipBindLayout included. If clipBindLayout is set after the
+	// layout was created, the pipeline must be recreated.
+	pipeLayoutHasClip bool
 
 	// MSAA and resolve textures for offscreen rendering (standalone mode).
 	// When used via GPURenderSession, these are nil -- the session owns textures.
@@ -305,7 +309,8 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 	p.uniformLayout = uniformLayout
 
 	bgLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
-	if p.clipBindLayout != nil {
+	hasClip := p.clipBindLayout != nil
+	if hasClip {
 		bgLayouts = append(bgLayouts, p.clipBindLayout)
 	}
 	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -315,6 +320,7 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 	if err != nil {
 		return fmt.Errorf("create pipeline layout: %w", err)
 	}
+	p.pipeLayoutHasClip = hasClip
 	p.pipeLayout = pipeLayout
 
 	premulBlend := gputypes.BlendStatePremultiplied()
@@ -365,6 +371,15 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
 	// Ensure base resources exist (shader, layouts).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
+		if err := p.createPipeline(); err != nil {
+			return err
+		}
+	}
+	// If the pipeline layout was created without clip but clip is now set,
+	// destroy and recreate so the layout includes @group(1). Without this,
+	// SetBindGroup(1, clipBG) crashes on AMD/NVIDIA (Intel tolerates it).
+	if p.clipBindLayout != nil && !p.pipeLayoutHasClip {
+		p.destroyPipeline()
 		if err := p.createPipeline(); err != nil {
 			return err
 		}
@@ -461,6 +476,7 @@ func (p *SDFRenderPipeline) destroyPipeline() {
 	if p.pipeLayout != nil {
 		p.pipeLayout.Release()
 		p.pipeLayout = nil
+		p.pipeLayoutHasClip = false
 	}
 	if p.uniformLayout != nil {
 		p.uniformLayout.Release()

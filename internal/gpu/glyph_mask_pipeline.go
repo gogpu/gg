@@ -75,6 +75,10 @@ type GlyphMaskPipeline struct {
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before ensurePipelineWithStencil.
 	clipBindLayout *wgpu.BindGroupLayout
+	// pipeLayoutHasClip tracks whether the current pipeLayout was created
+	// with clipBindLayout included. If clipBindLayout is set after the
+	// layout was created, the pipeline must be recreated.
+	pipeLayoutHasClip bool
 }
 
 // NewGlyphMaskPipeline creates a new glyph mask pipeline with the given device
@@ -160,7 +164,8 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 	p.uniformLayout = uniformLayout
 
 	glyphBGLayouts := []*wgpu.BindGroupLayout{p.uniformLayout}
-	if p.clipBindLayout != nil {
+	hasClip := p.clipBindLayout != nil
+	if hasClip {
 		glyphBGLayouts = append(glyphBGLayouts, p.clipBindLayout)
 	}
 	pipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
@@ -171,6 +176,7 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 		return fmt.Errorf("create glyph_mask pipeline layout: %w", err)
 	}
 	p.pipeLayout = pipeLayout
+	p.pipeLayoutHasClip = hasClip
 
 	// Create sampler for R8 atlas textures (linear filtering for smooth
 	// alpha interpolation at fractional positions).
@@ -202,6 +208,15 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 	// Ensure shared resources exist (shader, layouts, sampler).
 	if err := p.ensureSharedResources(); err != nil {
 		return err
+	}
+	// If the pipeline layout was created without clip but clip is now set,
+	// destroy and recreate so the layout includes @group(1). Without this,
+	// SetBindGroup(1, clipBG) crashes on AMD/NVIDIA (Intel tolerates it).
+	if p.clipBindLayout != nil && !p.pipeLayoutHasClip {
+		p.destroyPipeline()
+		if err := p.ensureSharedResources(); err != nil {
+			return err
+		}
 	}
 	if p.pipelineWithStencil != nil {
 		return nil
@@ -304,6 +319,7 @@ func (p *GlyphMaskPipeline) destroyPipeline() {
 	if p.pipeLayout != nil {
 		p.pipeLayout.Release()
 		p.pipeLayout = nil
+		p.pipeLayoutHasClip = false
 	}
 	if p.uniformLayout != nil {
 		p.uniformLayout.Release()
