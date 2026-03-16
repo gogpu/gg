@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.3] - 2026-03-16
+
+### Added
+
+- **`ggcanvas.Render(dc RenderTarget)`** — Universal one-call canvas presentation.
+  Tries GPU-direct first, falls back to CPU pixmap → texture → present.
+  Works on all backends including software.
+
+- **SDFAccelerator CPU adapter detection** — Detects `DeviceType == CPU`,
+  disables GPU pipelines, enables automatic CPU rasterizer fallback.
+
+### Dependencies
+
+- wgpu v0.21.2 → v0.21.3 (GLES/DX12/software fixes, naga v0.14.8)
+
 ## [0.37.2] - 2026-03-16
 
 ### Fixed
