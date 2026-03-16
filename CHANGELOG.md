@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `glyphMaskDeviceSize()` double-counting device scale through `c.matrix.E`
   - Zero behavioral change at `DeviceScale=1.0` (common case, zero overhead)
 
+### Testing
+
+- **Test coverage 77.4% → 80.5%** — enterprise-grade test suite for awesome-go submission.
+  Key improvements: `internal/path` 27%→98%, `surface` 61%→85%, `recording/backends/raster`
+  55%→81%, `recording` 82%→90%, `scene` 77%→82%, root `gg` package 87%→91%.
+  Tests focus on coordinate space consistency, round-trip correctness, edge cases,
+  and regression guards — not coverage padding.
+
 ## [0.37.3] - 2026-03-16
 
 ### Added
