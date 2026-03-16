@@ -384,6 +384,53 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	return err
 }
 
+// RenderTarget is the interface for presenting canvas content on screen.
+// Implement this on your application context. *gogpu.Context satisfies this
+// via the gogpu.RenderTarget() adapter.
+type RenderTarget interface {
+	SurfaceView() any
+	SurfaceSize() (uint32, uint32)
+	PresentTexture(tex any) error
+}
+
+// Render presents canvas content to the screen. Works on all backends.
+//
+// On GPU backends (Vulkan, DX12, Metal, GLES): renders directly to surface
+// via GPU shaders (zero-copy, optimal performance).
+//
+// On software backend or when GPU-direct fails: falls back to universal path
+// where gg CPU rasterizer renders to pixmap, uploads to texture, and presents
+// via textured quad.
+//
+// This is the recommended way to present canvas content — one call, all backends.
+//
+//	canvas.Draw(func(cc *gg.Context) { ... })
+//	canvas.Render(dc) // dc is *gogpu.Context
+func (c *Canvas) Render(dc RenderTarget) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	if !c.dirty {
+		return nil
+	}
+
+	// Try GPU-direct path (zero-copy surface rendering).
+	sv := dc.SurfaceView()
+	if sv != nil {
+		sw, sh := dc.SurfaceSize()
+		if err := c.RenderDirect(sv, sw, sh); err == nil {
+			return nil
+		}
+	}
+
+	// Universal path: CPU rasterizer → pixmap → texture → present.
+	tex, err := c.Flush()
+	if err != nil {
+		return err
+	}
+	return dc.PresentTexture(tex)
+}
+
 // Texture returns the current GPU texture without flushing.
 // Returns nil if texture hasn't been created yet.
 //
