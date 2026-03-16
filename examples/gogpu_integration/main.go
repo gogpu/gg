@@ -106,11 +106,9 @@ func main() {
 			log.Printf("Draw error: %v", err)
 		}
 
-		// Render directly to surface (zero-copy, no readback).
-		sv := dc.SurfaceView()
-		sw, sh := dc.SurfaceSize()
-		if err := canvas.RenderDirect(sv, sw, sh); err != nil {
-			log.Printf("Frame %d: RenderDirect error: %v", frame, err)
+		// Present canvas to screen (one call, all backends).
+		if err := canvas.Render(dc.RenderTarget()); err != nil {
+			log.Printf("Frame %d: Render error: %v", frame, err)
 		}
 		frame++
 	})

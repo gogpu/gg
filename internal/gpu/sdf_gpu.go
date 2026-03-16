@@ -326,6 +326,17 @@ func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
 // return a *wgpu.Device (as gpucontext.Device) so we can access HalDevice()
 // and HalQueue() for direct HAL-level GPU operations.
 func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
+	// Check if adapter is software/CPU — GPU shaders don't work on CPU backends.
+	// In that case, don't initialize GPU pipelines — gg will use CPU rasterizers.
+	if adapter := provider.Adapter(); adapter != nil {
+		if wgpuAdapter, ok := adapter.(*wgpu.Adapter); ok {
+			if wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
+				slogger().Info("gpu-sdf: software adapter detected, GPU acceleration disabled")
+				return nil // gpuReady stays false → CPU rasterizer fallback
+			}
+		}
+	}
+
 	dev := provider.Device()
 	if dev == nil {
 		return fmt.Errorf("gpu-sdf: provider Device is nil")
