@@ -19,122 +19,66 @@
 
 ---
 
-## Current State: v0.32.1
+## Current State: v0.37.4
 
-✅ **Production-ready** with GPU-accelerated rendering:
+✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
+- **Six-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute + Glyph Mask)
 - **Smart multi-engine rasterizer** — 5 algorithms with per-path auto-selection
-- Five-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute)
 - Vello 9-stage compute pipeline for full-scene GPU rasterization
-- GPU MSDF text pipeline (resolution-independent anti-aliased text)
-- GPU stroke rendering (stroke-expand-then-fill via convex polygon renderer)
-- RenderDirect zero-copy GPU surface rendering
-- Analytic anti-aliasing (Vello tile-based AA)
-- GPUAccelerator interface with transparent CPU fallback
-- PipelineMode (Auto/RenderPass/Compute) for pipeline selection
-- RasterizerMode (Auto/Analytic/SparseStrips/TileCompute/SDF) for algorithm override
+- GPU MSDF text + Glyph mask dual-strategy text rendering
+- GPU stroke rendering, RenderDirect zero-copy GPU surface rendering
+- **GPU RRect clip** — analytic SDF in fragment shaders (GPU-CLIP-002)
+- **GPU scissor rect clip** — hardware scissor for rectangular clips (GPU-CLIP-001)
+- **Separated deviceMatrix/userMatrix** — Cairo/Skia/Blend2D pattern for correct HiDPI
 - Recording System for vector export (PDF, SVG)
-- GGCanvas integration for gogpu windowed rendering (auto-registration)
-- Porter-Duff compositing for correct GPU readback
-- Premultiplied alpha pipeline for correct compositing
-- HarfBuzz-level text shaping via GoTextShaper
-- Structured logging via log/slog
-- **Transform-aware CPU text** — 3-tier hybrid decision tree (Skia/Cairo/Vello patterns)
-
-**New in v0.32.1:**
-- CPU text transform support (TEXT-002) — `DrawString` respects full CTM
-- GPU MSDF text transform support (TEXT-001, #146)
-
-**New in v0.32.0:**
-- Smart rasterizer selection — adaptive threshold `max(32, 2048/sqrt(bboxArea))` per-path
-- CoverageFiller interface — SparseStripsFiller (4×4) + TileComputeFiller (16×16)
-- AdaptiveFiller — auto-selects between 4×4 and 16×16 tiles
-- RasterizerMode API — per-context force override for debugging/benchmarking
-- ForceableFiller + ForceSDFAware interfaces
-- `gg/raster/` package — CPU-only tile registration
-- SDF minimum size check (16px threshold)
-
-**Previous:**
-- v0.31.1: Vulkan rounded rectangle pixel fix (wgpu v0.18.1)
-- v0.31.0: Text API redesign, DrawStringWrapped, Tier 5 accumulation, PipelineMode wiring
+- wgpu public API migration (zero hal imports in production GPU code)
+- Font hinting, ClearType LCD subpixel rendering
+- Premultiplied alpha, 29 blend modes, structured logging
 
 ---
 
 ## Upcoming
 
-### v0.33.0 — Text Transform Optimizations
-- [ ] Recording system CTM-aware text (separate task)
-- [ ] MeasureString with CTM (separate task)
-- [ ] Glyph outline cache optimization
-- [ ] Scaled Face cache with quantized sizes (Skia sk_relax pattern)
+### v0.38.0 — Planned
+- [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
+- [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
+- [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
+- [ ] naga MSL compute shader support (threadgroup vars, mem_flags)
+- [ ] Fix dashQuad/dashCubic off-by-one iteration bug (found by tests)
 
-### v0.32.1 — CPU Text Transform ✅ Released
-- [x] CPU hybrid text transform (TEXT-002): 3-tier decision tree (Skia/Cairo/Vello)
-- [x] Tier 0: Translation-only → bitmap fast path
-- [x] Tier 1: Uniform scale ≤256px → bitmap at device size (Strategy A)
-- [x] Tier 2: Rotation/shear/non-uniform/mirror → glyph outlines as paths (Strategy B)
-- [x] MultiFace graceful degradation
-- [x] Lazy OutlineExtractor on Context
-- [x] GPU MSDF text transform support (TEXT-001, #146)
+### v0.37.4 — HiDPI Coordinate Fix 🔧 In Progress
+- [x] Separate deviceMatrix from user CTM (Cairo/Skia/Blend2D pattern) (#218)
+- [x] Test coverage 77% → 81.5% for awesome-go submission
+- [x] Found dashQuad/dashCubic off-by-one bug via tests
 
-### v0.32.0 — Smart Multi-Engine Rasterizer ✅ Released
-- [x] CoverageFiller interface with registration pattern
-- [x] SparseStripsFiller (4×4 tiles) + TileComputeFiller (16×16 tiles)
-- [x] AdaptiveFiller auto-selection (segment count + canvas area)
-- [x] Adaptive threshold formula per-path
-- [x] RasterizerMode API (Auto/Analytic/SparseStrips/TileCompute/SDF)
-- [x] ForceableFiller + ForceSDFAware interfaces
-- [x] `gg/raster/` CPU-only tile registration package
-- [x] SDF minimum size check (16px)
+### v0.37.0–v0.37.3 ✅ Released
+- [x] Migrate internal/gpu from hal to wgpu public API (zero hal imports)
+- [x] Explicit SetViewport in all GPU render passes (#171)
+- [x] Universal `ggcanvas.Render()` — one call, all backends
+- [x] GLES/Software backend support
+- [x] Pipeline clip recreation fix
+- [x] naga v0.14.7–v0.14.8, wgpu v0.21.0–v0.21.3
 
-### v0.25.0 — Rendering Quality ✅ Released
-- [x] Vello tile-based analytic AA rasterizer
-- [x] VelloLine float pipeline (bypass fixed-point quantization)
+### v0.36.0–v0.36.4 ✅ Released
+- [x] GPU Glyph Mask Cache (Tier 6) — CPU rasterize → R8 alpha atlas → GPU composite
+- [x] RoundRectShape with SDF tile rendering
+- [x] BeginClip/EndClip in tile renderer
+- [x] Font hinting (auto-hinter ≤48px), ClearType LCD infrastructure
+- [x] GPU scissor rect clipping (GPU-CLIP-001)
+- [x] GPU RRect SDF clip in fragment shaders (GPU-CLIP-002)
+- [x] naga MSL buffer(0) collision fix (v0.14.7)
 
-### v0.26.0 — Architecture Refactor ✅ Released
-- [x] Extract internal/raster core package
-- [x] GPUAccelerator interface with transparent fallback
-- [x] Remove backend/ abstraction layer
-- [x] Move implementation details to internal/
-- [x] Clean go.mod dependencies
+### v0.33.0–v0.35.3 ✅ Released
+- [x] Text DPI scaling, MSDF fixes, TextMode API, vector text
+- [x] HiDPI/Retina platform support (gogpu v0.23.0+)
+- [x] MSDF atlas FontID collision fix
 
-### v0.27.0 — GPU Acceleration Foundation ✅ Released
-- [x] gg/gpu package with wgpu-based GPUAccelerator
-- [x] SDF GPU acceleration for circles, ellipses, rects, rounded rects
-- [x] Compute shader pipeline via naga WGSL compiler
-- [x] Structured logging via log/slog
-
-### v0.28.0 — Three-Tier GPU Rendering ✅ Released
-- [x] Three-tier GPU render pipeline (SDF + Convex + Stencil-then-Cover)
-- [x] Fan tessellator for path-to-triangle conversion
-- [x] RenderDirect zero-copy GPU surface rendering
-- [x] EvenOdd fill rule support in stencil pipeline
-- [x] ggcanvas deferred texture destruction for DX12 stability
-
-### v0.29.4 — Scene Renderer Bug Fixes ✅ Released
-- [x] Delegate rasterization to gg.SoftwareRenderer (#124)
-- [x] sync.Pool per-tile SoftwareRenderer/Pixmap reuse
-- [x] Premultiplied source-over alpha compositing in tile compositor
-- [x] Background preservation (no more tile data destruction)
-- [x] Full curve support in scene strokes (CubicTo, QuadTo)
-
-### v0.30.0 — Vello Compute Pipeline ✅ Released
-- [x] 9-stage compute pipeline (pathtag → path_tiling → fine) ported from vello
-- [x] 9 WGSL compute shaders with hal-based GPU dispatch
-- [x] tilecompute CPU reference implementation (RasterizeScenePTCL)
-- [x] Scene encoding: PathDef → EncodeScene → PackScene → flat u32 buffer
-- [x] Euler spiral curve flattening (Levien's algorithm)
-- [x] PipelineMode API (Auto/RenderPass/Compute)
-- [x] GPU vs CPU golden tests (7 scenes, 0% pixel diff)
-- [ ] VelloAccelerator integration with GPUAccelerator interface
-- [ ] Auto-selection heuristics for PipelineModeAuto
-
-### v0.29.0 — GPU Text Rendering ✅ Released
-- [x] MSDF text pipeline (Tier 4 in GPURenderSession)
-- [x] WGSL MSDF fragment shader (median + smoothstep)
-- [x] Persistent text vertex/index/uniform buffers
-- [x] Atlas generation from font glyphs
-- [x] DrawString → GPU text batch integration
+### v0.25.0–v0.32.1 ✅ Released
+- [x] Vello tile-based AA, architecture refactor, GPU acceleration
+- [x] Five-tier GPU rendering, MSDF text, Vello 9-stage compute
+- [x] Smart multi-engine rasterizer, CoverageFiller, RasterizerMode
+- [x] Text API redesign, CPU text transform, Recording System
 
 ### v1.0.0 — Production Release
 - [ ] API stability guarantee
@@ -186,39 +130,24 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.32.1** | 2026-02 | CPU text transform (3-tier hybrid: Skia/Cairo/Vello), GPU MSDF text transform (#146) |
-| v0.32.0 | 2026-02 | Smart multi-engine rasterizer (5 algorithms), adaptive threshold, RasterizerMode API, gg/raster/ package |
-| v0.31.1 | 2026-02 | Vulkan rounded rectangle pixel fix (wgpu v0.18.1) |
-| v0.31.0 | 2026-02 | Text API redesign, DrawStringWrapped, color.Color, Tier 5 accumulation, PipelineMode wiring, shader cleanup, wgpu v0.18.0 |
-| v0.30.2 | 2026-02 | Vello buffer overflow fix, WrapText hard line breaks, wgpu v0.16.17 |
-| v0.30.1 | 2026-02 | wgpu v0.16.15 (software backend always compiled, gogpu#106) |
-| v0.30.0 | 2026-02 | Vello 9-stage compute pipeline, GPU vs CPU golden tests |
-| v0.29.5 | 2026-02 | AdvanceX drift fix, coverageToRuns maxValue fix (#95) |
-| v0.29.4 | 2026-02 | scene.Renderer delegation to SoftwareRenderer (#124) |
-| v0.29.3 | 2026-02 | wgpu v0.16.12 (Vulkan debug object naming) |
-| v0.29.2 | 2026-02 | wgpu v0.16.11 (Vulkan zero-extent swapchain fix) |
-| v0.29.1 | 2026-02 | wgpu v0.16.10, naga v0.14.2 |
-| v0.29.0 | 2026-02 | GPU MSDF text pipeline, four-tier rendering, GPU strokes |
-| v0.28.6 | 2026-02 | wgpu v0.16.6 (Metal debug logging, goffi v0.3.9) |
-| v0.28.5 | 2026-02 | wgpu v0.16.5 (per-encoder command pools) |
-| v0.28.4 | 2026-02 | wgpu v0.16.4 (timeline semaphore, FencePool), naga v0.13.1 |
-| v0.28.3 | 2026-02 | wgpu v0.16.3 (per-frame fence tracking, WaitIdle) |
-| v0.28.2 | 2026-02 | Persistent GPU buffers, fence-free submit, buffer pooling |
-| v0.28.1 | 2026-02 | Porter-Duff GPU compositing, event-driven example |
-| v0.28.0 | 2026-02 | Three-tier GPU rendering, RenderDirect, ggcanvas improvements |
-| v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders, structured logging |
-| v0.26.0 | 2026-02 | GPUAccelerator interface, architecture refactor, clean dependencies |
-| v0.25.0 | 2026-02 | Vello tile-based analytic AA rasterizer, VelloLine float pipeline |
-| v0.24.x | 2026-02 | Premultiplied alpha, HarfBuzz shaping, WebP, gogpu_integration |
-| v0.23.0 | 2026-02 | Recording System for vector export (PDF, SVG backends) |
-| v0.22.x | 2026-01/02 | gpucontext.TextureDrawer integration, naga v0.10.0, wgpu v0.13.0 |
-| v0.21.x | 2026-01 | Enterprise architecture, stroke quality fixes |
-| v0.20.x | 2026-01 | GPU backend completion |
-| v0.19.x | 2026-01 | Anti-aliased rendering |
-| v0.15.x | 2025-12 | GPU compute shaders |
-| v0.12-14 | 2025-12 | Brush/Gradients, Go 1.25+, Masks |
-| v0.9-11 | 2025-12 | GPU backend, Scene graph, Text pipeline |
-| v0.1-8 | 2025-12 | Core features |
+| **v0.37.4** | 2026-03 | Separate deviceMatrix/userMatrix (#218), test coverage 81.5% |
+| v0.37.3 | 2026-03 | Universal `ggcanvas.Render()`, GLES/Software support |
+| v0.37.2 | 2026-03 | Pipeline clip recreation + wgpu v0.21.2 validation |
+| v0.37.1 | 2026-03 | wgpu v0.21.1, gogpu v0.24.2 |
+| v0.37.0 | 2026-03 | wgpu public API migration, SetViewport fix (#171), naga v0.14.7 |
+| v0.36.4 | 2026-03 | GPU RRect SDF clip (GPU-CLIP-002), ClipRoundRect API |
+| v0.36.0–3 | 2026-03 | Glyph Mask Tier 6, RoundRectShape, scissor clip, font hinting, ClearType |
+| v0.35.x | 2026-03 | MSDF atlas fixes, text DPI scaling |
+| v0.34.x | 2026-03 | HiDPI/Retina support, diagnostic logging |
+| v0.33.x | 2026-03 | TextMode API, MSDF quality improvements |
+| v0.32.x | 2026-02 | Smart multi-engine rasterizer, CPU text transform |
+| v0.31.x | 2026-02 | Text API redesign, DrawStringWrapped |
+| v0.30.x | 2026-02 | Vello 9-stage compute pipeline |
+| v0.29.x | 2026-02 | GPU MSDF text, scene.Renderer delegation |
+| v0.28.x | 2026-02 | Three-tier GPU rendering, RenderDirect |
+| v0.27.x | 2026-02 | SDF GPU acceleration, compute shaders |
+| v0.25–26 | 2026-02 | Vello AA rasterizer, architecture refactor |
+| v0.1–24 | 2025-12 – 2026-02 | Core features, GPU backend, text, images, recording |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed release notes**
 

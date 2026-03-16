@@ -4,6 +4,7 @@
 package surface
 
 import (
+	"image"
 	"image/color"
 	"testing"
 )
@@ -251,7 +252,352 @@ func TestPointCreation(t *testing.T) {
 	}
 }
 
-// TestSolidPattern tests SolidPattern.
+// --- Registry tests ---
+
+func TestRegistryRegisterAndList(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("test-backend", 50, factory, nil)
+
+	names := reg.List()
+	if len(names) != 1 || names[0] != "test-backend" {
+		t.Errorf("List() = %v, want [test-backend]", names)
+	}
+}
+
+func TestRegistryGet(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("my-backend", 10, factory, nil)
+
+	entry, ok := reg.Get("my-backend")
+	if !ok {
+		t.Fatal("Get returned false for registered backend")
+	}
+	if entry.Name != "my-backend" {
+		t.Errorf("entry.Name = %q, want %q", entry.Name, "my-backend")
+	}
+
+	_, ok = reg.Get("nonexistent")
+	if ok {
+		t.Error("Get returned true for unregistered backend")
+	}
+}
+
+func TestRegistryUnregisterExtended(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("temp-backend", 10, factory, nil)
+	reg.Unregister("temp-backend")
+
+	_, ok := reg.Get("temp-backend")
+	if ok {
+		t.Error("Get returned true after Unregister")
+	}
+}
+
+func TestRegistryNewSurfaceExtended(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("sw", 10, factory, nil)
+
+	s, err := reg.NewSurface(Options{Width: 100, Height: 100})
+	if err != nil {
+		t.Fatalf("NewSurface: %v", err)
+	}
+	if s == nil {
+		t.Fatal("NewSurface returned nil")
+	}
+	_ = s.Close()
+}
+
+func TestRegistryNewSurfaceByNameExtended(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("named-sw", 10, factory, nil)
+
+	s, err := reg.NewSurfaceByName("named-sw", Options{Width: 50, Height: 50})
+	if err != nil {
+		t.Fatalf("NewSurfaceByName: %v", err)
+	}
+	if s == nil {
+		t.Fatal("NewSurfaceByName returned nil")
+	}
+	_ = s.Close()
+
+	// Non-existent should error
+	_, err = reg.NewSurfaceByName("nonexistent", Options{Width: 50, Height: 50})
+	if err == nil {
+		t.Error("NewSurfaceByName should error for unknown backend")
+	}
+}
+
+func TestRegistryPriority(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("low", 10, factory, nil)
+	reg.Register("high", 100, factory, nil)
+	reg.Register("medium", 50, factory, nil)
+
+	names := reg.List()
+	if len(names) != 3 {
+		t.Fatalf("List() returned %d entries, want 3", len(names))
+	}
+	if names[0] != "high" {
+		t.Errorf("first entry = %q, want %q (highest priority)", names[0], "high")
+	}
+}
+
+func TestRegistryAvailability(t *testing.T) {
+	reg := NewRegistry()
+
+	factory := func(opts Options) (Surface, error) {
+		return NewImageSurface(opts.Width, opts.Height), nil
+	}
+
+	reg.Register("available", 50, factory, func() bool { return true })
+	reg.Register("unavailable", 100, factory, func() bool { return false })
+
+	available := reg.Available()
+	if len(available) != 1 || available[0] != "available" {
+		t.Errorf("Available() = %v, want [available]", available)
+	}
+}
+
+func TestGlobalRegistryFunctions(t *testing.T) {
+	// Test global wrappers (they use globalRegistry)
+	names := List()
+	_ = names // just verify it doesn't panic
+
+	avail := Available()
+	_ = avail
+}
+
+// --- FillStyle/StrokeStyle extended tests ---
+
+func TestFillStyleWithPattern(t *testing.T) {
+	style := DefaultFillStyle()
+	pat := SolidPattern{Color: color.RGBA{255, 0, 0, 255}}
+	style = style.WithPattern(&pat)
+	if style.Pattern == nil {
+		t.Error("expected pattern to be set")
+	}
+}
+
+func TestStrokeStyleWithColor(t *testing.T) {
+	style := DefaultStrokeStyle()
+	style = style.WithColor(color.RGBA{0, 255, 0, 255})
+	if style.Color == nil {
+		t.Error("expected color to be set")
+	}
+}
+
+func TestStrokeStyleWithPattern(t *testing.T) {
+	style := DefaultStrokeStyle()
+	pat := SolidPattern{Color: color.RGBA{0, 0, 255, 255}}
+	style = style.WithPattern(&pat)
+	if style.Pattern == nil {
+		t.Error("expected pattern to be set")
+	}
+}
+
+func TestDefaultOptions(t *testing.T) {
+	opts := DefaultOptions(800, 600)
+	if opts.Width != 800 || opts.Height != 600 {
+		t.Errorf("DefaultOptions = %dx%d, want 800x600", opts.Width, opts.Height)
+	}
+	if !opts.Antialias {
+		t.Error("expected Antialias=true by default")
+	}
+}
+
+// --- Path extended tests ---
+
+func TestPathArc(t *testing.T) {
+	p := NewPath()
+	p.Arc(100, 100, 50, 0, 3.14159)
+	if p.IsEmpty() {
+		t.Error("arc path should not be empty")
+	}
+}
+
+func TestPathBoundsEmpty(t *testing.T) {
+	p := NewPath()
+	minX, minY, maxX, maxY := p.Bounds()
+	if minX != 0 || minY != 0 || maxX != 0 || maxY != 0 {
+		t.Errorf("empty path bounds = (%v,%v,%v,%v), want (0,0,0,0)", minX, minY, maxX, maxY)
+	}
+}
+
+// --- ImageSurface extended ---
+
+func TestImageSurfaceDrawImageWithAlpha(t *testing.T) {
+	s := NewImageSurface(100, 100)
+	defer func() { _ = s.Close() }()
+
+	s.Clear(color.White)
+
+	// Create source image
+	src := newTestImageRGBA(20, 20, color.RGBA{255, 0, 0, 255})
+
+	// Draw with alpha < 1.0
+	s.DrawImage(src, Pt(10, 10), &DrawImageOptions{
+		Alpha: 0.5,
+	})
+
+	img := s.Snapshot()
+	c := img.RGBAAt(15, 15)
+	// Should be blended (not pure red due to 50% alpha)
+	if c.R == 255 && c.G == 0 {
+		t.Error("expected alpha-blended pixel, got pure red")
+	}
+}
+
+func TestImageSurfaceDrawImageWithSrcRect(t *testing.T) {
+	s := NewImageSurface(100, 100)
+	defer func() { _ = s.Close() }()
+
+	s.Clear(color.White)
+
+	// Create 20x20 source image
+	src := newTestImageRGBA(20, 20, color.RGBA{0, 0, 255, 255})
+
+	// Draw only a portion
+	srcRect := newRect(5, 5, 10, 10)
+	s.DrawImage(src, Pt(30, 30), &DrawImageOptions{
+		SrcRect: &srcRect,
+	})
+}
+
+func TestImageSurfaceStrokeWithCurves(t *testing.T) {
+	s := NewImageSurface(100, 100)
+	defer func() { _ = s.Close() }()
+
+	s.Clear(color.White)
+
+	path := NewPath()
+	path.MoveTo(10, 50)
+	path.QuadTo(50, 10, 90, 50)
+	s.Stroke(path, StrokeStyle{
+		Color: color.RGBA{255, 0, 0, 255},
+		Width: 3,
+	})
+}
+
+func TestImageSurfaceStrokeWithCubicCurves(t *testing.T) {
+	s := NewImageSurface(100, 100)
+	defer func() { _ = s.Close() }()
+
+	s.Clear(color.White)
+
+	path := NewPath()
+	path.MoveTo(10, 50)
+	path.CubicTo(30, 10, 70, 90, 90, 50)
+	s.Stroke(path, StrokeStyle{
+		Color: color.RGBA{0, 255, 0, 255},
+		Width: 2,
+	})
+}
+
+func TestImageSurfaceSnapshotAfterClose(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	_ = s.Close()
+	snap := s.Snapshot()
+	if snap != nil {
+		t.Error("Snapshot after Close should return nil")
+	}
+}
+
+func TestImageSurfaceNilPathFill(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	defer func() { _ = s.Close() }()
+	s.Fill(nil, FillStyle{Color: color.Black})
+}
+
+func TestImageSurfaceEmptyPathFill(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	defer func() { _ = s.Close() }()
+	s.Fill(NewPath(), FillStyle{Color: color.Black})
+}
+
+func TestImageSurfaceNilPathStroke(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	defer func() { _ = s.Close() }()
+	s.Stroke(nil, StrokeStyle{Color: color.Black, Width: 2})
+}
+
+func TestImageSurfaceNilImageDraw(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	defer func() { _ = s.Close() }()
+	s.DrawImage(nil, Pt(0, 0), nil)
+}
+
+func TestImageSurfaceDrawImageOutOfBounds(t *testing.T) {
+	s := NewImageSurface(10, 10)
+	defer func() { _ = s.Close() }()
+
+	src := newTestImageRGBA(5, 5, color.RGBA{255, 0, 0, 255})
+
+	// Draw partially out of bounds - should not panic
+	s.DrawImage(src, Pt(-3, -3), nil)
+	s.DrawImage(src, Pt(8, 8), nil)
+}
+
+func TestImageSurfaceStrokeZeroWidth(t *testing.T) {
+	s := NewImageSurface(100, 100)
+	defer func() { _ = s.Close() }()
+
+	path := NewPath()
+	path.MoveTo(10, 50)
+	path.LineTo(90, 50)
+	// Zero width should result in nil stroke path
+	s.Stroke(path, StrokeStyle{
+		Color: color.Black,
+		Width: 0,
+	})
+}
+
+// --- SolidPattern tests ---
+
+// helper: create test image
+func newTestImageRGBA(w, h int, c color.RGBA) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
+}
+
+func newRect(x, y, w, h int) image.Rectangle {
+	return image.Rect(x, y, x+w, y+h)
+}
+
 func TestSolidPattern(t *testing.T) {
 	pattern := SolidPattern{Color: color.RGBA{128, 64, 32, 255}}
 

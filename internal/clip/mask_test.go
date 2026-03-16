@@ -514,6 +514,110 @@ func pointsEqual(p1, p2 Point, epsilon float64) bool {
 	return dx < epsilon && dy < epsilon
 }
 
+// --- Non-AA rasterization tests ---
+
+func TestMaskClipper_NonAA(t *testing.T) {
+	// Test non-anti-aliased rasterization path
+	elements := []PathElement{
+		MoveTo{Point: Pt(5, 5)},
+		LineTo{Point: Pt(45, 5)},
+		LineTo{Point: Pt(45, 45)},
+		LineTo{Point: Pt(5, 45)},
+		Close{},
+	}
+
+	bounds := NewRect(0, 0, 50, 50)
+	mc, err := NewMaskClipper(elements, bounds, false) // false = non-AA
+	if err != nil {
+		t.Fatalf("NewMaskClipper(non-AA) error = %v", err)
+	}
+
+	// Inside should have coverage
+	inside := mc.Coverage(25, 25)
+	if inside == 0 {
+		t.Error("non-AA: inside point should have coverage")
+	}
+
+	// Outside should have zero coverage
+	outside := mc.Coverage(2, 2)
+	if outside != 0 {
+		t.Errorf("non-AA: outside point coverage = %d, want 0", outside)
+	}
+}
+
+func TestMaskClipper_LargeTriangle(t *testing.T) {
+	// Test with a larger shape to exercise more scanlines
+	elements := []PathElement{
+		MoveTo{Point: Pt(50, 10)},
+		LineTo{Point: Pt(10, 90)},
+		LineTo{Point: Pt(90, 90)},
+		Close{},
+	}
+
+	bounds := NewRect(0, 0, 100, 100)
+	mc, err := NewMaskClipper(elements, bounds, true)
+	if err != nil {
+		t.Fatalf("NewMaskClipper() error = %v", err)
+	}
+
+	// Center of triangle should have full coverage
+	center := mc.Coverage(50, 60)
+	if center == 0 {
+		t.Error("center of large triangle should have coverage")
+	}
+}
+
+func TestMaskClipper_ApplyCoverageOutside(t *testing.T) {
+	elements := []PathElement{
+		MoveTo{Point: Pt(10, 10)},
+		LineTo{Point: Pt(90, 10)},
+		LineTo{Point: Pt(90, 90)},
+		LineTo{Point: Pt(10, 90)},
+		Close{},
+	}
+
+	bounds := NewRect(0, 0, 100, 100)
+	mc, err := NewMaskClipper(elements, bounds, true)
+	if err != nil {
+		t.Fatalf("NewMaskClipper() error = %v", err)
+	}
+
+	// Apply coverage outside — should return 0
+	result := mc.ApplyCoverage(2, 2, 200)
+	if result != 0 {
+		t.Errorf("ApplyCoverage(outside) = %d, want 0", result)
+	}
+
+	// Apply coverage inside with full alpha
+	result = mc.ApplyCoverage(50, 50, 255)
+	if result == 0 {
+		t.Error("ApplyCoverage(inside, 255) should be > 0")
+	}
+}
+
+func TestMaskClipper_HorizontalEdge(t *testing.T) {
+	// Path with a horizontal segment (should be skipped in edge building)
+	elements := []PathElement{
+		MoveTo{Point: Pt(0, 10)},
+		LineTo{Point: Pt(20, 10)}, // horizontal — should be skipped
+		LineTo{Point: Pt(20, 20)},
+		LineTo{Point: Pt(0, 20)},
+		Close{},
+	}
+
+	bounds := NewRect(0, 0, 20, 30)
+	mc, err := NewMaskClipper(elements, bounds, true)
+	if err != nil {
+		t.Fatalf("NewMaskClipper() error = %v", err)
+	}
+
+	// Should still have coverage in the filled area
+	cov := mc.Coverage(10, 15)
+	if cov == 0 {
+		t.Error("should have coverage in filled area despite horizontal edge")
+	}
+}
+
 // Benchmark tests
 func BenchmarkNewMaskClipper_Rectangle(b *testing.B) {
 	elements := []PathElement{

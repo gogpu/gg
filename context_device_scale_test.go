@@ -185,7 +185,7 @@ func TestResizeWithDeviceScale(t *testing.T) {
 	}
 }
 
-func TestIdentityResetsToBaseMatrix(t *testing.T) {
+func TestIdentityResetsToIdentity(t *testing.T) {
 	dc := NewContext(800, 600, WithDeviceScale(2.0))
 	defer func() { _ = dc.Close() }()
 
@@ -196,11 +196,82 @@ func TestIdentityResetsToBaseMatrix(t *testing.T) {
 	// Reset to identity
 	dc.Identity()
 
-	// Should be back to base matrix (Scale(2, 2)), not pure identity.
-	// Verify by transforming a point: (1, 0) should map to (2, 0)
+	// Should be back to pure identity — device scale is separate.
+	// TransformPoint uses only the user matrix.
 	px, py := dc.TransformPoint(1, 0)
-	if px != 2.0 || py != 0.0 {
-		t.Errorf("TransformPoint(1, 0) = (%f, %f), want (2, 0) after Identity() with scale 2x", px, py)
+	if px != 1.0 || py != 0.0 {
+		t.Errorf("TransformPoint(1, 0) = (%f, %f), want (1, 0) after Identity()", px, py)
+	}
+}
+
+func TestGetCurrentPointWithDeviceScale(t *testing.T) {
+	dc := NewContext(100, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	dc.MoveTo(50, 60)
+	x, y, ok := dc.GetCurrentPoint()
+	if !ok {
+		t.Fatal("expected current point")
+	}
+	if x != 50 || y != 60 {
+		t.Errorf("GetCurrentPoint() = (%v, %v), want (50, 60)", x, y)
+	}
+}
+
+func TestCoordinateRoundTrip(t *testing.T) {
+	dc := NewContext(100, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	dc.MoveTo(25, 30)
+	x, y, _ := dc.GetCurrentPoint()
+	dc.LineTo(x+10, y+10) // Should NOT double-transform
+	x2, y2, _ := dc.GetCurrentPoint()
+	if x2 != 35 || y2 != 40 {
+		t.Errorf("after LineTo(x+10, y+10): got (%v, %v), want (35, 40)", x2, y2)
+	}
+}
+
+func TestGetTransformUserSpace(t *testing.T) {
+	dc := NewContext(100, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	m := dc.GetTransform()
+	// Should be Identity, not Scale(2, 2)
+	if m.A != 1 || m.E != 1 || m.B != 0 || m.D != 0 {
+		t.Errorf("GetTransform() = %+v, want Identity", m)
+	}
+}
+
+func TestFillAtDeviceScale(t *testing.T) {
+	dc := NewContext(10, 10, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, 1, 1)
+	_ = dc.Fill()
+
+	img := dc.Image()
+	// Physical image should be 20x20
+	if img.Bounds().Dx() != 20 || img.Bounds().Dy() != 20 {
+		t.Errorf("bounds = %v, want 20x20", img.Bounds())
+	}
+}
+
+func TestClipRectDeviceScale(t *testing.T) {
+	dc := NewContext(100, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc.Close() }()
+
+	dc.ClipRect(10, 10, 50, 50)
+	// Should clip correctly in user-space coordinates.
+	// Verify drawing outside clip produces no pixels.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, 5, 5) // Outside clip (10,10)-(60,60)
+	_ = dc.Fill()
+	// The rectangle (0,0)-(5,5) is outside the clip (10,10)-(60,60)
+	// so no red pixels should appear at physical pixel (0,0).
+	px := dc.pixmap.GetPixel(0, 0)
+	if px.R != 0 {
+		t.Errorf("pixel outside clip should be transparent, got r=%v", px.R)
 	}
 }
 

@@ -178,7 +178,7 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 	scaleY := dstHeight / float64(srcH)
 
 	// Transform destination rectangle to device coordinates for the anchor.
-	topLeft := c.matrix.TransformPoint(Pt(opts.X, opts.Y))
+	topLeft := c.totalMatrix().TransformPoint(Pt(opts.X, opts.Y))
 
 	// Create image pattern anchored at the destination position.
 	pattern := &ImagePattern{

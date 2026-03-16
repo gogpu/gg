@@ -826,6 +826,55 @@ func TestStrokeClipped(t *testing.T) {
 	}
 }
 
+// --- ImagePattern setter methods ---
+
+func TestImagePatternSetters(t *testing.T) {
+	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
+	p := &ImagePattern{image: img, w: 10, h: 10}
+
+	// SetAnchor
+	p.SetAnchor(100, 200)
+	if p.anchorX != 100 || p.anchorY != 200 {
+		t.Errorf("SetAnchor: got (%f,%f), want (100,200)", p.anchorX, p.anchorY)
+	}
+
+	// SetOpacity
+	p.SetOpacity(0.75)
+	if p.opacity != 0.75 {
+		t.Errorf("SetOpacity: got %f, want 0.75", p.opacity)
+	}
+
+	// SetClamp
+	p.SetClamp(true)
+	if !p.clamp {
+		t.Error("SetClamp(true): expected true")
+	}
+	p.SetClamp(false)
+	if p.clamp {
+		t.Error("SetClamp(false): expected false")
+	}
+
+	// SetScale
+	p.SetScale(3.0, 4.0)
+	if p.scaleX != 3.0 || p.scaleY != 4.0 {
+		t.Errorf("SetScale: got (%f,%f), want (3,4)", p.scaleX, p.scaleY)
+	}
+}
+
+func TestLoadImageNonexistent(t *testing.T) {
+	_, err := LoadImage("/nonexistent/path/image.png")
+	if err == nil {
+		t.Error("LoadImage of nonexistent file should return error")
+	}
+}
+
+func TestLoadWebPNonexistent(t *testing.T) {
+	_, err := LoadWebP("/nonexistent/path/image.webp")
+	if err == nil {
+		t.Error("LoadWebP of nonexistent file should return error")
+	}
+}
+
 // makeTestImage creates a solid-color test image with the given RGBA values.
 func makeTestImage(t *testing.T, width, height int, r, g, b, a uint8) *ImageBuf { //nolint:unparam // a=255 is intentional in tests; keeping param for completeness
 	t.Helper()
