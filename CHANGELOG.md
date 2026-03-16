@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `firstSet`). Intel silently tolerated the spec violation.
   Fixes [ui#52](https://github.com/gogpu/ui/issues/52).
 
+### Dependencies
+
+- wgpu v0.21.1 → v0.21.2 (core validation: Binder, SetBindGroup bounds, draw-time
+  compatibility — prevents crash before it reaches Vulkan driver)
+
 ## [0.37.1] - 2026-03-15
 
 ### Dependencies
