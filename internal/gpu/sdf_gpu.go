@@ -107,9 +107,19 @@ var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
 var _ gg.ForceSDFAware = (*SDFAccelerator)(nil)
 var _ gg.ClipAware = (*SDFAccelerator)(nil)
 var _ gg.RRectClipAware = (*SDFAccelerator)(nil)
+var _ gg.LCDLayoutAware = (*SDFAccelerator)(nil)
 
 // Name returns the accelerator identifier.
 func (a *SDFAccelerator) Name() string { return "sdf-gpu" }
+
+// SetLCDLayout propagates the LCD subpixel layout to the glyph mask engine.
+// The engine clears its atlas when the layout changes (masks are layout-specific).
+func (a *SDFAccelerator) SetLCDLayout(layout text.LCDLayout) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ensureGlyphMaskEngine()
+	a.glyphMaskEngine.SetLCDLayout(layout)
+}
 
 // SetForceSDF propagates the force-SDF flag to the CPU fallback accelerator.
 // When enabled, the CPU fallback skips the minimum size check for SDF shapes.
@@ -479,8 +489,6 @@ func (a *SDFAccelerator) BeginFrame() {
 // vertex shader.
 //
 // Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
-//
-//nolint:dupl // Intentional: mirrors DrawGlyphMaskText structure; each method owns its engine/batch type.
 func (a *SDFAccelerator) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
@@ -1080,9 +1088,15 @@ func (a *SDFAccelerator) syncTextAtlases() error {
 // the R8 alpha atlas at the exact device pixel size, then rendered as
 // textured quads in the unified render pass.
 //
+// ensureGlyphMaskEngine lazily creates the glyph mask engine on first use.
+// Must be called with a.mu held.
+func (a *SDFAccelerator) ensureGlyphMaskEngine() {
+	if a.glyphMaskEngine == nil {
+		a.glyphMaskEngine = NewGlyphMaskEngine()
+	}
+}
+
 // Returns ErrFallbackToCPU if the GPU is not ready or the face type is wrong.
-//
-//nolint:dupl // Intentional: mirrors DrawText structure for MSDF; each method owns its engine/batch type.
 func (a *SDFAccelerator) DrawGlyphMaskText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
@@ -1100,9 +1114,7 @@ func (a *SDFAccelerator) DrawGlyphMaskText(target gg.GPURenderTarget, face any, 
 	}
 
 	// Lazily create the glyph mask engine.
-	if a.glyphMaskEngine == nil {
-		a.glyphMaskEngine = NewGlyphMaskEngine()
-	}
+	a.ensureGlyphMaskEngine()
 
 	// If target changed, flush previous batch first.
 	if a.pendingTarget != nil && !sameTarget(a.pendingTarget, &target) {
@@ -1133,9 +1145,18 @@ func (a *SDFAccelerator) syncGlyphMaskAtlases(batches []GlyphMaskBatch) error {
 		return err
 	}
 
+	// Check if any batch uses LCD mode.
+	hasLCD := false
+	for i := range batches {
+		if batches[i].IsLCD {
+			hasLCD = true
+			break
+		}
+	}
+
 	// Ensure the glyph mask pipeline is initialized before setting atlas views.
 	// SetGlyphMaskAtlasView requires the pipeline's uniformLayout and sampler.
-	if err := a.session.ensureGlyphMaskPipeline(); err != nil {
+	if err := a.session.ensureGlyphMaskPipeline(hasLCD); err != nil {
 		return err
 	}
 
@@ -1145,7 +1166,7 @@ func (a *SDFAccelerator) syncGlyphMaskAtlases(batches []GlyphMaskBatch) error {
 		if view == nil {
 			continue
 		}
-		a.session.SetGlyphMaskAtlasView(i, view)
+		a.session.SetGlyphMaskAtlasView(i, view, batch.IsLCD)
 	}
 	return nil
 }

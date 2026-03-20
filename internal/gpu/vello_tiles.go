@@ -481,7 +481,7 @@ func (tr *TileRasterizer) binSegments(eb *raster.EdgeBuilder, _ float32) {
 // addSegmentToTile clips and adds a segment to a specific tile.
 // Port of path_tiling.rs segment clipping and y_edge calculation.
 //
-//nolint:gocognit,gocyclo,cyclop,funlen,dupl // Direct port of Vello algorithm
+//nolint:gocognit,gocyclo,cyclop,funlen // Direct port of Vello algorithm
 func (tr *TileRasterizer) addSegmentToTile(
 	x0, y0, x1, y1 float32,
 	tileX, tileY int,

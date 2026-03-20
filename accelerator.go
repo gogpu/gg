@@ -375,6 +375,19 @@ type RRectClipAware interface {
 	ClearClipRRect()
 }
 
+// LCDLayoutAware is an optional interface for accelerators that support
+// LCD subpixel (ClearType) text rendering. When the Context calls
+// SetLCDLayout, it propagates the layout to the accelerator so the
+// glyph mask engine can rasterize glyphs with 3x horizontal oversampling
+// and the GPU pipeline selects the LCD fragment shader.
+//
+// Use LCDLayoutRGB for most monitors, LCDLayoutBGR for rare BGR panels,
+// or LCDLayoutNone to disable subpixel rendering (grayscale, the default).
+type LCDLayoutAware interface {
+	// SetLCDLayout sets the LCD subpixel layout for ClearType rendering.
+	SetLCDLayout(layout LCDLayout)
+}
+
 // SceneStatsTracker is an optional interface for accelerators that track
 // per-frame scene statistics for auto pipeline selection. The Context
 // does not call these methods directly — the accelerator uses them internally.

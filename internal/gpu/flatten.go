@@ -23,7 +23,6 @@ const FlattenTolerance = 0.25
 //
 // Returns a SegmentList containing all flattened line segments.
 //
-//nolint:dupl // Duplicated with FlattenPathTo for API convenience - avoids callback overhead
 func FlattenPath(path *scene.Path, transform scene.Affine, tolerance float32) *SegmentList {
 	segments := NewSegmentList()
 
@@ -389,7 +388,6 @@ func (ctx *FlattenContext) Segments() *SegmentList {
 //
 // This avoids allocating a new SegmentList for each path.
 //
-//nolint:dupl // Duplicated with FlattenPath for API convenience - avoids callback overhead
 func (ctx *FlattenContext) FlattenPathTo(path *scene.Path, transform scene.Affine, tolerance float32) {
 	if path == nil || path.IsEmpty() {
 		return

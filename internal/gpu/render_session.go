@@ -1358,7 +1358,17 @@ func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (
 	if len(batches) == 0 {
 		return nil, nil //nolint:nilnil // no glyph mask text to render
 	}
-	if err := s.ensureGlyphMaskPipeline(); err != nil {
+
+	// Check if any batch uses LCD mode.
+	hasLCD := false
+	for i := range batches {
+		if batches[i].IsLCD {
+			hasLCD = true
+			break
+		}
+	}
+
+	if err := s.ensureGlyphMaskPipeline(hasLCD); err != nil {
 		slogger().Warn("glyph mask pipeline init failed", "err", err)
 		return nil, nil //nolint:nilnil // non-fatal, skip glyph mask text
 	}
@@ -1370,14 +1380,21 @@ func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (
 }
 
 // ensureGlyphMaskPipeline creates the glyph mask pipeline on demand. Called
-// only when glyph mask batches are present.
-func (s *GPURenderSession) ensureGlyphMaskPipeline() error {
+// only when glyph mask batches are present. If hasLCD is true, also creates
+// the LCD pipeline variant for ClearType rendering.
+func (s *GPURenderSession) ensureGlyphMaskPipeline(hasLCD bool) error {
 	if s.glyphMaskPipeline == nil {
 		s.glyphMaskPipeline = NewGlyphMaskPipeline(s.device, s.queue)
 	}
 	s.glyphMaskPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.glyphMaskPipeline.ensurePipelineWithStencil(); err != nil {
 		return fmt.Errorf("glyph mask pipeline: %w", err)
+	}
+	if hasLCD {
+		if err := s.glyphMaskPipeline.ensureLCDPipelineWithStencil(); err != nil {
+			slogger().Warn("glyph mask LCD pipeline init failed, falling back to grayscale", "err", err)
+			// Non-fatal: LCD batches will render with the grayscale pipeline.
+		}
 	}
 	return nil
 }
@@ -1459,10 +1476,40 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 		return nil, fmt.Errorf("write glyph mask index buffer: %w", err)
 	}
 
-	// Grow uniform buffer and bind group pools to match batch count.
-	s.ensureGlyphMaskBatchPools(len(batches))
+	// Determine if this frame uses LCD mode (all batches share the same mode
+	// because the GlyphMaskEngine uses a single LCD layout per frame).
+	frameIsLCD := hasLCDBatches(batches)
 
-	// Build per-batch draw calls with individual uniform buffers.
+	// Use the max uniform size (96 bytes) for the pool so we never need to
+	// recreate buffers when switching between grayscale and LCD modes.
+	s.ensureGlyphMaskBatchPools(len(batches), glyphMaskLCDUniformSize)
+
+	// Build per-batch draw calls.
+	drawCalls, err := s.buildGlyphMaskDrawCalls(batches)
+	if err != nil {
+		return nil, err
+	}
+
+	return &glyphMaskFrameResources{
+		vertBuf:   s.glyphMaskVertBuf,
+		idxBuf:    s.glyphMaskIdxBuf,
+		drawCalls: drawCalls,
+		isLCD:     frameIsLCD,
+	}, nil
+}
+
+// hasLCDBatches returns true if any batch uses LCD subpixel rendering.
+func hasLCDBatches(batches []GlyphMaskBatch) bool {
+	for i := range batches {
+		if batches[i].IsLCD {
+			return true
+		}
+	}
+	return false
+}
+
+// buildGlyphMaskDrawCalls creates per-batch draw calls with uniform data upload.
+func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch) ([]glyphMaskDrawCall, error) {
 	drawCalls := make([]glyphMaskDrawCall, 0, len(batches))
 	quadOffset := 0
 
@@ -1473,17 +1520,18 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 		}
 
 		// Write uniform data for this batch.
-		uniformData := makeGlyphMaskUniform(batch.Transform, batch.Color)
+		var uniformData []byte
+		if batch.IsLCD {
+			uniformData = makeGlyphMaskLCDUniform(batch.Transform, batch.Color, batch.AtlasWidth, batch.AtlasHeight)
+		} else {
+			uniformData = makeGlyphMaskUniform(batch.Transform, batch.Color)
+		}
 		if err := s.queue.WriteBuffer(s.glyphMaskUniformBufs[i], 0, uniformData); err != nil {
 			return nil, fmt.Errorf("write glyph mask uniform[%d]: %w", i, err)
 		}
 
 		// Ensure bind group exists for this batch.
 		if s.glyphMaskBindGroups[i] == nil {
-			// Get the atlas page texture view for this batch.
-			// The caller (SDFAccelerator) must have synced atlas textures
-			// before calling RenderFrame, so PageTextureView should be valid.
-			// If not, skip this batch.
 			slogger().Warn("glyph mask bind group nil, skipping batch",
 				"index", i, "nQuads", nQuads, "totalBatches", len(batches),
 				"poolLen", len(s.glyphMaskBindGroups))
@@ -1501,21 +1549,17 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 
 		quadOffset += nQuads
 	}
-
-	return &glyphMaskFrameResources{
-		vertBuf:   s.glyphMaskVertBuf,
-		idxBuf:    s.glyphMaskIdxBuf,
-		drawCalls: drawCalls,
-	}, nil
+	return drawCalls, nil
 }
 
 // ensureGlyphMaskBatchPools grows the uniform buffer and bind group pools to
-// at least n entries. Existing entries are preserved.
-func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
+// at least n entries. Existing entries are preserved. The uniformSize parameter
+// is the byte size of each uniform buffer (80 for grayscale, 96 for LCD).
+func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int, uniformSize uint64) {
 	for len(s.glyphMaskUniformBufs) < n {
 		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: fmt.Sprintf("session_glyph_mask_uniform_%d", len(s.glyphMaskUniformBufs)),
-			Size:  glyphMaskUniformSize,
+			Size:  uniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
@@ -1530,11 +1574,15 @@ func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 // SetGlyphMaskAtlasView creates or updates the bind group for a glyph mask
 // batch at the given index, binding the provided atlas texture view. This must
 // be called after syncing atlas textures and before RenderFrame.
-func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu.TextureView) {
+//
+// When isLCD is true and the LCD pipeline is available, the bind group uses
+// the LCD uniform layout (96 bytes with atlas_size) for per-channel alpha
+// compositing. Otherwise, the grayscale layout (80 bytes) is used.
+func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu.TextureView, isLCD bool) {
 	if s.glyphMaskPipeline == nil || atlasView == nil {
 		return
 	}
-	s.ensureGlyphMaskBatchPools(batchIndex + 1)
+	s.ensureGlyphMaskBatchPools(batchIndex+1, glyphMaskLCDUniformSize)
 	if batchIndex >= len(s.glyphMaskBindGroups) {
 		return
 	}
@@ -1543,11 +1591,20 @@ func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu
 		s.glyphMaskBindGroups[batchIndex].Release()
 		s.glyphMaskBindGroups[batchIndex] = nil
 	}
+
+	// Select layout and uniform size based on LCD mode.
+	layout := s.glyphMaskPipeline.uniformLayout
+	uniformSize := uint64(glyphMaskUniformSize)
+	if isLCD && s.glyphMaskPipeline.lcdUniformLayout != nil {
+		layout = s.glyphMaskPipeline.lcdUniformLayout
+		uniformSize = glyphMaskLCDUniformSize
+	}
+
 	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 		Label:  fmt.Sprintf("session_glyph_mask_bind_%d", batchIndex),
-		Layout: s.glyphMaskPipeline.uniformLayout,
+		Layout: layout,
 		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: s.glyphMaskUniformBufs[batchIndex], Offset: 0, Size: glyphMaskUniformSize},
+			{Binding: 0, Buffer: s.glyphMaskUniformBufs[batchIndex], Offset: 0, Size: uniformSize},
 			{Binding: 1, TextureView: atlasView},
 			{Binding: 2, Sampler: s.glyphMaskPipeline.sampler},
 		},
@@ -1990,6 +2047,7 @@ func (s *GPURenderSession) sliceGlyphMaskResources(
 		vertBuf:   combined.vertBuf,
 		idxBuf:    combined.idxBuf,
 		drawCalls: combined.drawCalls[dcStart : dcStart+dcCount],
+		isLCD:     combined.isLCD,
 	}
 }
 

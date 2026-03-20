@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **ClearType LCD subpixel text rendering pipeline** — dual GPU pipeline (Skia pattern)
+  for LCD subpixel text. CPU rasterizes glyphs at 3x horizontal oversampling with LCD
+  FIR filter, GPU composites per-channel alpha via dedicated `glyph_mask_lcd.wgsl` shader.
+  Separate LCD pipeline avoids Intel Vulkan uniform struct bug. Public API:
+  `dc.SetLCDLayout(gg.LCDLayoutRGB)` / `LCDLayoutBGR` / `LCDLayoutNone`.
+  Default: `LCDLayoutNone` (grayscale, same as before).
+
+### Changed
+
+- **Extracted GPU pipeline helpers** — `stencilPassthroughDepthStencil()`,
+  `triangleListPrimitive()`, `defaultMultisample()` eliminate duplicate pipeline
+  descriptor boilerplate across 6 GPU tiers.
+
 ## [0.37.4] - 2026-03-16
 
 ### Fixed

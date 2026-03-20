@@ -121,8 +121,7 @@ func (cr *ConvexRenderer) ensurePipeline() error {
 // buffer (Compare=Always, all ops=Keep, write mask=0).
 //
 // The base pipeline (shader, layout) is created first if it doesn't exist.
-func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
-	// Ensure base resources exist (shader, layouts).
+func (cr *ConvexRenderer) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts).
 	if cr.shader == nil || cr.uniformLayout == nil || cr.pipeLayout == nil {
 		if err := cr.createPipeline(); err != nil {
 			return err
@@ -161,33 +160,9 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { //nolint:dupl // G
 				},
 			},
 		},
-		DepthStencil: &wgpu.DepthStencilState{
-			Format:            gputypes.TextureFormatDepth24PlusStencil8,
-			DepthWriteEnabled: false,
-			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilBack: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilReadMask:  0x00,
-			StencilWriteMask: 0x00,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		DepthStencil: stencilPassthroughDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create convex pipeline with stencil: %w", err)
@@ -218,8 +193,7 @@ func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *con
 
 // createPipeline compiles the convex render shader and creates the render
 // pipeline with premultiplied alpha blending and MSAA.
-func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
-	if convexShaderSource == "" {
+func (cr *ConvexRenderer) createPipeline() error {	if convexShaderSource == "" {
 		return fmt.Errorf("convex shader source is empty")
 	}
 
@@ -282,14 +256,8 @@ func (cr *ConvexRenderer) createPipeline() error { //nolint:dupl // GPU pipeline
 				},
 			},
 		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		Primitive:   triangleListPrimitive(),
+		Multisample: defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create convex pipeline: %w", err)

@@ -142,7 +142,6 @@ func (fr *FineRasterizer) initTileWinding(
 // processSegment calculates the winding contribution of a segment to a tile.
 // This is the core of the analytic anti-aliasing algorithm.
 //
-//nolint:dupl // Duplicated with processSegmentForStrip for performance - avoiding abstraction overhead in hot path
 func (fr *FineRasterizer) processSegment(
 	line LineSegment,
 	tileX, tileY uint16,
@@ -806,7 +805,6 @@ func (sr *StripRenderer) initTileWindingForStrip(
 
 // processSegmentForStrip processes a segment for strip rendering.
 //
-//nolint:dupl // Duplicated with processSegment for performance - avoiding abstraction overhead in hot path
 func (sr *StripRenderer) processSegmentForStrip(
 	line LineSegment,
 	tileX, tileY uint16,

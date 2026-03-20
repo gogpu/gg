@@ -279,6 +279,25 @@ func (c *Context) TextMode() TextMode {
 	return c.textMode
 }
 
+// SetLCDLayout sets the LCD subpixel layout for ClearType text rendering.
+// Use LCDLayoutRGB for most monitors, LCDLayoutBGR for rare BGR panels,
+// or LCDLayoutNone to disable subpixel rendering (grayscale, the default).
+//
+// When a GPU accelerator is registered and implements LCDLayoutAware,
+// the layout is propagated so the glyph mask engine rasterizes glyphs
+// with 3x horizontal oversampling and the GPU uses the LCD fragment shader.
+//
+// The setting is per-Context. Call this before drawing text.
+func (c *Context) SetLCDLayout(layout LCDLayout) {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if la, ok := a.(LCDLayoutAware); ok {
+		la.SetLCDLayout(layout)
+	}
+}
+
 // Width returns the logical width of the context.
 // This is the coordinate space used by drawing operations.
 // For the physical pixel dimensions, use PixelWidth.

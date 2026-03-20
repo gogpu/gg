@@ -136,7 +136,7 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	// Color writes are suppressed (WriteMask=None) since this pass only
 	// updates the stencil buffer. A dummy fragment shader is included for
 	// backend compatibility.
-	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{ //nolint:dupl // NonZero vs EvenOdd differ only in stencil ops
+	nonZeroStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "stencil_fill_pipeline",
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
@@ -186,7 +186,7 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	// Even-odd fill rule: both front and back faces invert the stencil value.
 	// A pixel with odd winding count has stencil != 0 (inside), even count
 	// wraps back to 0 (outside). Same shader and layout as the non-zero variant.
-	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{ //nolint:dupl // EvenOdd vs NonZero differ only in stencil ops
+	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "stencil_fill_even_odd_pipeline",
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{

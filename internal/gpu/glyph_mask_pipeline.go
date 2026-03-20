@@ -13,10 +13,13 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// Embedded glyph mask shader source.
+// Embedded glyph mask shader sources.
 //
 //go:embed shaders/glyph_mask.wgsl
 var glyphMaskShaderSource string
+
+//go:embed shaders/glyph_mask_lcd.wgsl
+var glyphMaskLCDShaderSource string
 
 // glyphMaskVertexStride is the byte stride per vertex in the glyph mask pipeline.
 // Layout per vertex (matches MSDF text pipeline for Intel Vulkan driver compat):
@@ -29,13 +32,24 @@ var glyphMaskShaderSource string
 const glyphMaskVertexStride = 16
 
 // glyphMaskUniformSize is the byte size of the glyph mask uniform buffer.
-// Layout:
+// Layout (grayscale):
 //
 //	transform (mat4x4<f32>) = 64 bytes
 //	color     (vec4<f32>)   = 16 bytes
 //
 // Total = 80 bytes.
 const glyphMaskUniformSize = 80
+
+// glyphMaskLCDUniformSize is the byte size of the LCD uniform buffer.
+// Layout:
+//
+//	transform  (mat4x4<f32>) = 64 bytes
+//	color      (vec4<f32>)   = 16 bytes
+//	atlas_size (vec2<f32>)   =  8 bytes
+//	_pad       (vec2<f32>)   =  8 bytes
+//
+// Total = 96 bytes.
+const glyphMaskLCDUniformSize = 96
 
 // GlyphMaskPipeline manages GPU resources for alpha mask text rendering
 // (Tier 6). Each text run is rendered as a set of textured quads using
@@ -72,6 +86,16 @@ type GlyphMaskPipeline struct {
 	// alpha interpolation at subpixel positions).
 	sampler *wgpu.Sampler
 
+	// LCD pipeline: separate shader + pipeline for ClearType rendering.
+	// Uses a different uniform struct (96 bytes with atlas_size) and a
+	// different fragment shader (per-channel alpha compositing).
+	// This avoids the Intel Vulkan null pipeline handle bug caused by
+	// adding is_lcd to the grayscale uniform struct.
+	lcdShader              *wgpu.ShaderModule
+	lcdUniformLayout       *wgpu.BindGroupLayout
+	lcdPipeLayout          *wgpu.PipelineLayout
+	lcdPipelineWithStencil *wgpu.RenderPipeline
+
 	// clipBindLayout is the shared @group(1) bind group layout for RRect clip.
 	// Set by the session before ensurePipelineWithStencil.
 	clipBindLayout *wgpu.BindGroupLayout
@@ -79,6 +103,8 @@ type GlyphMaskPipeline struct {
 	// with clipBindLayout included. If clipBindLayout is set after the
 	// layout was created, the pipeline must be recreated.
 	pipeLayoutHasClip bool
+	// lcdPipeLayoutHasClip tracks the same for the LCD pipeline layout.
+	lcdPipeLayoutHasClip bool
 }
 
 // NewGlyphMaskPipeline creates a new glyph mask pipeline with the given device
@@ -101,6 +127,7 @@ func (p *GlyphMaskPipeline) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 // Destroy releases all GPU resources held by the pipeline. Safe to call
 // multiple times or on a pipeline with no allocated resources.
 func (p *GlyphMaskPipeline) Destroy() {
+	p.destroyLCDPipeline()
 	p.destroyPipeline()
 	if p.sampler != nil {
 		p.sampler.Release()
@@ -243,33 +270,9 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 				},
 			},
 		},
-		DepthStencil: &wgpu.DepthStencilState{
-			Format:            gputypes.TextureFormatDepth24PlusStencil8,
-			DepthWriteEnabled: false,
-			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilBack: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilReadMask:  0x00,
-			StencilWriteMask: 0x00,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		DepthStencil: stencilPassthroughDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create glyph mask pipeline with stencil: %w", err)
@@ -284,12 +287,20 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 // a depth/stencil attachment.
 //
 // The resources parameter holds pre-built vertex/index buffers, uniform buffer,
-// and bind group for the current frame.
+// and bind group for the current frame. If isLCD is true and the LCD pipeline
+// is available, the LCD pipeline is used for per-channel alpha compositing.
 func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *glyphMaskFrameResources, clipBG *wgpu.BindGroup) {
 	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
-	rp.SetPipeline(p.pipelineWithStencil)
+
+	// Select pipeline: LCD if available and batch is LCD, else grayscale.
+	selectedPipeline := p.pipelineWithStencil
+	if resources.isLCD && p.lcdPipelineWithStencil != nil {
+		selectedPipeline = p.lcdPipelineWithStencil
+	}
+
+	rp.SetPipeline(selectedPipeline)
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
 	}
@@ -302,6 +313,118 @@ func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *g
 		rp.SetBindGroup(0, dc.bindGroup, nil)
 		rp.DrawIndexed(dc.indexCount, 1, dc.indexOffset, 0, 0)
 	}
+}
+
+// ensureLCDPipelineWithStencil creates the LCD pipeline variant for ClearType
+// rendering. Uses a separate shader (glyph_mask_lcd.wgsl) with a different
+// uniform struct (96 bytes: includes atlas_size for texel stepping).
+//
+// This is a separate pipeline from the grayscale one (Skia pattern) to avoid
+// the Intel Vulkan null pipeline handle bug that occurs when adding fields to
+// the grayscale uniform struct.
+//
+func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
+	// Ensure base resources exist (sampler is shared).
+	if err := p.ensureSharedResources(); err != nil {
+		return err
+	}
+
+	// If the LCD pipeline layout was created without clip but clip is now set,
+	// destroy and recreate.
+	if p.clipBindLayout != nil && !p.lcdPipeLayoutHasClip {
+		p.destroyLCDPipeline()
+	}
+	if p.lcdPipelineWithStencil != nil {
+		return nil
+	}
+
+	if glyphMaskLCDShaderSource == "" {
+		return fmt.Errorf("glyph_mask_lcd shader source is empty")
+	}
+
+	lcdShader, err := p.device.CreateShaderModule(&wgpu.ShaderModuleDescriptor{
+		Label: "glyph_mask_lcd_shader",
+		WGSL:  glyphMaskLCDShaderSource,
+	})
+	if err != nil {
+		return fmt.Errorf("compile glyph_mask_lcd shader: %w", err)
+	}
+	p.lcdShader = lcdShader
+
+	// LCD bind group layout: same bindings as grayscale (uniform, texture, sampler)
+	// but with a larger uniform buffer (96 bytes instead of 80).
+	lcdUniformLayout, err := p.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "glyph_mask_lcd_uniform_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+			},
+			{
+				Binding:    1,
+				Visibility: gputypes.ShaderStageFragment,
+				Texture: &gputypes.TextureBindingLayout{
+					SampleType:    gputypes.TextureSampleTypeFloat,
+					ViewDimension: gputypes.TextureViewDimension2D,
+				},
+			},
+			{
+				Binding:    2,
+				Visibility: gputypes.ShaderStageFragment,
+				Sampler:    &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create glyph_mask_lcd uniform layout: %w", err)
+	}
+	p.lcdUniformLayout = lcdUniformLayout
+
+	lcdBGLayouts := []*wgpu.BindGroupLayout{p.lcdUniformLayout}
+	hasClip := p.clipBindLayout != nil
+	if hasClip {
+		lcdBGLayouts = append(lcdBGLayouts, p.clipBindLayout)
+	}
+	lcdPipeLayout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+		Label:            "glyph_mask_lcd_pipe_layout",
+		BindGroupLayouts: lcdBGLayouts,
+	})
+	if err != nil {
+		return fmt.Errorf("create glyph_mask_lcd pipeline layout: %w", err)
+	}
+	p.lcdPipeLayout = lcdPipeLayout
+	p.lcdPipeLayoutHasClip = hasClip
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	lcdPipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "glyph_mask_lcd_pipeline_with_stencil",
+		Layout: p.lcdPipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.lcdShader,
+			EntryPoint: "vs_main",
+			Buffers:    glyphMaskVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.lcdShader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: stencilPassthroughDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create glyph mask LCD pipeline with stencil: %w", err)
+	}
+	p.lcdPipelineWithStencil = lcdPipeline
+	return nil
 }
 
 // destroyPipeline releases all pipeline resources in reverse creation order.
@@ -332,6 +455,30 @@ func (p *GlyphMaskPipeline) destroyPipeline() {
 	}
 }
 
+// destroyLCDPipeline releases LCD pipeline resources in reverse creation order.
+func (p *GlyphMaskPipeline) destroyLCDPipeline() {
+	if p.device == nil {
+		return
+	}
+	if p.lcdPipelineWithStencil != nil {
+		p.lcdPipelineWithStencil.Release()
+		p.lcdPipelineWithStencil = nil
+	}
+	if p.lcdPipeLayout != nil {
+		p.lcdPipeLayout.Release()
+		p.lcdPipeLayout = nil
+		p.lcdPipeLayoutHasClip = false
+	}
+	if p.lcdUniformLayout != nil {
+		p.lcdUniformLayout.Release()
+		p.lcdUniformLayout = nil
+	}
+	if p.lcdShader != nil {
+		p.lcdShader.Release()
+		p.lcdShader = nil
+	}
+}
+
 // ---- Per-frame GPU resources ----
 
 // glyphMaskDrawCall represents a single draw call within a glyph mask batch.
@@ -346,6 +493,7 @@ type glyphMaskFrameResources struct {
 	vertBuf   *wgpu.Buffer
 	idxBuf    *wgpu.Buffer
 	drawCalls []glyphMaskDrawCall
+	isLCD     bool // true when LCD pipeline should be used
 }
 
 // ---- Vertex layout ----
@@ -400,9 +548,15 @@ type GlyphMaskBatch struct {
 	Color [4]float32
 
 	// IsLCD indicates this batch uses LCD subpixel rendering.
-	// Currently unused at the shader level (grayscale-only path) due to
-	// Intel Vulkan driver compatibility. Retained for future LCD restore.
+	// When true, the LCD pipeline is used with per-channel alpha compositing.
+	// The atlas region contains 3 R8 texels per logical pixel (R, G, B coverage).
 	IsLCD bool
+
+	// AtlasWidth and AtlasHeight are the dimensions of the R8 atlas texture
+	// in texels. Used by the LCD fragment shader to compute the texel step
+	// for sampling adjacent R, G, B coverage texels.
+	AtlasWidth  float32
+	AtlasHeight float32
 
 	// AtlasPageIndex identifies which atlas page (R8 texture) to use.
 	AtlasPageIndex int
@@ -480,6 +634,46 @@ func makeGlyphMaskUniform(transform gg.Matrix, color [4]float32) []byte {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4
 	}
+
+	return buf
+}
+
+// makeGlyphMaskLCDUniform creates the 96-byte uniform buffer for an LCD batch.
+// The uniform contains the transform matrix, text color, and atlas dimensions
+// (needed by the LCD fragment shader to compute the texel step for sampling
+// adjacent R, G, B coverage texels).
+func makeGlyphMaskLCDUniform(transform gg.Matrix, color [4]float32, atlasW, atlasH float32) []byte {
+	buf := make([]byte, glyphMaskLCDUniformSize)
+	off := 0
+
+	// Transform (mat4x4<f32>, column-major).
+	t := [16]float32{
+		float32(transform.A), float32(transform.D), 0, 0,
+		float32(transform.B), float32(transform.E), 0, 0,
+		0, 0, 1, 0,
+		float32(transform.C), float32(transform.F), 0, 1,
+	}
+	for _, v := range t {
+		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(v))
+		off += 4
+	}
+
+	// Color (vec4<f32>): premultiplied RGBA.
+	for i := range 4 {
+		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
+		off += 4
+	}
+
+	// Atlas size (vec2<f32>): width and height of the R8 atlas texture.
+	binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(atlasW))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(atlasH))
+	off += 4
+
+	// Padding (vec2<f32>): align to 16-byte boundary.
+	binary.LittleEndian.PutUint32(buf[off:], 0)
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], 0)
 
 	return buf
 }

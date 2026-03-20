@@ -229,11 +229,17 @@ func (e *GlyphMaskEngine) LayoutText(
 	}
 	transform := ortho.Multiply(matrix)
 
+	// Atlas dimensions for the LCD shader's texel stepping.
+	atlasConfig := e.atlas.Config()
+	atlasSize := float32(atlasConfig.Size)
+
 	return GlyphMaskBatch{
 		Quads:          quads,
 		Transform:      transform,
 		Color:          batchColor,
 		IsLCD:          batchIsLCD,
+		AtlasWidth:     atlasSize,
+		AtlasHeight:    atlasSize,
 		AtlasPageIndex: 0, // Currently single page support (first page).
 	}, nil
 }

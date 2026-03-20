@@ -224,14 +224,8 @@ func (p *MSDFTextPipeline) createPipeline() error {
 				},
 			},
 		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		Primitive:   triangleListPrimitive(),
+		Multisample: defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create msdf_text pipeline: %w", err)
@@ -249,9 +243,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 // The base pipeline (shader, layout, sampler) is created first if it
 // doesn't exist.
 //
-//nolint:dupl // Intentional: each pipeline type owns its stencil variant with distinct labels and vertex layouts.
-func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
-	// Ensure base resources exist (shader, layouts, sampler).
+func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts, sampler).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
 		if err := p.createPipeline(); err != nil {
 			return err
@@ -290,33 +282,9 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {
 				},
 			},
 		},
-		DepthStencil: &wgpu.DepthStencilState{
-			Format:            gputypes.TextureFormatDepth24PlusStencil8,
-			DepthWriteEnabled: false,
-			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilBack: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilReadMask:  0x00,
-			StencilWriteMask: 0x00,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		DepthStencil: stencilPassthroughDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create MSDF text pipeline with stencil: %w", err)

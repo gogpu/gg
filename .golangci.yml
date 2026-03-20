@@ -249,11 +249,13 @@ linters:
           - nestif        # Buffer readback error handling requires deep nesting
           - unparam       # numPaths reserved for future per-path diagnostics
 
-      # GPU compute shaders - similar initialization patterns (Phase 6)
-      # Each rasterizer has structurally similar but functionally different code
-      - path: internal/gpu/gpu_.*.go
+      # GPU render pipelines - structurally similar WebGPU pipeline descriptors
+      # Each pipeline (SDF, convex, stencil, text, glyph mask, LCD) has its own
+      # CreateRenderPipeline call with unique labels, shaders, and vertex layouts.
+      # The boilerplate structure is identical but the content differs per tier.
+      - path: internal/gpu/.*\.go
         linters:
-          - dupl          # Fine, coarse, flatten have similar WebGPU init patterns
+          - dupl          # Pipeline creation boilerplate is not real duplication
 
       # Example code - demonstration purposes
       - path: examples?/.*\.go

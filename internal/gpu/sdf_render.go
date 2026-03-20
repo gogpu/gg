@@ -279,8 +279,7 @@ func (p *SDFRenderPipeline) destroyTextures() {
 
 // createPipeline compiles the SDF render shader and creates the render
 // pipeline with premultiplied alpha blending and MSAA.
-func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
-	if sdfRenderShaderSource == "" {
+func (p *SDFRenderPipeline) createPipeline() error {	if sdfRenderShaderSource == "" {
 		return fmt.Errorf("sdf_render shader source is empty")
 	}
 
@@ -343,14 +342,8 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 				},
 			},
 		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		Primitive:   triangleListPrimitive(),
+		Multisample: defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create render pipeline: %w", err)
@@ -368,8 +361,7 @@ func (p *SDFRenderPipeline) createPipeline() error { //nolint:dupl // GPU pipeli
 //
 // The base pipeline (shader, layout, bind group layout) is created first
 // if it doesn't exist.
-func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl // GPU pipeline descriptors share structure but differ in labels, shaders, and vertex layouts
-	// Ensure base resources exist (shader, layouts).
+func (p *SDFRenderPipeline) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
 		if err := p.createPipeline(); err != nil {
 			return err
@@ -408,33 +400,9 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { //nolint:dupl //
 				},
 			},
 		},
-		DepthStencil: &wgpu.DepthStencilState{
-			Format:            gputypes.TextureFormatDepth24PlusStencil8,
-			DepthWriteEnabled: false,
-			DepthCompare:      gputypes.CompareFunctionAlways,
-			StencilFront: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilBack: wgpu.StencilFaceState{
-				Compare:     gputypes.CompareFunctionAlways,
-				FailOp:      wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationKeep,
-			},
-			StencilReadMask:  0x00,
-			StencilWriteMask: 0x00,
-		},
-		Primitive: gputypes.PrimitiveState{
-			Topology: gputypes.PrimitiveTopologyTriangleList,
-			CullMode: gputypes.CullModeNone,
-		},
-		Multisample: gputypes.MultisampleState{
-			Count: sampleCount,
-			Mask:  0xFFFFFFFF,
-		},
+		DepthStencil: stencilPassthroughDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
 	})
 	if err != nil {
 		return fmt.Errorf("create SDF pipeline with stencil: %w", err)
