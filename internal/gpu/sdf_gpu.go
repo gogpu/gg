@@ -1164,6 +1164,8 @@ func (a *SDFAccelerator) syncGlyphMaskAtlases(batches []GlyphMaskBatch) error {
 	for i, batch := range batches {
 		view := a.glyphMaskEngine.PageTextureView(batch.AtlasPageIndex)
 		if view == nil {
+			slogger().Warn("glyph mask atlas page not synced — text skipped",
+				"pageIndex", batch.AtlasPageIndex, "batchIndex", i, "quads", len(batch.Quads))
 			continue
 		}
 		a.session.SetGlyphMaskAtlasView(i, view, batch.IsLCD)
