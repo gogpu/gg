@@ -225,10 +225,16 @@ func (c *Canvas) MarkDirty() {
 // Draw calls fn with the gg context and marks the canvas as dirty.
 // This is the recommended way to update canvas content, as it ensures
 // the dirty flag is set correctly for GPU upload on next Flush/RenderTo.
+//
+// BeginAcceleratorFrame is called before fn to reset per-frame GPU state.
+// This ensures the first render pass clears the surface while mid-frame
+// CPU fallback flushes (bitmap text, gradient fill) use LoadOpLoad to
+// preserve previously drawn content. See RENDER-DIRECT-003.
 func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
+	gg.BeginAcceleratorFrame()
 	fn(c.ctx)
 	c.dirty = true
 	return nil
@@ -371,13 +377,13 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	// is only cleared on Close() or when switching to offscreen mode.
 	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
 
-	// Reset per-frame state so the first render pass clears the surface.
-	// Without this, frameRendered stays true from the previous frame,
-	// causing LoadOpLoad instead of LoadOpClear — previous frame content
-	// persists and new shapes accumulate on top (progressive drift bug).
-	gg.BeginAcceleratorFrame()
-
 	// Flush GPU shapes directly to the surface view (no readback).
+	// NOTE: BeginAcceleratorFrame is NOT called here — it must be called
+	// BEFORE canvas.Draw(), not after. If Draw triggers a mid-frame CPU
+	// fallback (bitmap text, gradient fill), flushGPUAccelerator submits
+	// GPU commands with LoadOpClear. Calling BeginFrame here would reset
+	// frameRendered=false, causing the final FlushGPU to wipe that content
+	// with a second LoadOpClear. See RENDER-DIRECT-003.
 	err := c.ctx.FlushGPU()
 
 	c.dirty = false
