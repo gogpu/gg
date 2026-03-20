@@ -344,3 +344,57 @@ func TestSetPathFromSVG(t *testing.T) {
 		t.Fatalf("Fill: %v", err)
 	}
 }
+
+func TestDrawPathWithTransform(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	path, err := ParseSVGPath("M0,0 L16,0 L16,16 L0,16 Z")
+	if err != nil {
+		t.Fatalf("ParseSVGPath: %v", err)
+	}
+
+	dc.SetRGB(1, 0, 0)
+	dc.Push()
+	dc.Translate(10, 10)
+	dc.Scale(2, 2)
+	dc.DrawPath(path)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill: %v", err)
+	}
+	dc.Pop()
+
+	// Red pixel should be at (10+16, 10+16) = (26, 26) due to 2x scale
+	// (0,0)→(10,10), (16,16)→(10+32, 10+32) = (42, 42)
+	img := dc.Image()
+	r, _, _, a := img.At(26, 26).RGBA()
+	if a == 0 {
+		t.Error("expected non-transparent pixel at (26,26) after DrawPath+Translate+Scale")
+	}
+	if r == 0 {
+		t.Error("expected red pixel at (26,26)")
+	}
+
+	// Outside should be transparent
+	_, _, _, a2 := img.At(5, 5).RGBA()
+	if a2 != 0 {
+		t.Error("expected transparent pixel at (5,5)")
+	}
+}
+
+func TestFillPath(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	path, _ := ParseSVGPath("M10,10 L90,10 L90,90 L10,90 Z")
+	dc.SetRGB(0, 1, 0)
+	if err := dc.FillPath(path); err != nil {
+		t.Fatalf("FillPath: %v", err)
+	}
+
+	img := dc.Image()
+	_, g, _, a := img.At(50, 50).RGBA()
+	if a == 0 || g == 0 {
+		t.Error("expected green pixel at center after FillPath")
+	}
+}
