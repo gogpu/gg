@@ -106,6 +106,17 @@ func (p *Path) Clear() {
 	p.current = Point{}
 }
 
+// Append adds all elements from other to this path.
+// The current point and subpath start are updated to match other's state.
+func (p *Path) Append(other *Path) {
+	if other == nil || len(other.elements) == 0 {
+		return
+	}
+	p.elements = append(p.elements, other.elements...)
+	p.current = other.current
+	p.start = other.start
+}
+
 // Elements returns the path elements.
 func (p *Path) Elements() []PathElement {
 	return p.elements

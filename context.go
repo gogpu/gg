@@ -586,6 +586,28 @@ func (c *Context) ClearPath() {
 	c.path.Clear()
 }
 
+// SetPath replaces the current path with p.
+// The path is copied — subsequent modifications to p do not affect the context.
+// Use this to render pre-built paths (e.g., from ParseSVGPath):
+//
+//	path, _ := gg.ParseSVGPath("M10,10 L90,10 L90,90 Z")
+//	dc.SetPath(path)
+//	dc.Fill()
+func (c *Context) SetPath(p *Path) {
+	c.path.Clear()
+	if p != nil {
+		c.path.Append(p)
+	}
+}
+
+// AppendPath appends the elements of p to the current path without clearing it.
+// This allows combining multiple sub-paths before a single Fill or Stroke call.
+func (c *Context) AppendPath(p *Path) {
+	if p != nil {
+		c.path.Append(p)
+	}
+}
+
 // NewSubPath starts a new subpath without closing the previous one.
 func (c *Context) NewSubPath() {
 	// In most implementations, just starting with MoveTo creates a new subpath

@@ -276,3 +276,71 @@ func TestContextCloseReleasesResources(t *testing.T) {
 	// (We can't easily verify this without exposing internals,
 	// but at minimum Close should not panic)
 }
+
+func TestSetPath(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	// Build a path externally
+	p := NewPath()
+	p.MoveTo(10, 20)
+	p.LineTo(30, 40)
+
+	dc.SetPath(p)
+	x, y, ok := dc.GetCurrentPoint()
+	if !ok {
+		t.Fatal("expected current point after SetPath")
+	}
+	if x != 30 || y != 40 {
+		t.Errorf("GetCurrentPoint() = (%v, %v), want (30, 40)", x, y)
+	}
+}
+
+func TestSetPathNil(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.MoveTo(10, 20)
+	dc.SetPath(nil)
+	_, _, ok := dc.GetCurrentPoint()
+	if ok {
+		t.Error("expected no current point after SetPath(nil)")
+	}
+}
+
+func TestAppendPath(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	dc.MoveTo(10, 20)
+	dc.LineTo(30, 40)
+
+	p := NewPath()
+	p.MoveTo(50, 60)
+	p.LineTo(70, 80)
+
+	dc.AppendPath(p)
+	x, y, ok := dc.GetCurrentPoint()
+	if !ok {
+		t.Fatal("expected current point after AppendPath")
+	}
+	if x != 70 || y != 80 {
+		t.Errorf("GetCurrentPoint() = (%v, %v), want (70, 80)", x, y)
+	}
+}
+
+func TestSetPathFromSVG(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer func() { _ = dc.Close() }()
+
+	path, err := ParseSVGPath("M10,10 L90,10 L90,90 L10,90 Z")
+	if err != nil {
+		t.Fatalf("ParseSVGPath: %v", err)
+	}
+
+	dc.SetPath(path)
+	dc.SetRGB(1, 0, 0)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill: %v", err)
+	}
+}
