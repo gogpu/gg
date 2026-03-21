@@ -163,11 +163,11 @@ func TestBuffer_MapAsync_AlreadyMapped(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopyDst, true)
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageCopyDst, true)
 	desc := &BufferDescriptor{
 		Label:            "already-mapped",
 		Size:             1024,
-		Usage:            gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
+		Usage:            gputypes.BufferUsageMapRead,
 		MappedAtCreation: true,
 	}
 
@@ -602,11 +602,11 @@ func TestBuffer_ConcurrentMapUnmap(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapRead|gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopyDst|gputypes.BufferUsageCopySrc, false)
+	halBuf := createNoopBuffer(t, device, 1024, gputypes.BufferUsageMapWrite|gputypes.BufferUsageCopyDst|gputypes.BufferUsageCopySrc, false)
 	desc := &BufferDescriptor{
 		Label: "concurrent",
 		Size:  1024,
-		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageMapWrite,
+		Usage: gputypes.BufferUsageMapWrite,
 	}
 
 	buf := NewBuffer(halBuf, device, desc)
