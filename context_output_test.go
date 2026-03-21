@@ -376,8 +376,7 @@ func TestDrawPathWithTransform(t *testing.T) {
 	}
 
 	// Outside should be transparent
-	_, _, _, a2 := img.At(5, 5).RGBA()
-	if a2 != 0 {
+	if _, _, _, a2 := img.At(5, 5).RGBA(); a2 != 0 {
 		t.Error("expected transparent pixel at (5,5)")
 	}
 }

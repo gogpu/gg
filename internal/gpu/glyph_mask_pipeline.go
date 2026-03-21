@@ -322,7 +322,6 @@ func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *g
 // This is a separate pipeline from the grayscale one (Skia pattern) to avoid
 // the Intel Vulkan null pipeline handle bug that occurs when adding fields to
 // the grayscale uniform struct.
-//
 func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
 	// Ensure base resources exist (sampler is shared).
 	if err := p.ensureSharedResources(); err != nil {

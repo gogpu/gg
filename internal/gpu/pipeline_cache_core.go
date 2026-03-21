@@ -89,7 +89,6 @@ func NewPipelineCacheCore() *PipelineCacheCore {
 //   - The device is nil
 //   - The descriptor is nil
 //   - Pipeline creation fails
-//
 func (c *PipelineCacheCore) GetOrCreateRenderPipeline(
 	device *wgpu.Device,
 	desc *RenderPipelineDescriptor,
@@ -146,7 +145,6 @@ func (c *PipelineCacheCore) GetOrCreateRenderPipeline(
 //   - The device is nil
 //   - The descriptor is nil
 //   - Pipeline creation fails
-//
 func (c *PipelineCacheCore) GetOrCreateComputePipeline(
 	device *wgpu.Device,
 	desc *ComputePipelineDescriptor,

@@ -242,8 +242,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 //
 // The base pipeline (shader, layout, sampler) is created first if it
 // doesn't exist.
-//
-func (p *MSDFTextPipeline) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts, sampler).
+func (p *MSDFTextPipeline) ensurePipelineWithStencil() error { // Ensure base resources exist (shader, layouts, sampler).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
 		if err := p.createPipeline(); err != nil {
 			return err

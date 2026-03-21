@@ -279,7 +279,8 @@ func (p *SDFRenderPipeline) destroyTextures() {
 
 // createPipeline compiles the SDF render shader and creates the render
 // pipeline with premultiplied alpha blending and MSAA.
-func (p *SDFRenderPipeline) createPipeline() error {	if sdfRenderShaderSource == "" {
+func (p *SDFRenderPipeline) createPipeline() error {
+	if sdfRenderShaderSource == "" {
 		return fmt.Errorf("sdf_render shader source is empty")
 	}
 
@@ -361,7 +362,7 @@ func (p *SDFRenderPipeline) createPipeline() error {	if sdfRenderShaderSource ==
 //
 // The base pipeline (shader, layout, bind group layout) is created first
 // if it doesn't exist.
-func (p *SDFRenderPipeline) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts).
+func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { // Ensure base resources exist (shader, layouts).
 	if p.shader == nil || p.uniformLayout == nil || p.pipeLayout == nil {
 		if err := p.createPipeline(); err != nil {
 			return err

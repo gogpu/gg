@@ -121,7 +121,7 @@ func (cr *ConvexRenderer) ensurePipeline() error {
 // buffer (Compare=Always, all ops=Keep, write mask=0).
 //
 // The base pipeline (shader, layout) is created first if it doesn't exist.
-func (cr *ConvexRenderer) ensurePipelineWithStencil() error {	// Ensure base resources exist (shader, layouts).
+func (cr *ConvexRenderer) ensurePipelineWithStencil() error { // Ensure base resources exist (shader, layouts).
 	if cr.shader == nil || cr.uniformLayout == nil || cr.pipeLayout == nil {
 		if err := cr.createPipeline(); err != nil {
 			return err
@@ -193,7 +193,8 @@ func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *con
 
 // createPipeline compiles the convex render shader and creates the render
 // pipeline with premultiplied alpha blending and MSAA.
-func (cr *ConvexRenderer) createPipeline() error {	if convexShaderSource == "" {
+func (cr *ConvexRenderer) createPipeline() error {
+	if convexShaderSource == "" {
 		return fmt.Errorf("convex shader source is empty")
 	}
 
