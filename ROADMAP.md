@@ -31,6 +31,8 @@
 - **GPU RRect clip** — analytic SDF in fragment shaders (GPU-CLIP-002)
 - **GPU scissor rect clip** — hardware scissor for rectangular clips (GPU-CLIP-001)
 - **Separated deviceMatrix/userMatrix** — Cairo/Skia/Blend2D pattern for correct HiDPI
+- **SVG renderer** (`gg/svg` package) — parse + render SVG XML for JB-quality icons
+- **SVG path parser** — `ParseSVGPath()` for SVG `d` attribute
 - Recording System for vector export (PDF, SVG)
 - wgpu public API migration (zero hal imports in production GPU code)
 - Font hinting, ClearType LCD subpixel rendering

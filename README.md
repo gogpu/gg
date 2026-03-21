@@ -43,6 +43,7 @@
 | **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
+| **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
 | **Vector Export** | Recording system with PDF and SVG backends |
 | **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute), text-aware area-based routing |
 | **Performance** | Tile-based parallel rendering, LRU caching |

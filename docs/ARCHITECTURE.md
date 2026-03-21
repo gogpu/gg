@@ -364,8 +364,10 @@ gg/
 ├── shape_detect.go         # DetectShape: auto-detect circles/rects/rrects from paths
 ├── pipeline_mode.go        # PipelineMode (Auto/RenderPass/Compute)
 ├── options.go              # Configuration options
-├── path.go                 # Vector path operations
+├── path.go                 # Vector path operations (SetPath, DrawPath, FillPath)
+├── path_svg.go             # SVG path data parser (ParseSVGPath)
 ├── paint.go                # Fill and stroke styles
+├── lcd_layout.go           # LCD ClearType layout types (LCDLayoutRGB/BGR/None)
 ├── pixmap.go               # Pixel buffer operations
 ├── text.go                 # Text rendering
 │
@@ -374,6 +376,14 @@ gg/
 │
 ├── raster/                 # PUBLIC opt-in: tile rasterizer only (no GPU)
 │   └── raster.go           # init() registers AdaptiveFiller (CPU-only)
+│
+├── svg/                    # SVG renderer (Parse + Render SVG XML → image.RGBA)
+│   ├── svg.go              # Public API: Parse, Render, RenderWithColor
+│   ├── parser.go           # SVG XML parser → Document tree
+│   ├── renderer.go         # Element rendering via gg.Context
+│   ├── colors.go           # SVG color parsing (#hex, rgb(), named)
+│   ├── transform.go        # SVG transform parsing (translate, rotate, scale)
+│   └── document.go         # Document, Element types
 │
 ├── integration/
 │   └── ggcanvas/           # gogpu integration (Canvas for windowed rendering)
