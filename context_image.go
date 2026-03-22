@@ -177,22 +177,32 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 	scaleX := dstWidth / float64(srcW)
 	scaleY := dstHeight / float64(srcH)
 
-	// Transform destination rectangle to device coordinates for the anchor.
-	topLeft := c.totalMatrix().TransformPoint(Pt(opts.X, opts.Y))
+	// Compose the full forward transform: image-space -> device-space.
+	//
+	// The transform chain is:
+	//   1. Scale source pixels to destination size: Scale(scaleX, scaleY)
+	//   2. Position at destination: Translate(opts.X, opts.Y)
+	//   3. Apply current CTM to device space: totalMatrix()
+	//
+	// Forward: device = totalMatrix * Translate(x,y) * Scale(sx,sy) * imageCoord
+	// Inverse: imageCoord = inverse(totalMatrix * Translate(x,y) * Scale(sx,sy)) * device
+	//
+	// This follows the Cairo/Skia/tiny-skia pattern (see IMAGE-PATTERN-TRANSFORM-RESEARCH.md).
+	patternTransform := c.totalMatrix().
+		Multiply(Translate(opts.X, opts.Y)).
+		Multiply(Scale(scaleX, scaleY))
+	inverse := patternTransform.Invert()
 
-	// Create image pattern anchored at the destination position.
+	// Create image pattern with pre-computed inverse transform.
 	pattern := &ImagePattern{
 		image:   img,
 		x:       srcX,
 		y:       srcY,
 		w:       srcW,
 		h:       srcH,
-		anchorX: topLeft.X,
-		anchorY: topLeft.Y,
+		inverse: inverse,
 		opacity: opts.Opacity,
 		clamp:   true, // Don't tile — clamp to image bounds
-		scaleX:  scaleX,
-		scaleY:  scaleY,
 	}
 
 	// Save current state (paint, path, transform).
@@ -223,11 +233,12 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 //	dc.Fill()
 func (c *Context) CreateImagePattern(img *ImageBuf, x, y, w, h int) Pattern {
 	return &ImagePattern{
-		image: img,
-		x:     x,
-		y:     y,
-		w:     w,
-		h:     h,
+		image:   img,
+		x:       x,
+		y:       y,
+		w:       w,
+		h:       h,
+		inverse: Identity(), // identity transform: device coords = image coords (tiling from origin)
 	}
 }
 
@@ -245,18 +256,26 @@ func (c *Context) SetStrokePattern(pattern Pattern) {
 	c.paint.Brush = BrushFromPattern(pattern)
 }
 
-// ImagePattern represents an image-based pattern.
-// When anchorX/anchorY are set, the pattern is positioned at that canvas
-// location instead of tiling from (0,0). Coordinates outside the image region
-// return transparent black (clamp mode) when clamp is true.
+// ImagePattern represents an image-based pattern with full affine transform support.
+// The pattern stores a pre-computed inverse matrix that maps device-space coordinates
+// back to image-space for sampling. This enables correct rendering under rotation,
+// scale, skew, and any combination of affine transforms.
+//
+// For backward compatibility, SetAnchor/SetScale convenience methods rebuild
+// the inverse from anchor+scale parameters. For full affine control, the inverse
+// is set directly by DrawImageEx or via SetTransform.
 type ImagePattern struct {
 	image   *ImageBuf
 	x, y    int     // source region offset within the image
 	w, h    int     // source region size (0 = full image dimension)
-	anchorX float64 // canvas anchor X
-	anchorY float64 // canvas anchor Y
+	inverse Matrix  // maps device-space -> image-space (pre-computed)
 	opacity float64 // opacity multiplier (0=transparent, 1=opaque; 0 means default=1)
 	clamp   bool    // when true, out-of-bounds returns transparent instead of tiling
+
+	// Legacy fields for SetAnchor/SetScale backward compatibility.
+	// When these are used, rebuildInverse() computes the inverse from them.
+	anchorX float64
+	anchorY float64
 	scaleX  float64 // horizontal scale factor (0 means 1.0)
 	scaleY  float64 // vertical scale factor (0 means 1.0)
 }
@@ -264,9 +283,11 @@ type ImagePattern struct {
 // SetAnchor sets the canvas position where the pattern is anchored.
 // This offsets all coordinate lookups so the image appears at (x, y)
 // on the canvas rather than tiled from the origin.
+// The inverse transform is rebuilt to reflect the new anchor.
 func (p *ImagePattern) SetAnchor(x, y float64) {
 	p.anchorX = x
 	p.anchorY = y
+	p.rebuildInverse()
 }
 
 // SetOpacity sets the opacity multiplier for the pattern (0.0 to 1.0).
@@ -283,31 +304,50 @@ func (p *ImagePattern) SetClamp(clamp bool) {
 // SetScale sets the scale factors for the pattern. The source image is scaled
 // by these factors before being sampled. For example, SetScale(2, 2) makes
 // each source pixel cover 2x2 destination pixels.
+// The inverse transform is rebuilt to reflect the new scale.
 func (p *ImagePattern) SetScale(sx, sy float64) {
 	p.scaleX = sx
 	p.scaleY = sy
+	p.rebuildInverse()
+}
+
+// SetTransform sets the full forward transform (image-space to device-space)
+// for the pattern. The inverse is computed and cached for sampling.
+// This overrides any anchor/scale settings.
+func (p *ImagePattern) SetTransform(m Matrix) {
+	p.inverse = m.Invert()
+}
+
+// rebuildInverse computes the inverse transform from the legacy anchor+scale fields.
+// The forward transform is: Translate(anchorX, anchorY) * Scale(scaleX, scaleY),
+// mapping image coordinates to device coordinates.
+func (p *ImagePattern) rebuildInverse() {
+	sx := p.scaleX
+	if sx == 0 {
+		sx = 1
+	}
+	sy := p.scaleY
+	if sy == 0 {
+		sy = 1
+	}
+	// Forward: device = Translate(anchor) * Scale(s) * imageCoord
+	// Inverse: imageCoord = Scale(1/s) * Translate(-anchor) * device
+	//        = (device - anchor) / s
+	forward := Translate(p.anchorX, p.anchorY).Multiply(Scale(sx, sy))
+	p.inverse = forward.Invert()
 }
 
 // ColorAt implements the Pattern interface.
-// It samples the image at the given coordinates. If an anchor is set,
-// coordinates are offset by the anchor position. In clamp mode, out-of-bounds
-// coordinates return transparent black; otherwise the pattern tiles.
+// It samples the image at the given device-space coordinates by applying the
+// pre-computed inverse transform to map back to image-space. In clamp mode,
+// out-of-bounds coordinates return transparent black; otherwise the pattern tiles.
 func (p *ImagePattern) ColorAt(x, y float64) RGBA {
-	// Subtract anchor to get local coordinates relative to the image origin.
-	lx := x - p.anchorX
-	ly := y - p.anchorY
+	// Apply inverse transform: device-space -> image-space.
+	imgPt := p.inverse.TransformPoint(Pt(x, y))
+	lx := imgPt.X
+	ly := imgPt.Y
 
-	// Apply inverse scale (map destination coords to source coords).
-	sx := p.scaleX
-	sy := p.scaleY
-	if sx != 0 {
-		lx /= sx
-	}
-	if sy != 0 {
-		ly /= sy
-	}
-
-	// Get image bounds
+	// Get image bounds.
 	imgW, imgH := p.image.Bounds()
 
 	// Determine pattern region.

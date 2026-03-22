@@ -3,6 +3,7 @@ package gg
 import (
 	"image"
 	"image/color"
+	"math"
 	"testing"
 )
 
@@ -224,11 +225,12 @@ func TestImagePattern_Tiling(t *testing.T) {
 	_ = img.SetRGBA(1, 1, 255, 255, 0, 255) // Yellow
 
 	pattern := &ImagePattern{
-		image: img,
-		x:     0,
-		y:     0,
-		w:     2,
-		h:     2,
+		image:   img,
+		x:       0,
+		y:       0,
+		w:       2,
+		h:       2,
+		inverse: Identity(),
 	}
 
 	// Test wrapping behavior
@@ -604,10 +606,10 @@ func TestImagePattern_Anchor(t *testing.T) {
 		image:   img,
 		w:       10,
 		h:       10,
-		anchorX: 50,
-		anchorY: 50,
+		inverse: Identity(),
 		clamp:   true,
 	}
+	pattern.SetAnchor(50, 50)
 
 	// At the anchor position, should return red.
 	col := pattern.ColorAt(50, 50)
@@ -634,13 +636,13 @@ func TestImagePattern_Scale(t *testing.T) {
 	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
 
 	pattern := &ImagePattern{
-		image:  img,
-		w:      10,
-		h:      10,
-		scaleX: 2.0, // Each pixel covers 2 destination pixels.
-		scaleY: 2.0,
-		clamp:  true,
+		image:   img,
+		w:       10,
+		h:       10,
+		inverse: Identity(),
+		clamp:   true,
 	}
+	pattern.SetScale(2.0, 2.0)
 
 	// At (0, 0), maps to source (0, 0) — should be red.
 	col := pattern.ColorAt(0, 0)
@@ -670,6 +672,7 @@ func TestImagePattern_Opacity(t *testing.T) {
 		w:       10,
 		h:       10,
 		opacity: 0.5,
+		inverse: Identity(),
 	}
 
 	col := pattern.ColorAt(0, 0)
@@ -830,7 +833,7 @@ func TestStrokeClipped(t *testing.T) {
 
 func TestImagePatternSetters(t *testing.T) {
 	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
-	p := &ImagePattern{image: img, w: 10, h: 10}
+	p := &ImagePattern{image: img, w: 10, h: 10, inverse: Identity()}
 
 	// SetAnchor
 	p.SetAnchor(100, 200)
@@ -858,6 +861,273 @@ func TestImagePatternSetters(t *testing.T) {
 	p.SetScale(3.0, 4.0)
 	if p.scaleX != 3.0 || p.scaleY != 4.0 {
 		t.Errorf("SetScale: got (%f,%f), want (3,4)", p.scaleX, p.scaleY)
+	}
+}
+
+// --- Rotation / Transform tests (IMG-002, issue #224) ---
+
+// TestDrawImage_Rotation90 reproduces the bug from issue #224:
+// DrawImage with 90-degree rotation should fill the rotated rectangle,
+// not produce a 1px sliver.
+func TestDrawImage_Rotation90(t *testing.T) {
+	// Create a tall narrow red image (100x400).
+	srcImg := makeTestImage(t, 100, 400, 255, 0, 0, 255)
+
+	// Create a wide short canvas (400x100).
+	dc := NewContext(400, 100)
+	dc.ClearWithColor(White)
+
+	// Rotate 90 degrees: the 100x400 image should fill the 400x100 canvas.
+	dc.Translate(400, 0)
+	dc.Rotate(math.Pi / 2)
+	dc.DrawImage(srcImg, 0, 0)
+
+	result := dc.Image()
+
+	// Center pixel should be red.
+	r, _, _, a := result.At(200, 50).RGBA()
+	if a == 0 || r == 0 {
+		t.Errorf("expected red pixel at center (200,50) after 90-degree rotation, got RGBA=(%d,%d,%d,%d)",
+			r>>8, 0, 0, a>>8)
+	}
+
+	// Near top-left corner should also be red (inside the rotated image).
+	r2, _, _, a2 := result.At(10, 10).RGBA()
+	if a2 == 0 || r2 == 0 {
+		t.Errorf("expected red pixel at (10,10) after 90-degree rotation, got RGBA=(%d,%d,%d,%d)",
+			r2>>8, 0, 0, a2>>8)
+	}
+}
+
+// TestDrawImage_Rotation45 verifies drawing with a 45-degree rotation.
+func TestDrawImage_Rotation45(t *testing.T) {
+	srcImg := makeTestImage(t, 50, 50, 0, 0, 255, 255)
+
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+
+	// Center the image and rotate 45 degrees.
+	dc.Translate(100, 100)
+	dc.Rotate(math.Pi / 4)
+	dc.DrawImage(srcImg, -25, -25) // center the 50x50 image
+
+	result := dc.Image()
+
+	// Center pixel (100, 100) should be blue.
+	_, _, b, a := result.At(100, 100).RGBA()
+	if a == 0 || b == 0 {
+		t.Errorf("expected blue pixel at center (100,100) after 45-degree rotation, got B=%d A=%d",
+			b>>8, a>>8)
+	}
+}
+
+// TestDrawImage_NoTransformRegression verifies that DrawImage without any
+// transform continues to work correctly after the affine refactoring.
+func TestDrawImage_NoTransformRegression(t *testing.T) {
+	srcImg := makeTestImage(t, 50, 50, 255, 0, 0, 255)
+
+	dc := NewContext(200, 200)
+	dc.Clear()
+	dc.DrawImage(srcImg, 10, 10)
+
+	// Pixel at (10, 10) should be red.
+	pixel := dc.pixmap.GetPixel(10, 10)
+	if pixel.R < 0.9 {
+		t.Errorf("expected red at (10,10), got R=%.2f", pixel.R)
+	}
+
+	// Pixel at (59, 59) should be red (10+50-1).
+	pixel2 := dc.pixmap.GetPixel(59, 59)
+	if pixel2.R < 0.9 {
+		t.Errorf("expected red at (59,59), got R=%.2f", pixel2.R)
+	}
+
+	// Pixel outside at (60, 10) should NOT be red.
+	pixel3 := dc.pixmap.GetPixel(60, 10)
+	if pixel3.R > 0.1 {
+		t.Errorf("expected no red at (60,10), got R=%.2f", pixel3.R)
+	}
+}
+
+// TestDrawImage_Scale2x verifies DrawImage with Scale(2,2) transform.
+func TestDrawImage_Scale2x(t *testing.T) {
+	srcImg := makeTestImage(t, 50, 50, 0, 255, 0, 255)
+
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+	dc.Scale(2, 2)
+	dc.DrawImage(srcImg, 10, 10)
+
+	result := dc.Image()
+
+	// In device space, the image at user (10,10) with 2x scale is at device (20,20).
+	// The 50x50 image scaled 2x covers device pixels (20,20) to (119,119).
+	r, g, _, a := result.At(20, 20).RGBA()
+	if a == 0 || g == 0 {
+		t.Errorf("expected green at device (20,20) with 2x scale, got G=%d A=%d", g>>8, a>>8)
+	}
+	_ = r
+
+	// Center of scaled image: device (70, 70).
+	_, g2, _, a2 := result.At(70, 70).RGBA()
+	if a2 == 0 || g2 == 0 {
+		t.Errorf("expected green at device (70,70) with 2x scale, got G=%d A=%d", g2>>8, a2>>8)
+	}
+}
+
+// TestDrawImage_TranslateRotate verifies combined translate + rotate.
+func TestDrawImage_TranslateRotate(t *testing.T) {
+	srcImg := makeTestImage(t, 40, 40, 255, 255, 0, 255)
+
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+	dc.Translate(100, 100)
+	dc.Rotate(math.Pi / 6) // 30 degrees
+	dc.DrawImage(srcImg, -20, -20)
+
+	result := dc.Image()
+
+	// Center of rotation is at (100, 100). The image is centered there.
+	// After rotation, (100, 100) should be yellow (the image center).
+	r, g, _, a := result.At(100, 100).RGBA()
+	if a == 0 || r == 0 || g == 0 {
+		t.Errorf("expected yellow at (100,100) with translate+rotate, got R=%d G=%d A=%d",
+			r>>8, g>>8, a>>8)
+	}
+}
+
+// TestDrawImage_DeviceScale verifies DrawImage with WithDeviceScale(2.0).
+func TestDrawImage_DeviceScale(t *testing.T) {
+	srcImg := makeTestImage(t, 50, 50, 0, 0, 255, 255)
+
+	dc := NewContextWithScale(200, 200, 2.0)
+	dc.Clear()
+	dc.DrawImage(srcImg, 10, 10)
+
+	// Physical pixmap is 400x400. Image at logical (10,10) should map to
+	// device (20,20) with 2x scale. Each source pixel covers 2x2 device pixels
+	// via the deviceMatrix, so the image covers device (20,20) to (119,119).
+	pixel := dc.pixmap.GetPixel(20, 20)
+	if pixel.B < 0.8 {
+		t.Errorf("expected blue at device (20,20) with DeviceScale=2, got B=%.2f", pixel.B)
+	}
+
+	pixel2 := dc.pixmap.GetPixel(60, 60)
+	if pixel2.B < 0.8 {
+		t.Errorf("expected blue at device (60,60) with DeviceScale=2, got B=%.2f", pixel2.B)
+	}
+
+	// Well outside the image region should not be blue.
+	pixel3 := dc.pixmap.GetPixel(200, 20)
+	if pixel3.B > 0.1 {
+		t.Errorf("expected no blue at device (200,20) with DeviceScale=2, got B=%.2f", pixel3.B)
+	}
+}
+
+// TestDrawImageEx_SrcRectWithRotation verifies SrcRect works with rotation.
+func TestDrawImageEx_SrcRectWithRotation(t *testing.T) {
+	// Create 100x100 image: top-left red, top-right green.
+	img, err := NewImageBuf(100, 100, FormatRGBA8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 50; x++ {
+			_ = img.SetRGBA(x, y, 255, 0, 0, 255)
+		}
+	}
+	for y := 0; y < 50; y++ {
+		for x := 50; x < 100; x++ {
+			_ = img.SetRGBA(x, y, 0, 255, 0, 255)
+		}
+	}
+
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+
+	// Draw only the red quadrant (top-left 50x50) rotated 90 degrees.
+	srcRect := image.Rect(0, 0, 50, 50)
+	dc.Translate(100, 100)
+	dc.Rotate(math.Pi / 2)
+	dc.DrawImageEx(img, DrawImageOptions{
+		X:       -25,
+		Y:       -25,
+		SrcRect: &srcRect,
+		Opacity: 1.0,
+	})
+
+	result := dc.Image()
+
+	// Center should be red (from the top-left quadrant).
+	r, g, _, a := result.At(100, 100).RGBA()
+	if a == 0 || r == 0 {
+		t.Errorf("expected red at center with SrcRect+rotation, got R=%d G=%d A=%d",
+			r>>8, g>>8, a>>8)
+	}
+	// Should not be green (that's the other quadrant).
+	if g>>8 > 50 {
+		t.Errorf("expected no green at center (wrong quadrant), got G=%d", g>>8)
+	}
+}
+
+// TestCreateImagePattern_Compat verifies backward compatibility of
+// CreateImagePattern after the affine transform refactoring.
+func TestCreateImagePattern_Compat(t *testing.T) {
+	dc := NewContext(200, 200)
+	img := makeTestImage(t, 20, 20, 255, 0, 0, 255)
+
+	pattern := dc.CreateImagePattern(img, 0, 0, 20, 20)
+
+	// Should tile: ColorAt(0,0) = red.
+	col := pattern.ColorAt(0, 0)
+	if col.R < 0.9 || col.A < 0.9 {
+		t.Errorf("expected red at (0,0), got R=%.2f A=%.2f", col.R, col.A)
+	}
+
+	// Tiling: ColorAt(20, 0) wraps to (0, 0) = red.
+	col2 := pattern.ColorAt(20, 0)
+	if col2.R < 0.9 || col2.A < 0.9 {
+		t.Errorf("expected red at (20,0) via tiling, got R=%.2f A=%.2f", col2.R, col2.A)
+	}
+
+	// Use as fill pattern and draw.
+	dc.SetFillPattern(pattern)
+	dc.DrawRectangle(0, 0, 200, 200)
+	_ = dc.Fill()
+
+	// Check some pixels are red.
+	pixel := dc.pixmap.GetPixel(10, 10)
+	if pixel.R < 0.8 {
+		t.Errorf("expected red fill from pattern at (10,10), got R=%.2f", pixel.R)
+	}
+}
+
+// TestImagePattern_SetTransform verifies the new SetTransform method.
+func TestImagePattern_SetTransform(t *testing.T) {
+	img := makeTestImage(t, 10, 10, 255, 0, 0, 255)
+
+	p := &ImagePattern{
+		image:   img,
+		w:       10,
+		h:       10,
+		inverse: Identity(),
+		clamp:   true,
+	}
+
+	// Set a transform that translates (50,50) -> image origin.
+	// Forward: device = Translate(50,50) * imageCoord
+	p.SetTransform(Translate(50, 50))
+
+	// At device (50, 50), should map to image (0, 0) = red.
+	col := p.ColorAt(50, 50)
+	if col.R < 0.9 || col.A < 0.9 {
+		t.Errorf("expected red at (50,50) with SetTransform, got R=%.2f A=%.2f", col.R, col.A)
+	}
+
+	// At device (0, 0), should map to image (-50, -50) = out of bounds.
+	col2 := p.ColorAt(0, 0)
+	if col2.A > 0.01 {
+		t.Errorf("expected transparent at (0,0) with SetTransform, got A=%.2f", col2.A)
 	}
 }
 
