@@ -437,6 +437,36 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	if err != nil {
 		return err
 	}
+
+	// Promote pendingTexture to real GPU texture if needed.
+	// Flush() returns pendingTexture on first call (lazy creation).
+	// We need a TextureCreator to create the real GPU texture.
+	if _, isPending := tex.(*pendingTexture); isPending {
+		type textureCreatorProvider interface {
+			TextureCreator() gpucontext.TextureCreator
+		}
+		tcp, ok := dc.(textureCreatorProvider)
+		if !ok {
+			return fmt.Errorf("ggcanvas: RenderTarget does not provide TextureCreator, cannot promote pending texture")
+		}
+		creator := tcp.TextureCreator()
+		if creator == nil {
+			return ErrInvalidRenderer
+		}
+		pending := tex.(*pendingTexture)
+		realTex, createErr := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
+		if createErr != nil {
+			return fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", createErr)
+		}
+		if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
+			pt.SetPremultiplied(true)
+		}
+		c.texture = realTex
+		destroyTexture(c.oldTexture)
+		c.oldTexture = nil
+		tex = realTex
+	}
+
 	return dc.PresentTexture(tex)
 }
 
