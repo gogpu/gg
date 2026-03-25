@@ -279,6 +279,33 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 //
 // If no accelerator is registered or it doesn't support surface rendering,
 // this is a no-op. The view parameter should be a hal.TextureView.
+// AcceleratorCanRenderDirect returns true if the registered GPU accelerator
+// is initialized and capable of rendering directly to a surface target.
+// Returns false if no accelerator is registered, GPU init failed (e.g.,
+// CPU-only adapter like llvmpipe), or the accelerator doesn't support
+// direct surface rendering.
+//
+// Use this to decide whether to attempt RenderDirect or go straight to
+// the universal CPU→texture→present path.
+func AcceleratorCanRenderDirect() bool {
+	a := Accelerator()
+	if a == nil {
+		return false
+	}
+	if drc, ok := a.(DirectRenderCapable); ok {
+		return drc.CanRenderDirect()
+	}
+	return false
+}
+
+// DirectRenderCapable is an optional interface for accelerators that can
+// report whether they are capable of rendering directly to a surface.
+// CPU-only adapters (llvmpipe, SwiftShader) return false because SDF/MSDF
+// shaders should not run on CPU — the accelerator stays uninitialized.
+type DirectRenderCapable interface {
+	CanRenderDirect() bool
+}
+
 func SetAcceleratorSurfaceTarget(view any, width, height uint32) {
 	a := Accelerator()
 	if a == nil {

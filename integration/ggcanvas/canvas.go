@@ -421,8 +421,11 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	}
 
 	// Try GPU-direct path (zero-copy surface rendering).
+	// Only attempt if the accelerator is actually capable — on CPU-only
+	// adapters (llvmpipe, SwiftShader) the accelerator stays uninitialized
+	// and RenderDirect would silently succeed without rendering anything.
 	sv := dc.SurfaceView()
-	if sv != nil {
+	if sv != nil && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
 		if err := c.RenderDirect(sv, sw, sh); err == nil {
 			return nil

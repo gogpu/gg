@@ -100,6 +100,7 @@ type SDFAccelerator struct {
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
+var _ gg.DirectRenderCapable = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.GPUGlyphMaskAccelerator = (*SDFAccelerator)(nil)
 var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
@@ -425,6 +426,15 @@ func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) e
 // automatically reset so the first render pass clears the surface while
 // subsequent mid-frame flushes preserve content (LoadOpLoad).
 //
+// CanRenderDirect returns true if the GPU accelerator is initialized and
+// capable of rendering directly to a surface. Returns false on CPU-only
+// adapters (llvmpipe, SwiftShader) where SDF shaders are not available.
+func (a *SDFAccelerator) CanRenderDirect() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.gpuReady && a.session != nil
+}
+
 // Call with nil to return to offscreen mode. The caller retains ownership
 // of the view.
 func (a *SDFAccelerator) SetSurfaceTarget(view any, width, height uint32) {
