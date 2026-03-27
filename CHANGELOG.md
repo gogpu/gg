@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.2] - 2026-03-27
+
+### Fixed
+
+- **`Clear()` documentation and examples** — Godoc now correctly states that `Clear()`
+  resets to transparent; `ClearWithColor()` is the recommended way to set a background
+  color. Updated all examples that used `dc.SetRGB(...); dc.Clear()` to use
+  `dc.ClearWithColor(gg.RGB(...))`. Fixes [#227](https://github.com/gogpu/gg/issues/227).
+
+- **`Recorder.Clear()` semantics** — `Recorder.Clear()` now matches `Context.Clear()`
+  by clearing to transparent. Previously it used the current fill brush, which was
+  inconsistent with `Context.Clear()` behavior.
+
 ## [0.38.1] - 2026-03-22
 
 ### Fixed

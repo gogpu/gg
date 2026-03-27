@@ -153,7 +153,6 @@ func main() {
 func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]text.Face, frame int) {
 	face28, face18, face14 := faces[1], faces[2], faces[3]
 
-	cc.SetRGBA(0, 0, 0, 0)
 	cc.Clear()
 
 	t := elapsed * 0.8

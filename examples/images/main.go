@@ -15,8 +15,7 @@ func main() {
 	dc := gg.NewContext(width, height)
 
 	// Fill background with light gray
-	dc.SetRGB(0.95, 0.95, 0.95)
-	dc.Clear()
+	dc.ClearWithColor(gg.RGB(0.95, 0.95, 0.95))
 
 	// Example 1: Create a simple test image programmatically
 	testImg, err := createTestImage(100, 100)

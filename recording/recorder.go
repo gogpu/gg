@@ -1109,13 +1109,15 @@ func recorderSplitLines(s string) []string {
 // Utility Methods
 // --------------------------------------------------------------------------
 
-// Clear fills the entire canvas with the current fill color.
-// This is equivalent to drawing a rectangle covering the entire canvas.
+// Clear resets the entire canvas to transparent (zero alpha),
+// matching [gg.Context.Clear] semantics. To fill with a specific
+// background color, use [Recorder.ClearWithColor].
 func (r *Recorder) Clear() {
-	r.FillRectangle(0, 0, float64(r.width), float64(r.height))
+	r.ClearWithColor(gg.Transparent)
 }
 
-// ClearWithColor fills the entire canvas with a specific color.
+// ClearWithColor fills the entire canvas with the specified color.
+// This is the recommended way to set a background color before drawing.
 func (r *Recorder) ClearWithColor(c gg.RGBA) {
 	oldBrush := r.fillBrush
 	r.fillBrush = NewSolidBrush(c)

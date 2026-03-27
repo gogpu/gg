@@ -19,8 +19,7 @@ func main() {
 	dc := gg.NewContext(width, height)
 
 	// White background
-	dc.SetRGB(1, 1, 1)
-	dc.Clear()
+	dc.ClearWithColor(gg.White)
 
 	// Example 1: Circular clip with pattern fill
 	example1CircularClip(dc)

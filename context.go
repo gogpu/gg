@@ -389,12 +389,14 @@ func (c *Context) SavePNG(path string) error {
 	return c.pixmap.SavePNG(path)
 }
 
-// Clear fills the entire context with a color.
+// Clear resets the entire context to transparent (zero alpha).
+// To fill with a specific background color, use [ClearWithColor].
 func (c *Context) Clear() {
 	c.pixmap.Clear(Transparent)
 }
 
-// ClearWithColor fills the entire context with a specific color.
+// ClearWithColor fills the entire context with the specified color.
+// This is the recommended way to set a background color before drawing.
 func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
 }

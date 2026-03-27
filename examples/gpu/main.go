@@ -39,8 +39,7 @@ func main() {
 	dc := gg.NewContext(width, height)
 
 	// Light background.
-	dc.SetRGBA(0.95, 0.95, 0.98, 1)
-	dc.Clear()
+	dc.ClearWithColor(gg.RGBA2(0.95, 0.95, 0.98, 1))
 
 	// --- Tier 1: SDF shapes (circles, rounded rects) ---
 	// These use the SDF fragment shader for pixel-perfect edges.

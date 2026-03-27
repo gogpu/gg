@@ -31,8 +31,7 @@ func main() {
 	dc := gg.NewContext(width, height)
 
 	// Dark background
-	dc.SetRGB(0.086, 0.129, 0.243)
-	dc.Clear()
+	dc.ClearWithColor(gg.RGB(0.086, 0.129, 0.243))
 
 	// === Filled shapes ===
 
