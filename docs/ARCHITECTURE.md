@@ -24,7 +24,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
              │  CPU Raster │             │    GPU      │
              │  (default)  │             │ Accelerator │
              └──────┬──────┘             └──────┬──────┘
-                    │                           │ (optional, 5 tiers)
+                    │                           │ (optional, 6 tiers)
              ┌──────▼──────┐             ┌──────▼──────┐
              │  internal/  │             │  internal/  │
              │   raster    │             │    gpu      │

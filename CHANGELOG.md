@@ -5,10 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.38.2] - 2026-03-31
 
 ### Fixed
 
+- **`Clear()` documentation and examples** — Godoc now correctly states that `Clear()`
+  resets to transparent; `ClearWithColor()` is the recommended way to set a background
+  color (Blend2D/Skia/HTML Canvas pattern). Updated all examples that used
+  `dc.SetRGB(...); dc.Clear()` to use `dc.ClearWithColor(gg.RGB(...))`.
+  Fixes [#227](https://github.com/gogpu/gg/issues/227).
+- **`Recorder.Clear()` semantics** — `Recorder.Clear()` now matches `Context.Clear()`
+  by clearing to transparent. Previously it used the current fill brush, which was
+  inconsistent with `Context.Clear()` behavior.
 - **Render() promotes pendingTexture** — Universal rendering path (CPU pixmap →
   GPU texture → present) now correctly promotes pending texture via TextureCreator
   duck-typing. Fixes black screen on CPU-only adapters. (BUG-GOGPU-001)
@@ -23,19 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wgpu `Queue.Submit()` signature (returns submission index, non-blocking).
   Replaces `SubmitWithFence` + `WaitForFence` with `Submit` + `WaitIdle`.
   Part of enterprise fence architecture fix (wgpu BUG-GOGPU-004).
-
-## [0.38.2] - 2026-03-27
-
-### Fixed
-
-- **`Clear()` documentation and examples** — Godoc now correctly states that `Clear()`
-  resets to transparent; `ClearWithColor()` is the recommended way to set a background
-  color. Updated all examples that used `dc.SetRGB(...); dc.Clear()` to use
-  `dc.ClearWithColor(gg.RGB(...))`. Fixes [#227](https://github.com/gogpu/gg/issues/227).
-
-- **`Recorder.Clear()` semantics** — `Recorder.Clear()` now matches `Context.Clear()`
-  by clearing to transparent. Previously it used the current fill brush, which was
-  inconsistent with `Context.Clear()` behavior.
+- **deps: wgpu v0.22.1 → v0.23.0** — Enterprise fence architecture
+- **deps: naga v0.14.8 → v0.15.0** — Full Rust parity (all 5 backends 100%)
+- **deps: goffi v0.4.2 → v0.5.0** — Windows ARM64 support
 
 ## [0.38.1] - 2026-03-22
 

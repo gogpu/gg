@@ -30,7 +30,7 @@
     Six-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline, glyph mask cache
   </video>
   <br>
-  <sub>Four-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, and MSDF text in a single render pass.
+  <sub>Six-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute, and glyph mask cache.
   Pure Go, Vulkan/DX12/GLES backends, zero CGO. (<a href="examples/gogpu_integration/">source</a>)</sub>
 </p>
 
@@ -200,7 +200,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 |-----------|----------|-------------|
 | **CPU Raster** | `internal/raster/` | Scanline analytic AA (hybrid: Vello coverage + Skia/tiny-skia edge infrastructure) |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
-| **GPU Accelerator** | `internal/gpu` | Five-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute) |
+| **GPU Accelerator** | `internal/gpu` | Six-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask) |
 | **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
 | **Tiles Only** | `raster/` | Opt-in via `import _ "github.com/gogpu/gg/raster"` (CPU-only tiles) |
 | **Software** | Root `gg` package | Default CPU renderer with smart algorithm selection |

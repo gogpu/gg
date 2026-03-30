@@ -440,34 +440,43 @@ func (c *Canvas) Render(dc RenderTarget) error {
 
 	// Promote pendingTexture to real GPU texture if needed.
 	// Flush() returns pendingTexture on first call (lazy creation).
-	// We need a TextureCreator to create the real GPU texture.
-	if _, isPending := tex.(*pendingTexture); isPending {
-		type textureCreatorProvider interface {
-			TextureCreator() gpucontext.TextureCreator
-		}
-		tcp, ok := dc.(textureCreatorProvider)
-		if !ok {
-			return fmt.Errorf("ggcanvas: RenderTarget does not provide TextureCreator, cannot promote pending texture")
-		}
-		creator := tcp.TextureCreator()
-		if creator == nil {
-			return ErrInvalidRenderer
-		}
-		pending := tex.(*pendingTexture)
-		realTex, createErr := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
-		if createErr != nil {
-			return fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", createErr)
-		}
-		if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
-			pt.SetPremultiplied(true)
-		}
-		c.texture = realTex
-		destroyTexture(c.oldTexture)
-		c.oldTexture = nil
-		tex = realTex
+	tex, err = c.promoteIfPending(tex, dc)
+	if err != nil {
+		return err
 	}
 
 	return dc.PresentTexture(tex)
+}
+
+// promoteIfPending promotes a pendingTexture to a real GPU texture if needed.
+// Returns the texture unchanged if it is not pending.
+func (c *Canvas) promoteIfPending(tex any, dc RenderTarget) (any, error) {
+	if _, ok := tex.(*pendingTexture); !ok {
+		return tex, nil
+	}
+	type textureCreatorProvider interface {
+		TextureCreator() gpucontext.TextureCreator
+	}
+	tcp, ok := dc.(textureCreatorProvider)
+	if !ok {
+		return nil, fmt.Errorf("ggcanvas: RenderTarget does not provide TextureCreator, cannot promote pending texture")
+	}
+	creator := tcp.TextureCreator()
+	if creator == nil {
+		return nil, ErrInvalidRenderer
+	}
+	pending := tex.(*pendingTexture)
+	realTex, err := creator.NewTextureFromRGBA(pending.width, pending.height, pending.data)
+	if err != nil {
+		return nil, fmt.Errorf("ggcanvas: NewTextureFromRGBA failed: %w", err)
+	}
+	if pt, ok := realTex.(interface{ SetPremultiplied(bool) }); ok {
+		pt.SetPremultiplied(true)
+	}
+	c.texture = realTex
+	destroyTexture(c.oldTexture)
+	c.oldTexture = nil
+	return realTex, nil
 }
 
 // Texture returns the current GPU texture without flushing.
