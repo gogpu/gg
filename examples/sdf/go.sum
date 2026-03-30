@@ -2,10 +2,10 @@ github.com/go-text/typesetting v0.3.4 h1:YYurUOtEb9kGSOz4uE3k4OpBGsp1dDL8+fjCeaF
 github.com/go-text/typesetting v0.3.4/go.mod h1:4qZCQphq4KSgGTAeI0uMEkVbROgfah8BuyF5LRYr7XY=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3 h1:drBZzMgdYPbmyXqOto4YhhJGrFIQCX94FpR4MzTCsos=
 github.com/go-text/typesetting-utils v0.0.0-20260223113751-2d88ac90dae3/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
-github.com/gogpu/gg v0.37.3 h1:U4xahzW7uRoT986trkE4OuQcpOnN1R2pXdQZZhWL1jc=
-github.com/gogpu/gg v0.37.3/go.mod h1:8+77MoKulv5217RkbaaF+fLV75WAUnwfS1gMjotLu7Y=
-github.com/gogpu/gpucontext v0.10.0 h1:Uv9N/J9xJYWYgQNC3rJQVVKdjeakHmIpgUuIoSTXNYw=
-github.com/gogpu/gpucontext v0.10.0/go.mod h1:d+6V6OVk81cFRpsJcl+9Qnd8qCDLTQGelMVMEzjPTUg=
+github.com/gogpu/gg v0.38.2 h1:fsqYYvP7LXw5Ahn3Vvnmza6f7tpWzJRR6LhYQEBfTvw=
+github.com/gogpu/gg v0.38.2/go.mod h1:qbxfWmr5V8D94PttJTNJtSDNkqvdfVe2Ub1oFVBmbZo=
+github.com/gogpu/gpucontext v0.11.0 h1:dm+u3+Sl0Xgh7iZiRRUb36GDpSi8RpNk8n3NPmd5sGw=
+github.com/gogpu/gpucontext v0.11.0/go.mod h1:d+6V6OVk81cFRpsJcl+9Qnd8qCDLTQGelMVMEzjPTUg=
 github.com/gogpu/gputypes v0.3.0 h1:gcwxsBrcoCX19GqqqiV55wLv2iFwaybiOluKCb0hVrs=
 github.com/gogpu/gputypes v0.3.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
 golang.org/x/image v0.37.0 h1:ZiRjArKI8GwxZOoEtUfhrBtaCN+4b/7709dlT6SSnQA=
