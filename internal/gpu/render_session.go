@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
@@ -626,29 +625,10 @@ func (s *GPURenderSession) Destroy() {
 	// Do not destroy pipelines -- they are owned by the caller.
 }
 
-// drainQueue submits a no-op command buffer with a fence and waits for it.
-// Since the GPU queue is FIFO, this guarantees all prior submissions are done.
+// drainQueue waits for all prior GPU submissions to complete.
+// Since the GPU queue is FIFO, WaitIdle guarantees all prior submissions are done.
 func (s *GPURenderSession) drainQueue() {
-	fence, err := s.device.CreateFence()
-	if err != nil {
-		return
-	}
-	defer fence.Release()
-
-	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
-		Label: "session_drain",
-	})
-	if err != nil {
-		return
-	}
-	cmdBuf, err := encoder.Finish()
-	if err != nil {
-		return
-	}
-	// cmdBuf freed after fence wait
-
-	_ = s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1)
-	_, _ = s.device.WaitForFence(fence, 1, 5*time.Second)
+	_ = s.device.WaitIdle()
 }
 
 func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen,gocognit // sequential resource cleanup across 6 tiers
@@ -1761,18 +1741,11 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	// cmdBuf freed after fence wait
 
 	// Submit and wait.
-	fence, err := s.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("create fence: %w", err)
-	}
-	defer fence.Release()
-
-	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := s.device.WaitForFence(fence, 1, 5*time.Second)
-	if err != nil || !fenceOK {
-		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
+	if err := s.device.WaitIdle(); err != nil {
+		return fmt.Errorf("wait for GPU: %w", err)
 	}
 
 	readback := make([]byte, stagingBufSize)
@@ -1908,7 +1881,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 
 	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
 	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
-	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
@@ -2188,7 +2161,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 
 	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
 	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
-	if err := s.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, nil, 0); err != nil {
+	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}

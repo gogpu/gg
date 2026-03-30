@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Render() promotes pendingTexture** — Universal rendering path (CPU pixmap →
+  GPU texture → present) now correctly promotes pending texture via TextureCreator
+  duck-typing. Fixes black screen on CPU-only adapters. (BUG-GOGPU-001)
+- **Skip GPU-direct path on CPU adapters** — `AcceleratorCanRenderDirect()` returns
+  false on llvmpipe/SwiftShader, forcing universal path. Prevents empty SDF render
+  on GPU-disabled accelerator.
+
+### Changed
+
+- **GPU accelerator: wgpu Submit API update** — Updated internal GPU code
+  (SDF renderer, Vello accelerator, stencil renderer, render session) to use
+  new wgpu `Queue.Submit()` signature (returns submission index, non-blocking).
+  Replaces `SubmitWithFence` + `WaitForFence` with `Submit` + `WaitIdle`.
+  Part of enterprise fence architecture fix (wgpu BUG-GOGPU-004).
+
 ## [0.38.2] - 2026-03-27
 
 ### Fixed

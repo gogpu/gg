@@ -753,22 +753,12 @@ func (a *VelloAccelerator) readbackBuffer(outputBuffer *wgpu.Buffer, size uint64
 	// cmdBuf freed after fence wait
 
 	// Submit and wait.
-	fence, err := a.device.CreateFence()
-	if err != nil {
-		return nil, fmt.Errorf("create readback fence: %w", err)
-	}
-	defer fence.Release()
-
-	if err := a.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if _, err := a.queue.Submit(cmdBuf); err != nil {
 		return nil, fmt.Errorf("submit readback: %w", err)
 	}
 
-	ok, err := a.device.WaitForFence(fence, 1, velloFenceTimeout)
-	if err != nil {
+	if err := a.device.WaitIdle(); err != nil {
 		return nil, fmt.Errorf("wait for readback: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("readback timeout after %v", velloFenceTimeout)
 	}
 
 	// Read data.

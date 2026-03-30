@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"time"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
@@ -530,18 +529,11 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	// cmdBuf freed after fence wait
 
 	// Submit and wait.
-	fence, err := p.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("create fence: %w", err)
-	}
-	defer fence.Release()
-
-	if err := p.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if _, err := p.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := p.device.WaitForFence(fence, 1, 5*time.Second)
-	if err != nil || !fenceOK {
-		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
+	if err := p.device.WaitIdle(); err != nil {
+		return fmt.Errorf("wait for GPU: %w", err)
 	}
 
 	readback := make([]byte, pixelBufSize)

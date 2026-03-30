@@ -14,7 +14,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -69,9 +68,6 @@ const (
 	// velloPTCLMaxPerTile is the maximum PTCL words per tile.
 	// Each tile's command list is bounded to this size.
 	velloPTCLMaxPerTile = 1024
-
-	// velloFenceTimeout is the maximum time to wait for GPU work to complete.
-	velloFenceTimeout = 5 * time.Second
 )
 
 // =============================================================================
@@ -1040,14 +1036,10 @@ type dispatchResources struct {
 	device     *wgpu.Device
 	bindGroups []*wgpu.BindGroup
 	cmdBuf     *wgpu.CommandBuffer
-	fence      *wgpu.Fence
 }
 
 // cleanup destroys all tracked per-frame resources.
 func (r *dispatchResources) cleanup() {
-	if r.fence != nil {
-		r.fence.Release()
-	}
 	// cmdBuf is consumed by Submit; no explicit free needed.
 	for _, g := range r.bindGroups {
 		g.Release()
@@ -1188,22 +1180,12 @@ type stageDispatch struct {
 
 // submitAndWait submits the command buffer and waits for GPU completion.
 func (d *VelloComputeDispatcher) submitAndWait(res *dispatchResources) error {
-	fence, err := d.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("vello compute: create fence: %w", err)
-	}
-	res.fence = fence
-
-	if err := d.queue.SubmitWithFence([]*wgpu.CommandBuffer{res.cmdBuf}, fence, 1); err != nil {
+	if _, err := d.queue.Submit(res.cmdBuf); err != nil {
 		return fmt.Errorf("vello compute: submit: %w", err)
 	}
 
-	ok, err := d.device.WaitForFence(fence, 1, velloFenceTimeout)
-	if err != nil {
+	if err := d.device.WaitIdle(); err != nil {
 		return fmt.Errorf("vello compute: wait for GPU: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("vello compute: GPU timeout after %v", velloFenceTimeout)
 	}
 
 	slogger().Debug("vello compute: all stages dispatched successfully",

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"time"
 	"unsafe"
 
 	"github.com/gogpu/gg"
@@ -430,18 +429,11 @@ func (sr *StencilRenderer) submitAndReadback(
 	cmdBuf *wgpu.CommandBuffer, stagingBuf *wgpu.Buffer,
 	pixelBufSize uint64, target gg.GPURenderTarget,
 ) error {
-	fence, err := sr.device.CreateFence()
-	if err != nil {
-		return fmt.Errorf("create fence: %w", err)
-	}
-	defer fence.Release()
-
-	if err := sr.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuf}, fence, 1); err != nil {
+	if _, err := sr.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	fenceOK, err := sr.device.WaitForFence(fence, 1, 5*time.Second)
-	if err != nil || !fenceOK {
-		return fmt.Errorf("wait for GPU: ok=%v err=%w", fenceOK, err)
+	if err := sr.device.WaitIdle(); err != nil {
+		return fmt.Errorf("wait for GPU: %w", err)
 	}
 
 	readback := make([]byte, pixelBufSize)

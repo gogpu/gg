@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/gogpu/gg/internal/gpucore"
 	"github.com/gogpu/gputypes"
@@ -240,20 +239,13 @@ func (a *HALAdapter) ReadBuffer(id gpucore.BufferID, offset, size uint64) ([]byt
 	}
 
 	// Submit and wait
-	fence, err := a.device.CreateFence()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create fence: %w", err)
-	}
-	defer fence.Release()
-
-	if err := a.queue.SubmitWithFence([]*wgpu.CommandBuffer{cmdBuffer}, fence, 1); err != nil {
+	if _, err := a.queue.Submit(cmdBuffer); err != nil {
 		return nil, fmt.Errorf("failed to submit commands: %w", err)
 	}
 
-	// Wait for completion (5 seconds)
-	_, err = a.device.WaitForFence(fence, 1, 5*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for fence: %w", err)
+	// Wait for completion
+	if err := a.device.WaitIdle(); err != nil {
+		return nil, fmt.Errorf("failed to wait for GPU: %w", err)
 	}
 
 	// TODO: Actual buffer mapping is not yet implemented in HAL
@@ -621,8 +613,8 @@ func (a *HALAdapter) Submit() {
 		return
 	}
 
-	// Submit without fence (fire and forget)
-	_ = a.queue.Submit(cmdBuffer)
+	// Submit (fire and forget — non-blocking)
+	_, _ = a.queue.Submit(cmdBuffer)
 
 	// Clean up
 	// cmdBuffer consumed by Submit
@@ -635,19 +627,8 @@ func (a *HALAdapter) WaitIdle() {
 	// Submit any pending work first
 	a.Submit()
 
-	// Create a fence and submit empty work to synchronize
-	fence, err := a.device.CreateFence()
-	if err != nil {
-		return
-	}
-	defer fence.Release()
-
-	if err := a.queue.SubmitWithFence(nil, fence, 1); err != nil {
-		return
-	}
-
-	// Wait for fence (5 second timeout)
-	_, _ = a.device.WaitForFence(fence, 1, 5*time.Second)
+	// Wait for all GPU work to complete.
+	_ = a.device.WaitIdle()
 }
 
 // === Type Conversion Helpers ===
