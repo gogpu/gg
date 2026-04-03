@@ -289,16 +289,74 @@ func TestCommonColors(t *testing.T) {
 
 func TestParseHex(t *testing.T) {
 	tests := []struct {
+		name    string
+		hex     string
+		want    RGBA
+		wantErr bool
+	}{
+		{"6-char with hash", "#FF0000", RGB(1, 0, 0), false},
+		{"6-char no hash", "00FF00", RGB(0, 1, 0), false},
+		{"6-char blue", "#0000FF", RGB(0, 0, 1), false},
+		{"3-char red", "#F00", RGB(1, 0, 0), false},
+		{"3-char white", "#FFF", RGB(1, 1, 1), false},
+		{"3-char black", "#000", RGB(0, 0, 0), false},
+		{"8-char with alpha", "#FF000080", RGBA{1, 0, 0, 128.0 / 255.0}, false},
+		{"8-char fully opaque", "#FF0000FF", RGB(1, 0, 0), false},
+		{"8-char fully transparent", "#FF000000", RGBA{1, 0, 0, 0}, false},
+		{"4-char with alpha", "#F008", RGBA{1, 0, 0, 136.0 / 255.0}, false},
+		{"4-char opaque", "#F00F", RGB(1, 0, 0), false},
+		{"lowercase", "#ff8800", RGB(1, 136.0/255.0, 0), false},
+		{"mixed case", "#Ff8800", RGB(1, 136.0/255.0, 0), false},
+		{"gray", "#808080", RGB(128.0/255.0, 128.0/255.0, 128.0/255.0), false},
+		{"empty string", "", RGBA{}, true},
+		{"hash only", "#", RGBA{}, true},
+		{"1 char", "#F", RGBA{}, true},
+		{"2 chars", "#FF", RGBA{}, true},
+		{"5 chars", "#12345", RGBA{}, true},
+		{"7 chars", "#1234567", RGBA{}, true},
+		{"9 chars", "#123456789", RGBA{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseHex(tt.hex)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseHex(%q) expected error, got nil", tt.hex)
+				}
+				wantBlack := RGB(0, 0, 0)
+				if !colorsNear(got, wantBlack, 0.001) {
+					t.Errorf("ParseHex(%q) on error = %v, want black opaque %v", tt.hex, got, wantBlack)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseHex(%q) unexpected error: %v", tt.hex, err)
+			}
+			if !colorsNear(got, tt.want, 0.01) {
+				t.Errorf("ParseHex(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_parseHex(t *testing.T) {
+	tests := []struct {
 		name string
 		s    string
 		want uint32
 	}{
-		{"single digit", "F", 15},
-		{"two digits", "FF", 255},
-		{"lowercase", "ff", 255},
-		{"mixed", "Ab", 171},
-		{"zero", "00", 0},
-		{"invalid char", "GG", 0},
+		{"single 0", "0", 0},
+		{"single F", "F", 15},
+		{"single a", "a", 10},
+		{"two digit 00", "00", 0},
+		{"two digit FF", "FF", 255},
+		{"two digit ff", "ff", 255},
+		{"two digit 80", "80", 128},
+		{"mixed case Ab", "Ab", 171},
+		{"hex 10", "10", 16},
+		{"invalid char stops parsing", "GG", 0},
+		{"invalid after valid", "1G", 16},
 	}
 
 	for _, tt := range tests {

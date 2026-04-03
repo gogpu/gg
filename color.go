@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 )
@@ -60,9 +61,9 @@ func RGBA2(r, g, b, a float64) RGBA {
 	return RGBA{R: r, G: g, B: b, A: a}
 }
 
-// Hex creates a color from a hex string.
+// ParseHex creates a color from a hex string, returning an error for invalid formats.
 // Supports formats: "RGB", "RGBA", "RRGGBB", "RRGGBBAA".
-func Hex(hex string) RGBA {
+func ParseHex(hex string) (RGBA, error) {
 	if hex != "" && hex[0] == '#' {
 		hex = hex[1:]
 	}
@@ -92,15 +93,23 @@ func Hex(hex string) RGBA {
 		parseHex(hex[4:6], &b)
 		parseHex(hex[6:8], &a)
 	default:
-		return RGBA{R: 0, G: 0, B: 0, A: 1}
+		return RGBA{R: 0, G: 0, B: 0, A: 1}, fmt.Errorf("invalid hex color format: %s", hex)
 	}
-
 	return RGBA{
 		R: float64(r) / 255,
 		G: float64(g) / 255,
 		B: float64(b) / 255,
 		A: float64(a) / 255,
+	}, nil
+}
+
+// Hex creates a color from a hex string.
+// Supports formats: "RGB", "RGBA", "RRGGBB", "RRGGBBAA".
+func Hex(hex string) RGBA {
+	if c, err := ParseHex(hex); err == nil {
+		return c
 	}
+	return RGBA{R: 0, G: 0, B: 0, A: 1}
 }
 
 // parseHex is a helper for hex parsing
