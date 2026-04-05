@@ -13,25 +13,31 @@ func (p *Path) Area() float64 {
 	var area float64
 	var current, start Point
 
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			start = e.Point
-			current = e.Point
-		case LineTo:
-			area += lineArea(current, e.Point)
-			current = e.Point
-		case QuadTo:
-			area += quadArea(current, e.Control, e.Point)
-			current = e.Point
-		case CubicTo:
-			area += cubicArea(current, e.Control1, e.Control2, e.Point)
-			current = e.Point
-		case Close:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			start = Pt(coords[0], coords[1])
+			current = start
+		case VerbLineTo:
+			pt := Pt(coords[0], coords[1])
+			area += lineArea(current, pt)
+			current = pt
+		case VerbQuadTo:
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			area += quadArea(current, ctrl, pt)
+			current = pt
+		case VerbCubicTo:
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			area += cubicArea(current, ctrl1, ctrl2, pt)
+			current = pt
+		case VerbClose:
 			area += lineArea(current, start)
 			current = start
 		}
-	}
+	})
 
 	return area
 }
@@ -47,34 +53,13 @@ func lineArea(p0, p1 Point) float64 {
 func quadArea(p0, p1, p2 Point) float64 {
 	// For a quadratic Bezier B(t) = (1-t)^2*P0 + 2*(1-t)*t*P1 + t^2*P2
 	// Area contribution = integral of x*dy from t=0 to t=1
-	// After computing symbolically:
-	// area = (x0*(2*y1 + y2) + x1*(y2 - y0) + x2*(-2*y1 - y0)) / 6
-	// Simplified: area = (x0*(2*y1 + y2) + x1*(-y0 + y2) + x2*(-2*y1 - y0)) / 6
 	return (p0.X*(2*p1.Y+p2.Y) + p1.X*(-p0.Y+p2.Y) + p2.X*(-2*p1.Y-p0.Y)) / 6.0
 }
 
 // cubicArea computes the contribution of a cubic Bezier to the signed area.
 // Integrates x*dy using the parametric form and Green's theorem.
-// Formula derived from: integral of x*dy for B(t) = (1-t)^3*P0 + 3*(1-t)^2*t*P1 + 3*(1-t)*t^2*P2 + t^3*P3
 func cubicArea(p0, p1, p2, p3 Point) float64 {
-	// The exact formula for the signed area contribution of a cubic Bezier:
-	// Area = (3/20) * [ (x1-x0)*(y2-y0) - (x2-x0)*(y1-y0)
-	//                 + (x2-x0)*(y3-y0) - (x3-x0)*(y2-y0)
-	//                 + 2*((x1-x0)*(y3-y0) - (x3-x0)*(y1-y0))
-	//                 + (x3-x0)*(y0+y3) - x0*(y3-y0) ]
-	// Simplified using shoelace-like form:
-	// = (x0*(6*y1-3*y3+3*y2) + x1*(3*y2-6*y0+3*y3) + x2*(3*y3-6*y0+3*y1) + x3*(-3*y2+6*y1-3*y0)) / 20
-	//   + closing segment from p3 to p0
-
-	// Simpler formulation using cross products:
-	// Area = 3/20 * [(P1-P0) x (P2-P0) + (P2-P0) x (P3-P0) + 2*(P1-P0) x (P3-P0)]
-	//        + (P3 x P0) / 2 [closing segment contribution]
-
 	// Using the formula from the kurbo library:
-	// area = (x0*(6*y1 + 3*y2 + y3) + 3*x1*(-2*y0 + y2 + y3) + 3*x2*(-y0 - y1 + 2*y3) + x3*(-y0 - 3*y1 - 6*y2)) / 20
-	// Plus the closing line from p3 back to origin (included in total path area)
-
-	// Direct formula for cubic bezier area contribution:
 	return (p0.X*(6*p1.Y+3*p2.Y+p3.Y) +
 		3*p1.X*(-2*p0.Y+p2.Y+p3.Y) +
 		3*p2.X*(-p0.Y-p1.Y+2*p3.Y) +
@@ -88,25 +73,31 @@ func (p *Path) Winding(pt Point) int {
 	var winding int
 	var current, start Point
 
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			start = e.Point
-			current = e.Point
-		case LineTo:
-			winding += lineWinding(current, e.Point, pt)
-			current = e.Point
-		case QuadTo:
-			winding += quadWinding(current, e.Control, e.Point, pt)
-			current = e.Point
-		case CubicTo:
-			winding += cubicWinding(current, e.Control1, e.Control2, e.Point, pt)
-			current = e.Point
-		case Close:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			start = Pt(coords[0], coords[1])
+			current = start
+		case VerbLineTo:
+			ep := Pt(coords[0], coords[1])
+			winding += lineWinding(current, ep, pt)
+			current = ep
+		case VerbQuadTo:
+			ctrl := Pt(coords[0], coords[1])
+			ep := Pt(coords[2], coords[3])
+			winding += quadWinding(current, ctrl, ep, pt)
+			current = ep
+		case VerbCubicTo:
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			ep := Pt(coords[4], coords[5])
+			winding += cubicWinding(current, ctrl1, ctrl2, ep, pt)
+			current = ep
+		case VerbClose:
 			winding += lineWinding(current, start, pt)
 			current = start
 		}
-	}
+	})
 
 	return winding
 }
@@ -245,7 +236,7 @@ func (p *Path) Contains(pt Point) bool {
 // BoundingBox returns the tight axis-aligned bounding box of the path.
 // Uses curve extrema for accuracy.
 func (p *Path) BoundingBox() Rect {
-	if len(p.elements) == 0 {
+	if len(p.verbs) == 0 {
 		return Rect{}
 	}
 
@@ -257,24 +248,31 @@ func (p *Path) BoundingBox() Rect {
 
 	var current Point
 
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			bbox = expandBBox(bbox, e.Point)
-			current = e.Point
-		case LineTo:
-			bbox = expandBBox(bbox, e.Point)
-			current = e.Point
-		case QuadTo:
-			bbox = bbox.Union(quadBBox(current, e.Control, e.Point))
-			current = e.Point
-		case CubicTo:
-			bbox = bbox.Union(cubicBBox(current, e.Control1, e.Control2, e.Point))
-			current = e.Point
-		case Close:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			pt := Pt(coords[0], coords[1])
+			bbox = expandBBox(bbox, pt)
+			current = pt
+		case VerbLineTo:
+			pt := Pt(coords[0], coords[1])
+			bbox = expandBBox(bbox, pt)
+			current = pt
+		case VerbQuadTo:
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			bbox = bbox.Union(quadBBox(current, ctrl, pt))
+			current = pt
+		case VerbCubicTo:
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			bbox = bbox.Union(cubicBBox(current, ctrl1, ctrl2, pt))
+			current = pt
+		case VerbClose:
 			// Close doesn't add new points
 		}
-	}
+	})
 
 	// Handle empty path case
 	if bbox.Min.X == math.MaxFloat64 {
@@ -307,11 +305,11 @@ func cubicBBox(p0, p1, p2, p3 Point) Rect {
 // Flatten converts all curves to line segments with given tolerance.
 // tolerance is the maximum distance from the curve.
 func (p *Path) Flatten(tolerance float64) []Point {
-	if len(p.elements) == 0 {
+	if len(p.verbs) == 0 {
 		return nil
 	}
 
-	points := make([]Point, 0, len(p.elements)*4)
+	points := make([]Point, 0, len(p.verbs)*4)
 	p.FlattenCallback(tolerance, func(pt Point) {
 		points = append(points, pt)
 	})
@@ -328,32 +326,39 @@ func (p *Path) FlattenCallback(tolerance float64, fn func(pt Point)) {
 	var current, start Point
 	var started bool
 
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
-		case MoveTo:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
 			if started {
 				fn(current) // Emit last point of previous subpath
 			}
-			fn(e.Point)
-			start = e.Point
-			current = e.Point
+			pt := Pt(coords[0], coords[1])
+			fn(pt)
+			start = pt
+			current = pt
 			started = true
-		case LineTo:
-			fn(e.Point)
-			current = e.Point
-		case QuadTo:
-			flattenQuad(current, e.Control, e.Point, tolerance, fn)
-			current = e.Point
-		case CubicTo:
-			flattenCubic(current, e.Control1, e.Control2, e.Point, tolerance, fn)
-			current = e.Point
-		case Close:
+		case VerbLineTo:
+			pt := Pt(coords[0], coords[1])
+			fn(pt)
+			current = pt
+		case VerbQuadTo:
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			flattenQuad(current, ctrl, pt, tolerance, fn)
+			current = pt
+		case VerbCubicTo:
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			flattenCubic(current, ctrl1, ctrl2, pt, tolerance, fn)
+			current = pt
+		case VerbClose:
 			if current != start {
 				fn(start)
 			}
 			current = start
 		}
-	}
+	})
 }
 
 // flattenQuad flattens a quadratic Bezier curve.
@@ -403,7 +408,7 @@ func flattenCubicRecursive(c CubicBez, toleranceSq float64, fn func(pt Point)) {
 // Reversed returns a new path with reversed direction.
 // Each subpath is reversed independently.
 func (p *Path) Reversed() *Path {
-	if len(p.elements) == 0 {
+	if len(p.verbs) == 0 {
 		return NewPath()
 	}
 
@@ -426,11 +431,12 @@ type subpath struct {
 }
 
 // collectSubpaths splits the path into separate subpaths.
+// Uses Elements() for simplicity since this is not a hot path.
 func (p *Path) collectSubpaths() []subpath {
 	var subpaths []subpath
 	var current subpath
 
-	for _, elem := range p.elements {
+	for _, elem := range p.Elements() {
 		switch elem.(type) {
 		case MoveTo:
 			// Start a new subpath
@@ -553,23 +559,29 @@ func (p *Path) Length(accuracy float64) float64 {
 	var length float64
 	var current Point
 
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			current = e.Point
-		case LineTo:
-			length += current.Distance(e.Point)
-			current = e.Point
-		case QuadTo:
-			length += quadLength(current, e.Control, e.Point, accuracy)
-			current = e.Point
-		case CubicTo:
-			length += cubicLength(current, e.Control1, e.Control2, e.Point, accuracy)
-			current = e.Point
-		case Close:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			current = Pt(coords[0], coords[1])
+		case VerbLineTo:
+			pt := Pt(coords[0], coords[1])
+			length += current.Distance(pt)
+			current = pt
+		case VerbQuadTo:
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			length += quadLength(current, ctrl, pt, accuracy)
+			current = pt
+		case VerbCubicTo:
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			length += cubicLength(current, ctrl1, ctrl2, pt, accuracy)
+			current = pt
+		case VerbClose:
 			// Close doesn't add length (already computed if there's a closing line)
 		}
-	}
+	})
 
 	return length
 }
