@@ -10,79 +10,66 @@ import (
 )
 
 // makeTrianglePath returns a simple triangle path (3 LineTo, no curves).
-func makeTrianglePath() []gg.PathElement {
-	return []gg.PathElement{
-		gg.MoveTo{Point: gg.Pt(0, 0)},
-		gg.LineTo{Point: gg.Pt(100, 0)},
-		gg.LineTo{Point: gg.Pt(50, 100)},
-		gg.Close{},
-	}
+func makeTrianglePath() *gg.Path {
+	p := gg.NewPath()
+	p.MoveTo(0, 0)
+	p.LineTo(100, 0)
+	p.LineTo(50, 100)
+	p.Close()
+	return p
 }
 
 // makeSquarePath returns a square path (4 LineTo).
-func makeSquarePath() []gg.PathElement {
-	return []gg.PathElement{
-		gg.MoveTo{Point: gg.Pt(10, 10)},
-		gg.LineTo{Point: gg.Pt(60, 10)},
-		gg.LineTo{Point: gg.Pt(60, 60)},
-		gg.LineTo{Point: gg.Pt(10, 60)},
-		gg.Close{},
-	}
+func makeSquarePath() *gg.Path {
+	p := gg.NewPath()
+	p.MoveTo(10, 10)
+	p.LineTo(60, 10)
+	p.LineTo(60, 60)
+	p.LineTo(10, 60)
+	p.Close()
+	return p
 }
 
-// makeCirclePath returns a circle using 4 cubic Beziers (standard kappa approximation).
-func makeCirclePath(cx, cy, r float64) []gg.PathElement {
-	const k = 0.5522847498307936
-	off := r * k
-	return []gg.PathElement{
-		gg.MoveTo{Point: gg.Pt(cx+r, cy)},
-		gg.CubicTo{Control1: gg.Pt(cx+r, cy+off), Control2: gg.Pt(cx+off, cy+r), Point: gg.Pt(cx, cy+r)},
-		gg.CubicTo{Control1: gg.Pt(cx-off, cy+r), Control2: gg.Pt(cx-r, cy+off), Point: gg.Pt(cx-r, cy)},
-		gg.CubicTo{Control1: gg.Pt(cx-r, cy-off), Control2: gg.Pt(cx-off, cy-r), Point: gg.Pt(cx, cy-r)},
-		gg.CubicTo{Control1: gg.Pt(cx+off, cy-r), Control2: gg.Pt(cx+r, cy-off), Point: gg.Pt(cx+r, cy)},
-		gg.Close{},
-	}
+// makeCirclePath returns a circle using gg.Path.Circle.
+func makeCirclePath(cx, cy, r float64) *gg.Path {
+	p := gg.NewPath()
+	p.Circle(cx, cy, r)
+	return p
 }
 
 // makeStarPath returns a 5-pointed star (10 LineTo, concave).
-func makeStarPath() []gg.PathElement {
+func makeStarPath() *gg.Path {
 	const (
 		cx, cy  = 100.0, 100.0
 		outerR  = 80.0
 		innerR  = 30.0
 		nPoints = 5
 	)
-	elems := make([]gg.PathElement, 0, 2*nPoints+2)
-
+	p := gg.NewPath()
 	for i := 0; i < nPoints; i++ {
-		// Outer point
 		outerAngle := float64(i)*2*math.Pi/nPoints - math.Pi/2
 		ox := cx + outerR*math.Cos(outerAngle)
 		oy := cy + outerR*math.Sin(outerAngle)
 		if i == 0 {
-			elems = append(elems, gg.MoveTo{Point: gg.Pt(ox, oy)})
+			p.MoveTo(ox, oy)
 		} else {
-			elems = append(elems, gg.LineTo{Point: gg.Pt(ox, oy)})
+			p.LineTo(ox, oy)
 		}
-		// Inner point
 		innerAngle := outerAngle + math.Pi/nPoints
 		ix := cx + innerR*math.Cos(innerAngle)
 		iy := cy + innerR*math.Sin(innerAngle)
-		elems = append(elems, gg.LineTo{Point: gg.Pt(ix, iy)})
+		p.LineTo(ix, iy)
 	}
-	elems = append(elems, gg.Close{})
-	return elems
+	p.Close()
+	return p
 }
 
 // makeDonutPath returns two concentric contours (outer CW, inner CCW).
-func makeDonutPath() []gg.PathElement {
-	outer := makeCirclePath(100, 100, 80)
-	inner := makeCirclePath(100, 100, 30)
-	// Combine both contours into one path
-	elems := make([]gg.PathElement, 0, len(outer)+len(inner))
-	elems = append(elems, outer...)
-	elems = append(elems, inner...)
-	return elems
+func makeDonutPath() *gg.Path {
+	p := gg.NewPath()
+	p.Circle(100, 100, 80)
+	p.Circle(100, 100, 30)
+	return p
 }
 
 func TestFanTessellateEmpty(t *testing.T) {
@@ -92,7 +79,7 @@ func TestFanTessellateEmpty(t *testing.T) {
 		t.Errorf("nil path: got %d vertices, want 0", count)
 	}
 
-	count = ft.TessellatePath([]gg.PathElement{})
+	count = ft.TessellatePath(gg.NewPath())
 	if count != 0 {
 		t.Errorf("empty path: got %d vertices, want 0", count)
 	}
@@ -217,7 +204,7 @@ func TestFanTessellateDonut(t *testing.T) {
 func TestFanTessellateAABB(t *testing.T) {
 	tests := []struct {
 		name     string
-		elements []gg.PathElement
+		elements *gg.Path
 		wantMinX float32
 		wantMinY float32
 		wantMaxX float32
@@ -333,14 +320,13 @@ func TestFanTessellateReset(t *testing.T) {
 
 func TestFanTessellateQuadBezier(t *testing.T) {
 	// A simple quadratic curve that should be subdivided
-	elements := []gg.PathElement{
-		gg.MoveTo{Point: gg.Pt(0, 0)},
-		gg.QuadTo{Control: gg.Pt(50, 100), Point: gg.Pt(100, 0)},
-		gg.Close{},
-	}
+	p := gg.NewPath()
+	p.MoveTo(0, 0)
+	p.QuadraticTo(50, 100, 100, 0)
+	p.Close()
 
 	ft := NewFanTessellator()
-	ft.TessellatePath(elements)
+	ft.TessellatePath(p)
 
 	// A quadratic with high curvature should produce multiple fan triangles
 	triangles := ft.TriangleCount()
@@ -384,13 +370,12 @@ func TestFanTessellateVertexLayout(t *testing.T) {
 
 func TestFanTessellateOnlyMoveTo(t *testing.T) {
 	// Path with only MoveTo elements should produce no triangles
-	elements := []gg.PathElement{
-		gg.MoveTo{Point: gg.Pt(10, 20)},
-		gg.MoveTo{Point: gg.Pt(30, 40)},
-	}
+	p := gg.NewPath()
+	p.MoveTo(10, 20)
+	p.MoveTo(30, 40)
 
 	ft := NewFanTessellator()
-	count := ft.TessellatePath(elements)
+	count := ft.TessellatePath(p)
 	if count != 0 {
 		t.Errorf("moveto-only: got %d vertices, want 0", count)
 	}
@@ -403,21 +388,21 @@ func TestFanTessellatePentagon(t *testing.T) {
 		r      = 50.0
 		n      = 5
 	)
-	elems := make([]gg.PathElement, 0, n+2)
+	p := gg.NewPath()
 	for i := 0; i < n; i++ {
 		angle := float64(i)*2*math.Pi/float64(n) - math.Pi/2
 		px := cx + r*math.Cos(angle)
 		py := cy + r*math.Sin(angle)
 		if i == 0 {
-			elems = append(elems, gg.MoveTo{Point: gg.Pt(px, py)})
+			p.MoveTo(px, py)
 		} else {
-			elems = append(elems, gg.LineTo{Point: gg.Pt(px, py)})
+			p.LineTo(px, py)
 		}
 	}
-	elems = append(elems, gg.Close{})
+	p.Close()
 
 	ft := NewFanTessellator()
-	ft.TessellatePath(elems)
+	ft.TessellatePath(p)
 
 	// Pentagon: 5 vertices, fan from v0:
 	// LineTo v1: no triangle yet
@@ -432,23 +417,23 @@ func TestFanTessellatePentagon(t *testing.T) {
 }
 
 func BenchmarkFanTessellateCircle(b *testing.B) {
-	elements := makeCirclePath(200, 200, 100)
+	p := makeCirclePath(200, 200, 100)
 	ft := NewFanTessellator()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ft.Reset()
-		ft.TessellatePath(elements)
+		ft.TessellatePath(p)
 	}
 }
 
 func BenchmarkFanTessellateSquare(b *testing.B) {
-	elements := makeSquarePath()
+	p := makeSquarePath()
 	ft := NewFanTessellator()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ft.Reset()
-		ft.TessellatePath(elements)
+		ft.TessellatePath(p)
 	}
 }

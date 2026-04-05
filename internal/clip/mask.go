@@ -21,20 +21,6 @@ const (
 	VerbClose
 )
 
-// verbCoordCount returns the number of float64 coordinates consumed by a verb.
-func verbCoordCount(v PathVerb) int {
-	switch v {
-	case VerbMoveTo, VerbLineTo:
-		return 2
-	case VerbQuadTo:
-		return 4
-	case VerbCubicTo:
-		return 6
-	default:
-		return 0
-	}
-}
-
 // MaskClipper performs alpha mask-based clipping for anti-aliased complex clips.
 // It rasterizes a path into a grayscale mask where each pixel's value represents
 // coverage (0 = outside, 255 = fully inside).

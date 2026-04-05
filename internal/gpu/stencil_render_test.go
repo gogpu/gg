@@ -234,7 +234,7 @@ func TestRenderPathResizesTextures(t *testing.T) {
 		Height: 64,
 		Stride: 64 * 4,
 	}
-	if err := sr.RenderPath(target1, elements, color, gg.FillRuleNonZero); err != nil {
+	if err := sr.RenderPath(target1, path, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath at 64x64 failed: %v", err)
 	}
 	w, h := sr.Size()
@@ -249,7 +249,7 @@ func TestRenderPathResizesTextures(t *testing.T) {
 		Height: 96,
 		Stride: 128 * 4,
 	}
-	if err := sr.RenderPath(target2, elements, color, gg.FillRuleNonZero); err != nil {
+	if err := sr.RenderPath(target2, path, color, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath at 128x96 failed: %v", err)
 	}
 	w, h = sr.Size()

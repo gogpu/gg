@@ -19,8 +19,8 @@
 // only while animation is active. Press Space to pause/resume.
 //
 // Requirements:
-//   - gogpu v0.23.1+
-//   - gg v0.35.1+
+//   - gogpu v0.26.0+
+//   - gg v0.39.0+
 package main
 
 import (
@@ -42,7 +42,7 @@ func main() {
 	const width, height = 800, 600
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("GoGPU + gg: Four-Tier GPU Rendering").
+		WithTitle("GoGPU + gg: Six-Tier GPU Rendering").
 		WithSize(width, height).
 		WithContinuousRender(false)) // Event-driven: 0% CPU when paused
 
@@ -250,7 +250,7 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 	if face28 != nil {
 		cc.SetFont(face28)
 		cc.SetRGBA(1, 1, 1, 1)
-		cc.DrawStringAnchored("Four-Tier GPU Rendering", cx/2, 30, 0.5, 0)
+		cc.DrawStringAnchored("Six-Tier GPU Rendering", cx/2, 30, 0.5, 0)
 	}
 	if face14 != nil {
 		cc.SetFont(face14)
