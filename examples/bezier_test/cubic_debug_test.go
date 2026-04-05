@@ -22,30 +22,30 @@ func TestCubicLeafDebug(t *testing.T) {
 	path.Close()
 
 	fmt.Printf("=== CUBIC LEAF SHAPE (Purple) ===\n")
-	fmt.Printf("Path elements count: %d\n", len(path.Elements()))
-	for i, elem := range path.Elements() {
-		fmt.Printf("  [%d] %T: %+v\n", i, elem, elem)
-	}
+	fmt.Printf("Path verbs count: %d\n", path.NumVerbs())
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		fmt.Printf("  %v: %v\n", verb, coords)
+	})
 
 	// Convert to scene.Path
 	scenePath := scene.NewPath()
-	for _, elem := range path.Elements() {
-		switch e := elem.(type) {
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
 		case gg.MoveTo:
-			scenePath.MoveTo(float32(e.Point.X), float32(e.Point.Y))
+			scenePath.MoveTo(float32(coords[0]), float32(coords[1]))
 		case gg.LineTo:
-			scenePath.LineTo(float32(e.Point.X), float32(e.Point.Y))
+			scenePath.LineTo(float32(coords[0]), float32(coords[1]))
 		case gg.QuadTo:
-			scenePath.QuadTo(float32(e.Control.X), float32(e.Control.Y),
-				float32(e.Point.X), float32(e.Point.Y))
+			scenePath.QuadTo(float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]))
 		case gg.CubicTo:
-			scenePath.CubicTo(float32(e.Control1.X), float32(e.Control1.Y),
-				float32(e.Control2.X), float32(e.Control2.Y),
-				float32(e.Point.X), float32(e.Point.Y))
+			scenePath.CubicTo(float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
+				float32(coords[4]), float32(coords[5]))
 		case gg.Close:
 			scenePath.Close()
 		}
-	}
+	})
 
 	fmt.Printf("\nScene path verbs: %d, points: %d\n", len(scenePath.Verbs()), len(scenePath.Points()))
 
