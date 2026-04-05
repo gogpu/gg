@@ -62,14 +62,20 @@ type Path struct {
 	coords  []float64
 	start   Point // Starting point of current subpath
 	current Point // Current point
+
+	// Embedded stack buffers for small paths (≤32 verbs, ≤10 cubics).
+	// Avoids heap allocation for typical shapes (rect=5, circle=7, icon≤20 verbs).
+	// Slices point to these buffers initially; grow to heap only if exceeded.
+	verbsBuf  [32]PathVerb
+	coordsBuf [96]float64 // 96 = 16 cubics × 6 coords, or 48 lines × 2 coords
 }
 
-// NewPath creates a new empty path.
+// NewPath creates a new empty path with stack-backed buffers.
 func NewPath() *Path {
-	return &Path{
-		verbs:  make([]PathVerb, 0, 16),
-		coords: make([]float64, 0, 64),
-	}
+	p := &Path{}
+	p.verbs = p.verbsBuf[:0]
+	p.coords = p.coordsBuf[:0]
+	return p
 }
 
 // MoveTo moves to a point without drawing.
