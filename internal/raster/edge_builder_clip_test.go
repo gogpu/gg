@@ -10,7 +10,7 @@ import (
 // clipTestLinePath creates a PathLike with a single line from (x0,y0) to (x1,y1).
 func clipTestLinePath(x0, y0, x1, y1 float32) PathLike {
 	return &clipTestPathData{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo},
+		verbs:  []PathVerb{MoveTo, LineTo},
 		points: []float32{x0, y0, x1, y1},
 	}
 }
@@ -19,7 +19,7 @@ func clipTestLinePath(x0, y0, x1, y1 float32) PathLike {
 func clipTestRectPath(x, y, w, h float32) PathLike {
 	return &clipTestPathData{
 		verbs: []PathVerb{
-			VerbMoveTo, VerbLineTo, VerbLineTo, VerbLineTo, VerbClose,
+			MoveTo, LineTo, LineTo, LineTo, Close,
 		},
 		points: []float32{
 			x, y,

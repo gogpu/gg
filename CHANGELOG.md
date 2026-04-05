@@ -5,10 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.38.3] - 2026-04-05
+## [0.39.0] - 2026-04-05
+
+### Breaking Changes
+
+- **Path API: SOA representation** — `PathElement` interface and struct types
+  (`MoveToEl`, `LineToEl`, `QuadToEl`, `CubicToEl`, `CloseEl`) deleted.
+  `Elements()` method removed. Use `Iterate()`, `Verbs()`, `Coords()` instead.
+  Verb constants renamed: `VerbMoveTo` → `MoveTo`, `VerbLineTo` → `LineTo`, etc.
+  This eliminates per-verb heap allocations (Go interface boxing), matching the
+  enterprise standard (Skia, tiny-skia, Blend2D, Cairo). See ADR-010.
+
+  **Migration guide:**
+  ```go
+  // BEFORE (v0.38.x):
+  for _, elem := range path.Elements() {
+      switch e := elem.(type) {
+      case gg.MoveTo:  doMove(e.Point.X, e.Point.Y)
+      case gg.LineTo:  doLine(e.Point.X, e.Point.Y)
+      }
+  }
+
+  // AFTER (v0.39.0):
+  path.Iterate(func(verb gg.PathVerb, coords []float64) {
+      switch verb {
+      case gg.MoveTo:  doMove(coords[0], coords[1])
+      case gg.LineTo:  doLine(coords[0], coords[1])
+      }
+  })
+  ```
 
 ### Performance
 
+- **Zero-alloc rasterizer pipeline** — FillRect/FillCircle: 14-270 allocs → **0 allocs**.
+  EdgeBuilder accepts float64 directly (no float32 conversion alloc), embedded
+  clipRect (no pointer escape), embedded sort buffer (no per-call alloc).
+- **Embedded stack buffer for Path** — small paths (≤32 verbs) use stack memory.
+  ParseSVGPath: 3 → 1 alloc. Path construction: 2 → 0 allocs.
+- **Path SOA representation — zero per-verb allocations** (ADR-010) — replaced
+  `[]PathElement` (Go interface, heap alloc per verb) with `[]PathVerb` + `[]float64`
+  (Skia/tiny-skia/Blend2D pattern). Eliminated all interface boxing. Renamed
+  `VerbMoveTo` → `MoveTo`, deleted deprecated `PathElement` types. SVG parser:
+  14 → 3 allocs. All consumers migrated to `Iterate()` zero-alloc API.
 - **Gradient rendering 2–5x faster, zero allocations** — `sortStops()` was called
   per-pixel (copying + sorting on every `ColorAt()`). Now pre-sorted at
   `AddColorStop()` time with lazy cache invalidation.

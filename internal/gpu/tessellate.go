@@ -61,7 +61,7 @@ func (ft *FanTessellator) Reset() {
 	ft.hasBounds = false
 }
 
-// TessellatePath converts a sequence of path elements into triangle fan vertices.
+// TessellatePath converts a gg.Path into triangle fan vertices.
 //
 // For each contour (started by MoveTo), the first vertex becomes the fan center.
 // Subsequent line/curve segments are flattened and triangulated as fan triangles
@@ -70,74 +70,71 @@ func (ft *FanTessellator) Reset() {
 //
 // Returns the total number of vertices emitted. Each triangle uses 3 vertices
 // (6 floats), so the triangle count is vertexCount/3.
-func (ft *FanTessellator) TessellatePath(elements []gg.PathElement) int {
-	if len(elements) == 0 {
+func (ft *FanTessellator) TessellatePath(path *gg.Path) int {
+	if path == nil || path.NumVerbs() == 0 {
 		return 0
 	}
 
 	var (
-		fanOriginX, fanOriginY float64 // First vertex of current contour (fan center)
-		prevX, prevY           float64 // Previous vertex
-		contourStarted         bool    // Whether we have a fan origin
+		fanOriginX, fanOriginY float64
+		prevX, prevY           float64
+		contourStarted         bool
 	)
 
-	for _, elem := range elements {
-		switch e := elem.(type) {
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
 		case gg.MoveTo:
-			// Close previous contour implicitly if needed
-			// (no closing triangle — path was not explicitly closed)
-			fanOriginX, fanOriginY = e.Point.X, e.Point.Y
-			prevX, prevY = e.Point.X, e.Point.Y
+			fanOriginX, fanOriginY = coords[0], coords[1]
+			prevX, prevY = coords[0], coords[1]
 			contourStarted = true
-			ft.updateBounds(float32(e.Point.X), float32(e.Point.Y))
+			ft.updateBounds(float32(coords[0]), float32(coords[1]))
 
 		case gg.LineTo:
 			if !contourStarted {
-				continue
+				return
 			}
-			ft.updateBounds(float32(e.Point.X), float32(e.Point.Y))
-			ft.emitFanTriangle(fanOriginX, fanOriginY, prevX, prevY, e.Point.X, e.Point.Y)
-			prevX, prevY = e.Point.X, e.Point.Y
+			ft.updateBounds(float32(coords[0]), float32(coords[1]))
+			ft.emitFanTriangle(fanOriginX, fanOriginY, prevX, prevY, coords[0], coords[1])
+			prevX, prevY = coords[0], coords[1]
 
 		case gg.QuadTo:
 			if !contourStarted {
-				continue
+				return
 			}
 			ft.flattenQuadFan(
 				fanOriginX, fanOriginY,
 				prevX, prevY,
-				e.Control.X, e.Control.Y,
-				e.Point.X, e.Point.Y,
+				coords[0], coords[1],
+				coords[2], coords[3],
 				fanFlattenTolerance,
 			)
-			prevX, prevY = e.Point.X, e.Point.Y
+			prevX, prevY = coords[2], coords[3]
 
 		case gg.CubicTo:
 			if !contourStarted {
-				continue
+				return
 			}
 			ft.flattenCubicFan(
 				fanOriginX, fanOriginY,
 				prevX, prevY,
-				e.Control1.X, e.Control1.Y,
-				e.Control2.X, e.Control2.Y,
-				e.Point.X, e.Point.Y,
+				coords[0], coords[1],
+				coords[2], coords[3],
+				coords[4], coords[5],
 				fanFlattenTolerance,
 			)
-			prevX, prevY = e.Point.X, e.Point.Y
+			prevX, prevY = coords[4], coords[5]
 
 		case gg.Close:
 			if !contourStarted {
-				continue
+				return
 			}
-			// Emit closing triangle if the last point differs from the fan origin
 			if prevX != fanOriginX || prevY != fanOriginY {
 				ft.emitFanTriangle(fanOriginX, fanOriginY, prevX, prevY, fanOriginX, fanOriginY)
 			}
 			prevX, prevY = fanOriginX, fanOriginY
 			contourStarted = false
 		}
-	}
+	})
 
 	return len(ft.vertices) / 2
 }

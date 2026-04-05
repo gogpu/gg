@@ -12,8 +12,8 @@ func TestClip(t *testing.T) {
 	dc.Clip()
 
 	// Path should be cleared after Clip()
-	if len(dc.path.Elements()) != 0 {
-		t.Errorf("Expected path to be cleared after Clip(), got %d elements", len(dc.path.Elements()))
+	if dc.path.NumVerbs() != 0 {
+		t.Errorf("Expected path to be cleared after Clip(), got %d elements", dc.path.NumVerbs())
 	}
 
 	// Clip stack should be initialized
@@ -32,12 +32,12 @@ func TestClipPreserve(t *testing.T) {
 
 	// Create a rectangular clip region
 	dc.DrawRectangle(10, 10, 50, 50)
-	elemCount := len(dc.path.Elements())
+	elemCount := dc.path.NumVerbs()
 	dc.ClipPreserve()
 
 	// Path should be preserved after ClipPreserve()
-	if len(dc.path.Elements()) != elemCount {
-		t.Errorf("Expected path to be preserved with %d elements, got %d", elemCount, len(dc.path.Elements()))
+	if dc.path.NumVerbs() != elemCount {
+		t.Errorf("Expected path to be preserved with %d elements, got %d", elemCount, dc.path.NumVerbs())
 	}
 
 	// Clip stack should be initialized
@@ -267,7 +267,7 @@ func TestResetClipWithoutInitialization(t *testing.T) {
 	}
 }
 
-func TestConvertPathElements(t *testing.T) {
+func TestConvertPathToClipVerbs(t *testing.T) {
 	// Create a path with all element types
 	path := NewPath()
 	path.MoveTo(10, 10)
@@ -276,25 +276,16 @@ func TestConvertPathElements(t *testing.T) {
 	path.CubicTo(70, 60, 50, 70, 30, 70)
 	path.Close()
 
-	elements := path.Elements()
-	converted := convertPathElements(elements)
+	clipVerbs, clipCoords := convertPathToClipVerbs(path)
 
-	// Should have same number of elements
-	if len(converted) != len(elements) {
-		t.Errorf("Expected %d converted elements, got %d", len(elements), len(converted))
+	// Should have same number of verbs
+	if len(clipVerbs) != path.NumVerbs() {
+		t.Errorf("Expected %d clip verbs, got %d", path.NumVerbs(), len(clipVerbs))
 	}
 
-	// Verify each type was converted correctly
-	if len(converted) < 5 {
-		t.Fatalf("Expected at least 5 elements, got %d", len(converted))
-	}
-
-	// Check types (order: MoveTo, LineTo, QuadTo, CubicTo, Close)
-	typeNames := []string{"MoveTo", "LineTo", "QuadTo", "CubicTo", "Close"}
-	for i, name := range typeNames {
-		if converted[i] == nil {
-			t.Errorf("Element %d (%s) is nil after conversion", i, name)
-		}
+	// Should have coords for all points
+	if len(clipCoords) == 0 {
+		t.Error("Expected non-empty clip coords")
 	}
 }
 

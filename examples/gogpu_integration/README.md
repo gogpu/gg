@@ -19,9 +19,9 @@ gogpu.Context (GPU rendering)
 Window (Vulkan / Metal / DX12)
 ```
 
-### Four-Tier GPU Rendering
+### Six-Tier GPU Rendering
 
-The example showcases all four GPU rendering tiers:
+The example showcases GPU rendering tiers:
 
 | Tier | Shapes | Technique |
 |------|--------|-----------|
@@ -36,13 +36,13 @@ The example showcases all four GPU rendering tiers:
 go run .
 ```
 
-The example opens an 800×600 window with animated shapes across all four
-GPU tiers. Press **Space** to pause (0% CPU idle) and resume (VSync ~60fps).
+The example opens an 800×600 window with animated shapes.
+Press **Space** to pause (0% CPU idle) and resume (VSync ~60fps).
 
 ## Requirements
 
 | Dependency | Minimum version |
 |------------|-----------------|
 | Go | 1.25+ |
-| gogpu | v0.22.11+ |
-| gg | v0.33.6+ |
+| gogpu | v0.26.0+ |
+| gg | v0.39.0+ |

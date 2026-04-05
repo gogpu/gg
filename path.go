@@ -2,106 +2,130 @@ package gg
 
 import "math"
 
-// PathElement represents a single element in a path.
-type PathElement interface {
-	isPathElement()
-}
+// PathVerb represents a path construction command.
+type PathVerb byte
 
-// MoveTo moves to a point without drawing.
-type MoveTo struct {
-	Point Point
-}
+const (
+	// MoveTo moves the current point without drawing. Consumes 2 coords (x, y).
+	MoveTo PathVerb = iota
+	// LineTo draws a line to the specified point. Consumes 2 coords (x, y).
+	LineTo
+	// QuadTo draws a quadratic Bezier curve. Consumes 4 coords (cx, cy, x, y).
+	QuadTo
+	// CubicTo draws a cubic Bezier curve. Consumes 6 coords (c1x, c1y, c2x, c2y, x, y).
+	CubicTo
+	// Close closes the current subpath. Consumes 0 coords.
+	Close
+)
 
-func (MoveTo) isPathElement() {}
-
-// LineTo draws a line to a point.
-type LineTo struct {
-	Point Point
-}
-
-func (LineTo) isPathElement() {}
-
-// QuadTo draws a quadratic Bezier curve.
-type QuadTo struct {
-	Control Point
-	Point   Point
-}
-
-func (QuadTo) isPathElement() {}
-
-// CubicTo draws a cubic Bezier curve.
-type CubicTo struct {
-	Control1 Point
-	Control2 Point
-	Point    Point
-}
-
-func (CubicTo) isPathElement() {}
-
-// Close closes the current subpath.
-type Close struct{}
-
-func (Close) isPathElement() {}
-
-// Path represents a vector path.
-type Path struct {
-	elements []PathElement
-	start    Point // Starting point of current subpath
-	current  Point // Current point
-}
-
-// NewPath creates a new empty path.
-func NewPath() *Path {
-	return &Path{
-		elements: make([]PathElement, 0, 16),
+// String returns a human-readable name for the verb.
+func (v PathVerb) String() string {
+	switch v {
+	case MoveTo:
+		return "MoveTo"
+	case LineTo:
+		return "LineTo"
+	case QuadTo:
+		return "QuadTo"
+	case CubicTo:
+		return "CubicTo"
+	case Close:
+		return "Close"
+	default:
+		return "Unknown"
 	}
+}
+
+// verbCoordCount returns the number of float64 coordinates consumed by a verb.
+func verbCoordCount(v PathVerb) int {
+	switch v {
+	case MoveTo, LineTo:
+		return 2
+	case QuadTo:
+		return 4
+	case CubicTo:
+		return 6
+	case Close:
+		return 0
+	default:
+		return 0
+	}
+}
+
+// Path represents a vector path using SOA (Structure of Arrays) layout.
+//
+// Internally, the path stores verbs and coordinates in separate contiguous slices
+// for cache efficiency and zero per-verb heap allocations. This matches the
+// enterprise standard used by Skia, Cairo, tiny-skia, Blend2D, and femtovg.
+type Path struct {
+	verbs   []PathVerb
+	coords  []float64
+	start   Point // Starting point of current subpath
+	current Point // Current point
+
+	// Embedded stack buffers for small paths (≤32 verbs, ≤10 cubics).
+	// Avoids heap allocation for typical shapes (rect=5, circle=7, icon≤20 verbs).
+	// Slices point to these buffers initially; grow to heap only if exceeded.
+	verbsBuf  [32]PathVerb
+	coordsBuf [96]float64 // 96 = 16 cubics × 6 coords, or 48 lines × 2 coords
+}
+
+// NewPath creates a new empty path with stack-backed buffers.
+func NewPath() *Path {
+	p := &Path{}
+	p.verbs = p.verbsBuf[:0]
+	p.coords = p.coordsBuf[:0]
+	return p
 }
 
 // MoveTo moves to a point without drawing.
 func (p *Path) MoveTo(x, y float64) {
-	pt := Pt(x, y)
-	p.elements = append(p.elements, MoveTo{Point: pt})
-	p.start = pt
-	p.current = pt
+	p.verbs = append(p.verbs, MoveTo)
+	p.coords = append(p.coords, x, y)
+	p.start = Pt(x, y)
+	p.current = p.start
 }
 
 // LineTo draws a line to a point.
 func (p *Path) LineTo(x, y float64) {
-	pt := Pt(x, y)
-	p.elements = append(p.elements, LineTo{Point: pt})
-	p.current = pt
+	p.verbs = append(p.verbs, LineTo)
+	p.coords = append(p.coords, x, y)
+	p.current = Pt(x, y)
 }
 
 // QuadraticTo draws a quadratic Bezier curve.
 func (p *Path) QuadraticTo(cx, cy, x, y float64) {
-	ctrl := Pt(cx, cy)
-	pt := Pt(x, y)
-	p.elements = append(p.elements, QuadTo{Control: ctrl, Point: pt})
-	p.current = pt
+	p.verbs = append(p.verbs, QuadTo)
+	p.coords = append(p.coords, cx, cy, x, y)
+	p.current = Pt(x, y)
 }
 
 // CubicTo draws a cubic Bezier curve.
 func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
-	ctrl1 := Pt(c1x, c1y)
-	ctrl2 := Pt(c2x, c2y)
-	pt := Pt(x, y)
-	p.elements = append(p.elements, CubicTo{
-		Control1: ctrl1,
-		Control2: ctrl2,
-		Point:    pt,
-	})
-	p.current = pt
+	p.verbs = append(p.verbs, CubicTo)
+	p.coords = append(p.coords, c1x, c1y, c2x, c2y, x, y)
+	p.current = Pt(x, y)
 }
 
 // Close closes the current subpath by drawing a line to the start point.
 func (p *Path) Close() {
-	p.elements = append(p.elements, Close{})
+	p.verbs = append(p.verbs, Close)
 	p.current = p.start
 }
 
-// Clear removes all elements from the path.
+// Clear removes all elements from the path, releasing the underlying storage.
 func (p *Path) Clear() {
-	p.elements = p.elements[:0]
+	p.verbs = p.verbs[:0]
+	p.coords = p.coords[:0]
+	p.start = Point{}
+	p.current = Point{}
+}
+
+// Reset clears the path for reuse, keeping allocated capacity.
+// This is identical to Clear in the current implementation.
+func (p *Path) Reset() {
+	p.verbs = p.verbs[:0]
+	p.coords = p.coords[:0]
 	p.start = Point{}
 	p.current = Point{}
 }
@@ -109,17 +133,50 @@ func (p *Path) Clear() {
 // Append adds all elements from other to this path.
 // The current point and subpath start are updated to match other's state.
 func (p *Path) Append(other *Path) {
-	if other == nil || len(other.elements) == 0 {
+	if other == nil || len(other.verbs) == 0 {
 		return
 	}
-	p.elements = append(p.elements, other.elements...)
+	p.verbs = append(p.verbs, other.verbs...)
+	p.coords = append(p.coords, other.coords...)
 	p.current = other.current
 	p.start = other.start
 }
 
-// Elements returns the path elements.
-func (p *Path) Elements() []PathElement {
-	return p.elements
+// Iterate calls fn for each verb in the path with the corresponding coordinate slice.
+// This is the primary zero-allocation iteration API.
+//
+// The coords slice passed to fn is a sub-slice of the path's coordinate buffer:
+//   - MoveTo:  coords has 2 elements (x, y)
+//   - LineTo:  coords has 2 elements (x, y)
+//   - QuadTo:  coords has 4 elements (cx, cy, x, y)
+//   - CubicTo: coords has 6 elements (c1x, c1y, c2x, c2y, x, y)
+//   - Close:   coords has 0 elements (nil)
+func (p *Path) Iterate(fn func(verb PathVerb, coords []float64)) {
+	ci := 0
+	for _, v := range p.verbs {
+		n := verbCoordCount(v)
+		if n > 0 {
+			fn(v, p.coords[ci:ci+n])
+		} else {
+			fn(v, nil)
+		}
+		ci += n
+	}
+}
+
+// Verbs returns the verb stream. The returned slice must not be modified.
+func (p *Path) Verbs() []PathVerb {
+	return p.verbs
+}
+
+// Coords returns the coordinate stream. The returned slice must not be modified.
+func (p *Path) Coords() []float64 {
+	return p.coords
+}
+
+// NumVerbs returns the number of verbs in the path.
+func (p *Path) NumVerbs() int {
+	return len(p.verbs)
 }
 
 // CurrentPoint returns the current point.
@@ -130,38 +187,38 @@ func (p *Path) CurrentPoint() Point {
 // HasCurrentPoint returns true if the path has a current point.
 // A path has a current point after MoveTo, LineTo, or any curve operation.
 func (p *Path) HasCurrentPoint() bool {
-	return len(p.elements) > 0
+	return len(p.verbs) > 0
 }
 
 // isEmpty returns true if the path has no elements.
 func (p *Path) isEmpty() bool {
-	return len(p.elements) == 0
+	return len(p.verbs) == 0
 }
 
 // Transform applies a transformation matrix to all points in the path.
 func (p *Path) Transform(m Matrix) *Path {
 	result := NewPath()
-	for _, elem := range p.elements {
-		switch e := elem.(type) {
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
 		case MoveTo:
-			pt := m.TransformPoint(e.Point)
+			pt := m.TransformPoint(Pt(coords[0], coords[1]))
 			result.MoveTo(pt.X, pt.Y)
 		case LineTo:
-			pt := m.TransformPoint(e.Point)
+			pt := m.TransformPoint(Pt(coords[0], coords[1]))
 			result.LineTo(pt.X, pt.Y)
 		case QuadTo:
-			ctrl := m.TransformPoint(e.Control)
-			pt := m.TransformPoint(e.Point)
+			ctrl := m.TransformPoint(Pt(coords[0], coords[1]))
+			pt := m.TransformPoint(Pt(coords[2], coords[3]))
 			result.QuadraticTo(ctrl.X, ctrl.Y, pt.X, pt.Y)
 		case CubicTo:
-			ctrl1 := m.TransformPoint(e.Control1)
-			ctrl2 := m.TransformPoint(e.Control2)
-			pt := m.TransformPoint(e.Point)
+			ctrl1 := m.TransformPoint(Pt(coords[0], coords[1]))
+			ctrl2 := m.TransformPoint(Pt(coords[2], coords[3]))
+			pt := m.TransformPoint(Pt(coords[4], coords[5]))
 			result.CubicTo(ctrl1.X, ctrl1.Y, ctrl2.X, ctrl2.Y, pt.X, pt.Y)
 		case Close:
 			result.Close()
 		}
-	}
+	})
 	return result
 }
 
@@ -224,10 +281,9 @@ func (p *Path) Arc(cx, cy, r, angle1, angle2 float64) {
 	}
 }
 
-// arcSegment adds a single arc segment (≤90 degrees).
+// arcSegment adds a single arc segment (<=90 degrees).
 func (p *Path) arcSegment(cx, cy, r, a1, a2 float64) {
 	// Calculate control points for cubic Bezier approximation
-	// Using the formula from "Drawing an elliptical arc using polylines, quadratic or cubic Bezier curves"
 	alpha := math.Sin(a2-a1) * (math.Sqrt(4+3*math.Tan((a2-a1)/2)*math.Tan((a2-a1)/2)) - 1) / 3
 
 	cos1, sin1 := math.Cos(a1), math.Sin(a1)
@@ -243,7 +299,7 @@ func (p *Path) arcSegment(cx, cy, r, a1, a2 float64) {
 	c2x := x2 + alpha*r*sin2
 	c2y := y2 - alpha*r*cos2
 
-	if len(p.elements) == 0 {
+	if len(p.verbs) == 0 {
 		p.MoveTo(x1, y1)
 	}
 	p.CubicTo(c1x, c1y, c2x, c2y, x2, y2)
@@ -271,10 +327,13 @@ func (p *Path) RoundedRectangle(x, y, w, h, r float64) {
 
 // Clone creates a deep copy of the path.
 func (p *Path) Clone() *Path {
-	result := NewPath()
-	result.elements = make([]PathElement, len(p.elements))
-	copy(result.elements, p.elements)
-	result.start = p.start
-	result.current = p.current
+	result := &Path{
+		verbs:   make([]PathVerb, len(p.verbs)),
+		coords:  make([]float64, len(p.coords)),
+		start:   p.start,
+		current: p.current,
+	}
+	copy(result.verbs, p.verbs)
+	copy(result.coords, p.coords)
 	return result
 }

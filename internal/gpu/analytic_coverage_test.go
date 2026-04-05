@@ -66,7 +66,7 @@ func TestGPUAnalyticFillerVello_MergedRunAlpha(t *testing.T) {
 
 	// Horizontal band: top=0, bottom=0.5 — gives 50% coverage across full width
 	path := &gpuTestPath{
-		verbs:  []raster.PathVerb{raster.VerbMoveTo, raster.VerbLineTo, raster.VerbLineTo, raster.VerbLineTo, raster.VerbClose},
+		verbs:  []raster.PathVerb{raster.MoveTo, raster.LineTo, raster.LineTo, raster.LineTo, raster.Close},
 		points: []float32{2, 0, 8, 0, 8, 0.5, 2, 0.5},
 	}
 	eb.BuildFromPath(path, raster.IdentityTransform{})

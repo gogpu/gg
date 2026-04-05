@@ -28,38 +28,38 @@ func makeCirclePath(cx, cy, r float64) *testPath {
 
 	// Start at right (3 o'clock)
 	startX, startY := cx+r, cy
-	p.verbs = append(p.verbs, VerbMoveTo)
+	p.verbs = append(p.verbs, MoveTo)
 	p.points = append(p.points, float32(startX), float32(startY))
 
 	// Right to bottom
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.points = append(p.points,
 		float32(cx+r), float32(cy+k),
 		float32(cx+k), float32(cy+r),
 		float32(cx), float32(cy+r))
 
 	// Bottom to left
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.points = append(p.points,
 		float32(cx-k), float32(cy+r),
 		float32(cx-r), float32(cy+k),
 		float32(cx-r), float32(cy))
 
 	// Left to top
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.points = append(p.points,
 		float32(cx-r), float32(cy-k),
 		float32(cx-k), float32(cy-r),
 		float32(cx), float32(cy-r))
 
 	// Top to right
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.points = append(p.points,
 		float32(cx+k), float32(cy-r),
 		float32(cx+r), float32(cy-k),
 		float32(cx+r), float32(cy))
 
-	p.verbs = append(p.verbs, VerbClose)
+	p.verbs = append(p.verbs, Close)
 
 	return p
 }

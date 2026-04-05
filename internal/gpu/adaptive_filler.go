@@ -52,7 +52,7 @@ func (f *AdaptiveFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
 	callback func(x, y int, coverage uint8),
 ) {
-	elements := len(path.Elements())
+	elements := path.NumVerbs()
 	estimatedSegments := elements * segmentMultiplier
 	canvasArea := width * height
 

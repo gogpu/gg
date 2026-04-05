@@ -771,41 +771,32 @@ func TestConvertPath(t *testing.T) {
 
 	ggp := convertPath(sp, 5, 10)
 
-	elements := ggp.Elements()
-	if len(elements) != 5 {
-		t.Fatalf("expected 5 elements, got %d", len(elements))
+	verbs := ggp.Verbs()
+	if len(verbs) != 5 {
+		t.Fatalf("expected 5 verbs, got %d", len(verbs))
 	}
 
-	// Verify element types
-	if _, ok := elements[0].(gg.MoveTo); !ok {
-		t.Errorf("element 0: want MoveTo, got %T", elements[0])
-	}
-	if _, ok := elements[1].(gg.LineTo); !ok {
-		t.Errorf("element 1: want LineTo, got %T", elements[1])
-	}
-	if _, ok := elements[2].(gg.QuadTo); !ok {
-		t.Errorf("element 2: want QuadTo, got %T", elements[2])
-	}
-	if _, ok := elements[3].(gg.CubicTo); !ok {
-		t.Errorf("element 3: want CubicTo, got %T", elements[3])
-	}
-	if _, ok := elements[4].(gg.Close); !ok {
-		t.Errorf("element 4: want Close, got %T", elements[4])
+	// Verify verb types
+	wantVerbs := []gg.PathVerb{gg.MoveTo, gg.LineTo, gg.QuadTo, gg.CubicTo, gg.Close}
+	for i, want := range wantVerbs {
+		if verbs[i] != want {
+			t.Errorf("verb %d: want %v, got %v", i, want, verbs[i])
+		}
 	}
 
-	// Verify offset subtraction on MoveTo
-	m := elements[0].(gg.MoveTo)
+	// Verify offset subtraction on MoveTo coords
+	coords := ggp.Coords()
 	wantX, wantY := 10.0-5.0, 20.0-10.0
-	if m.Point.X != wantX || m.Point.Y != wantY {
-		t.Errorf("MoveTo = (%.1f, %.1f), want (%.1f, %.1f)", m.Point.X, m.Point.Y, wantX, wantY)
+	if coords[0] != wantX || coords[1] != wantY {
+		t.Errorf("MoveTo = (%.1f, %.1f), want (%.1f, %.1f)", coords[0], coords[1], wantX, wantY)
 	}
 
-	// Verify offset on CubicTo endpoint
-	cb := elements[3].(gg.CubicTo)
+	// Verify offset on CubicTo endpoint (coords: MoveTo(2) + LineTo(2) + QuadTo(4) + CubicTo(6))
+	// CubicTo starts at offset 8, endpoint at [12,13]
 	wantEndX, wantEndY := 130.0-5.0, 140.0-10.0
-	if cb.Point.X != wantEndX || cb.Point.Y != wantEndY {
+	if coords[12] != wantEndX || coords[13] != wantEndY {
 		t.Errorf("CubicTo end = (%.1f, %.1f), want (%.1f, %.1f)",
-			cb.Point.X, cb.Point.Y, wantEndX, wantEndY)
+			coords[12], coords[13], wantEndX, wantEndY)
 	}
 }
 

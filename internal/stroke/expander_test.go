@@ -5,6 +5,72 @@ import (
 	"testing"
 )
 
+// soaPath is a test helper for building SOA (verb+coords) paths.
+type soaPath struct {
+	verbs  []PathVerb
+	coords []float64
+}
+
+func newSOAPath() *soaPath { return &soaPath{} }
+
+func (p *soaPath) moveTo(x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbMoveTo)
+	p.coords = append(p.coords, x, y)
+	return p
+}
+
+func (p *soaPath) lineTo(x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbLineTo)
+	p.coords = append(p.coords, x, y)
+	return p
+}
+
+func (p *soaPath) quadTo(cx, cy, x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbQuadTo)
+	p.coords = append(p.coords, cx, cy, x, y)
+	return p
+}
+
+func (p *soaPath) cubicTo(c1x, c1y, c2x, c2y, x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbCubicTo)
+	p.coords = append(p.coords, c1x, c1y, c2x, c2y, x, y)
+	return p
+}
+
+func (p *soaPath) close() *soaPath {
+	p.verbs = append(p.verbs, VerbClose)
+	return p
+}
+
+// countVerb counts occurrences of a specific verb in a verb slice.
+func countVerb(verbs []PathVerb, target PathVerb) int {
+	n := 0
+	for _, v := range verbs {
+		if v == target {
+			n++
+		}
+	}
+	return n
+}
+
+// hasVerb returns true if the verb slice contains the target verb.
+func hasVerb(verbs []PathVerb, target PathVerb) bool {
+	return countVerb(verbs, target) > 0
+}
+
+// endPointAt returns the endpoint of the verb at the given index in the SOA path.
+func endPointAt(verbs []PathVerb, coords []float64, idx int) Point {
+	ci := 0
+	for j := 0; j < idx; j++ {
+		ci += verbCoordCount(verbs[j])
+	}
+	n := verbCoordCount(verbs[idx])
+	if n >= 2 {
+		return Point{X: coords[ci+n-2], Y: coords[ci+n-1]}
+	}
+	return Point{}
+}
+
 func TestNewStrokeExpander(t *testing.T) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
@@ -50,34 +116,19 @@ func TestStrokeExpander_ExpandSimpleLine(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	// Simple horizontal line from (0,0) to (10,0)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0)
+	rv, _ := expander.Expand(p.verbs, p.coords)
+
+	if len(rv) < 4 {
+		t.Fatalf("expected at least 4 verbs, got %d", len(rv))
 	}
 
-	result := expander.Expand(input)
-
-	// Should produce a closed rectangle
-	if len(result) < 4 {
-		t.Fatalf("expected at least 4 elements, got %d", len(result))
+	if rv[0] != VerbMoveTo {
+		t.Error("first verb should be VerbMoveTo")
 	}
 
-	// First element should be MoveTo
-	if _, ok := result[0].(MoveTo); !ok {
-		t.Error("first element should be MoveTo")
-	}
-
-	// Should have a Close element
-	hasClose := false
-	for _, el := range result {
-		if _, ok := el.(Close); ok {
-			hasClose = true
-			break
-		}
-	}
-	if !hasClose {
-		t.Error("result should contain Close element")
+	if !hasVerb(rv, VerbClose) {
+		t.Error("result should contain VerbClose")
 	}
 }
 
@@ -90,30 +141,16 @@ func TestStrokeExpander_ExpandSquare(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	// Square path
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 10}},
-		LineTo{Point: Point{X: 0, Y: 10}},
-		Close{},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).lineTo(10, 10).lineTo(0, 10).close()
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Closed path should produce two closed subpaths (outer and inner)
-	closeCount := 0
-	for _, el := range result {
-		if _, ok := el.(Close); ok {
-			closeCount++
-		}
-	}
+	closeCount := countVerb(rv, VerbClose)
 	if closeCount != 2 {
-		t.Errorf("closed path should produce 2 Close elements, got %d", closeCount)
+		t.Errorf("closed path should produce 2 VerbClose, got %d", closeCount)
 	}
 }
 
@@ -126,27 +163,15 @@ func TestStrokeExpander_ExpandWithRoundCap(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Round caps produce CubicTo elements
-	hasCubic := false
-	for _, el := range result {
-		if _, ok := el.(CubicTo); ok {
-			hasCubic = true
-			break
-		}
-	}
-	if !hasCubic {
-		t.Error("round cap should produce CubicTo elements")
+	if !hasVerb(rv, VerbCubicTo) {
+		t.Error("round cap should produce VerbCubicTo")
 	}
 }
 
@@ -159,27 +184,16 @@ func TestStrokeExpander_ExpandWithSquareCap(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Count LineTo elements (square cap adds extra line segments)
-	lineCount := 0
-	for _, el := range result {
-		if _, ok := el.(LineTo); ok {
-			lineCount++
-		}
-	}
-	// Should have more lines than a butt cap
+	lineCount := countVerb(rv, VerbLineTo)
 	if lineCount < 4 {
-		t.Errorf("square cap should produce at least 4 LineTo elements, got %d", lineCount)
+		t.Errorf("square cap should produce at least 4 VerbLineTo, got %d", lineCount)
 	}
 }
 
@@ -192,16 +206,10 @@ func TestStrokeExpander_MiterJoin(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	// Two lines at 90 degrees
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 10}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).lineTo(10, 10)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 }
@@ -215,16 +223,10 @@ func TestStrokeExpander_BevelJoin(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	// Two lines at 90 degrees
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 10}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).lineTo(10, 10)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 }
@@ -238,29 +240,15 @@ func TestStrokeExpander_RoundJoin(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	// Two lines at 90 degrees
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 10}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).lineTo(10, 10)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Round join produces CubicTo elements
-	hasCubic := false
-	for _, el := range result {
-		if _, ok := el.(CubicTo); ok {
-			hasCubic = true
-			break
-		}
-	}
-	if !hasCubic {
-		t.Error("round join should produce CubicTo elements")
+	if !hasVerb(rv, VerbCubicTo) {
+		t.Error("round join should produce VerbCubicTo")
 	}
 }
 
@@ -273,14 +261,10 @@ func TestStrokeExpander_QuadraticCurve(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		QuadTo{Control: Point{X: 5, Y: 5}, Point: Point{X: 10, Y: 0}},
-	}
+	p := newSOAPath().moveTo(0, 0).quadTo(5, 5, 10, 0)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 }
@@ -294,14 +278,10 @@ func TestStrokeExpander_CubicCurve(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		CubicTo{Control1: Point{X: 3, Y: 5}, Control2: Point{X: 7, Y: 5}, Point: Point{X: 10, Y: 0}},
-	}
+	p := newSOAPath().moveTo(0, 0).cubicTo(3, 5, 7, 5, 10, 0)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 }
@@ -310,13 +290,13 @@ func TestStrokeExpander_EmptyPath(t *testing.T) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
 
-	result := expander.Expand(nil)
-	if len(result) != 0 {
+	rv, _ := expander.Expand(nil, nil)
+	if len(rv) != 0 {
 		t.Error("empty input should produce empty output")
 	}
 
-	result = expander.Expand([]PathElement{})
-	if len(result) != 0 {
+	rv, _ = expander.Expand([]PathVerb{}, []float64{})
+	if len(rv) != 0 {
 		t.Error("empty input should produce empty output")
 	}
 }
@@ -325,16 +305,11 @@ func TestStrokeExpander_SingleMoveTo(t *testing.T) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 5, Y: 5}},
-	}
+	p := newSOAPath().moveTo(5, 5)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	// A single MoveTo with no actual drawing should produce no output
-	// (no segments to expand)
-	if len(result) != 0 {
-		t.Errorf("single MoveTo should produce no output, got %d elements", len(result))
+	if len(rv) != 0 {
+		t.Errorf("single MoveTo should produce no output, got %d verbs", len(rv))
 	}
 }
 
@@ -342,17 +317,11 @@ func TestStrokeExpander_ZeroLengthLine(t *testing.T) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
 
-	// Zero-length line (same start and end point)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 5, Y: 5}},
-		LineTo{Point: Point{X: 5, Y: 5}},
-	}
+	p := newSOAPath().moveTo(5, 5).lineTo(5, 5)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	// Zero-length lines should be skipped
-	if len(result) != 0 {
-		t.Errorf("zero-length line should produce no output, got %d elements", len(result))
+	if len(rv) != 0 {
+		t.Errorf("zero-length line should produce no output, got %d verbs", len(rv))
 	}
 }
 
@@ -365,28 +334,16 @@ func TestStrokeExpander_MultipleSubpaths(t *testing.T) {
 	}
 	expander := NewStrokeExpander(style)
 
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 10, Y: 0}},
-		MoveTo{Point: Point{X: 0, Y: 10}},
-		LineTo{Point: Point{X: 10, Y: 10}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).moveTo(0, 10).lineTo(10, 10)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Should have 2 MoveTo elements (one for each subpath)
-	moveCount := 0
-	for _, el := range result {
-		if _, ok := el.(MoveTo); ok {
-			moveCount++
-		}
-	}
+	moveCount := countVerb(rv, VerbMoveTo)
 	if moveCount != 2 {
-		t.Errorf("expected 2 MoveTo elements, got %d", moveCount)
+		t.Errorf("expected 2 VerbMoveTo, got %d", moveCount)
 	}
 }
 
@@ -534,41 +491,11 @@ func TestDistanceToLine(t *testing.T) {
 		b    Point
 		want float64
 	}{
-		{
-			name: "point on line",
-			p:    Point{X: 5, Y: 0},
-			a:    Point{X: 0, Y: 0},
-			b:    Point{X: 10, Y: 0},
-			want: 0,
-		},
-		{
-			name: "point above line",
-			p:    Point{X: 5, Y: 3},
-			a:    Point{X: 0, Y: 0},
-			b:    Point{X: 10, Y: 0},
-			want: 3,
-		},
-		{
-			name: "point before line start",
-			p:    Point{X: -3, Y: 0},
-			a:    Point{X: 0, Y: 0},
-			b:    Point{X: 10, Y: 0},
-			want: 3,
-		},
-		{
-			name: "point after line end",
-			p:    Point{X: 14, Y: 0},
-			a:    Point{X: 0, Y: 0},
-			b:    Point{X: 10, Y: 0},
-			want: 4,
-		},
-		{
-			name: "degenerate line (a == b)",
-			p:    Point{X: 3, Y: 4},
-			a:    Point{X: 0, Y: 0},
-			b:    Point{X: 0, Y: 0},
-			want: 5,
-		},
+		{"point on line", Point{X: 5, Y: 0}, Point{X: 0, Y: 0}, Point{X: 10, Y: 0}, 0},
+		{"point above line", Point{X: 5, Y: 3}, Point{X: 0, Y: 0}, Point{X: 10, Y: 0}, 3},
+		{"point before line start", Point{X: -3, Y: 0}, Point{X: 0, Y: 0}, Point{X: 10, Y: 0}, 3},
+		{"point after line end", Point{X: 14, Y: 0}, Point{X: 0, Y: 0}, Point{X: 10, Y: 0}, 4},
+		{"degenerate line (a == b)", Point{X: 3, Y: 4}, Point{X: 0, Y: 0}, Point{X: 0, Y: 0}, 5},
 	}
 
 	for _, tt := range tests {
@@ -583,7 +510,6 @@ func TestDistanceToLine(t *testing.T) {
 
 func TestDefaultStroke(t *testing.T) {
 	s := DefaultStroke()
-
 	if s.Width != 1.0 {
 		t.Errorf("Width = %v, want 1.0", s.Width)
 	}
@@ -599,7 +525,7 @@ func TestDefaultStroke(t *testing.T) {
 }
 
 func TestPathBuilder(t *testing.T) {
-	pb := newPathBuilder()
+	var pb pathBuilder
 
 	if !pb.isEmpty() {
 		t.Error("new pathBuilder should be empty")
@@ -615,110 +541,63 @@ func TestPathBuilder(t *testing.T) {
 	pb.cubicTo(Point{X: 25, Y: 5}, Point{X: 35, Y: 5}, Point{X: 40, Y: 0})
 	pb.close()
 
-	elements := pb.build()
-	if len(elements) != 5 {
-		t.Errorf("expected 5 elements, got %d", len(elements))
+	if len(pb.verbs) != 5 {
+		t.Errorf("expected 5 verbs, got %d", len(pb.verbs))
 	}
 }
 
-// Benchmark for stroke expansion
 func BenchmarkStrokeExpander_SimpleLine(b *testing.B) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 100, Y: 0}},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(100, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expander.Expand(input)
+		expander.Expand(p.verbs, p.coords)
 	}
 }
 
 func BenchmarkStrokeExpander_Square(b *testing.B) {
-	style := Stroke{
-		Width:      2.0,
-		Cap:        LineCapButt,
-		Join:       LineJoinMiter,
-		MiterLimit: 4.0,
-	}
+	style := Stroke{Width: 2.0, Cap: LineCapButt, Join: LineJoinMiter, MiterLimit: 4.0}
 	expander := NewStrokeExpander(style)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 100, Y: 0}},
-		LineTo{Point: Point{X: 100, Y: 100}},
-		LineTo{Point: Point{X: 0, Y: 100}},
-		Close{},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(100, 0).lineTo(100, 100).lineTo(0, 100).close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expander.Expand(input)
+		expander.Expand(p.verbs, p.coords)
 	}
 }
 
 func BenchmarkStrokeExpander_ComplexPath(b *testing.B) {
-	style := Stroke{
-		Width:      2.0,
-		Cap:        LineCapRound,
-		Join:       LineJoinRound,
-		MiterLimit: 4.0,
-	}
+	style := Stroke{Width: 2.0, Cap: LineCapRound, Join: LineJoinRound, MiterLimit: 4.0}
 	expander := NewStrokeExpander(style)
 
-	// Create a complex path with many segments
-	input := []PathElement{MoveTo{Point: Point{X: 0, Y: 0}}}
+	p := newSOAPath().moveTo(0, 0)
 	for i := 1; i <= 100; i++ {
 		x := float64(i * 10)
 		y := float64((i % 2) * 10)
-		input = append(input, LineTo{Point: Point{X: x, Y: y}})
+		p.lineTo(x, y)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expander.Expand(input)
+		expander.Expand(p.verbs, p.coords)
 	}
 }
 
 func BenchmarkStrokeExpander_CubicCurves(b *testing.B) {
 	style := DefaultStroke()
 	expander := NewStrokeExpander(style)
-
-	// Path with cubic curves
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 50}},
-		CubicTo{
-			Control1: Point{X: 25, Y: 0},
-			Control2: Point{X: 75, Y: 100},
-			Point:    Point{X: 100, Y: 50},
-		},
-		CubicTo{
-			Control1: Point{X: 125, Y: 0},
-			Control2: Point{X: 175, Y: 100},
-			Point:    Point{X: 200, Y: 50},
-		},
-	}
+	p := newSOAPath().moveTo(0, 50).cubicTo(25, 0, 75, 100, 100, 50).cubicTo(125, 0, 175, 100, 200, 50)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		expander.Expand(input)
+		expander.Expand(p.verbs, p.coords)
 	}
 }
 
-// TestInnerJoin_AcuteAngle tests that acute angles do not produce self-intersecting
-// geometry on the inner (concave) side of the join. This is the fix for Issue #168.
-// All three join types must route the inner path through the pivot point.
 func TestInnerJoin_AcuteAngle(t *testing.T) {
-	// Zig-zag polyline with near-reversal angles.
-	// Without inner join handling, the inner side self-intersects.
-	zigzag := []PathElement{
-		MoveTo{Point: Point{X: 10, Y: 50}},
-		LineTo{Point: Point{X: 100, Y: 50}},
-		LineTo{Point: Point{X: 130, Y: 100}},
-		LineTo{Point: Point{X: 130, Y: 60}}, // near-reversal
-		LineTo{Point: Point{X: 250, Y: 50}},
-	}
+	zigzag := newSOAPath().moveTo(10, 50).lineTo(100, 50).lineTo(130, 100).lineTo(130, 60).lineTo(250, 50)
 
 	tests := []struct {
 		name string
@@ -731,35 +610,21 @@ func TestInnerJoin_AcuteAngle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			style := Stroke{
-				Width:      10.0,
-				Cap:        LineCapButt,
-				Join:       tt.join,
-				MiterLimit: 4.0,
-			}
+			style := Stroke{Width: 10.0, Cap: LineCapButt, Join: tt.join, MiterLimit: 4.0}
 			expander := NewStrokeExpander(style)
-			result := expander.Expand(zigzag)
+			rv, rc := expander.Expand(zigzag.verbs, zigzag.coords)
 
-			if len(result) == 0 {
+			if len(rv) == 0 {
 				t.Fatal("result should not be empty")
 			}
 
-			// Verify no self-intersection by checking that the expanded path
-			// does not have any line segments that cross the centerline at
-			// join points. We check this indirectly: the inner side must pass
-			// through the pivot point at each join.
-			pivots := []Point{
-				{X: 100, Y: 50},
-				{X: 130, Y: 100},
-				{X: 130, Y: 60},
-			}
-
+			pivots := []Point{{X: 100, Y: 50}, {X: 130, Y: 100}, {X: 130, Y: 60}}
 			for _, pivot := range pivots {
 				found := false
-				for _, el := range result {
-					if lt, ok := el.(LineTo); ok {
-						dist := lt.Point.Distance(pivot)
-						if dist < 0.01 {
+				for i, v := range rv {
+					if v == VerbLineTo {
+						ep := endPointAt(rv, rc, i)
+						if ep.Distance(pivot) < 0.01 {
 							found = true
 							break
 						}
@@ -773,61 +638,38 @@ func TestInnerJoin_AcuteAngle(t *testing.T) {
 	}
 }
 
-// TestInnerJoin_ExactReversal tests that an exact 180-degree reversal
-// does not panic or produce degenerate output.
 func TestInnerJoin_ExactReversal(t *testing.T) {
-	// Exact reversal: go right then go left
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 0}},
-		LineTo{Point: Point{X: 100, Y: 0}},
-		LineTo{Point: Point{X: 0, Y: 0}}, // exact 180-degree reversal
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(100, 0).lineTo(0, 0)
 
 	for _, join := range []LineJoin{LineJoinBevel, LineJoinMiter, LineJoinRound} {
-		style := Stroke{
-			Width:      10.0,
-			Cap:        LineCapButt,
-			Join:       join,
-			MiterLimit: 4.0,
-		}
+		style := Stroke{Width: 10.0, Cap: LineCapButt, Join: join, MiterLimit: 4.0}
 		expander := NewStrokeExpander(style)
-		result := expander.Expand(input)
+		rv, _ := expander.Expand(p.verbs, p.coords)
 
-		if len(result) == 0 {
+		if len(rv) == 0 {
 			t.Errorf("join=%d: exact reversal should produce output", join)
 		}
 	}
 }
 
-// TestInnerJoin_VeryAcuteAngle tests a very acute angle (close to 180 degrees).
 func TestInnerJoin_VeryAcuteAngle(t *testing.T) {
-	// Nearly-reversing V shape: ~170 degrees between segments
-	input := []PathElement{
-		MoveTo{Point: Point{X: 0, Y: 50}},
-		LineTo{Point: Point{X: 100, Y: 50}},
-		LineTo{Point: Point{X: 10, Y: 55}}, // very acute return
-	}
+	p := newSOAPath().moveTo(0, 50).lineTo(100, 50).lineTo(10, 55)
 
 	for _, join := range []LineJoin{LineJoinBevel, LineJoinMiter, LineJoinRound} {
-		style := Stroke{
-			Width:      8.0,
-			Cap:        LineCapButt,
-			Join:       join,
-			MiterLimit: 4.0,
-		}
+		style := Stroke{Width: 8.0, Cap: LineCapButt, Join: join, MiterLimit: 4.0}
 		expander := NewStrokeExpander(style)
-		result := expander.Expand(input)
+		rv, rc := expander.Expand(p.verbs, p.coords)
 
-		if len(result) == 0 {
+		if len(rv) == 0 {
 			t.Errorf("join=%d: acute angle should produce output", join)
 		}
 
-		// The inner join must pass through the pivot (100, 50).
 		pivot := Point{X: 100, Y: 50}
 		found := false
-		for _, el := range result {
-			if lt, ok := el.(LineTo); ok {
-				if lt.Point.Distance(pivot) < 0.01 {
+		for i, v := range rv {
+			if v == VerbLineTo {
+				ep := endPointAt(rv, rc, i)
+				if ep.Distance(pivot) < 0.01 {
 					found = true
 					break
 				}
@@ -839,71 +681,40 @@ func TestInnerJoin_VeryAcuteAngle(t *testing.T) {
 	}
 }
 
-// TestInnerJoin_ClosedPath tests that inner join handling works correctly
-// for closed paths (triangles, etc.).
 func TestInnerJoin_ClosedPath(t *testing.T) {
-	// Acute triangle
-	input := []PathElement{
-		MoveTo{Point: Point{X: 50, Y: 0}},
-		LineTo{Point: Point{X: 100, Y: 80}},
-		LineTo{Point: Point{X: 0, Y: 80}},
-		Close{},
-	}
+	p := newSOAPath().moveTo(50, 0).lineTo(100, 80).lineTo(0, 80).close()
 
-	style := Stroke{
-		Width:      6.0,
-		Cap:        LineCapButt,
-		Join:       LineJoinBevel,
-		MiterLimit: 4.0,
-	}
+	style := Stroke{Width: 6.0, Cap: LineCapButt, Join: LineJoinBevel, MiterLimit: 4.0}
 	expander := NewStrokeExpander(style)
-	result := expander.Expand(input)
+	rv, _ := expander.Expand(p.verbs, p.coords)
 
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Closed path should produce two closed subpaths
-	closeCount := 0
-	for _, el := range result {
-		if _, ok := el.(Close); ok {
-			closeCount++
-		}
-	}
+	closeCount := countVerb(rv, VerbClose)
 	if closeCount != 2 {
-		t.Errorf("closed path should produce 2 Close elements, got %d", closeCount)
+		t.Errorf("closed path should produce 2 VerbClose, got %d", closeCount)
 	}
 }
 
-// TestInnerJoin_WideStrokeShortSegment tests that wide strokes on short
-// segments route through the pivot correctly (prevents "funny diagonal").
 func TestInnerJoin_WideStrokeShortSegment(t *testing.T) {
-	// Short segments with wide stroke (width > segment length)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 50, Y: 50}},
-		LineTo{Point: Point{X: 55, Y: 50}}, // 5px segment
-		LineTo{Point: Point{X: 53, Y: 45}}, // 5px segment, acute angle
-	}
+	p := newSOAPath().moveTo(50, 50).lineTo(55, 50).lineTo(53, 45)
 
-	style := Stroke{
-		Width:      20.0, // Width much larger than segment length
-		Cap:        LineCapButt,
-		Join:       LineJoinBevel,
-		MiterLimit: 4.0,
-	}
+	style := Stroke{Width: 20.0, Cap: LineCapButt, Join: LineJoinBevel, MiterLimit: 4.0}
 	expander := NewStrokeExpander(style)
-	result := expander.Expand(input)
+	rv, rc := expander.Expand(p.verbs, p.coords)
 
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Pivot at (55, 50) must appear in the output (inner join routes through it)
 	pivot := Point{X: 55, Y: 50}
 	found := false
-	for _, el := range result {
-		if lt, ok := el.(LineTo); ok {
-			if lt.Point.Distance(pivot) < 0.01 {
+	for i, v := range rv {
+		if v == VerbLineTo {
+			ep := endPointAt(rv, rc, i)
+			if ep.Distance(pivot) < 0.01 {
 				found = true
 				break
 			}
@@ -914,60 +725,33 @@ func TestInnerJoin_WideStrokeShortSegment(t *testing.T) {
 	}
 }
 
-// TestRoundJoin_VShape tests the round join fix for Issue #62
-// https://github.com/gogpu/gg/issues/62
-// The V-shape path should produce a smooth round join arc
-// that connects the previous segment's normal to the current segment's normal.
 func TestRoundJoin_VShape(t *testing.T) {
-	style := Stroke{
-		Width:      5.0, // Same as issue report
-		Cap:        LineCapButt,
-		Join:       LineJoinRound,
-		MiterLimit: 4.0,
-	}
+	style := Stroke{Width: 5.0, Cap: LineCapButt, Join: LineJoinRound, MiterLimit: 4.0}
 	expander := NewStrokeExpander(style)
 
-	// V-shape from issue #62: two lines meeting at a sharp angle
-	// MoveTo(2.65, 37.57) → LineTo(10.16, 10.65) → LineTo(17.67, 37.57)
-	input := []PathElement{
-		MoveTo{Point: Point{X: 2.65, Y: 37.57}},
-		LineTo{Point: Point{X: 10.16, Y: 10.65}},
-		LineTo{Point: Point{X: 17.67, Y: 37.57}},
-	}
+	p := newSOAPath().moveTo(2.65, 37.57).lineTo(10.16, 10.65).lineTo(17.67, 37.57)
+	rv, rc := expander.Expand(p.verbs, p.coords)
 
-	result := expander.Expand(input)
-
-	if len(result) == 0 {
+	if len(rv) == 0 {
 		t.Fatal("result should not be empty")
 	}
 
-	// Round join should produce CubicTo elements for the arc
-	cubicCount := 0
-	for _, el := range result {
-		if _, ok := el.(CubicTo); ok {
-			cubicCount++
-		}
-	}
-
-	// At minimum, we expect 1 cubic for the round join arc
+	cubicCount := countVerb(rv, VerbCubicTo)
 	if cubicCount < 1 {
-		t.Errorf("round join should produce at least 1 CubicTo for arc, got %d", cubicCount)
+		t.Errorf("round join should produce at least 1 VerbCubicTo for arc, got %d", cubicCount)
 	}
 
-	// Verify the arc starts from the correct position by checking
-	// that the first CubicTo after the join point is close to
-	// the expected position based on the previous segment's normal
 	joinPoint := Point{X: 10.16, Y: 10.65}
 	halfWidth := style.Width / 2
 
 	foundArcNearJoin := false
-	for _, el := range result {
-		if cubic, ok := el.(CubicTo); ok {
-			// Check if this cubic is near the join point (within reasonable tolerance)
+	for i, v := range rv {
+		if v == VerbCubicTo {
+			ep := endPointAt(rv, rc, i)
 			dist := math.Sqrt(
-				(cubic.Point.X-joinPoint.X)*(cubic.Point.X-joinPoint.X) +
-					(cubic.Point.Y-joinPoint.Y)*(cubic.Point.Y-joinPoint.Y))
-			if dist < halfWidth*3 { // Arc should be within ~3 radii of join point
+				(ep.X-joinPoint.X)*(ep.X-joinPoint.X) +
+					(ep.Y-joinPoint.Y)*(ep.Y-joinPoint.Y))
+			if dist < halfWidth*3 {
 				foundArcNearJoin = true
 				break
 			}

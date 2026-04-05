@@ -21,7 +21,7 @@ func TestVertexCoverage_PartialAlpha(t *testing.T) {
 
 	// Triangle with vertex at (200,100)
 	path := &vertexTestPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{100, 220, 300, 220, 200, 100},
 	}
 	eb.BuildFromPath(path, IdentityTransform{})
@@ -72,7 +72,7 @@ func TestEdgePosition_NoDrift(t *testing.T) {
 	// Left edge: (200,50)→(100,250), slope = -100/200 = -0.5 px/row
 	// Right edge: (200,50)→(300,250), slope = +100/200 = +0.5 px/row
 	path := &vertexTestPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{100, 250, 300, 250, 200, 50},
 	}
 	eb.BuildFromPath(path, IdentityTransform{})
@@ -201,7 +201,7 @@ func TestInteriorPixels_FullCoverage(t *testing.T) {
 
 	// Large rectangle covering most of the canvas
 	path := &vertexTestPath{
-		verbs: []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs: []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},
 		points: []float32{
 			10, 10, 90, 10, 90, 90, 10, 90,
 		},

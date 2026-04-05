@@ -17,7 +17,7 @@ func TestPathBuilder_Basic(t *testing.T) {
 	}
 
 	// Check path has elements
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 4 { // MoveTo, LineTo, LineTo, Close
 		t.Errorf("expected 4 elements, got %d", count)
 	}
@@ -40,7 +40,7 @@ func TestPathBuilder_Shapes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := tt.builder().Build()
-			count := len(path.Elements())
+			count := path.NumVerbs()
 			if count < tt.minElems {
 				t.Errorf("expected at least %d elements, got %d", tt.minElems, count)
 			}
@@ -61,7 +61,7 @@ func TestPathBuilder_Chaining(t *testing.T) {
 	}
 
 	// Should have elements from all three shapes
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	// Circle: 6 (MoveTo + 4 CubicTo + Close)
 	// Rect: 5 (MoveTo + 3 LineTo + Close)
 	// Star: 11 (MoveTo + 9 LineTo + Close)
@@ -75,7 +75,7 @@ func TestPathBuilder_InvalidPolygon(t *testing.T) {
 	// Polygon with < 3 sides should do nothing
 	path := BuildPath().Polygon(50, 50, 25, 2).Build()
 
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 0 {
 		t.Errorf("expected 0 elements for invalid polygon, got %d", count)
 	}
@@ -85,7 +85,7 @@ func TestPathBuilder_InvalidStar(t *testing.T) {
 	// Star with < 3 points should do nothing
 	path := BuildPath().Star(50, 50, 30, 15, 2).Build()
 
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 0 {
 		t.Errorf("expected 0 elements for invalid star, got %d", count)
 	}
@@ -101,7 +101,7 @@ func TestPathBuilder_QuadTo(t *testing.T) {
 		t.Fatal("expected non-nil path")
 	}
 
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 2 { // MoveTo, QuadTo
 		t.Errorf("expected 2 elements, got %d", count)
 	}
@@ -117,7 +117,7 @@ func TestPathBuilder_CubicTo(t *testing.T) {
 		t.Fatal("expected non-nil path")
 	}
 
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 2 { // MoveTo, CubicTo
 		t.Errorf("expected 2 elements, got %d", count)
 	}
@@ -144,7 +144,7 @@ func TestPathBuilder_RoundRectRadiusClamping(t *testing.T) {
 	}
 
 	// Should still produce a valid path (essentially a pill shape)
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count < 9 {
 		t.Errorf("expected at least 9 elements for rounded rect, got %d", count)
 	}
@@ -157,7 +157,7 @@ func TestPathBuilder_EmptyPath(t *testing.T) {
 		t.Fatal("expected non-nil path")
 	}
 
-	count := len(path.Elements())
+	count := path.NumVerbs()
 	if count != 0 {
 		t.Errorf("expected 0 elements for empty path, got %d", count)
 	}

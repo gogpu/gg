@@ -18,7 +18,7 @@ func (f *SparseStripsFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
 	callback func(x, y int, coverage uint8),
 ) {
-	if path == nil || len(path.Elements()) == 0 {
+	if path == nil || path.NumVerbs() == 0 {
 		return
 	}
 
@@ -64,27 +64,27 @@ func (f *SparseStripsFiller) FillCoverage(
 // convertGGToScenePath converts a gg.Path (float64) to a scene.Path (float32).
 func convertGGToScenePath(p *gg.Path) *scene.Path {
 	sp := scene.NewPath()
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
+	p.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
 		case gg.MoveTo:
-			sp.MoveTo(float32(e.Point.X), float32(e.Point.Y))
+			sp.MoveTo(float32(coords[0]), float32(coords[1]))
 		case gg.LineTo:
-			sp.LineTo(float32(e.Point.X), float32(e.Point.Y))
+			sp.LineTo(float32(coords[0]), float32(coords[1]))
 		case gg.QuadTo:
 			sp.QuadTo(
-				float32(e.Control.X), float32(e.Control.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
 			)
 		case gg.CubicTo:
 			sp.CubicTo(
-				float32(e.Control1.X), float32(e.Control1.Y),
-				float32(e.Control2.X), float32(e.Control2.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
+				float32(coords[4]), float32(coords[5]),
 			)
 		case gg.Close:
 			sp.Close()
 		}
-	}
+	})
 	return sp
 }
 

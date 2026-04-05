@@ -81,11 +81,11 @@ func (cs *ClipStack) PushRRect(r Rect, radius float64) {
 }
 
 // PushPath pushes a path-based clip region onto the stack.
-// The path is rasterized into a mask using the current bounds.
+// The path (given as SOA verb+coords) is rasterized into a mask using the current bounds.
 // If antiAlias is true, the mask will use anti-aliased rendering.
-func (cs *ClipStack) PushPath(path []PathElement, antiAlias bool) error {
+func (cs *ClipStack) PushPath(verbs []PathVerb, coords []float64, antiAlias bool) error {
 	// Create mask clipper from path
-	mask, err := NewMaskClipper(path, cs.bounds, antiAlias)
+	mask, err := NewMaskClipper(verbs, coords, cs.bounds, antiAlias)
 	if err != nil {
 		return err
 	}

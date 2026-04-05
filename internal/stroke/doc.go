@@ -41,13 +41,10 @@
 //	expander := stroke.NewStrokeExpander(style)
 //	expander.SetTolerance(0.1) // Optional: adjust curve flattening
 //
-//	inputPath := []stroke.PathElement{
-//	    stroke.MoveTo{Point: stroke.Point{X: 0, Y: 0}},
-//	    stroke.LineTo{Point: stroke.Point{X: 100, Y: 0}},
-//	    stroke.LineTo{Point: stroke.Point{X: 100, Y: 100}},
-//	}
+//	verbs := []stroke.PathVerb{stroke.VerbMoveTo, stroke.VerbLineTo, stroke.VerbLineTo}
+//	coords := []float64{0, 0, 100, 0, 100, 100}
 //
-//	filledPath := expander.Expand(inputPath)
+//	outVerbs, outCoords := expander.Expand(verbs, coords)
 //
 // # Performance
 //

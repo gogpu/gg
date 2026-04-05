@@ -59,10 +59,10 @@ func TestAnalyticFiller_EmptyPath(t *testing.T) {
 func TestAnalyticFiller_FillTriangle(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbLineTo,
-			VerbLineTo,
-			VerbClose,
+			MoveTo,
+			LineTo,
+			LineTo,
+			Close,
 		},
 		points: []float32{
 			50, 10,
@@ -95,7 +95,7 @@ func TestAnalyticFiller_FillTriangle(t *testing.T) {
 func TestAnalyticFiller_FillRuleEvenOdd(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose,
+			MoveTo, LineTo, LineTo, Close,
 		},
 		points: []float32{
 			50, 10, 10, 90, 90, 90,
@@ -121,7 +121,7 @@ func TestAnalyticFiller_FillRuleEvenOdd(t *testing.T) {
 // TestFillPath tests the convenience function.
 func TestFillPath(t *testing.T) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, 10, 10, 90, 90, 90},
 	}
 
@@ -142,7 +142,7 @@ func TestFillPath(t *testing.T) {
 // TestFillToBuffer tests the buffer fill function.
 func TestFillToBuffer(t *testing.T) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, 10, 10, 90, 90, 90},
 	}
 
@@ -169,7 +169,7 @@ func TestFillToBuffer(t *testing.T) {
 // TestFillToBuffer_SmallBuffer tests buffer size validation.
 func TestFillToBuffer_SmallBuffer(t *testing.T) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, 10, 10, 90, 90, 90},
 	}
 
@@ -206,7 +206,7 @@ func TestClamp32(t *testing.T) {
 func TestAnalyticFiller_ClipBounds(t *testing.T) {
 	// Path extends beyond canvas
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, -20, -20, 120, 120, 120}, // extends beyond 100x100
 	}
 
@@ -241,7 +241,7 @@ func TestAnalyticFiller_ClipBounds(t *testing.T) {
 // TestScenePathAdapter tests the scene path adapter.
 func TestScenePathAdapter(t *testing.T) {
 	adapter := NewScenePathAdapter(false,
-		[]PathVerb{VerbMoveTo, VerbLineTo, VerbClose},
+		[]PathVerb{MoveTo, LineTo, Close},
 		[]float32{0, 0, 100, 100},
 	)
 
@@ -288,7 +288,7 @@ func TestAnalyticFiller_CurveEdges(t *testing.T) {
 // BenchmarkAnalyticFiller_Triangle benchmarks triangle filling.
 func BenchmarkAnalyticFiller_Triangle(b *testing.B) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, 10, 10, 90, 90, 90},
 	}
 

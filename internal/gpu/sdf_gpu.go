@@ -598,7 +598,7 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 
 	// Fall back to stencil-then-cover for non-convex or complex paths.
 	tess := NewFanTessellator()
-	tess.TessellatePath(path.Elements())
+	tess.TessellatePath(path)
 	fanVerts := tess.Vertices()
 	if len(fanVerts) == 0 {
 		return nil // empty path, nothing to render
@@ -626,46 +626,40 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 // This enables Tier 2a (convex fast-path) for paths like triangles, pentagons,
 // and other convex shapes that don't need stencil-then-cover.
 func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
-	elements := path.Elements()
-	if len(elements) < 3 {
+	if path.NumVerbs() < 3 {
 		return nil, false
 	}
 
 	var points []gg.Point
 	moveCount := 0
 	closed := false
+	hasCurves := false
 
-	for _, elem := range elements {
-		switch e := elem.(type) {
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		if hasCurves {
+			return
+		}
+		switch verb {
 		case gg.MoveTo:
 			moveCount++
 			if moveCount > 1 {
-				// Multiple subpaths: not a single polygon.
-				return nil, false
+				hasCurves = true // abuse flag for early exit
+				return
 			}
-			points = append(points, e.Point)
+			points = append(points, gg.Pt(coords[0], coords[1]))
 		case gg.LineTo:
-			points = append(points, e.Point)
+			points = append(points, gg.Pt(coords[0], coords[1]))
 		case gg.QuadTo, gg.CubicTo:
-			// Paths with curves need flattening, which changes point positions.
-			// Use stencil-then-cover for these (fan tessellator handles curves).
-			return nil, false
+			hasCurves = true
 		case gg.Close:
 			closed = true
 		}
-	}
+	})
 
-	// Must be a single closed subpath with no curves.
-	if !closed || moveCount != 1 {
+	if hasCurves || !closed || moveCount != 1 || len(points) < 3 {
 		return nil, false
 	}
 
-	// Need at least 3 points for a polygon.
-	if len(points) < 3 {
-		return nil, false
-	}
-
-	// Check convexity.
 	if !IsConvex(points) {
 		return nil, false
 	}
@@ -696,15 +690,12 @@ func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, pa
 		return a.velloAccel.StrokePath(target, path, paint)
 	}
 
-	ggElems := path.Elements()
-	if len(ggElems) == 0 {
+	if path.NumVerbs() == 0 {
 		return nil
 	}
 
-	// Convert gg path elements to stroke package elements.
-	strokeElems := convertPathToStrokeElements(ggElems)
-
-	// Expand stroke to filled outline.
+	// Convert gg verbs to stroke verbs and expand to filled outline.
+	strokeVerbs := convertPathVerbsToStroke(path.Verbs())
 	style := stroke.Stroke{
 		Width:      paint.EffectiveLineWidth(),
 		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
@@ -712,27 +703,13 @@ func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, pa
 		MiterLimit: paint.EffectiveMiterLimit(),
 	}
 	expander := stroke.NewStrokeExpander(style)
-	expanded := expander.Expand(strokeElems)
-	if len(expanded) == 0 {
+	outVerbs, outCoords := expander.Expand(strokeVerbs, path.Coords())
+	if len(outVerbs) == 0 {
 		return nil
 	}
 
 	// Build a gg.Path from the expanded outline.
-	fillPath := gg.NewPath()
-	for _, e := range expanded {
-		switch el := e.(type) {
-		case stroke.MoveTo:
-			fillPath.MoveTo(el.Point.X, el.Point.Y)
-		case stroke.LineTo:
-			fillPath.LineTo(el.Point.X, el.Point.Y)
-		case stroke.QuadTo:
-			fillPath.QuadraticTo(el.Control.X, el.Control.Y, el.Point.X, el.Point.Y)
-		case stroke.CubicTo:
-			fillPath.CubicTo(el.Control1.X, el.Control1.Y, el.Control2.X, el.Control2.Y, el.Point.X, el.Point.Y)
-		case stroke.Close:
-			fillPath.Close()
-		}
-	}
+	fillPath := strokeResultToPath(outVerbs, outCoords)
 
 	// Route through the fill pipeline (convex fast-path or stencil-then-cover).
 	return a.FillPath(target, fillPath, paint)

@@ -5,13 +5,34 @@ import (
 	"testing"
 )
 
+// svgTestVerb holds verb + coords for path_svg_test assertions.
+type svgTestVerb struct {
+	Verb   PathVerb
+	Coords []float64 // copy of coords for this verb
+}
+
+// collectVerbs returns all verbs with their coordinates.
+// Test helper replacing the old Elements() pattern.
+func collectVerbs(p *Path) []svgTestVerb {
+	result := make([]svgTestVerb, 0, p.NumVerbs())
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		sv := svgTestVerb{Verb: verb}
+		if len(coords) > 0 {
+			sv.Coords = make([]float64, len(coords))
+			copy(sv.Coords, coords)
+		}
+		result = append(result, sv)
+	})
+	return result
+}
+
 func TestParseSVGPath_Empty(t *testing.T) {
 	p, err := ParseSVGPath("")
 	if err != nil {
 		t.Fatalf("empty string should not error: %v", err)
 	}
-	if len(p.Elements()) != 0 {
-		t.Errorf("expected 0 elements, got %d", len(p.Elements()))
+	if p.NumVerbs() != 0 {
+		t.Errorf("expected 0 elements, got %d", p.NumVerbs())
 	}
 }
 
@@ -20,8 +41,8 @@ func TestParseSVGPath_WhitespaceOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("whitespace-only should not error: %v", err)
 	}
-	if len(p.Elements()) != 0 {
-		t.Errorf("expected 0 elements, got %d", len(p.Elements()))
+	if p.NumVerbs() != 0 {
+		t.Errorf("expected 0 elements, got %d", p.NumVerbs())
 	}
 }
 
@@ -43,16 +64,15 @@ func TestParseSVGPath_MoveTo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseSVGPath(%q) error: %v", tt.d, err)
 			}
-			elems := p.Elements()
+			elems := collectVerbs(p)
 			if len(elems) != 1 {
 				t.Fatalf("expected 1 element, got %d", len(elems))
 			}
-			m, ok := elems[0].(MoveTo)
-			if !ok {
-				t.Fatalf("expected MoveTo, got %T", elems[0])
+			if elems[0].Verb != MoveTo {
+				t.Fatalf("expected MoveTo, got %v", elems[0].Verb)
 			}
-			if m.Point.X != tt.wantX || m.Point.Y != tt.wantY {
-				t.Errorf("got MoveTo(%v, %v), want (%v, %v)", m.Point.X, m.Point.Y, tt.wantX, tt.wantY)
+			if elems[0].Coords[0] != tt.wantX || elems[0].Coords[1] != tt.wantY {
+				t.Errorf("got MoveTo(%v, %v), want (%v, %v)", elems[0].Coords[0], elems[0].Coords[1], tt.wantX, tt.wantY)
 			}
 		})
 	}
@@ -64,17 +84,16 @@ func TestParseSVGPath_RelativeMoveTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elems))
 	}
-	m, ok := elems[1].(MoveTo)
-	if !ok {
-		t.Fatalf("expected MoveTo, got %T", elems[1])
+	if elems[1].Verb != MoveTo {
+		t.Fatalf("expected MoveTo, got %v", elems[1].Verb)
 	}
 	// Relative to (5,5): (5+10, 5+20) = (15, 25).
-	if m.Point.X != 15 || m.Point.Y != 25 {
-		t.Errorf("got MoveTo(%v, %v), want (15, 25)", m.Point.X, m.Point.Y)
+	if elems[1].Coords[0] != 15 || elems[1].Coords[1] != 25 {
+		t.Errorf("got MoveTo(%v, %v), want (15, 25)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -83,16 +102,15 @@ func TestParseSVGPath_LineTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elems))
 	}
-	l, ok := elems[1].(LineTo)
-	if !ok {
-		t.Fatalf("expected LineTo, got %T", elems[1])
+	if elems[1].Verb != LineTo {
+		t.Fatalf("expected LineTo, got %v", elems[1].Verb)
 	}
-	if l.Point.X != 10 || l.Point.Y != 20 {
-		t.Errorf("got LineTo(%v, %v), want (10, 20)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 10 || elems[1].Coords[1] != 20 {
+		t.Errorf("got LineTo(%v, %v), want (10, 20)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -101,16 +119,15 @@ func TestParseSVGPath_RelativeLineTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elems))
 	}
-	l, ok := elems[1].(LineTo)
-	if !ok {
-		t.Fatalf("expected LineTo, got %T", elems[1])
+	if elems[1].Verb != LineTo {
+		t.Fatalf("expected LineTo, got %v", elems[1].Verb)
 	}
-	if l.Point.X != 15 || l.Point.Y != 25 {
-		t.Errorf("got LineTo(%v, %v), want (15, 25)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 15 || elems[1].Coords[1] != 25 {
+		t.Errorf("got LineTo(%v, %v), want (15, 25)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -119,17 +136,16 @@ func TestParseSVGPath_HorizontalLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elems))
 	}
-	l, ok := elems[1].(LineTo)
-	if !ok {
-		t.Fatalf("expected LineTo, got %T", elems[1])
+	if elems[1].Verb != LineTo {
+		t.Fatalf("expected LineTo, got %v", elems[1].Verb)
 	}
 	// H20 = absolute x=20, y stays at 10.
-	if l.Point.X != 20 || l.Point.Y != 10 {
-		t.Errorf("got LineTo(%v, %v), want (20, 10)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 20 || elems[1].Coords[1] != 10 {
+		t.Errorf("got LineTo(%v, %v), want (20, 10)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -138,10 +154,9 @@ func TestParseSVGPath_RelativeHorizontalLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
-	l := elems[1].(LineTo)
-	if l.Point.X != 20 || l.Point.Y != 10 {
-		t.Errorf("got LineTo(%v, %v), want (20, 10)", l.Point.X, l.Point.Y)
+	elems := collectVerbs(p)
+	if elems[1].Coords[0] != 20 || elems[1].Coords[1] != 10 {
+		t.Errorf("got LineTo(%v, %v), want (20, 10)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -150,11 +165,10 @@ func TestParseSVGPath_VerticalLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
-	l := elems[1].(LineTo)
+	elems := collectVerbs(p)
 	// V30 = absolute y=30, x stays at 5.
-	if l.Point.X != 5 || l.Point.Y != 30 {
-		t.Errorf("got LineTo(%v, %v), want (5, 30)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 5 || elems[1].Coords[1] != 30 {
+		t.Errorf("got LineTo(%v, %v), want (5, 30)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -163,10 +177,9 @@ func TestParseSVGPath_RelativeVerticalLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
-	l := elems[1].(LineTo)
-	if l.Point.X != 5 || l.Point.Y != 30 {
-		t.Errorf("got LineTo(%v, %v), want (5, 30)", l.Point.X, l.Point.Y)
+	elems := collectVerbs(p)
+	if elems[1].Coords[0] != 5 || elems[1].Coords[1] != 30 {
+		t.Errorf("got LineTo(%v, %v), want (5, 30)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -175,22 +188,21 @@ func TestParseSVGPath_CubicBezier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements, got %d", len(elems))
 	}
-	c, ok := elems[1].(CubicTo)
-	if !ok {
-		t.Fatalf("expected CubicTo, got %T", elems[1])
+	if elems[1].Verb != CubicTo {
+		t.Fatalf("expected CubicTo, got %v", elems[1].Verb)
 	}
-	if c.Control1.X != 10 || c.Control1.Y != 20 {
-		t.Errorf("control1 = (%v, %v), want (10, 20)", c.Control1.X, c.Control1.Y)
+	if elems[1].Coords[0] != 10 || elems[1].Coords[1] != 20 {
+		t.Errorf("control1 = (%v, %v), want (10, 20)", elems[1].Coords[0], elems[1].Coords[1])
 	}
-	if c.Control2.X != 30 || c.Control2.Y != 40 {
-		t.Errorf("control2 = (%v, %v), want (30, 40)", c.Control2.X, c.Control2.Y)
+	if elems[1].Coords[2] != 30 || elems[1].Coords[3] != 40 {
+		t.Errorf("control2 = (%v, %v), want (30, 40)", elems[1].Coords[2], elems[1].Coords[3])
 	}
-	if c.Point.X != 50 || c.Point.Y != 60 {
-		t.Errorf("endpoint = (%v, %v), want (50, 60)", c.Point.X, c.Point.Y)
+	if elems[1].Coords[4] != 50 || elems[1].Coords[5] != 60 {
+		t.Errorf("endpoint = (%v, %v), want (50, 60)", elems[1].Coords[4], elems[1].Coords[5])
 	}
 }
 
@@ -199,12 +211,12 @@ func TestParseSVGPath_RelativeCubicBezier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	c := p.Elements()[1].(CubicTo)
-	if c.Control1.X != 15 || c.Control1.Y != 15 {
-		t.Errorf("control1 = (%v, %v), want (15, 15)", c.Control1.X, c.Control1.Y)
+	c := collectVerbs(p)[1]
+	if c.Coords[0] != 15 || c.Coords[1] != 15 {
+		t.Errorf("control1 = (%v, %v), want (15, 15)", c.Coords[0], c.Coords[1])
 	}
-	if c.Point.X != 30 || c.Point.Y != 30 {
-		t.Errorf("endpoint = (%v, %v), want (30, 30)", c.Point.X, c.Point.Y)
+	if c.Coords[4] != 30 || c.Coords[5] != 30 {
+		t.Errorf("endpoint = (%v, %v), want (30, 30)", c.Coords[4], c.Coords[5])
 	}
 }
 
@@ -215,23 +227,22 @@ func TestParseSVGPath_SmoothCubic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(elems))
 	}
-	s, ok := elems[2].(CubicTo)
-	if !ok {
-		t.Fatalf("expected CubicTo, got %T", elems[2])
+	if elems[2].Verb != CubicTo {
+		t.Fatalf("expected CubicTo, got %v", elems[2].Verb)
 	}
 	// Reflected control1 = 2*(50,60) - (30,40) = (70, 80).
-	if s.Control1.X != 70 || s.Control1.Y != 80 {
-		t.Errorf("reflected control1 = (%v, %v), want (70, 80)", s.Control1.X, s.Control1.Y)
+	if elems[2].Coords[0] != 70 || elems[2].Coords[1] != 80 {
+		t.Errorf("reflected control1 = (%v, %v), want (70, 80)", elems[2].Coords[0], elems[2].Coords[1])
 	}
-	if s.Control2.X != 80 || s.Control2.Y != 90 {
-		t.Errorf("control2 = (%v, %v), want (80, 90)", s.Control2.X, s.Control2.Y)
+	if elems[2].Coords[2] != 80 || elems[2].Coords[3] != 90 {
+		t.Errorf("control2 = (%v, %v), want (80, 90)", elems[2].Coords[2], elems[2].Coords[3])
 	}
-	if s.Point.X != 100 || s.Point.Y != 100 {
-		t.Errorf("endpoint = (%v, %v), want (100, 100)", s.Point.X, s.Point.Y)
+	if elems[2].Coords[4] != 100 || elems[2].Coords[5] != 100 {
+		t.Errorf("endpoint = (%v, %v), want (100, 100)", elems[2].Coords[4], elems[2].Coords[5])
 	}
 }
 
@@ -241,10 +252,10 @@ func TestParseSVGPath_SmoothCubicNoPrec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	s := p.Elements()[1].(CubicTo)
+	s := collectVerbs(p)[1]
 	// No previous C/S, so control1 = current point = (10, 20).
-	if s.Control1.X != 10 || s.Control1.Y != 20 {
-		t.Errorf("reflected control1 = (%v, %v), want (10, 20)", s.Control1.X, s.Control1.Y)
+	if s.Coords[0] != 10 || s.Coords[1] != 20 {
+		t.Errorf("reflected control1 = (%v, %v), want (10, 20)", s.Coords[0], s.Coords[1])
 	}
 }
 
@@ -253,12 +264,12 @@ func TestParseSVGPath_QuadBezier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	q := p.Elements()[1].(QuadTo)
-	if q.Control.X != 10 || q.Control.Y != 20 {
-		t.Errorf("control = (%v, %v), want (10, 20)", q.Control.X, q.Control.Y)
+	q := collectVerbs(p)[1]
+	if q.Coords[0] != 10 || q.Coords[1] != 20 {
+		t.Errorf("control = (%v, %v), want (10, 20)", q.Coords[0], q.Coords[1])
 	}
-	if q.Point.X != 30 || q.Point.Y != 40 {
-		t.Errorf("endpoint = (%v, %v), want (30, 40)", q.Point.X, q.Point.Y)
+	if q.Coords[2] != 30 || q.Coords[3] != 40 {
+		t.Errorf("endpoint = (%v, %v), want (30, 40)", q.Coords[2], q.Coords[3])
 	}
 }
 
@@ -267,17 +278,16 @@ func TestParseSVGPath_SmoothQuad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(elems))
 	}
-	tq := elems[2].(QuadTo)
 	// Reflected control = 2*(30,0) - (10,20) = (50, -20).
-	if tq.Control.X != 50 || tq.Control.Y != -20 {
-		t.Errorf("reflected control = (%v, %v), want (50, -20)", tq.Control.X, tq.Control.Y)
+	if elems[2].Coords[0] != 50 || elems[2].Coords[1] != -20 {
+		t.Errorf("reflected control = (%v, %v), want (50, -20)", elems[2].Coords[0], elems[2].Coords[1])
 	}
-	if tq.Point.X != 60 || tq.Point.Y != 0 {
-		t.Errorf("endpoint = (%v, %v), want (60, 0)", tq.Point.X, tq.Point.Y)
+	if elems[2].Coords[2] != 60 || elems[2].Coords[3] != 0 {
+		t.Errorf("endpoint = (%v, %v), want (60, 0)", elems[2].Coords[2], elems[2].Coords[3])
 	}
 }
 
@@ -287,9 +297,9 @@ func TestParseSVGPath_SmoothQuadNoPrec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	tq := p.Elements()[1].(QuadTo)
-	if tq.Control.X != 10 || tq.Control.Y != 20 {
-		t.Errorf("reflected control = (%v, %v), want (10, 20)", tq.Control.X, tq.Control.Y)
+	tq := collectVerbs(p)[1]
+	if tq.Coords[0] != 10 || tq.Coords[1] != 20 {
+		t.Errorf("reflected control = (%v, %v), want (10, 20)", tq.Coords[0], tq.Coords[1])
 	}
 }
 
@@ -298,13 +308,12 @@ func TestParseSVGPath_Close(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 4 {
 		t.Fatalf("expected 4 elements, got %d", len(elems))
 	}
-	_, ok := elems[3].(Close)
-	if !ok {
-		t.Fatalf("expected Close, got %T", elems[3])
+	if elems[3].Verb != Close {
+		t.Fatalf("expected Close, got %v", elems[3].Verb)
 	}
 	// After Z, current point returns to subpath start.
 	if p.CurrentPoint().X != 0 || p.CurrentPoint().Y != 0 {
@@ -319,7 +328,7 @@ func TestParseSVGPath_CloseMoveTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 5 {
 		t.Fatalf("expected 5 elements, got %d", len(elems))
 	}
@@ -331,17 +340,15 @@ func TestParseSVGPath_ImplicitRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 3 {
 		t.Fatalf("expected 3 elements (M + 2L), got %d", len(elems))
 	}
-	l1 := elems[1].(LineTo)
-	l2 := elems[2].(LineTo)
-	if l1.Point.X != 10 || l1.Point.Y != 20 {
-		t.Errorf("first L = (%v, %v), want (10, 20)", l1.Point.X, l1.Point.Y)
+	if elems[1].Coords[0] != 10 || elems[1].Coords[1] != 20 {
+		t.Errorf("first L = (%v, %v), want (10, 20)", elems[1].Coords[0], elems[1].Coords[1])
 	}
-	if l2.Point.X != 30 || l2.Point.Y != 40 {
-		t.Errorf("second L = (%v, %v), want (30, 40)", l2.Point.X, l2.Point.Y)
+	if elems[2].Coords[0] != 30 || elems[2].Coords[1] != 40 {
+		t.Errorf("second L = (%v, %v), want (30, 40)", elems[2].Coords[0], elems[2].Coords[1])
 	}
 }
 
@@ -351,20 +358,18 @@ func TestParseSVGPath_ImplicitLineToAfterMoveTo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements (M + L), got %d", len(elems))
 	}
-	_, ok := elems[0].(MoveTo)
-	if !ok {
-		t.Fatalf("expected MoveTo, got %T", elems[0])
+	if elems[0].Verb != MoveTo {
+		t.Fatalf("expected MoveTo, got %v", elems[0].Verb)
 	}
-	l, ok := elems[1].(LineTo)
-	if !ok {
-		t.Fatalf("expected LineTo, got %T", elems[1])
+	if elems[1].Verb != LineTo {
+		t.Fatalf("expected LineTo, got %v", elems[1].Verb)
 	}
-	if l.Point.X != 30 || l.Point.Y != 40 {
-		t.Errorf("implicit L = (%v, %v), want (30, 40)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 30 || elems[1].Coords[1] != 40 {
+		t.Errorf("implicit L = (%v, %v), want (30, 40)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -373,14 +378,13 @@ func TestParseSVGPath_ImplicitHRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// M + 3 LineTo.
 	if len(elems) != 4 {
 		t.Fatalf("expected 4 elements, got %d", len(elems))
 	}
-	l3 := elems[3].(LineTo)
-	if l3.Point.X != 30 || l3.Point.Y != 0 {
-		t.Errorf("third H = (%v, %v), want (30, 0)", l3.Point.X, l3.Point.Y)
+	if elems[3].Coords[0] != 30 || elems[3].Coords[1] != 0 {
+		t.Errorf("third H = (%v, %v), want (30, 0)", elems[3].Coords[0], elems[3].Coords[1])
 	}
 }
 
@@ -390,9 +394,9 @@ func TestParseSVGPath_NegativeAsSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	m := p.Elements()[0].(MoveTo)
-	if m.Point.X != 10 || m.Point.Y != -20 {
-		t.Errorf("got (%v, %v), want (10, -20)", m.Point.X, m.Point.Y)
+	m := collectVerbs(p)[0]
+	if m.Coords[0] != 10 || m.Coords[1] != -20 {
+		t.Errorf("got (%v, %v), want (10, -20)", m.Coords[0], m.Coords[1])
 	}
 }
 
@@ -401,9 +405,9 @@ func TestParseSVGPath_ScientificNotation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	m := p.Elements()[0].(MoveTo)
-	if m.Point.X != 100 || m.Point.Y != 25 {
-		t.Errorf("got (%v, %v), want (100, 25)", m.Point.X, m.Point.Y)
+	m := collectVerbs(p)[0]
+	if m.Coords[0] != 100 || m.Coords[1] != 25 {
+		t.Errorf("got (%v, %v), want (100, 25)", m.Coords[0], m.Coords[1])
 	}
 }
 
@@ -412,12 +416,12 @@ func TestParseSVGPath_ScientificNotationNegativeExponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	m := p.Elements()[0].(MoveTo)
-	if math.Abs(m.Point.X-0.01) > 1e-12 {
-		t.Errorf("X = %v, want 0.01", m.Point.X)
+	m := collectVerbs(p)[0]
+	if math.Abs(m.Coords[0]-0.01) > 1e-12 {
+		t.Errorf("X = %v, want 0.01", m.Coords[0])
 	}
-	if math.Abs(m.Point.Y-5) > 1e-12 {
-		t.Errorf("Y = %v, want 5", m.Point.Y)
+	if math.Abs(m.Coords[1]-5) > 1e-12 {
+		t.Errorf("Y = %v, want 5", m.Coords[1])
 	}
 }
 
@@ -426,9 +430,9 @@ func TestParseSVGPath_LeadingDot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	m := p.Elements()[0].(MoveTo)
-	if m.Point.X != 0.5 || m.Point.Y != 0.3 {
-		t.Errorf("got (%v, %v), want (0.5, 0.3)", m.Point.X, m.Point.Y)
+	m := collectVerbs(p)[0]
+	if m.Coords[0] != 0.5 || m.Coords[1] != 0.3 {
+		t.Errorf("got (%v, %v), want (0.5, 0.3)", m.Coords[0], m.Coords[1])
 	}
 }
 
@@ -438,15 +442,15 @@ func TestParseSVGPath_Arc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// MoveTo + 1-2 CubicTo segments.
 	if len(elems) < 2 {
 		t.Fatalf("expected >=2 elements, got %d", len(elems))
 	}
 	// The last element's endpoint should be (100, 0).
-	last := elems[len(elems)-1].(CubicTo)
-	if math.Abs(last.Point.X-100) > 0.01 || math.Abs(last.Point.Y) > 0.01 {
-		t.Errorf("arc endpoint = (%v, %v), want (~100, ~0)", last.Point.X, last.Point.Y)
+	last := elems[len(elems)-1]
+	if math.Abs(last.Coords[4]-100) > 0.01 || math.Abs(last.Coords[5]) > 0.01 {
+		t.Errorf("arc endpoint = (%v, %v), want (~100, ~0)", last.Coords[4], last.Coords[5])
 	}
 }
 
@@ -456,16 +460,15 @@ func TestParseSVGPath_ArcZeroRadius(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) != 2 {
 		t.Fatalf("expected 2 elements (M + L), got %d", len(elems))
 	}
-	l, ok := elems[1].(LineTo)
-	if !ok {
-		t.Fatalf("expected LineTo for zero-radius arc, got %T", elems[1])
+	if elems[1].Verb != LineTo {
+		t.Fatalf("expected LineTo, got %v", elems[1].Verb)
 	}
-	if l.Point.X != 100 || l.Point.Y != 0 {
-		t.Errorf("got (%v, %v), want (100, 0)", l.Point.X, l.Point.Y)
+	if elems[1].Coords[0] != 100 || elems[1].Coords[1] != 0 {
+		t.Errorf("got (%v, %v), want (100, 0)", elems[1].Coords[0], elems[1].Coords[1])
 	}
 }
 
@@ -475,7 +478,7 @@ func TestParseSVGPath_ArcSameEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// Only MoveTo, arc is skipped.
 	if len(elems) != 1 {
 		t.Fatalf("expected 1 element (only M), got %d", len(elems))
@@ -489,14 +492,14 @@ func TestParseSVGPath_ArcFlagsNoSeparator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	if len(elems) < 2 {
 		t.Fatalf("expected >=2 elements, got %d", len(elems))
 	}
 	// Verify endpoint.
-	last := elems[len(elems)-1].(CubicTo)
-	if math.Abs(last.Point.X-25) > 0.01 || math.Abs(last.Point.Y-(-25)) > 0.01 {
-		t.Errorf("arc endpoint = (%v, %v), want (25, -25)", last.Point.X, last.Point.Y)
+	last := elems[len(elems)-1]
+	if math.Abs(last.Coords[4]-25) > 0.01 || math.Abs(last.Coords[5]-(-25)) > 0.01 {
+		t.Errorf("arc endpoint = (%v, %v), want (25, -25)", last.Coords[4], last.Coords[5])
 	}
 }
 
@@ -506,14 +509,14 @@ func TestParseSVGPath_ArcLargeArcSweep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// Large arc = multiple cubic segments (typically 3-4).
 	if len(elems) < 3 {
 		t.Fatalf("expected >=3 elements for large arc, got %d", len(elems))
 	}
-	last := elems[len(elems)-1].(CubicTo)
-	if math.Abs(last.Point.X-100) > 0.01 || math.Abs(last.Point.Y) > 0.01 {
-		t.Errorf("arc endpoint = (%v, %v), want (~100, ~0)", last.Point.X, last.Point.Y)
+	last := elems[len(elems)-1]
+	if math.Abs(last.Coords[4]-100) > 0.01 || math.Abs(last.Coords[5]) > 0.01 {
+		t.Errorf("arc endpoint = (%v, %v), want (~100, ~0)", last.Coords[4], last.Coords[5])
 	}
 }
 
@@ -522,11 +525,11 @@ func TestParseSVGPath_RelativeArc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
-	last := elems[len(elems)-1].(CubicTo)
+	elems := collectVerbs(p)
+	last := elems[len(elems)-1]
 	// Relative: endpoint = (50+50, 50+0) = (100, 50).
-	if math.Abs(last.Point.X-100) > 0.01 || math.Abs(last.Point.Y-50) > 0.01 {
-		t.Errorf("arc endpoint = (%v, %v), want (~100, ~50)", last.Point.X, last.Point.Y)
+	if math.Abs(last.Coords[4]-100) > 0.01 || math.Abs(last.Coords[5]-50) > 0.01 {
+		t.Errorf("arc endpoint = (%v, %v), want (~100, ~50)", last.Coords[4], last.Coords[5])
 	}
 }
 
@@ -548,14 +551,13 @@ func TestParseSVGPath_CloseIcon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error parsing close icon: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// 1 MoveTo + 11 LineTo + 1 Close = 13.
 	if len(elems) != 13 {
 		t.Errorf("expected 13 elements, got %d", len(elems))
 	}
-	_, ok := elems[12].(Close)
-	if !ok {
-		t.Errorf("last element should be Close, got %T", elems[12])
+	if elems[12].Verb != Close {
+		t.Errorf("expected Close, got %v", elems[12].Verb)
 	}
 }
 
@@ -565,7 +567,7 @@ func TestParseSVGPath_RefreshIcon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error parsing refresh icon: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// M + 3 C = 4 elements.
 	if len(elems) != 4 {
 		t.Errorf("expected 4 elements, got %d", len(elems))
@@ -578,7 +580,7 @@ func TestParseSVGPath_SearchIcon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error parsing search icon: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// M + 2C + 1L = 4.
 	if len(elems) != 4 {
 		t.Errorf("expected 4 elements, got %d", len(elems))
@@ -592,7 +594,7 @@ func TestParseSVGPath_ComplexMultiCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	elems := p.Elements()
+	elems := collectVerbs(p)
 	// M10,10 + L20,20 + C... + Q... + Z + M80,80 + l... = 7.
 	if len(elems) != 7 {
 		t.Errorf("expected 7 elements, got %d", len(elems))
@@ -622,13 +624,12 @@ func TestParseSVGPath_WhitespaceVariants(t *testing.T) {
 			if err != nil {
 				t.Fatalf("error: %v", err)
 			}
-			elems := p.Elements()
+			elems := collectVerbs(p)
 			if len(elems) != 2 {
 				t.Fatalf("expected 2 elements, got %d", len(elems))
 			}
-			l := elems[1].(LineTo)
-			if l.Point.X != 30 || l.Point.Y != 40 {
-				t.Errorf("got (%v, %v), want (30, 40)", l.Point.X, l.Point.Y)
+			if elems[1].Coords[0] != 30 || elems[1].Coords[1] != 40 {
+				t.Errorf("got (%v, %v), want (30, 40)", elems[1].Coords[0], elems[1].Coords[1])
 			}
 		})
 	}

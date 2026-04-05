@@ -39,7 +39,7 @@ func FlattenPath(path *scene.Path, transform scene.Affine, tolerance float32) *S
 
 	for _, verb := range verbs {
 		switch verb {
-		case scene.VerbMoveTo:
+		case scene.MoveTo:
 			// Close previous subpath if needed
 			if curX != startX || curY != startY {
 				addMonotonicLine(segments, curX, curY, startX, startY)
@@ -50,14 +50,14 @@ func FlattenPath(path *scene.Path, transform scene.Affine, tolerance float32) *S
 			startX, startY = curX, curY
 			pointIdx += 2
 
-		case scene.VerbLineTo:
+		case scene.LineTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			nextX, nextY := transform.TransformPoint(x, y)
 			addMonotonicLine(segments, curX, curY, nextX, nextY)
 			curX, curY = nextX, nextY
 			pointIdx += 2
 
-		case scene.VerbQuadTo:
+		case scene.QuadTo:
 			// Control point and end point
 			cx, cy := points[pointIdx], points[pointIdx+1]
 			x, y := points[pointIdx+2], points[pointIdx+3]
@@ -69,7 +69,7 @@ func FlattenPath(path *scene.Path, transform scene.Affine, tolerance float32) *S
 			curX, curY = tx, ty
 			pointIdx += 4
 
-		case scene.VerbCubicTo:
+		case scene.CubicTo:
 			// Two control points and end point
 			c1x, c1y := points[pointIdx], points[pointIdx+1]
 			c2x, c2y := points[pointIdx+2], points[pointIdx+3]
@@ -83,7 +83,7 @@ func FlattenPath(path *scene.Path, transform scene.Affine, tolerance float32) *S
 			curX, curY = tx, ty
 			pointIdx += 6
 
-		case scene.VerbClose:
+		case scene.Close:
 			// Close the subpath
 			if curX != startX || curY != startY {
 				addMonotonicLine(segments, curX, curY, startX, startY)
@@ -403,7 +403,7 @@ func (ctx *FlattenContext) FlattenPathTo(path *scene.Path, transform scene.Affin
 
 	for _, verb := range verbs {
 		switch verb {
-		case scene.VerbMoveTo:
+		case scene.MoveTo:
 			if curX != startX || curY != startY {
 				addMonotonicLine(segments, curX, curY, startX, startY)
 			}
@@ -412,14 +412,14 @@ func (ctx *FlattenContext) FlattenPathTo(path *scene.Path, transform scene.Affin
 			startX, startY = curX, curY
 			pointIdx += 2
 
-		case scene.VerbLineTo:
+		case scene.LineTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			nextX, nextY := transform.TransformPoint(x, y)
 			addMonotonicLine(segments, curX, curY, nextX, nextY)
 			curX, curY = nextX, nextY
 			pointIdx += 2
 
-		case scene.VerbQuadTo:
+		case scene.QuadTo:
 			cx, cy := points[pointIdx], points[pointIdx+1]
 			x, y := points[pointIdx+2], points[pointIdx+3]
 			tcx, tcy := transform.TransformPoint(cx, cy)
@@ -428,7 +428,7 @@ func (ctx *FlattenContext) FlattenPathTo(path *scene.Path, transform scene.Affin
 			curX, curY = tx, ty
 			pointIdx += 4
 
-		case scene.VerbCubicTo:
+		case scene.CubicTo:
 			c1x, c1y := points[pointIdx], points[pointIdx+1]
 			c2x, c2y := points[pointIdx+2], points[pointIdx+3]
 			x, y := points[pointIdx+4], points[pointIdx+5]
@@ -439,7 +439,7 @@ func (ctx *FlattenContext) FlattenPathTo(path *scene.Path, transform scene.Affin
 			curX, curY = tx, ty
 			pointIdx += 6
 
-		case scene.VerbClose:
+		case scene.Close:
 			if curX != startX || curY != startY {
 				addMonotonicLine(segments, curX, curY, startX, startY)
 			}

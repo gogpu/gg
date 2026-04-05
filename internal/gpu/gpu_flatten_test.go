@@ -71,11 +71,11 @@ func TestGPUPathElementConversion(t *testing.T) {
 
 	// Check verb types
 	expectedVerbs := []uint32{
-		uint32(scene.VerbMoveTo),
-		uint32(scene.VerbLineTo),
-		uint32(scene.VerbQuadTo),
-		uint32(scene.VerbCubicTo),
-		uint32(scene.VerbClose),
+		uint32(scene.MoveTo),
+		uint32(scene.LineTo),
+		uint32(scene.QuadTo),
+		uint32(scene.CubicTo),
+		uint32(scene.Close),
 	}
 	for i, verb := range expectedVerbs {
 		if elements[i].Verb != verb {

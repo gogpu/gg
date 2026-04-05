@@ -419,8 +419,7 @@ func (e *Encoding) EncodePath(p *gg.Path) {
 		return
 	}
 
-	elements := p.Elements()
-	if len(elements) == 0 {
+	if p.NumVerbs() == 0 {
 		return
 	}
 
@@ -428,27 +427,27 @@ func (e *Encoding) EncodePath(p *gg.Path) {
 	e.pathBounds = EmptyRect()
 	e.pathCount++
 
-	for _, elem := range elements {
-		switch el := elem.(type) {
+	p.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
 		case gg.MoveTo:
-			e.encodeMoveTo(float32(el.Point.X), float32(el.Point.Y))
+			e.encodeMoveTo(float32(coords[0]), float32(coords[1]))
 		case gg.LineTo:
-			e.encodeLineTo(float32(el.Point.X), float32(el.Point.Y))
+			e.encodeLineTo(float32(coords[0]), float32(coords[1]))
 		case gg.QuadTo:
 			e.encodeQuadTo(
-				float32(el.Control.X), float32(el.Control.Y),
-				float32(el.Point.X), float32(el.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
 			)
 		case gg.CubicTo:
 			e.encodeCubicTo(
-				float32(el.Control1.X), float32(el.Control1.Y),
-				float32(el.Control2.X), float32(el.Control2.Y),
-				float32(el.Point.X), float32(el.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
+				float32(coords[4]), float32(coords[5]),
 			)
 		case gg.Close:
 			e.tags = append(e.tags, TagClosePath)
 		}
-	}
+	})
 
 	e.tags = append(e.tags, TagEndPath)
 	e.bounds = e.bounds.Union(e.pathBounds)

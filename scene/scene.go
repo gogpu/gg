@@ -487,21 +487,21 @@ func (s *Scene) encodeScenePath(enc *Encoding, path *Path) {
 	pointIdx := 0
 	for _, verb := range path.verbs {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			enc.tags = append(enc.tags, TagMoveTo)
 			x, y := path.points[pointIdx], path.points[pointIdx+1]
 			enc.pathData = append(enc.pathData, x, y)
 			enc.pathBounds = enc.pathBounds.UnionPoint(x, y)
 			pointIdx += 2
 
-		case VerbLineTo:
+		case LineTo:
 			enc.tags = append(enc.tags, TagLineTo)
 			x, y := path.points[pointIdx], path.points[pointIdx+1]
 			enc.pathData = append(enc.pathData, x, y)
 			enc.pathBounds = enc.pathBounds.UnionPoint(x, y)
 			pointIdx += 2
 
-		case VerbQuadTo:
+		case QuadTo:
 			enc.tags = append(enc.tags, TagQuadTo)
 			cx, cy := path.points[pointIdx], path.points[pointIdx+1]
 			x, y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -510,7 +510,7 @@ func (s *Scene) encodeScenePath(enc *Encoding, path *Path) {
 			enc.pathBounds = enc.pathBounds.UnionPoint(x, y)
 			pointIdx += 4
 
-		case VerbCubicTo:
+		case CubicTo:
 			enc.tags = append(enc.tags, TagCubicTo)
 			c1x, c1y := path.points[pointIdx], path.points[pointIdx+1]
 			c2x, c2y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -521,7 +521,7 @@ func (s *Scene) encodeScenePath(enc *Encoding, path *Path) {
 			enc.pathBounds = enc.pathBounds.UnionPoint(x, y)
 			pointIdx += 6
 
-		case VerbClose:
+		case Close:
 			enc.tags = append(enc.tags, TagClosePath)
 		}
 	}

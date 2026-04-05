@@ -139,11 +139,11 @@ func TestSceneRectangle(t *testing.T) {
 	}
 
 	expectedVerbs := []raster.PathVerb{
-		raster.VerbMoveTo,
-		raster.VerbLineTo,
-		raster.VerbLineTo,
-		raster.VerbLineTo,
-		raster.VerbClose,
+		raster.MoveTo,
+		raster.LineTo,
+		raster.LineTo,
+		raster.LineTo,
+		raster.Close,
 	}
 
 	for i, expected := range expectedVerbs {
@@ -169,12 +169,12 @@ func TestSceneCircle(t *testing.T) {
 		t.Errorf("Circle verbs = %d, want 5", len(cmd.path.verbs))
 	}
 
-	if cmd.path.verbs[0] != raster.VerbMoveTo {
+	if cmd.path.verbs[0] != raster.MoveTo {
 		t.Error("Circle should start with MoveTo")
 	}
 
 	for i := 1; i < 5; i++ {
-		if cmd.path.verbs[i] != raster.VerbCubicTo {
+		if cmd.path.verbs[i] != raster.CubicTo {
 			t.Errorf("verb[%d] = %v, want CubicTo", i, cmd.path.verbs[i])
 		}
 	}
@@ -196,7 +196,7 @@ func TestSceneQuadTo(t *testing.T) {
 		t.Errorf("verbs length = %d, want 2", len(cmd.path.verbs))
 	}
 
-	if cmd.path.verbs[1] != raster.VerbQuadTo {
+	if cmd.path.verbs[1] != raster.QuadTo {
 		t.Errorf("verb[1] = %v, want QuadTo", cmd.path.verbs[1])
 	}
 
@@ -219,7 +219,7 @@ func TestSceneCubicTo(t *testing.T) {
 		t.Fatal("Command path should not be nil")
 	}
 
-	if cmd.path.verbs[1] != raster.VerbCubicTo {
+	if cmd.path.verbs[1] != raster.CubicTo {
 		t.Errorf("verb[1] = %v, want CubicTo", cmd.path.verbs[1])
 	}
 

@@ -2,6 +2,7 @@ package gg
 
 import (
 	"math"
+	"unsafe"
 
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/internal/stroke"
@@ -71,34 +72,34 @@ func (r *SoftwareRenderer) SetDeviceScale(scale float32) {
 
 // convertGGPathToCorePath converts a gg.Path to raster.PathLike.
 func convertGGPathToCorePath(p *Path) raster.PathLike {
-	var verbs []raster.PathVerb
-	var points []float32
+	verbs := make([]raster.PathVerb, 0, p.NumVerbs())
+	points := make([]float32, 0, len(p.Coords())*2) //nolint:mnd // preallocate for float64→float32
 
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
 		case MoveTo:
-			verbs = append(verbs, raster.VerbMoveTo)
-			points = append(points, float32(e.Point.X), float32(e.Point.Y))
+			verbs = append(verbs, raster.MoveTo)
+			points = append(points, float32(coords[0]), float32(coords[1]))
 		case LineTo:
-			verbs = append(verbs, raster.VerbLineTo)
-			points = append(points, float32(e.Point.X), float32(e.Point.Y))
+			verbs = append(verbs, raster.LineTo)
+			points = append(points, float32(coords[0]), float32(coords[1]))
 		case QuadTo:
-			verbs = append(verbs, raster.VerbQuadTo)
+			verbs = append(verbs, raster.QuadTo)
 			points = append(points,
-				float32(e.Control.X), float32(e.Control.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
 			)
 		case CubicTo:
-			verbs = append(verbs, raster.VerbCubicTo)
+			verbs = append(verbs, raster.CubicTo)
 			points = append(points,
-				float32(e.Control1.X), float32(e.Control1.Y),
-				float32(e.Control2.X), float32(e.Control2.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
+				float32(coords[4]), float32(coords[5]),
 			)
 		case Close:
-			verbs = append(verbs, raster.VerbClose)
+			verbs = append(verbs, raster.Close)
 		}
-	}
+	})
 
 	return raster.NewScenePathAdapter(len(verbs) == 0, verbs, points)
 }
@@ -149,8 +150,7 @@ func adaptiveThreshold(bboxArea float64) int {
 // over all path elements. Returns (minX, minY, maxX, maxY).
 // For an empty path, returns (0, 0, 0, 0).
 func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
-	elems := p.Elements()
-	if len(elems) == 0 {
+	if p.isEmpty() {
 		return 0, 0, 0, 0
 	}
 
@@ -174,21 +174,19 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 		}
 	}
 
-	for _, elem := range elems {
-		switch e := elem.(type) {
-		case MoveTo:
-			expandPt(e.Point.X, e.Point.Y)
-		case LineTo:
-			expandPt(e.Point.X, e.Point.Y)
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case MoveTo, LineTo:
+			expandPt(coords[0], coords[1])
 		case QuadTo:
-			expandPt(e.Control.X, e.Control.Y)
-			expandPt(e.Point.X, e.Point.Y)
+			expandPt(coords[0], coords[1])
+			expandPt(coords[2], coords[3])
 		case CubicTo:
-			expandPt(e.Control1.X, e.Control1.Y)
-			expandPt(e.Control2.X, e.Control2.Y)
-			expandPt(e.Point.X, e.Point.Y)
+			expandPt(coords[0], coords[1])
+			expandPt(coords[2], coords[3])
+			expandPt(coords[4], coords[5])
 		}
-	}
+	})
 
 	return minX, minY, maxX, maxY
 }
@@ -198,7 +196,7 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 // (not per-dimension) so that wide-but-short dense paths (e.g. text outlines
 // at 16px with hundreds of path elements) can be routed to the tile rasterizer.
 func shouldUseTileRasterizer(p *Path) bool {
-	nElems := len(p.Elements())
+	nElems := p.NumVerbs()
 	if nElems <= 0 {
 		return false
 	}
@@ -347,9 +345,14 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	r.edgeBuilder.SetFlattenCurves(true)
 	defer r.edgeBuilder.SetFlattenCurves(false)
 
-	// Build edges from the path
-	pathAdapter := convertGGPathToCorePath(p)
-	r.edgeBuilder.BuildFromPath(pathAdapter, raster.IdentityTransform{})
+	// Build edges from the path directly from float64 coords (zero-alloc).
+	// PathVerb values match between gg and raster packages (both 0-4 iota).
+	// gg.PathVerb is byte, so []PathVerb has identical memory layout to []byte.
+	verbs := p.Verbs()
+	if len(verbs) > 0 {
+		verbBytes := unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(verbs))), len(verbs))
+		r.edgeBuilder.BuildFromPathF64(verbBytes, p.Coords())
+	}
 
 	// If no edges, nothing to fill
 	if r.edgeBuilder.IsEmpty() {
@@ -615,8 +618,8 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 		pathToDraw = dashPath(p, dash)
 	}
 
-	// Convert gg.Path to stroke.PathElement
-	strokeElements := convertPathToStrokeElements(pathToDraw)
+	// Convert gg.PathVerb to stroke.PathVerb (same layout, just cast)
+	strokeVerbs := convertVerbsToStroke(pathToDraw.Verbs())
 
 	// Create stroke style from paint
 	// Scale line width by transform scale (path coordinates are already transformed)
@@ -643,57 +646,45 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 	expander.SetTolerance(strokeTol)
 
-	// Expand stroke to fill path
-	expandedElements := expander.Expand(strokeElements)
+	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
+	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
 	// Convert back to gg.Path
-	strokePath := convertStrokeElementsToPath(expandedElements)
+	strokePath := strokeResultToPath(outVerbs, outCoords)
 
 	// Fill the stroke path - this gives us anti-aliased strokes
 	return r.Fill(pixmap, strokePath, paint)
 }
 
-// convertPathToStrokeElements converts gg.Path elements to stroke.PathElement.
-func convertPathToStrokeElements(p *Path) []stroke.PathElement {
-	var elements []stroke.PathElement
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
-		case MoveTo:
-			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
-		case LineTo:
-			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
-		case QuadTo:
-			elements = append(elements, stroke.QuadTo{
-				Control: stroke.Point{X: e.Control.X, Y: e.Control.Y},
-				Point:   stroke.Point{X: e.Point.X, Y: e.Point.Y},
-			})
-		case CubicTo:
-			elements = append(elements, stroke.CubicTo{
-				Control1: stroke.Point{X: e.Control1.X, Y: e.Control1.Y},
-				Control2: stroke.Point{X: e.Control2.X, Y: e.Control2.Y},
-				Point:    stroke.Point{X: e.Point.X, Y: e.Point.Y},
-			})
-		case Close:
-			elements = append(elements, stroke.Close{})
-		}
+// convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
+// Both types have identical byte values, so this is a simple cast.
+func convertVerbsToStroke(verbs []PathVerb) []stroke.PathVerb {
+	result := make([]stroke.PathVerb, len(verbs))
+	for i, v := range verbs {
+		result[i] = stroke.PathVerb(v)
 	}
-	return elements
+	return result
 }
 
-// convertStrokeElementsToPath converts stroke.PathElement back to gg.Path.
-func convertStrokeElementsToPath(elements []stroke.PathElement) *Path {
+// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
+func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *Path {
 	p := NewPath()
-	for _, elem := range elements {
-		switch e := elem.(type) {
-		case stroke.MoveTo:
-			p.MoveTo(e.Point.X, e.Point.Y)
-		case stroke.LineTo:
-			p.LineTo(e.Point.X, e.Point.Y)
-		case stroke.QuadTo:
-			p.QuadraticTo(e.Control.X, e.Control.Y, e.Point.X, e.Point.Y)
-		case stroke.CubicTo:
-			p.CubicTo(e.Control1.X, e.Control1.Y, e.Control2.X, e.Control2.Y, e.Point.X, e.Point.Y)
-		case stroke.Close:
+	ci := 0
+	for _, v := range verbs {
+		switch v {
+		case stroke.VerbMoveTo:
+			p.MoveTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbLineTo:
+			p.LineTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbQuadTo:
+			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			ci += 4
+		case stroke.VerbCubicTo:
+			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			ci += 6
+		case stroke.VerbClose:
 			p.Close()
 		}
 	}
@@ -755,10 +746,10 @@ func dashPath(p *Path, dash *Dash) *Path {
 	offset := dash.NormalizedOffset()
 	patternIdx, patternPos, inDash = dashStateAtOffset(pattern, offset)
 
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
 		case MoveTo:
-			currentX, currentY = e.Point.X, e.Point.Y
+			currentX, currentY = coords[0], coords[1]
 			startX, startY = currentX, currentY
 			// Reset pattern state for new subpath
 			patternIdx, patternPos, inDash = dashStateAtOffset(pattern, offset)
@@ -767,17 +758,22 @@ func dashPath(p *Path, dash *Dash) *Path {
 			}
 
 		case LineTo:
-			dashLine(result, &currentX, &currentY, e.Point.X, e.Point.Y,
+			dashLine(result, &currentX, &currentY, coords[0], coords[1],
 				pattern, &patternIdx, &patternPos, &inDash)
 
 		case QuadTo:
 			// Flatten quadratic to lines for dashing
-			dashQuad(result, &currentX, &currentY, e.Control, e.Point,
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			dashQuad(result, &currentX, &currentY, ctrl, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
 		case CubicTo:
 			// Flatten cubic to lines for dashing
-			dashCubic(result, &currentX, &currentY, e.Control1, e.Control2, e.Point,
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			dashCubic(result, &currentX, &currentY, ctrl1, ctrl2, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
 		case Close:
@@ -787,7 +783,7 @@ func dashPath(p *Path, dash *Dash) *Path {
 					pattern, &patternIdx, &patternPos, &inDash)
 			}
 		}
-	}
+	})
 
 	return result
 }
@@ -906,23 +902,11 @@ func dashCubic(result *Path, currentX, currentY *float64, c1, c2, end Point,
 
 // pathEndAt checks if the path ends at the given point.
 func pathEndAt(p *Path, x, y float64) bool {
-	elements := p.Elements()
-	if len(elements) == 0 {
+	if p.isEmpty() {
 		return false
 	}
-
-	last := elements[len(elements)-1]
-	switch e := last.(type) {
-	case MoveTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case LineTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case QuadTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case CubicTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	}
-	return false
+	cp := p.CurrentPoint()
+	return math.Abs(cp.X-x) < 1e-10 && math.Abs(cp.Y-y) < 1e-10
 }
 
 // flattenQuadForDash flattens a quadratic bezier to line points.

@@ -893,26 +893,26 @@ func convertPathInto(scenePath *Path, tileOffsetX, tileOffsetY int, p *gg.Path) 
 	pts := scenePath.Points()
 	for _, verb := range scenePath.Verbs() {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			p.MoveTo(float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy)
 			pointIdx += 2
-		case VerbLineTo:
+		case LineTo:
 			p.LineTo(float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy)
 			pointIdx += 2
-		case VerbQuadTo:
+		case QuadTo:
 			p.QuadraticTo(
 				float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy,
 				float64(pts[pointIdx+2])-ox, float64(pts[pointIdx+3])-oy,
 			)
 			pointIdx += 4
-		case VerbCubicTo:
+		case CubicTo:
 			p.CubicTo(
 				float64(pts[pointIdx])-ox, float64(pts[pointIdx+1])-oy,
 				float64(pts[pointIdx+2])-ox, float64(pts[pointIdx+3])-oy,
 				float64(pts[pointIdx+4])-ox, float64(pts[pointIdx+5])-oy,
 			)
 			pointIdx += 6
-		case VerbClose:
+		case Close:
 			p.Close()
 		}
 	}

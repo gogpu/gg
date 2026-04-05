@@ -241,15 +241,14 @@ func TestPathReversed_QuadraticClosed(t *testing.T) {
 	p.Close()
 
 	rev := p.Reversed()
-	revElems := rev.Elements()
+	revVerbs := rev.Verbs()
 
-	if len(revElems) == 0 {
-		t.Fatal("Reversed path has no elements")
+	if len(revVerbs) == 0 {
+		t.Fatal("Reversed path has no verbs")
 	}
 
 	// Should also be closed
-	_, isClosed := revElems[len(revElems)-1].(Close)
-	if !isClosed {
+	if revVerbs[len(revVerbs)-1] != Close {
 		t.Error("Reversed closed path should also be closed")
 	}
 

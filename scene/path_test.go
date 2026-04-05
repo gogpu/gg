@@ -28,8 +28,8 @@ func TestPathMoveTo(t *testing.T) {
 	if path.VerbCount() != 1 {
 		t.Errorf("VerbCount() = %d, want 1", path.VerbCount())
 	}
-	if path.Verbs()[0] != VerbMoveTo {
-		t.Errorf("verb = %v, want VerbMoveTo", path.Verbs()[0])
+	if path.Verbs()[0] != MoveTo {
+		t.Errorf("verb = %v, want MoveTo", path.Verbs()[0])
 	}
 	if path.PointCount() != 2 {
 		t.Errorf("PointCount() = %d, want 2", path.PointCount())
@@ -54,8 +54,8 @@ func TestPathLineTo(t *testing.T) {
 	if path.VerbCount() != 2 {
 		t.Errorf("VerbCount() = %d, want 2", path.VerbCount())
 	}
-	if path.Verbs()[1] != VerbLineTo {
-		t.Errorf("verb[1] = %v, want VerbLineTo", path.Verbs()[1])
+	if path.Verbs()[1] != LineTo {
+		t.Errorf("verb[1] = %v, want LineTo", path.Verbs()[1])
 	}
 	if path.PointCount() != 4 {
 		t.Errorf("PointCount() = %d, want 4", path.PointCount())
@@ -75,8 +75,8 @@ func TestPathQuadTo(t *testing.T) {
 	if path.VerbCount() != 2 {
 		t.Errorf("VerbCount() = %d, want 2", path.VerbCount())
 	}
-	if path.Verbs()[1] != VerbQuadTo {
-		t.Errorf("verb[1] = %v, want VerbQuadTo", path.Verbs()[1])
+	if path.Verbs()[1] != QuadTo {
+		t.Errorf("verb[1] = %v, want QuadTo", path.Verbs()[1])
 	}
 	// MoveTo: 2, QuadTo: 4 = 6
 	if path.PointCount() != 6 {
@@ -92,8 +92,8 @@ func TestPathCubicTo(t *testing.T) {
 	if path.VerbCount() != 2 {
 		t.Errorf("VerbCount() = %d, want 2", path.VerbCount())
 	}
-	if path.Verbs()[1] != VerbCubicTo {
-		t.Errorf("verb[1] = %v, want VerbCubicTo", path.Verbs()[1])
+	if path.Verbs()[1] != CubicTo {
+		t.Errorf("verb[1] = %v, want CubicTo", path.Verbs()[1])
 	}
 	// MoveTo: 2, CubicTo: 6 = 8
 	if path.PointCount() != 8 {
@@ -111,8 +111,8 @@ func TestPathClose(t *testing.T) {
 	if path.VerbCount() != 4 {
 		t.Errorf("VerbCount() = %d, want 4", path.VerbCount())
 	}
-	if path.Verbs()[3] != VerbClose {
-		t.Errorf("verb[3] = %v, want VerbClose", path.Verbs()[3])
+	if path.Verbs()[3] != Close {
+		t.Errorf("verb[3] = %v, want Close", path.Verbs()[3])
 	}
 }
 
@@ -297,11 +297,11 @@ func TestPathVerbString(t *testing.T) {
 		verb PathVerb
 		want string
 	}{
-		{VerbMoveTo, "MoveTo"},
-		{VerbLineTo, "LineTo"},
-		{VerbQuadTo, "QuadTo"},
-		{VerbCubicTo, "CubicTo"},
-		{VerbClose, "Close"},
+		{MoveTo, "MoveTo"},
+		{LineTo, "LineTo"},
+		{QuadTo, "QuadTo"},
+		{CubicTo, "CubicTo"},
+		{Close, "Close"},
 		{PathVerb(255), "Unknown"},
 	}
 
@@ -319,11 +319,11 @@ func TestPathVerbPointCount(t *testing.T) {
 		verb PathVerb
 		want int
 	}{
-		{VerbMoveTo, 2},
-		{VerbLineTo, 2},
-		{VerbQuadTo, 4},
-		{VerbCubicTo, 6},
-		{VerbClose, 0},
+		{MoveTo, 2},
+		{LineTo, 2},
+		{QuadTo, 4},
+		{CubicTo, 6},
+		{Close, 0},
 	}
 
 	for _, tt := range tests {
@@ -348,10 +348,10 @@ func TestPathArc(t *testing.T) {
 	hasMoveTo := false
 	hasCubic := false
 	for _, verb := range path.Verbs() {
-		if verb == VerbMoveTo {
+		if verb == MoveTo {
 			hasMoveTo = true
 		}
-		if verb == VerbCubicTo {
+		if verb == CubicTo {
 			hasCubic = true
 		}
 	}
@@ -465,7 +465,7 @@ func TestPathElements(t *testing.T) {
 	}
 
 	// Verify MoveTo
-	if elements[0].Verb != VerbMoveTo {
+	if elements[0].Verb != MoveTo {
 		t.Errorf("element 0: expected MoveTo, got %v", elements[0].Verb)
 	}
 	if len(elements[0].Points) != 1 {
@@ -476,7 +476,7 @@ func TestPathElements(t *testing.T) {
 	}
 
 	// Verify LineTo
-	if elements[1].Verb != VerbLineTo {
+	if elements[1].Verb != LineTo {
 		t.Errorf("element 1: expected LineTo, got %v", elements[1].Verb)
 	}
 	if len(elements[1].Points) != 1 {
@@ -484,7 +484,7 @@ func TestPathElements(t *testing.T) {
 	}
 
 	// Verify QuadTo
-	if elements[2].Verb != VerbQuadTo {
+	if elements[2].Verb != QuadTo {
 		t.Errorf("element 2: expected QuadTo, got %v", elements[2].Verb)
 	}
 	if len(elements[2].Points) != 2 {
@@ -498,7 +498,7 @@ func TestPathElements(t *testing.T) {
 	}
 
 	// Verify CubicTo
-	if elements[3].Verb != VerbCubicTo {
+	if elements[3].Verb != CubicTo {
 		t.Errorf("element 3: expected CubicTo, got %v", elements[3].Verb)
 	}
 	if len(elements[3].Points) != 3 {
@@ -506,7 +506,7 @@ func TestPathElements(t *testing.T) {
 	}
 
 	// Verify Close
-	if elements[4].Verb != VerbClose {
+	if elements[4].Verb != Close {
 		t.Errorf("element 4: expected Close, got %v", elements[4].Verb)
 	}
 	if len(elements[4].Points) != 0 {

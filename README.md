@@ -459,7 +459,10 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 | LayerCache.Get | 90ns | Thread-safe LRU |
 | DirtyRegion.Mark | 10.9ns | Lock-free atomic |
 | MSDF lookup | <10ns | Zero-allocation |
-| Path iteration | 438ns | iter.Seq, 0 allocs |
+| Path iteration | 23ns | SOA Iterate(), 0 allocs |
+| FillRect | 77µs | **0 allocs** (zero-alloc pipeline) |
+| FillCircle r100 | 2ms | **0 allocs** (zero-alloc pipeline) |
+| Gradient ColorAt | 33ns | 0 allocs (pre-sorted stops) |
 
 ---
 

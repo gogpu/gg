@@ -232,8 +232,7 @@ func TestContextNewSubPath(t *testing.T) {
 	dc.LineTo(90, 90)
 	dc.ClosePath()
 
-	elems := dc.path.Elements()
-	if len(elems) == 0 {
+	if dc.path.NumVerbs() == 0 {
 		t.Error("expected path elements after NewSubPath")
 	}
 }
@@ -246,9 +245,8 @@ func TestContextClearPath(t *testing.T) {
 	dc.LineTo(50, 50)
 	dc.ClearPath()
 
-	elems := dc.path.Elements()
-	if len(elems) != 0 {
-		t.Errorf("after ClearPath, elements = %d, want 0", len(elems))
+	if dc.path.NumVerbs() != 0 {
+		t.Errorf("after ClearPath, elements = %d, want 0", dc.path.NumVerbs())
 	}
 }
 
@@ -647,9 +645,9 @@ func TestContextNewSubPathIsNoOp(t *testing.T) {
 
 	dc.MoveTo(10, 10)
 	dc.LineTo(50, 50)
-	before := len(dc.path.Elements())
+	before := dc.path.NumVerbs()
 	dc.NewSubPath()
-	after := len(dc.path.Elements())
+	after := dc.path.NumVerbs()
 	// NewSubPath is a no-op for API compatibility
 	if after != before {
 		t.Errorf("NewSubPath changed element count from %d to %d", before, after)
@@ -900,8 +898,7 @@ func TestContextFillPreserve(t *testing.T) {
 	dc.FillPreserve()
 
 	// Path should still exist after FillPreserve
-	elems := dc.path.Elements()
-	if len(elems) == 0 {
+	if dc.path.NumVerbs() == 0 {
 		t.Error("path should be preserved after FillPreserve")
 	}
 }
@@ -917,8 +914,7 @@ func TestContextStrokePreserve(t *testing.T) {
 	dc.StrokePreserve()
 
 	// Path should still exist after StrokePreserve
-	elems := dc.path.Elements()
-	if len(elems) == 0 {
+	if dc.path.NumVerbs() == 0 {
 		t.Error("path should be preserved after StrokePreserve")
 	}
 }

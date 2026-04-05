@@ -52,10 +52,10 @@ func TestEdgeBuilderNilPath(t *testing.T) {
 func TestEdgeBuilderTriangle(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbLineTo,
-			VerbLineTo,
-			VerbClose,
+			MoveTo,
+			LineTo,
+			LineTo,
+			Close,
 		},
 		points: []float32{
 			50, 10, // move to top
@@ -90,11 +90,11 @@ func TestEdgeBuilderTriangle(t *testing.T) {
 func TestEdgeBuilderRectangle(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbLineTo,
-			VerbLineTo,
-			VerbLineTo,
-			VerbClose,
+			MoveTo,
+			LineTo,
+			LineTo,
+			LineTo,
+			Close,
 		},
 		points: []float32{
 			10, 10, // top-left
@@ -133,9 +133,9 @@ func TestEdgeBuilderQuadCurve(t *testing.T) {
 	// Simple quadratic from (10,10) control (50,50) to (90,10) — arch shape
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbQuadTo,
-			VerbClose,
+			MoveTo,
+			QuadTo,
+			Close,
 		},
 		points: []float32{
 			10, 10, // start
@@ -181,9 +181,9 @@ func TestEdgeBuilderCubicCurve(t *testing.T) {
 	// S-curve
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbCubicTo,
-			VerbClose,
+			MoveTo,
+			CubicTo,
+			Close,
 		},
 		points: []float32{
 			10, 10, // start
@@ -221,10 +221,10 @@ func TestEdgeBuilderCubicCurve(t *testing.T) {
 func TestEdgeBuilderVelloLines(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo,
-			VerbLineTo,
-			VerbLineTo,
-			VerbClose,
+			MoveTo,
+			LineTo,
+			LineTo,
+			Close,
 		},
 		points: []float32{
 			50, 10,
@@ -253,7 +253,7 @@ func TestEdgeBuilderVelloLines(t *testing.T) {
 // TestEdgeBuilderReset tests builder reuse via Reset.
 func TestEdgeBuilderReset(t *testing.T) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, Close},
 		points: []float32{0, 0, 10, 10},
 	}
 
@@ -283,8 +283,8 @@ func TestEdgeBuilderAllEdges(t *testing.T) {
 	// Two separate line segments that start at different Y
 	path := &testPath{
 		verbs: []PathVerb{
-			VerbMoveTo, VerbLineTo,
-			VerbMoveTo, VerbLineTo,
+			MoveTo, LineTo,
+			MoveTo, LineTo,
 		},
 		points: []float32{
 			0, 50, 10, 100, // starts at y=50
@@ -316,7 +316,7 @@ func TestEdgeBuilderAllEdges(t *testing.T) {
 // TestEdgeBuilderLineEdgesIterator tests the line edges iterator.
 func TestEdgeBuilderLineEdgesIterator(t *testing.T) {
 	path := &testPath{
-		verbs:  []PathVerb{VerbMoveTo, VerbLineTo, VerbLineTo, VerbClose},
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, Close},
 		points: []float32{50, 10, 10, 90, 90, 90},
 	}
 

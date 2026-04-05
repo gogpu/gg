@@ -220,7 +220,7 @@ func (b *stencilCoverBuffers) destroy() {
 // written to target.Data.
 //
 // Returns nil for empty paths (no triangles after tessellation).
-func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.PathElement, color gg.RGBA, fillRule gg.FillRule) error {
+func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, path *gg.Path, color gg.RGBA, fillRule gg.FillRule) error {
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
 
 	if err := sr.ensureReady(w, h); err != nil {
@@ -229,7 +229,7 @@ func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, elements []gg.P
 
 	// Tessellate path into fan triangles.
 	tess := NewFanTessellator()
-	tess.TessellatePath(elements)
+	tess.TessellatePath(path)
 	fanVerts := tess.Vertices()
 	if len(fanVerts) == 0 {
 		return nil // empty path, nothing to render

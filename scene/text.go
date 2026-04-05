@@ -436,22 +436,22 @@ func appendPath(dst, src *Path) {
 
 	for _, verb := range srcVerbs {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			dst.MoveTo(srcPoints[pointIdx], srcPoints[pointIdx+1])
 			pointIdx += 2
-		case VerbLineTo:
+		case LineTo:
 			dst.LineTo(srcPoints[pointIdx], srcPoints[pointIdx+1])
 			pointIdx += 2
-		case VerbQuadTo:
+		case QuadTo:
 			dst.QuadTo(srcPoints[pointIdx], srcPoints[pointIdx+1],
 				srcPoints[pointIdx+2], srcPoints[pointIdx+3])
 			pointIdx += 4
-		case VerbCubicTo:
+		case CubicTo:
 			dst.CubicTo(srcPoints[pointIdx], srcPoints[pointIdx+1],
 				srcPoints[pointIdx+2], srcPoints[pointIdx+3],
 				srcPoints[pointIdx+4], srcPoints[pointIdx+5])
 			pointIdx += 6
-		case VerbClose:
+		case Close:
 			dst.Close()
 		}
 	}

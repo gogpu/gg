@@ -6,43 +6,61 @@ import (
 	"github.com/gogpu/gg/internal/image"
 )
 
+// soaPath is a test helper for building SOA (verb+coords) paths for clip tests.
+type soaPath struct {
+	verbs  []PathVerb
+	coords []float64
+}
+
+func newSOAPath() *soaPath { return &soaPath{} }
+
+func (p *soaPath) moveTo(x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbMoveTo)
+	p.coords = append(p.coords, x, y)
+	return p
+}
+
+func (p *soaPath) lineTo(x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbLineTo)
+	p.coords = append(p.coords, x, y)
+	return p
+}
+
+func (p *soaPath) quadTo(cx, cy, x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbQuadTo)
+	p.coords = append(p.coords, cx, cy, x, y)
+	return p
+}
+
+func (p *soaPath) cubicTo(c1x, c1y, c2x, c2y, x, y float64) *soaPath {
+	p.verbs = append(p.verbs, VerbCubicTo)
+	p.coords = append(p.coords, c1x, c1y, c2x, c2y, x, y)
+	return p
+}
+
+func (p *soaPath) close() *soaPath {
+	p.verbs = append(p.verbs, VerbClose)
+	return p
+}
+
 func TestNewMaskClipper(t *testing.T) {
+	rect := newSOAPath().moveTo(10, 10).lineTo(20, 10).lineTo(20, 20).lineTo(10, 20).close()
+
 	tests := []struct {
-		name     string
-		elements []PathElement
-		bounds   Rect
-		wantNil  bool
+		name    string
+		verbs   []PathVerb
+		coords  []float64
+		bounds  Rect
+		wantNil bool
 	}{
-		{
-			name: "simple rectangle",
-			elements: []PathElement{
-				MoveTo{Point: Pt(10, 10)},
-				LineTo{Point: Pt(20, 10)},
-				LineTo{Point: Pt(20, 20)},
-				LineTo{Point: Pt(10, 20)},
-				Close{},
-			},
-			bounds:  NewRect(0, 0, 30, 30),
-			wantNil: false,
-		},
-		{
-			name:     "empty bounds",
-			elements: []PathElement{},
-			bounds:   NewRect(0, 0, 0, 0),
-			wantNil:  true, // Should return error for empty bounds
-		},
-		{
-			name:     "negative dimensions",
-			elements: []PathElement{},
-			bounds:   NewRect(0, 0, -10, -10),
-			wantNil:  true, // Should return error for negative dimensions
-		},
+		{"simple rectangle", rect.verbs, rect.coords, NewRect(0, 0, 30, 30), false},
+		{"empty bounds", nil, nil, NewRect(0, 0, 0, 0), true},
+		{"negative dimensions", nil, nil, NewRect(0, 0, -10, -10), true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mc, err := NewMaskClipper(tt.elements, tt.bounds, true)
-
+			mc, err := NewMaskClipper(tt.verbs, tt.coords, tt.bounds, true)
 			if tt.wantNil {
 				if err == nil {
 					t.Errorf("NewMaskClipper() expected error, got nil")
@@ -52,19 +70,15 @@ func TestNewMaskClipper(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("NewMaskClipper() error = %v", err)
 			}
-
 			if mc == nil {
 				t.Fatal("NewMaskClipper() returned nil unexpectedly")
 			}
-
 			if mc.mask == nil {
 				t.Error("mask is nil")
 			}
-
 			if mc.bounds != tt.bounds {
 				t.Errorf("bounds = %v, want %v", mc.bounds, tt.bounds)
 			}
@@ -73,17 +87,9 @@ func TestNewMaskClipper(t *testing.T) {
 }
 
 func TestMaskClipper_Coverage(t *testing.T) {
-	// Create a 10x10 rectangle from (5,5) to (15,15)
-	elements := []PathElement{
-		MoveTo{Point: Pt(5, 5)},
-		LineTo{Point: Pt(15, 5)},
-		LineTo{Point: Pt(15, 15)},
-		LineTo{Point: Pt(5, 15)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(5, 5).lineTo(15, 5).lineTo(15, 15).lineTo(5, 15).close()
 	bounds := NewRect(0, 0, 20, 20)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
@@ -91,66 +97,28 @@ func TestMaskClipper_Coverage(t *testing.T) {
 	tests := []struct {
 		name      string
 		x, y      float64
-		wantZero  bool // true if coverage should be 0
-		wantFull  bool // true if coverage should be 255
-		checkNonZ bool // true if coverage should be > 0
+		wantZero  bool
+		wantFull  bool
+		checkNonZ bool
 	}{
-		{
-			name:     "outside left",
-			x:        2,
-			y:        10,
-			wantZero: true,
-		},
-		{
-			name:     "outside right",
-			x:        18,
-			y:        10,
-			wantZero: true,
-		},
-		{
-			name:     "outside top",
-			x:        10,
-			y:        2,
-			wantZero: true,
-		},
-		{
-			name:     "outside bottom",
-			x:        10,
-			y:        18,
-			wantZero: true,
-		},
-		{
-			name:      "inside center",
-			x:         10,
-			y:         10,
-			checkNonZ: true,
-		},
-		{
-			name:     "outside mask bounds",
-			x:        -5,
-			y:        -5,
-			wantZero: true,
-		},
-		{
-			name:     "outside mask bounds high",
-			x:        25,
-			y:        25,
-			wantZero: true,
-		},
+		{"outside left", 2, 10, true, false, false},
+		{"outside right", 18, 10, true, false, false},
+		{"outside top", 10, 2, true, false, false},
+		{"outside bottom", 10, 18, true, false, false},
+		{"inside center", 10, 10, false, false, true},
+		{"outside mask bounds", -5, -5, true, false, false},
+		{"outside mask bounds high", 25, 25, true, false, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			coverage := mc.Coverage(tt.x, tt.y)
-
 			if tt.wantZero && coverage != 0 {
 				t.Errorf("Coverage(%v, %v) = %v, want 0", tt.x, tt.y, coverage)
 			}
-
 			if tt.wantFull && coverage != 255 {
 				t.Errorf("Coverage(%v, %v) = %v, want 255", tt.x, tt.y, coverage)
 			}
-
 			if tt.checkNonZ && coverage == 0 {
 				t.Errorf("Coverage(%v, %v) = 0, want > 0", tt.x, tt.y)
 			}
@@ -159,17 +127,9 @@ func TestMaskClipper_Coverage(t *testing.T) {
 }
 
 func TestMaskClipper_ApplyCoverage(t *testing.T) {
-	// Create a simple filled rectangle
-	elements := []PathElement{
-		MoveTo{Point: Pt(0, 0)},
-		LineTo{Point: Pt(10, 0)},
-		LineTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(0, 10)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 0).lineTo(10, 10).lineTo(0, 10).close()
 	bounds := NewRect(0, 0, 10, 10)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
@@ -180,43 +140,16 @@ func TestMaskClipper_ApplyCoverage(t *testing.T) {
 		srcAlpha byte
 		want     byte
 	}{
-		{
-			name:     "full coverage full alpha",
-			x:        5,
-			y:        5,
-			srcAlpha: 255,
-			want:     255, // Should be 255 or close to it (inside)
-		},
-		{
-			name:     "zero coverage",
-			x:        15,
-			y:        15,
-			srcAlpha: 255,
-			want:     0, // Outside, so coverage = 0
-		},
-		{
-			name:     "full coverage half alpha",
-			x:        5,
-			y:        5,
-			srcAlpha: 128,
-			want:     128, // Inside, so should preserve alpha
-		},
-		{
-			name:     "zero alpha",
-			x:        5,
-			y:        5,
-			srcAlpha: 0,
-			want:     0,
-		},
+		{"full coverage full alpha", 5, 5, 255, 255},
+		{"zero coverage", 15, 15, 255, 0},
+		{"full coverage half alpha", 5, 5, 128, 128},
+		{"zero alpha", 5, 5, 0, 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := mc.ApplyCoverage(tt.x, tt.y, tt.srcAlpha)
-
-			// For inside points, allow some tolerance due to rasterization
 			if tt.name == "full coverage full alpha" || tt.name == "full coverage half alpha" {
-				// Just check it's non-zero for inside points
 				if result == 0 {
 					t.Errorf("ApplyCoverage(%v, %v, %v) = %v, expected non-zero (inside)", tt.x, tt.y, tt.srcAlpha, result)
 				}
@@ -231,144 +164,85 @@ func TestMaskClipper_ApplyCoverage(t *testing.T) {
 
 func TestMaskClipper_Bounds(t *testing.T) {
 	bounds := NewRect(10, 20, 100, 200)
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 20)},
-		LineTo{Point: Pt(110, 220)},
-	}
-
-	mc, err := NewMaskClipper(elements, bounds, true)
+	p := newSOAPath().moveTo(10, 20).lineTo(110, 220)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
 	if mc.Bounds() != bounds {
 		t.Errorf("Bounds() = %v, want %v", mc.Bounds(), bounds)
 	}
 }
 
 func TestMaskClipper_Mask(t *testing.T) {
-	elements := []PathElement{
-		MoveTo{Point: Pt(0, 0)},
-		LineTo{Point: Pt(10, 10)},
-	}
+	p := newSOAPath().moveTo(0, 0).lineTo(10, 10)
 	bounds := NewRect(0, 0, 10, 10)
-
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
 	mask := mc.Mask()
 	if mask == nil {
 		t.Fatal("Mask() returned nil")
 	}
-
 	if mask.Format() != image.FormatGray8 {
 		t.Errorf("Mask format = %v, want FormatGray8", mask.Format())
 	}
-
 	if mask.Width() != 10 || mask.Height() != 10 {
 		t.Errorf("Mask dimensions = %dx%d, want 10x10", mask.Width(), mask.Height())
 	}
 }
 
 func TestMaskClipper_QuadraticBezier(t *testing.T) {
-	// Test that quadratic Bezier curves are properly rasterized
-	elements := []PathElement{
-		MoveTo{Point: Pt(0, 10)},
-		QuadTo{
-			Control: Pt(10, 0),
-			Point:   Pt(20, 10),
-		},
-		LineTo{Point: Pt(20, 20)},
-		LineTo{Point: Pt(0, 20)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(0, 10).quadTo(10, 0, 20, 10).lineTo(20, 20).lineTo(0, 20).close()
 	bounds := NewRect(0, 0, 20, 20)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Check that center point has coverage
-	coverage := mc.Coverage(10, 15)
-	if coverage == 0 {
+	if mc.Coverage(10, 15) == 0 {
 		t.Error("Quadratic Bezier path should have coverage at center")
 	}
 }
 
 func TestMaskClipper_CubicBezier(t *testing.T) {
-	// Test that cubic Bezier curves are properly rasterized
-	elements := []PathElement{
-		MoveTo{Point: Pt(0, 10)},
-		CubicTo{
-			Control1: Pt(5, 0),
-			Control2: Pt(15, 0),
-			Point:    Pt(20, 10),
-		},
-		LineTo{Point: Pt(20, 20)},
-		LineTo{Point: Pt(0, 20)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(0, 10).cubicTo(5, 0, 15, 0, 20, 10).lineTo(20, 20).lineTo(0, 20).close()
 	bounds := NewRect(0, 0, 20, 20)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Check that center point has coverage
-	coverage := mc.Coverage(10, 15)
-	if coverage == 0 {
+	if mc.Coverage(10, 15) == 0 {
 		t.Error("Cubic Bezier path should have coverage at center")
 	}
 }
 
 func TestMaskClipper_EmptyPath(t *testing.T) {
-	elements := []PathElement{}
 	bounds := NewRect(0, 0, 10, 10)
-
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(nil, nil, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Empty path should have zero coverage everywhere
 	for y := 0; y < 10; y++ {
 		for x := 0; x < 10; x++ {
-			coverage := mc.Coverage(float64(x), float64(y))
-			if coverage != 0 {
-				t.Errorf("Empty path should have zero coverage, got %v at (%d, %d)", coverage, x, y)
+			if mc.Coverage(float64(x), float64(y)) != 0 {
+				t.Errorf("Empty path should have zero coverage at (%d, %d)", x, y)
 			}
 		}
 	}
 }
 
 func TestMaskClipper_Triangle(t *testing.T) {
-	// Create a triangle path
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 5)},
-		LineTo{Point: Pt(5, 15)},
-		LineTo{Point: Pt(15, 15)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(10, 5).lineTo(5, 15).lineTo(15, 15).close()
 	bounds := NewRect(0, 0, 20, 20)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Point inside triangle
-	inside := mc.Coverage(10, 10)
-	if inside == 0 {
+	if mc.Coverage(10, 10) == 0 {
 		t.Error("Point inside triangle should have coverage")
 	}
-
-	// Point outside triangle
-	outside := mc.Coverage(2, 2)
-	if outside != 0 {
+	if mc.Coverage(2, 2) != 0 {
 		t.Error("Point outside triangle should have zero coverage")
 	}
 }
@@ -383,29 +257,15 @@ func TestEvalQuadraticBezier(t *testing.T) {
 		t    float64
 		want Point
 	}{
-		{
-			name: "start point",
-			t:    0,
-			want: p0,
-		},
-		{
-			name: "end point",
-			t:    1,
-			want: p2,
-		},
-		{
-			name: "midpoint",
-			t:    0.5,
-			want: Pt(10, 5),
-		},
+		{"start point", 0, p0},
+		{"end point", 1, p2},
+		{"midpoint", 0.5, Pt(10, 5)},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := evalQuadraticBezier(p0, p1, p2, tt.t)
-
-			const epsilon = 0.01
-			if !pointsEqual(got, tt.want, epsilon) {
+			if !pointsEqual(got, tt.want, 0.01) {
 				t.Errorf("evalQuadraticBezier() = %v, want %v", got, tt.want)
 			}
 		})
@@ -423,24 +283,14 @@ func TestEvalCubicBezier(t *testing.T) {
 		t    float64
 		want Point
 	}{
-		{
-			name: "start point",
-			t:    0,
-			want: p0,
-		},
-		{
-			name: "end point",
-			t:    1,
-			want: p3,
-		},
+		{"start point", 0, p0},
+		{"end point", 1, p3},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := evalCubicBezier(p0, p1, p2, p3, tt.t)
-
-			const epsilon = 0.01
-			if !pointsEqual(got, tt.want, epsilon) {
+			if !pointsEqual(got, tt.want, 0.01) {
 				t.Errorf("evalCubicBezier() = %v, want %v", got, tt.want)
 			}
 		})
@@ -453,31 +303,11 @@ func TestSortFloats(t *testing.T) {
 		input []float64
 		want  []float64
 	}{
-		{
-			name:  "empty",
-			input: []float64{},
-			want:  []float64{},
-		},
-		{
-			name:  "single element",
-			input: []float64{5.0},
-			want:  []float64{5.0},
-		},
-		{
-			name:  "already sorted",
-			input: []float64{1.0, 2.0, 3.0},
-			want:  []float64{1.0, 2.0, 3.0},
-		},
-		{
-			name:  "reverse sorted",
-			input: []float64{3.0, 2.0, 1.0},
-			want:  []float64{1.0, 2.0, 3.0},
-		},
-		{
-			name:  "unsorted",
-			input: []float64{2.5, 1.0, 3.7, 0.5},
-			want:  []float64{0.5, 1.0, 2.5, 3.7},
-		},
+		{"empty", []float64{}, []float64{}},
+		{"single", []float64{5.0}, []float64{5.0}},
+		{"sorted", []float64{1.0, 2.0, 3.0}, []float64{1.0, 2.0, 3.0}},
+		{"reverse", []float64{3.0, 2.0, 1.0}, []float64{1.0, 2.0, 3.0}},
+		{"unsorted", []float64{2.5, 1.0, 3.7, 0.5}, []float64{0.5, 1.0, 2.5, 3.7}},
 	}
 
 	for _, tt := range tests {
@@ -485,12 +315,6 @@ func TestSortFloats(t *testing.T) {
 			got := make([]float64, len(tt.input))
 			copy(got, tt.input)
 			sortFloats(got)
-
-			if len(got) != len(tt.want) {
-				t.Errorf("length = %d, want %d", len(got), len(tt.want))
-				return
-			}
-
 			for i := range got {
 				if got[i] != tt.want[i] {
 					t.Errorf("sortFloats() = %v, want %v", got, tt.want)
@@ -501,7 +325,6 @@ func TestSortFloats(t *testing.T) {
 	}
 }
 
-// Helper function to compare points with epsilon tolerance.
 func pointsEqual(p1, p2 Point, epsilon float64) bool {
 	dx := p1.X - p2.X
 	dy := p1.Y - p2.Y
@@ -514,139 +337,73 @@ func pointsEqual(p1, p2 Point, epsilon float64) bool {
 	return dx < epsilon && dy < epsilon
 }
 
-// --- Non-AA rasterization tests ---
-
 func TestMaskClipper_NonAA(t *testing.T) {
-	// Test non-anti-aliased rasterization path
-	elements := []PathElement{
-		MoveTo{Point: Pt(5, 5)},
-		LineTo{Point: Pt(45, 5)},
-		LineTo{Point: Pt(45, 45)},
-		LineTo{Point: Pt(5, 45)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(5, 5).lineTo(45, 5).lineTo(45, 45).lineTo(5, 45).close()
 	bounds := NewRect(0, 0, 50, 50)
-	mc, err := NewMaskClipper(elements, bounds, false) // false = non-AA
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, false)
 	if err != nil {
 		t.Fatalf("NewMaskClipper(non-AA) error = %v", err)
 	}
-
-	// Inside should have coverage
-	inside := mc.Coverage(25, 25)
-	if inside == 0 {
+	if mc.Coverage(25, 25) == 0 {
 		t.Error("non-AA: inside point should have coverage")
 	}
-
-	// Outside should have zero coverage
-	outside := mc.Coverage(2, 2)
-	if outside != 0 {
-		t.Errorf("non-AA: outside point coverage = %d, want 0", outside)
+	if mc.Coverage(2, 2) != 0 {
+		t.Errorf("non-AA: outside point coverage should be 0")
 	}
 }
 
 func TestMaskClipper_LargeTriangle(t *testing.T) {
-	// Test with a larger shape to exercise more scanlines
-	elements := []PathElement{
-		MoveTo{Point: Pt(50, 10)},
-		LineTo{Point: Pt(10, 90)},
-		LineTo{Point: Pt(90, 90)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(50, 10).lineTo(10, 90).lineTo(90, 90).close()
 	bounds := NewRect(0, 0, 100, 100)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Center of triangle should have full coverage
-	center := mc.Coverage(50, 60)
-	if center == 0 {
+	if mc.Coverage(50, 60) == 0 {
 		t.Error("center of large triangle should have coverage")
 	}
 }
 
 func TestMaskClipper_ApplyCoverageOutside(t *testing.T) {
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(90, 10)},
-		LineTo{Point: Pt(90, 90)},
-		LineTo{Point: Pt(10, 90)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(10, 10).lineTo(90, 10).lineTo(90, 90).lineTo(10, 90).close()
 	bounds := NewRect(0, 0, 100, 100)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Apply coverage outside — should return 0
-	result := mc.ApplyCoverage(2, 2, 200)
-	if result != 0 {
-		t.Errorf("ApplyCoverage(outside) = %d, want 0", result)
+	if mc.ApplyCoverage(2, 2, 200) != 0 {
+		t.Error("ApplyCoverage(outside) should be 0")
 	}
-
-	// Apply coverage inside with full alpha
-	result = mc.ApplyCoverage(50, 50, 255)
-	if result == 0 {
+	if mc.ApplyCoverage(50, 50, 255) == 0 {
 		t.Error("ApplyCoverage(inside, 255) should be > 0")
 	}
 }
 
 func TestMaskClipper_HorizontalEdge(t *testing.T) {
-	// Path with a horizontal segment (should be skipped in edge building)
-	elements := []PathElement{
-		MoveTo{Point: Pt(0, 10)},
-		LineTo{Point: Pt(20, 10)}, // horizontal — should be skipped
-		LineTo{Point: Pt(20, 20)},
-		LineTo{Point: Pt(0, 20)},
-		Close{},
-	}
-
+	p := newSOAPath().moveTo(0, 10).lineTo(20, 10).lineTo(20, 20).lineTo(0, 20).close()
 	bounds := NewRect(0, 0, 20, 30)
-	mc, err := NewMaskClipper(elements, bounds, true)
+	mc, err := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	if err != nil {
 		t.Fatalf("NewMaskClipper() error = %v", err)
 	}
-
-	// Should still have coverage in the filled area
-	cov := mc.Coverage(10, 15)
-	if cov == 0 {
+	if mc.Coverage(10, 15) == 0 {
 		t.Error("should have coverage in filled area despite horizontal edge")
 	}
 }
 
-// Benchmark tests
 func BenchmarkNewMaskClipper_Rectangle(b *testing.B) {
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(110, 10)},
-		LineTo{Point: Pt(110, 110)},
-		LineTo{Point: Pt(10, 110)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(110, 10).lineTo(110, 110).lineTo(10, 110).close()
 	bounds := NewRect(0, 0, 120, 120)
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = NewMaskClipper(elements, bounds, true)
+		_, _ = NewMaskClipper(p.verbs, p.coords, bounds, true)
 	}
 }
 
 func BenchmarkMaskClipper_Coverage(b *testing.B) {
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(110, 10)},
-		LineTo{Point: Pt(110, 110)},
-		LineTo{Point: Pt(10, 110)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(110, 10).lineTo(110, 110).lineTo(10, 110).close()
 	bounds := NewRect(0, 0, 120, 120)
-
-	mc, _ := NewMaskClipper(elements, bounds, true)
-
+	mc, _ := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = mc.Coverage(50, 50)
@@ -654,17 +411,9 @@ func BenchmarkMaskClipper_Coverage(b *testing.B) {
 }
 
 func BenchmarkMaskClipper_ApplyCoverage(b *testing.B) {
-	elements := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(110, 10)},
-		LineTo{Point: Pt(110, 110)},
-		LineTo{Point: Pt(10, 110)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(110, 10).lineTo(110, 110).lineTo(10, 110).close()
 	bounds := NewRect(0, 0, 120, 120)
-
-	mc, _ := NewMaskClipper(elements, bounds, true)
-
+	mc, _ := NewMaskClipper(p.verbs, p.coords, bounds, true)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = mc.ApplyCoverage(50, 50, 128)
