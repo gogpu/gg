@@ -424,37 +424,45 @@ func (p *Path) Reversed() *Path {
 	return result
 }
 
-// subpath represents a single subpath with its elements and closure state.
-type subpath struct {
-	elements []PathElement
-	closed   bool
+// soaVerbEntry tracks a verb and its coordinate offset for reverse iteration.
+type soaVerbEntry struct {
+	verb PathVerb
+	off  int // offset into coords slice
 }
 
-// collectSubpaths splits the path into separate subpaths.
-// Uses Elements() for simplicity since this is not a hot path.
-func (p *Path) collectSubpaths() []subpath {
-	var subpaths []subpath
-	var current subpath
+// subpathSOA represents a single subpath using SOA (verbs + coords).
+type subpathSOA struct {
+	verbs  []PathVerb
+	coords []float64
+	closed bool
+}
 
-	for _, elem := range p.Elements() {
-		switch elem.(type) {
-		case MoveTo:
-			// Start a new subpath
-			if len(current.elements) > 0 {
+// collectSubpaths splits the path into separate subpaths using SOA iteration.
+func (p *Path) collectSubpaths() []subpathSOA {
+	var subpaths []subpathSOA
+	var current subpathSOA
+
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			if len(current.verbs) > 0 {
 				subpaths = append(subpaths, current)
 			}
-			current = subpath{elements: []PathElement{elem}}
-		case Close:
+			current = subpathSOA{
+				verbs:  []PathVerb{VerbMoveTo},
+				coords: []float64{coords[0], coords[1]},
+			}
+		case VerbClose:
 			current.closed = true
 			subpaths = append(subpaths, current)
-			current = subpath{}
+			current = subpathSOA{}
 		default:
-			current.elements = append(current.elements, elem)
+			current.verbs = append(current.verbs, verb)
+			current.coords = append(current.coords, coords...)
 		}
-	}
+	})
 
-	// Add final subpath if not closed
-	if len(current.elements) > 0 {
+	if len(current.verbs) > 0 {
 		subpaths = append(subpaths, current)
 	}
 
@@ -462,34 +470,40 @@ func (p *Path) collectSubpaths() []subpath {
 }
 
 // reverseSubpath reverses a single subpath and appends to result.
-func reverseSubpath(sp subpath, result *Path) {
-	if len(sp.elements) == 0 {
+func reverseSubpath(sp subpathSOA, result *Path) {
+	if len(sp.verbs) == 0 {
 		return
 	}
 
-	// Get the endpoint of the subpath
-	endPoint := getSubpathEndpoint(sp)
-
-	// Start from the endpoint
+	// Get the endpoint of the subpath.
+	endPoint := getSubpathEndpointSOA(sp)
 	result.MoveTo(endPoint.X, endPoint.Y)
 
-	// Reverse elements
-	for i := len(sp.elements) - 1; i >= 0; i-- {
-		elem := sp.elements[i]
-		prevPoint := getElementStartPoint(sp, i)
+	// Build an index of coord offsets per verb for reverse iteration.
+	entries := make([]soaVerbEntry, len(sp.verbs))
+	ci := 0
+	for i, v := range sp.verbs {
+		entries[i] = soaVerbEntry{verb: v, off: ci}
+		ci += verbCoordCount(v)
+	}
 
-		switch e := elem.(type) {
-		case MoveTo:
-			// MoveTo becomes the end point
+	// Reverse elements (skip index 0 which is MoveTo).
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		c := sp.coords[e.off:]
+		prevPoint := getSOAElementStartPoint(sp, entries, i)
+
+		switch e.verb {
+		case VerbMoveTo:
 			continue
-		case LineTo:
+		case VerbLineTo:
 			result.LineTo(prevPoint.X, prevPoint.Y)
-		case QuadTo:
-			// Reverse quadratic: swap start and end, keep control
-			result.QuadraticTo(e.Control.X, e.Control.Y, prevPoint.X, prevPoint.Y)
-		case CubicTo:
-			// Reverse cubic: swap start and end, swap control points
-			result.CubicTo(e.Control2.X, e.Control2.Y, e.Control1.X, e.Control1.Y, prevPoint.X, prevPoint.Y)
+		case VerbQuadTo:
+			// Reverse quadratic: keep control, swap endpoint
+			result.QuadraticTo(c[0], c[1], prevPoint.X, prevPoint.Y)
+		case VerbCubicTo:
+			// Reverse cubic: swap control points and endpoint
+			result.CubicTo(c[2], c[3], c[0], c[1], prevPoint.X, prevPoint.Y)
 		}
 	}
 
@@ -498,53 +512,39 @@ func reverseSubpath(sp subpath, result *Path) {
 	}
 }
 
-// getSubpathEndpoint returns the endpoint of a subpath.
-func getSubpathEndpoint(sp subpath) Point {
-	if len(sp.elements) == 0 {
+// getSubpathEndpointSOA returns the endpoint of a subpath.
+func getSubpathEndpointSOA(sp subpathSOA) Point {
+	if len(sp.verbs) == 0 {
 		return Point{}
 	}
 
-	// Find the last non-MoveTo element
-	for i := len(sp.elements) - 1; i >= 0; i-- {
-		switch e := sp.elements[i].(type) {
-		case MoveTo:
-			return e.Point
-		case LineTo:
-			return e.Point
-		case QuadTo:
-			return e.Point
-		case CubicTo:
-			return e.Point
+	// Walk to find the last verb's endpoint.
+	ci := 0
+	var lastPt Point
+	for _, v := range sp.verbs {
+		n := verbCoordCount(v)
+		if n >= 2 {
+			lastPt = Pt(sp.coords[ci+n-2], sp.coords[ci+n-1])
 		}
+		ci += n
 	}
-
-	// Fallback to MoveTo
-	if m, ok := sp.elements[0].(MoveTo); ok {
-		return m.Point
-	}
-	return Point{}
+	return lastPt
 }
 
-// getElementStartPoint returns the start point of element at index i.
-func getElementStartPoint(sp subpath, i int) Point {
+// getSOAElementStartPoint returns the start point of element at index i.
+func getSOAElementStartPoint(sp subpathSOA, entries []soaVerbEntry, i int) Point {
 	if i == 0 {
-		// First element (MoveTo)
-		if m, ok := sp.elements[0].(MoveTo); ok {
-			return m.Point
+		if sp.verbs[0] == VerbMoveTo {
+			return Pt(sp.coords[0], sp.coords[1])
 		}
 		return Point{}
 	}
 
-	// Get endpoint of previous element
-	switch e := sp.elements[i-1].(type) {
-	case MoveTo:
-		return e.Point
-	case LineTo:
-		return e.Point
-	case QuadTo:
-		return e.Point
-	case CubicTo:
-		return e.Point
+	// Get endpoint of previous element.
+	prev := entries[i-1]
+	n := verbCoordCount(prev.verb)
+	if n >= 2 {
+		return Pt(sp.coords[prev.off+n-2], sp.coords[prev.off+n-1])
 	}
 	return Point{}
 }

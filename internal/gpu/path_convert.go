@@ -27,12 +27,7 @@ func flushCubics(lines []tilecompute.LineSoup, cubics []tilecompute.CubicBezier)
 // cubics are flattened via tilecompute.FlattenFill (Euler spiral adaptive
 // subdivision — same algorithm used by golden tests).
 func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
-	if path == nil || path.Elements() == nil {
-		return tilecompute.PathDef{}
-	}
-
-	elements := path.Elements()
-	if len(elements) == 0 {
+	if path == nil || path.NumVerbs() == 0 {
 		return tilecompute.PathDef{}
 	}
 
@@ -43,31 +38,31 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 	var subpathStart [2]float32
 	hasMoveTo := false
 
-	for _, elem := range elements {
-		switch e := elem.(type) {
-		case gg.MoveTo:
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.VerbMoveTo:
 			lines = flushCubics(lines, cubics)
 			cubics = cubics[:0]
-			current = [2]float32{float32(e.Point.X), float32(e.Point.Y)}
+			current = [2]float32{float32(coords[0]), float32(coords[1])}
 			subpathStart = current
 			hasMoveTo = true
 
-		case gg.LineTo:
+		case gg.VerbLineTo:
 			if !hasMoveTo {
-				continue
+				return
 			}
-			pt := [2]float32{float32(e.Point.X), float32(e.Point.Y)}
+			pt := [2]float32{float32(coords[0]), float32(coords[1])}
 			if pt != current {
 				lines = append(lines, tilecompute.LineSoup{P0: current, P1: pt})
 			}
 			current = pt
 
-		case gg.QuadTo:
+		case gg.VerbQuadTo:
 			if !hasMoveTo {
-				continue
+				return
 			}
-			ctrl := [2]float32{float32(e.Control.X), float32(e.Control.Y)}
-			end := [2]float32{float32(e.Point.X), float32(e.Point.Y)}
+			ctrl := [2]float32{float32(coords[0]), float32(coords[1])}
+			end := [2]float32{float32(coords[2]), float32(coords[3])}
 			cubics = append(cubics, tilecompute.CubicBezier{
 				P0: current,
 				P1: [2]float32{current[0] + 2.0/3.0*(ctrl[0]-current[0]), current[1] + 2.0/3.0*(ctrl[1]-current[1])},
@@ -76,19 +71,19 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			})
 			current = end
 
-		case gg.CubicTo:
+		case gg.VerbCubicTo:
 			if !hasMoveTo {
-				continue
+				return
 			}
 			cubics = append(cubics, tilecompute.CubicBezier{
 				P0: current,
-				P1: [2]float32{float32(e.Control1.X), float32(e.Control1.Y)},
-				P2: [2]float32{float32(e.Control2.X), float32(e.Control2.Y)},
-				P3: [2]float32{float32(e.Point.X), float32(e.Point.Y)},
+				P1: [2]float32{float32(coords[0]), float32(coords[1])},
+				P2: [2]float32{float32(coords[2]), float32(coords[3])},
+				P3: [2]float32{float32(coords[4]), float32(coords[5])},
 			})
-			current = [2]float32{float32(e.Point.X), float32(e.Point.Y)}
+			current = [2]float32{float32(coords[4]), float32(coords[5])}
 
-		case gg.Close:
+		case gg.VerbClose:
 			lines = flushCubics(lines, cubics)
 			cubics = cubics[:0]
 			if hasMoveTo && current != subpathStart {
@@ -96,7 +91,7 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			}
 			current = subpathStart
 		}
-	}
+	})
 
 	lines = flushCubics(lines, cubics)
 
@@ -144,30 +139,30 @@ func clampU8(v float64) uint8 {
 	return uint8(x)
 }
 
-// convertPathToStrokeElements converts gg.Path elements to stroke package elements.
-func convertPathToStrokeElements(ggElems []gg.PathElement) []stroke.PathElement {
-	strokeElems := make([]stroke.PathElement, 0, len(ggElems))
-	for _, e := range ggElems {
-		switch el := e.(type) {
-		case gg.MoveTo:
-			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
-		case gg.LineTo:
-			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: el.Point.X, Y: el.Point.Y}})
-		case gg.QuadTo:
+// convertPathToStrokeElements converts gg.Path to stroke package elements.
+func convertPathToStrokeElements(path *gg.Path) []stroke.PathElement {
+	strokeElems := make([]stroke.PathElement, 0, path.NumVerbs())
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.VerbMoveTo:
+			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
+		case gg.VerbLineTo:
+			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
+		case gg.VerbQuadTo:
 			strokeElems = append(strokeElems, stroke.QuadTo{
-				Control: stroke.Point{X: el.Control.X, Y: el.Control.Y},
-				Point:   stroke.Point{X: el.Point.X, Y: el.Point.Y},
+				Control: stroke.Point{X: coords[0], Y: coords[1]},
+				Point:   stroke.Point{X: coords[2], Y: coords[3]},
 			})
-		case gg.CubicTo:
+		case gg.VerbCubicTo:
 			strokeElems = append(strokeElems, stroke.CubicTo{
-				Control1: stroke.Point{X: el.Control1.X, Y: el.Control1.Y},
-				Control2: stroke.Point{X: el.Control2.X, Y: el.Control2.Y},
-				Point:    stroke.Point{X: el.Point.X, Y: el.Point.Y},
+				Control1: stroke.Point{X: coords[0], Y: coords[1]},
+				Control2: stroke.Point{X: coords[2], Y: coords[3]},
+				Point:    stroke.Point{X: coords[4], Y: coords[5]},
 			})
-		case gg.Close:
+		case gg.VerbClose:
 			strokeElems = append(strokeElems, stroke.Close{})
 		}
-	}
+	})
 	return strokeElems
 }
 

@@ -19,7 +19,7 @@ func (f *TileComputeFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
 	callback func(x, y int, coverage uint8),
 ) {
-	if path == nil || len(path.Elements()) == 0 {
+	if path == nil || path.NumVerbs() == 0 {
 		return
 	}
 

@@ -282,22 +282,22 @@ func (b *Backend) setPath(path *gg.Path) {
 	b.setPathFromElements(path)
 }
 
-// setPathFromElements walks path elements and adds them to the context.
+// setPathFromElements walks path verbs/coords and adds them to the context.
 func (b *Backend) setPathFromElements(path *gg.Path) {
-	for _, elem := range path.Elements() {
-		switch e := elem.(type) {
-		case gg.MoveTo:
-			b.ctx.MoveTo(e.Point.X, e.Point.Y)
-		case gg.LineTo:
-			b.ctx.LineTo(e.Point.X, e.Point.Y)
-		case gg.QuadTo:
-			b.ctx.QuadraticTo(e.Control.X, e.Control.Y, e.Point.X, e.Point.Y)
-		case gg.CubicTo:
-			b.ctx.CubicTo(e.Control1.X, e.Control1.Y, e.Control2.X, e.Control2.Y, e.Point.X, e.Point.Y)
-		case gg.Close:
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.VerbMoveTo:
+			b.ctx.MoveTo(coords[0], coords[1])
+		case gg.VerbLineTo:
+			b.ctx.LineTo(coords[0], coords[1])
+		case gg.VerbQuadTo:
+			b.ctx.QuadraticTo(coords[0], coords[1], coords[2], coords[3])
+		case gg.VerbCubicTo:
+			b.ctx.CubicTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5])
+		case gg.VerbClose:
 			b.ctx.ClosePath()
 		}
-	}
+	})
 }
 
 // applyBrush applies the recording brush to the context.

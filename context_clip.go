@@ -17,7 +17,7 @@ func (c *Context) Clip() {
 	// Path elements are in user-space; clip stack operates in device-space.
 	// Transform through deviceMatrix to get device coordinates.
 	devicePath := c.deviceSpacePath()
-	elements := convertPathElements(devicePath.Elements())
+	elements := convertPathToClipElements(devicePath)
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
@@ -36,7 +36,7 @@ func (c *Context) ClipPreserve() {
 
 	// Path elements are in user-space; clip stack operates in device-space.
 	devicePath := c.deviceSpacePath()
-	elements := convertPathElements(devicePath.Elements())
+	elements := convertPathToClipElements(devicePath)
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
@@ -128,29 +128,30 @@ func (c *Context) initClipStack() {
 	c.clipStack = clip.NewClipStack(bounds)
 }
 
-// convertPathElements converts gg.PathElement slice to clip.PathElement slice.
-func convertPathElements(elements []PathElement) []clip.PathElement {
-	result := make([]clip.PathElement, len(elements))
-	for i, elem := range elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			result[i] = clip.MoveTo{Point: clip.Pt(e.Point.X, e.Point.Y)}
-		case LineTo:
-			result[i] = clip.LineTo{Point: clip.Pt(e.Point.X, e.Point.Y)}
-		case QuadTo:
-			result[i] = clip.QuadTo{
-				Control: clip.Pt(e.Control.X, e.Control.Y),
-				Point:   clip.Pt(e.Point.X, e.Point.Y),
-			}
-		case CubicTo:
-			result[i] = clip.CubicTo{
-				Control1: clip.Pt(e.Control1.X, e.Control1.Y),
-				Control2: clip.Pt(e.Control2.X, e.Control2.Y),
-				Point:    clip.Pt(e.Point.X, e.Point.Y),
-			}
-		case Close:
-			result[i] = clip.Close{}
+// convertPathToClipElements converts a gg.Path to a clip.PathElement slice
+// using zero-alloc verb/coord iteration.
+func convertPathToClipElements(p *Path) []clip.PathElement {
+	result := make([]clip.PathElement, 0, p.NumVerbs())
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			result = append(result, clip.MoveTo{Point: clip.Pt(coords[0], coords[1])})
+		case VerbLineTo:
+			result = append(result, clip.LineTo{Point: clip.Pt(coords[0], coords[1])})
+		case VerbQuadTo:
+			result = append(result, clip.QuadTo{
+				Control: clip.Pt(coords[0], coords[1]),
+				Point:   clip.Pt(coords[2], coords[3]),
+			})
+		case VerbCubicTo:
+			result = append(result, clip.CubicTo{
+				Control1: clip.Pt(coords[0], coords[1]),
+				Control2: clip.Pt(coords[2], coords[3]),
+				Point:    clip.Pt(coords[4], coords[5]),
+			})
+		case VerbClose:
+			result = append(result, clip.Close{})
 		}
-	}
+	})
 	return result
 }

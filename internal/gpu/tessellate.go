@@ -142,6 +142,77 @@ func (ft *FanTessellator) TessellatePath(elements []gg.PathElement) int {
 	return len(ft.vertices) / 2
 }
 
+// TessellatePathSOA converts a gg.Path (SOA layout) into triangle fan vertices.
+// This is the zero-alloc equivalent of TessellatePath for the new Path representation.
+func (ft *FanTessellator) TessellatePathSOA(path *gg.Path) int {
+	if path == nil || path.NumVerbs() == 0 {
+		return 0
+	}
+
+	var (
+		fanOriginX, fanOriginY float64
+		prevX, prevY           float64
+		contourStarted         bool
+	)
+
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.VerbMoveTo:
+			fanOriginX, fanOriginY = coords[0], coords[1]
+			prevX, prevY = coords[0], coords[1]
+			contourStarted = true
+			ft.updateBounds(float32(coords[0]), float32(coords[1]))
+
+		case gg.VerbLineTo:
+			if !contourStarted {
+				return
+			}
+			ft.updateBounds(float32(coords[0]), float32(coords[1]))
+			ft.emitFanTriangle(fanOriginX, fanOriginY, prevX, prevY, coords[0], coords[1])
+			prevX, prevY = coords[0], coords[1]
+
+		case gg.VerbQuadTo:
+			if !contourStarted {
+				return
+			}
+			ft.flattenQuadFan(
+				fanOriginX, fanOriginY,
+				prevX, prevY,
+				coords[0], coords[1],
+				coords[2], coords[3],
+				fanFlattenTolerance,
+			)
+			prevX, prevY = coords[2], coords[3]
+
+		case gg.VerbCubicTo:
+			if !contourStarted {
+				return
+			}
+			ft.flattenCubicFan(
+				fanOriginX, fanOriginY,
+				prevX, prevY,
+				coords[0], coords[1],
+				coords[2], coords[3],
+				coords[4], coords[5],
+				fanFlattenTolerance,
+			)
+			prevX, prevY = coords[4], coords[5]
+
+		case gg.VerbClose:
+			if !contourStarted {
+				return
+			}
+			if prevX != fanOriginX || prevY != fanOriginY {
+				ft.emitFanTriangle(fanOriginX, fanOriginY, prevX, prevY, fanOriginX, fanOriginY)
+			}
+			prevX, prevY = fanOriginX, fanOriginY
+			contourStarted = false
+		}
+	})
+
+	return len(ft.vertices) / 2
+}
+
 // Vertices returns the raw vertex buffer data as x,y float32 pairs.
 // Every 6 consecutive values represent one triangle (3 vertices).
 func (ft *FanTessellator) Vertices() []float32 {

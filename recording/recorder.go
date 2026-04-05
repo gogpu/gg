@@ -549,7 +549,7 @@ func (r *Recorder) NewSubPath() {
 
 // Fill fills the current path and clears it.
 func (r *Recorder) Fill() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 
@@ -567,7 +567,7 @@ func (r *Recorder) Fill() {
 
 // FillPreserve fills the current path without clearing it.
 func (r *Recorder) FillPreserve() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 
@@ -583,7 +583,7 @@ func (r *Recorder) FillPreserve() {
 
 // Stroke strokes the current path and clears it.
 func (r *Recorder) Stroke() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 
@@ -610,7 +610,7 @@ func (r *Recorder) Stroke() {
 
 // StrokePreserve strokes the current path without clearing it.
 func (r *Recorder) StrokePreserve() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 
@@ -750,7 +750,7 @@ func (r *Recorder) arcSegment(cx, cy, radius, a1, a2 float64) {
 	c2x := x2 + alpha*radius*sin2
 	c2y := y2 - alpha*radius*cos2
 
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		r.MoveTo(x1, y1)
 	}
 	r.CubicTo(c1x, c1y, c2x, c2y, x2, y2)
@@ -831,7 +831,7 @@ func (r *Recorder) StrokeRectangle(x, y, w, h float64) {
 
 // Clip sets the current path as the clipping region and clears the path.
 func (r *Recorder) Clip() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 
@@ -846,7 +846,7 @@ func (r *Recorder) Clip() {
 
 // ClipPreserve sets the current path as the clipping region but keeps the path.
 func (r *Recorder) ClipPreserve() {
-	if len(r.currentPath.Elements()) == 0 {
+	if r.currentPath.NumVerbs() == 0 {
 		return
 	}
 

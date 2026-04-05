@@ -632,20 +632,20 @@ func (c *Context) DrawPath(p *Path) {
 	if p == nil {
 		return
 	}
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
-		case MoveTo:
-			c.MoveTo(e.Point.X, e.Point.Y)
-		case LineTo:
-			c.LineTo(e.Point.X, e.Point.Y)
-		case QuadTo:
-			c.QuadraticTo(e.Control.X, e.Control.Y, e.Point.X, e.Point.Y)
-		case CubicTo:
-			c.CubicTo(e.Control1.X, e.Control1.Y, e.Control2.X, e.Control2.Y, e.Point.X, e.Point.Y)
-		case Close:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			c.MoveTo(coords[0], coords[1])
+		case VerbLineTo:
+			c.LineTo(coords[0], coords[1])
+		case VerbQuadTo:
+			c.QuadraticTo(coords[0], coords[1], coords[2], coords[3])
+		case VerbCubicTo:
+			c.CubicTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5])
+		case VerbClose:
 			c.ClosePath()
 		}
-	}
+	})
 }
 
 // FillPath is a convenience method that replays path p through the current
@@ -968,7 +968,7 @@ func (c *Context) arcSegment(cx, cy, r, a1, a2 float64) {
 	c2x := x2 + alpha*r*sin2
 	c2y := y2 - alpha*r*cos2
 
-	if len(c.path.Elements()) == 0 {
+	if c.path.isEmpty() {
 		c.path.MoveTo(x1, y1)
 	}
 	c.path.CubicTo(c1x, c1y, c2x, c2y, x2, y2)

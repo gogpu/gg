@@ -71,34 +71,34 @@ func (r *SoftwareRenderer) SetDeviceScale(scale float32) {
 
 // convertGGPathToCorePath converts a gg.Path to raster.PathLike.
 func convertGGPathToCorePath(p *Path) raster.PathLike {
-	var verbs []raster.PathVerb
-	var points []float32
+	verbs := make([]raster.PathVerb, 0, p.NumVerbs())
+	points := make([]float32, 0, len(p.Coords())*2) //nolint:mnd // preallocate for float64→float32
 
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
-		case MoveTo:
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
 			verbs = append(verbs, raster.VerbMoveTo)
-			points = append(points, float32(e.Point.X), float32(e.Point.Y))
-		case LineTo:
+			points = append(points, float32(coords[0]), float32(coords[1]))
+		case VerbLineTo:
 			verbs = append(verbs, raster.VerbLineTo)
-			points = append(points, float32(e.Point.X), float32(e.Point.Y))
-		case QuadTo:
+			points = append(points, float32(coords[0]), float32(coords[1]))
+		case VerbQuadTo:
 			verbs = append(verbs, raster.VerbQuadTo)
 			points = append(points,
-				float32(e.Control.X), float32(e.Control.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
 			)
-		case CubicTo:
+		case VerbCubicTo:
 			verbs = append(verbs, raster.VerbCubicTo)
 			points = append(points,
-				float32(e.Control1.X), float32(e.Control1.Y),
-				float32(e.Control2.X), float32(e.Control2.Y),
-				float32(e.Point.X), float32(e.Point.Y),
+				float32(coords[0]), float32(coords[1]),
+				float32(coords[2]), float32(coords[3]),
+				float32(coords[4]), float32(coords[5]),
 			)
-		case Close:
+		case VerbClose:
 			verbs = append(verbs, raster.VerbClose)
 		}
-	}
+	})
 
 	return raster.NewScenePathAdapter(len(verbs) == 0, verbs, points)
 }
@@ -149,8 +149,7 @@ func adaptiveThreshold(bboxArea float64) int {
 // over all path elements. Returns (minX, minY, maxX, maxY).
 // For an empty path, returns (0, 0, 0, 0).
 func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
-	elems := p.Elements()
-	if len(elems) == 0 {
+	if p.isEmpty() {
 		return 0, 0, 0, 0
 	}
 
@@ -174,21 +173,19 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 		}
 	}
 
-	for _, elem := range elems {
-		switch e := elem.(type) {
-		case MoveTo:
-			expandPt(e.Point.X, e.Point.Y)
-		case LineTo:
-			expandPt(e.Point.X, e.Point.Y)
-		case QuadTo:
-			expandPt(e.Control.X, e.Control.Y)
-			expandPt(e.Point.X, e.Point.Y)
-		case CubicTo:
-			expandPt(e.Control1.X, e.Control1.Y)
-			expandPt(e.Control2.X, e.Control2.Y)
-			expandPt(e.Point.X, e.Point.Y)
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo, VerbLineTo:
+			expandPt(coords[0], coords[1])
+		case VerbQuadTo:
+			expandPt(coords[0], coords[1])
+			expandPt(coords[2], coords[3])
+		case VerbCubicTo:
+			expandPt(coords[0], coords[1])
+			expandPt(coords[2], coords[3])
+			expandPt(coords[4], coords[5])
 		}
-	}
+	})
 
 	return minX, minY, maxX, maxY
 }
@@ -198,7 +195,7 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 // (not per-dimension) so that wide-but-short dense paths (e.g. text outlines
 // at 16px with hundreds of path elements) can be routed to the tile rasterizer.
 func shouldUseTileRasterizer(p *Path) bool {
-	nElems := len(p.Elements())
+	nElems := p.NumVerbs()
 	if nElems <= 0 {
 		return false
 	}
@@ -653,30 +650,30 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	return r.Fill(pixmap, strokePath, paint)
 }
 
-// convertPathToStrokeElements converts gg.Path elements to stroke.PathElement.
+// convertPathToStrokeElements converts gg.Path to stroke.PathElement slice.
 func convertPathToStrokeElements(p *Path) []stroke.PathElement {
-	var elements []stroke.PathElement
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
-		case MoveTo:
-			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
-		case LineTo:
-			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: e.Point.X, Y: e.Point.Y}})
-		case QuadTo:
+	elements := make([]stroke.PathElement, 0, p.NumVerbs())
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
+		case VerbLineTo:
+			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
+		case VerbQuadTo:
 			elements = append(elements, stroke.QuadTo{
-				Control: stroke.Point{X: e.Control.X, Y: e.Control.Y},
-				Point:   stroke.Point{X: e.Point.X, Y: e.Point.Y},
+				Control: stroke.Point{X: coords[0], Y: coords[1]},
+				Point:   stroke.Point{X: coords[2], Y: coords[3]},
 			})
-		case CubicTo:
+		case VerbCubicTo:
 			elements = append(elements, stroke.CubicTo{
-				Control1: stroke.Point{X: e.Control1.X, Y: e.Control1.Y},
-				Control2: stroke.Point{X: e.Control2.X, Y: e.Control2.Y},
-				Point:    stroke.Point{X: e.Point.X, Y: e.Point.Y},
+				Control1: stroke.Point{X: coords[0], Y: coords[1]},
+				Control2: stroke.Point{X: coords[2], Y: coords[3]},
+				Point:    stroke.Point{X: coords[4], Y: coords[5]},
 			})
-		case Close:
+		case VerbClose:
 			elements = append(elements, stroke.Close{})
 		}
-	}
+	})
 	return elements
 }
 
@@ -755,10 +752,10 @@ func dashPath(p *Path, dash *Dash) *Path {
 	offset := dash.NormalizedOffset()
 	patternIdx, patternPos, inDash = dashStateAtOffset(pattern, offset)
 
-	for _, elem := range p.Elements() {
-		switch e := elem.(type) {
-		case MoveTo:
-			currentX, currentY = e.Point.X, e.Point.Y
+	p.Iterate(func(verb PathVerb, coords []float64) {
+		switch verb {
+		case VerbMoveTo:
+			currentX, currentY = coords[0], coords[1]
 			startX, startY = currentX, currentY
 			// Reset pattern state for new subpath
 			patternIdx, patternPos, inDash = dashStateAtOffset(pattern, offset)
@@ -766,28 +763,33 @@ func dashPath(p *Path, dash *Dash) *Path {
 				result.MoveTo(currentX, currentY)
 			}
 
-		case LineTo:
-			dashLine(result, &currentX, &currentY, e.Point.X, e.Point.Y,
+		case VerbLineTo:
+			dashLine(result, &currentX, &currentY, coords[0], coords[1],
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case QuadTo:
+		case VerbQuadTo:
 			// Flatten quadratic to lines for dashing
-			dashQuad(result, &currentX, &currentY, e.Control, e.Point,
+			ctrl := Pt(coords[0], coords[1])
+			pt := Pt(coords[2], coords[3])
+			dashQuad(result, &currentX, &currentY, ctrl, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case CubicTo:
+		case VerbCubicTo:
 			// Flatten cubic to lines for dashing
-			dashCubic(result, &currentX, &currentY, e.Control1, e.Control2, e.Point,
+			ctrl1 := Pt(coords[0], coords[1])
+			ctrl2 := Pt(coords[2], coords[3])
+			pt := Pt(coords[4], coords[5])
+			dashCubic(result, &currentX, &currentY, ctrl1, ctrl2, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case Close:
+		case VerbClose:
 			// Close by dashing line back to start
 			if currentX != startX || currentY != startY {
 				dashLine(result, &currentX, &currentY, startX, startY,
 					pattern, &patternIdx, &patternPos, &inDash)
 			}
 		}
-	}
+	})
 
 	return result
 }
@@ -906,23 +908,11 @@ func dashCubic(result *Path, currentX, currentY *float64, c1, c2, end Point,
 
 // pathEndAt checks if the path ends at the given point.
 func pathEndAt(p *Path, x, y float64) bool {
-	elements := p.Elements()
-	if len(elements) == 0 {
+	if p.isEmpty() {
 		return false
 	}
-
-	last := elements[len(elements)-1]
-	switch e := last.(type) {
-	case MoveTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case LineTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case QuadTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	case CubicTo:
-		return math.Abs(e.Point.X-x) < 1e-10 && math.Abs(e.Point.Y-y) < 1e-10
-	}
-	return false
+	cp := p.CurrentPoint()
+	return math.Abs(cp.X-x) < 1e-10 && math.Abs(cp.Y-y) < 1e-10
 }
 
 // flattenQuadForDash flattens a quadratic bezier to line points.

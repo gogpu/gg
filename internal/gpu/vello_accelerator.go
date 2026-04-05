@@ -182,7 +182,7 @@ func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider)
 // The actual GPU dispatch happens when Flush is called. Returns ErrFallbackToCPU
 // if the GPU is not ready or the path is empty.
 func (a *VelloAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
-	if path == nil || len(path.Elements()) == 0 {
+	if path == nil || path.NumVerbs() == 0 {
 		return nil
 	}
 
@@ -214,7 +214,7 @@ func (a *VelloAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pa
 // StrokePath expands the stroke to a filled outline and accumulates the result
 // for the next Flush. Dashed strokes fall back to CPU rendering.
 func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
-	if path == nil || len(path.Elements()) == 0 {
+	if path == nil || path.NumVerbs() == 0 {
 		return nil
 	}
 	if paint != nil && paint.IsDashed() {
@@ -222,7 +222,7 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	}
 
 	// Convert gg path elements to stroke package elements.
-	strokeElems := convertPathToStrokeElements(path.Elements())
+	strokeElems := convertPathToStrokeElements(path)
 
 	// Expand stroke to filled outline.
 	style := stroke.Stroke{

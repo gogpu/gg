@@ -598,7 +598,7 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 
 	// Fall back to stencil-then-cover for non-convex or complex paths.
 	tess := NewFanTessellator()
-	tess.TessellatePath(path.Elements())
+	tess.TessellatePathSOA(path)
 	fanVerts := tess.Vertices()
 	if len(fanVerts) == 0 {
 		return nil // empty path, nothing to render
@@ -626,46 +626,40 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 // This enables Tier 2a (convex fast-path) for paths like triangles, pentagons,
 // and other convex shapes that don't need stencil-then-cover.
 func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
-	elements := path.Elements()
-	if len(elements) < 3 {
+	if path.NumVerbs() < 3 {
 		return nil, false
 	}
 
 	var points []gg.Point
 	moveCount := 0
 	closed := false
+	hasCurves := false
 
-	for _, elem := range elements {
-		switch e := elem.(type) {
-		case gg.MoveTo:
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		if hasCurves {
+			return
+		}
+		switch verb {
+		case gg.VerbMoveTo:
 			moveCount++
 			if moveCount > 1 {
-				// Multiple subpaths: not a single polygon.
-				return nil, false
+				hasCurves = true // abuse flag for early exit
+				return
 			}
-			points = append(points, e.Point)
-		case gg.LineTo:
-			points = append(points, e.Point)
-		case gg.QuadTo, gg.CubicTo:
-			// Paths with curves need flattening, which changes point positions.
-			// Use stencil-then-cover for these (fan tessellator handles curves).
-			return nil, false
-		case gg.Close:
+			points = append(points, gg.Pt(coords[0], coords[1]))
+		case gg.VerbLineTo:
+			points = append(points, gg.Pt(coords[0], coords[1]))
+		case gg.VerbQuadTo, gg.VerbCubicTo:
+			hasCurves = true
+		case gg.VerbClose:
 			closed = true
 		}
-	}
+	})
 
-	// Must be a single closed subpath with no curves.
-	if !closed || moveCount != 1 {
+	if hasCurves || !closed || moveCount != 1 || len(points) < 3 {
 		return nil, false
 	}
 
-	// Need at least 3 points for a polygon.
-	if len(points) < 3 {
-		return nil, false
-	}
-
-	// Check convexity.
 	if !IsConvex(points) {
 		return nil, false
 	}
@@ -696,13 +690,12 @@ func (a *SDFAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, pa
 		return a.velloAccel.StrokePath(target, path, paint)
 	}
 
-	ggElems := path.Elements()
-	if len(ggElems) == 0 {
+	if path.NumVerbs() == 0 {
 		return nil
 	}
 
 	// Convert gg path elements to stroke package elements.
-	strokeElems := convertPathToStrokeElements(ggElems)
+	strokeElems := convertPathToStrokeElements(path)
 
 	// Expand stroke to filled outline.
 	style := stroke.Stroke{
