@@ -66,22 +66,22 @@ func convertGGToScenePath(p *gg.Path) *scene.Path {
 	sp := scene.NewPath()
 	p.Iterate(func(verb gg.PathVerb, coords []float64) {
 		switch verb {
-		case gg.VerbMoveTo:
+		case gg.MoveTo:
 			sp.MoveTo(float32(coords[0]), float32(coords[1]))
-		case gg.VerbLineTo:
+		case gg.LineTo:
 			sp.LineTo(float32(coords[0]), float32(coords[1]))
-		case gg.VerbQuadTo:
+		case gg.QuadTo:
 			sp.QuadTo(
 				float32(coords[0]), float32(coords[1]),
 				float32(coords[2]), float32(coords[3]),
 			)
-		case gg.VerbCubicTo:
+		case gg.CubicTo:
 			sp.CubicTo(
 				float32(coords[0]), float32(coords[1]),
 				float32(coords[2]), float32(coords[3]),
 				float32(coords[4]), float32(coords[5]),
 			)
-		case gg.VerbClose:
+		case gg.Close:
 			sp.Close()
 		}
 	})

@@ -56,7 +56,7 @@ func TestRoundedRectShape(t *testing.T) {
 	// Should have curves for corners
 	hasCubic := false
 	for _, verb := range path.Verbs() {
-		if verb == VerbCubicTo {
+		if verb == CubicTo {
 			hasCubic = true
 			break
 		}
@@ -262,7 +262,7 @@ func TestRegularPolygonShape(t *testing.T) {
 			// Count LineTo verbs (each side is a LineTo except first which is MoveTo)
 			lineCount := 0
 			for _, verb := range path.Verbs() {
-				if verb == VerbLineTo {
+				if verb == LineTo {
 					lineCount++
 				}
 			}
@@ -292,7 +292,7 @@ func TestStarShape(t *testing.T) {
 	// That's 1 MoveTo + 9 LineTo + Close
 	lineCount := 0
 	for _, verb := range path.Verbs() {
-		if verb == VerbLineTo {
+		if verb == LineTo {
 			lineCount++
 		}
 	}
@@ -337,7 +337,7 @@ func TestPieShape(t *testing.T) {
 	}
 
 	// Should have MoveTo at center
-	if path.Verbs()[0] != VerbMoveTo {
+	if path.Verbs()[0] != MoveTo {
 		t.Error("pie should start with MoveTo")
 	}
 

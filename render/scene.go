@@ -195,19 +195,19 @@ func (s *Scene) SetFillRule(rule raster.FillRule) {
 
 // MoveTo starts a new subpath at the given point.
 func (s *Scene) MoveTo(x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbMoveTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.MoveTo)
 	s.currentPath.points = append(s.currentPath.points, float32(x), float32(y))
 }
 
 // LineTo draws a line from the current point to the given point.
 func (s *Scene) LineTo(x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbLineTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.LineTo)
 	s.currentPath.points = append(s.currentPath.points, float32(x), float32(y))
 }
 
 // QuadTo draws a quadratic Bezier curve.
 func (s *Scene) QuadTo(cx, cy, x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbQuadTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.QuadTo)
 	s.currentPath.points = append(s.currentPath.points,
 		float32(cx), float32(cy),
 		float32(x), float32(y))
@@ -215,7 +215,7 @@ func (s *Scene) QuadTo(cx, cy, x, y float64) {
 
 // CubicTo draws a cubic Bezier curve.
 func (s *Scene) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
-	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbCubicTo)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.CubicTo)
 	s.currentPath.points = append(s.currentPath.points,
 		float32(c1x), float32(c1y),
 		float32(c2x), float32(c2y),
@@ -224,7 +224,7 @@ func (s *Scene) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
 
 // ClosePath closes the current subpath.
 func (s *Scene) ClosePath() {
-	s.currentPath.verbs = append(s.currentPath.verbs, raster.VerbClose)
+	s.currentPath.verbs = append(s.currentPath.verbs, raster.Close)
 }
 
 // Rectangle adds a rectangle to the current path.

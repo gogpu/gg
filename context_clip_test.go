@@ -12,8 +12,8 @@ func TestClip(t *testing.T) {
 	dc.Clip()
 
 	// Path should be cleared after Clip()
-	if len(dc.path.Elements()) != 0 {
-		t.Errorf("Expected path to be cleared after Clip(), got %d elements", len(dc.path.Elements()))
+	if dc.path.NumVerbs() != 0 {
+		t.Errorf("Expected path to be cleared after Clip(), got %d elements", dc.path.NumVerbs())
 	}
 
 	// Clip stack should be initialized
@@ -32,12 +32,12 @@ func TestClipPreserve(t *testing.T) {
 
 	// Create a rectangular clip region
 	dc.DrawRectangle(10, 10, 50, 50)
-	elemCount := len(dc.path.Elements())
+	elemCount := dc.path.NumVerbs()
 	dc.ClipPreserve()
 
 	// Path should be preserved after ClipPreserve()
-	if len(dc.path.Elements()) != elemCount {
-		t.Errorf("Expected path to be preserved with %d elements, got %d", elemCount, len(dc.path.Elements()))
+	if dc.path.NumVerbs() != elemCount {
+		t.Errorf("Expected path to be preserved with %d elements, got %d", elemCount, dc.path.NumVerbs())
 	}
 
 	// Clip stack should be initialized

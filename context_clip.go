@@ -134,22 +134,22 @@ func convertPathToClipElements(p *Path) []clip.PathElement {
 	result := make([]clip.PathElement, 0, p.NumVerbs())
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			result = append(result, clip.MoveTo{Point: clip.Pt(coords[0], coords[1])})
-		case VerbLineTo:
+		case LineTo:
 			result = append(result, clip.LineTo{Point: clip.Pt(coords[0], coords[1])})
-		case VerbQuadTo:
+		case QuadTo:
 			result = append(result, clip.QuadTo{
 				Control: clip.Pt(coords[0], coords[1]),
 				Point:   clip.Pt(coords[2], coords[3]),
 			})
-		case VerbCubicTo:
+		case CubicTo:
 			result = append(result, clip.CubicTo{
 				Control1: clip.Pt(coords[0], coords[1]),
 				Control2: clip.Pt(coords[2], coords[3]),
 				Point:    clip.Pt(coords[4], coords[5]),
 			})
-		case VerbClose:
+		case Close:
 			result = append(result, clip.Close{})
 		}
 	})

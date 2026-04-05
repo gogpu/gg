@@ -283,14 +283,14 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 
 	for _, verb := range path.verbs {
 		switch verb {
-		case raster.VerbMoveTo:
+		case raster.MoveTo:
 			curX = path.points[pointIdx]
 			curY = path.points[pointIdx+1]
 			startX = curX
 			startY = curY
 			pointIdx += 2
 
-		case raster.VerbLineTo:
+		case raster.LineTo:
 			x := path.points[pointIdx]
 			y := path.points[pointIdx+1]
 			r.addLineStroke(expanded, curX, curY, x, y, float32(halfWidth))
@@ -298,7 +298,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 2
 
-		case raster.VerbQuadTo:
+		case raster.QuadTo:
 			// Simplify: treat as line to endpoint
 			x := path.points[pointIdx+2]
 			y := path.points[pointIdx+3]
@@ -307,7 +307,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 4
 
-		case raster.VerbCubicTo:
+		case raster.CubicTo:
 			// Simplify: treat as line to endpoint
 			x := path.points[pointIdx+4]
 			y := path.points[pointIdx+5]
@@ -316,7 +316,7 @@ func (r *SoftwareRenderer) expandStroke(path *pathBuilder, width float64) *pathB
 			curY = y
 			pointIdx += 6
 
-		case raster.VerbClose:
+		case raster.Close:
 			if curX != startX || curY != startY {
 				r.addLineStroke(expanded, curX, curY, startX, startY, float32(halfWidth))
 			}
@@ -347,11 +347,11 @@ func (r *SoftwareRenderer) addLineStroke(path *pathBuilder, x0, y0, x1, y1, half
 	// Four corners of the stroke rectangle
 	// CCW winding for correct fill
 	path.verbs = append(path.verbs,
-		raster.VerbMoveTo,
-		raster.VerbLineTo,
-		raster.VerbLineTo,
-		raster.VerbLineTo,
-		raster.VerbClose,
+		raster.MoveTo,
+		raster.LineTo,
+		raster.LineTo,
+		raster.LineTo,
+		raster.Close,
 	)
 	path.points = append(path.points,
 		x0+px, y0+py, // Top-left

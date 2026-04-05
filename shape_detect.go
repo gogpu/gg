@@ -86,11 +86,11 @@ func DetectShape(path *Path) DetectedShape {
 // detectCircleOrEllipse checks if 6 verbs form a circle or ellipse.
 // Expected pattern: MoveTo, CubicTo, CubicTo, CubicTo, CubicTo, Close.
 func detectCircleOrEllipse(verbs []PathVerb, coords []float64) (DetectedShape, bool) {
-	if verbs[0] != VerbMoveTo || verbs[5] != VerbClose {
+	if verbs[0] != MoveTo || verbs[5] != Close {
 		return DetectedShape{}, false
 	}
 	for i := 1; i <= 4; i++ {
-		if verbs[i] != VerbCubicTo {
+		if verbs[i] != CubicTo {
 			return DetectedShape{}, false
 		}
 	}
@@ -195,11 +195,11 @@ func checkCPXY(ax, ay, ex, ey float64) bool {
 // detectRect checks if 5 verbs form an axis-aligned rectangle.
 // Expected pattern: MoveTo, LineTo, LineTo, LineTo, Close.
 func detectRect(verbs []PathVerb, coords []float64) (DetectedShape, bool) {
-	if verbs[0] != VerbMoveTo || verbs[4] != VerbClose {
+	if verbs[0] != MoveTo || verbs[4] != Close {
 		return DetectedShape{}, false
 	}
 	for i := 1; i <= 3; i++ {
-		if verbs[i] != VerbLineTo {
+		if verbs[i] != LineTo {
 			return DetectedShape{}, false
 		}
 	}
@@ -255,13 +255,13 @@ func detectRRect(verbs []PathVerb, coords []float64) (DetectedShape, bool) {
 		return DetectedShape{}, false
 	}
 
-	if verbs[0] != VerbMoveTo || verbs[9] != VerbClose {
+	if verbs[0] != MoveTo || verbs[9] != Close {
 		return DetectedShape{}, false
 	}
 
 	// Verify alternating LineTo, CubicTo pattern.
 	for i := 0; i < 4; i++ {
-		if verbs[1+i*2] != VerbLineTo || verbs[2+i*2] != VerbCubicTo {
+		if verbs[1+i*2] != LineTo || verbs[2+i*2] != CubicTo {
 			return DetectedShape{}, false
 		}
 	}

@@ -265,12 +265,12 @@ func TestRecorderPathBuilding(t *testing.T) {
 	rec.CubicTo(10, 20, 30, 40, 50, 60)
 	rec.ClosePath()
 
-	if len(rec.currentPath.Elements()) == 0 {
+	if len(rec.currentPath.Verbs()) == 0 {
 		t.Error("path should not be empty after path operations")
 	}
 
 	rec.ClearPath()
-	if len(rec.currentPath.Elements()) != 0 {
+	if len(rec.currentPath.Verbs()) != 0 {
 		t.Error("path should be empty after ClearPath")
 	}
 }
@@ -297,7 +297,7 @@ func TestRecorderFill(t *testing.T) {
 	}
 
 	// Path should be cleared after Fill
-	if len(rec.currentPath.Elements()) != 0 {
+	if len(rec.currentPath.Verbs()) != 0 {
 		t.Error("path should be empty after Fill")
 	}
 }
@@ -309,7 +309,7 @@ func TestRecorderFillPreserve(t *testing.T) {
 	rec.FillPreserve()
 
 	// Path should NOT be cleared after FillPreserve
-	if len(rec.currentPath.Elements()) == 0 {
+	if len(rec.currentPath.Verbs()) == 0 {
 		t.Error("path should not be empty after FillPreserve")
 	}
 }
@@ -341,7 +341,7 @@ func TestRecorderStroke(t *testing.T) {
 	}
 
 	// Path should be cleared after Stroke
-	if len(rec.currentPath.Elements()) != 0 {
+	if len(rec.currentPath.Verbs()) != 0 {
 		t.Error("path should be empty after Stroke")
 	}
 }
@@ -353,7 +353,7 @@ func TestRecorderStrokePreserve(t *testing.T) {
 	rec.StrokePreserve()
 
 	// Path should NOT be cleared after StrokePreserve
-	if len(rec.currentPath.Elements()) == 0 {
+	if len(rec.currentPath.Verbs()) == 0 {
 		t.Error("path should not be empty after StrokePreserve")
 	}
 }
@@ -402,7 +402,7 @@ func TestRecorderShapes(t *testing.T) {
 			rec := NewRecorder(100, 100)
 			tt.draw(rec)
 
-			if len(rec.currentPath.Elements()) == 0 {
+			if len(rec.currentPath.Verbs()) == 0 {
 				t.Errorf("%s should add elements to the path", tt.name)
 			}
 
@@ -471,7 +471,7 @@ func TestRecorderClipping(t *testing.T) {
 	}
 
 	// Path should be cleared after Clip
-	if len(rec.currentPath.Elements()) != 0 {
+	if len(rec.currentPath.Verbs()) != 0 {
 		t.Error("path should be empty after Clip")
 	}
 }
@@ -483,7 +483,7 @@ func TestRecorderClipPreserve(t *testing.T) {
 	rec.ClipPreserve()
 
 	// Path should NOT be cleared after ClipPreserve
-	if len(rec.currentPath.Elements()) == 0 {
+	if len(rec.currentPath.Verbs()) == 0 {
 		t.Error("path should not be empty after ClipPreserve")
 	}
 }
@@ -705,18 +705,18 @@ func TestRecorderTransformAffectsPath(t *testing.T) {
 		t.Fatal("path not found in resources")
 	}
 
-	elements := path.Elements()
-	if len(elements) < 1 {
-		t.Fatal("path has no elements")
+	verbs := path.Verbs()
+	if len(verbs) < 1 {
+		t.Fatal("path has no verbs")
 	}
 
-	// First element should be MoveTo at transformed position
-	moveTo, ok := elements[0].(gg.MoveTo)
-	if !ok {
-		t.Fatal("first element should be MoveTo")
+	// First verb should be MoveTo at transformed position
+	if verbs[0] != gg.MoveTo {
+		t.Fatal("first verb should be MoveTo")
 	}
-	if moveTo.Point.X != 10 || moveTo.Point.Y != 20 {
-		t.Errorf("MoveTo = (%f, %f), want (10, 20)", moveTo.Point.X, moveTo.Point.Y)
+	coords := path.Coords()
+	if coords[0] != 10 || coords[1] != 20 {
+		t.Errorf("MoveTo = (%f, %f), want (10, 20)", coords[0], coords[1])
 	}
 }
 

@@ -10,16 +10,16 @@ type PathVerb uint8
 
 // Path verb constants.
 const (
-	// VerbMoveTo moves the current point without drawing.
-	VerbMoveTo PathVerb = iota
-	// VerbLineTo draws a line to the specified point.
-	VerbLineTo
-	// VerbQuadTo draws a quadratic Bezier curve.
-	VerbQuadTo
-	// VerbCubicTo draws a cubic Bezier curve.
-	VerbCubicTo
-	// VerbClose closes the current subpath.
-	VerbClose
+	// MoveTo moves the current point without drawing.
+	MoveTo PathVerb = iota
+	// LineTo draws a line to the specified point.
+	LineTo
+	// QuadTo draws a quadratic Bezier curve.
+	QuadTo
+	// CubicTo draws a cubic Bezier curve.
+	CubicTo
+	// Close closes the current subpath.
+	Close
 )
 
 // unknownStr is the string returned for unknown enum values.
@@ -28,15 +28,15 @@ const unknownStr = "Unknown"
 // String returns a human-readable name for the verb.
 func (v PathVerb) String() string {
 	switch v {
-	case VerbMoveTo:
+	case MoveTo:
 		return "MoveTo"
-	case VerbLineTo:
+	case LineTo:
 		return "LineTo"
-	case VerbQuadTo:
+	case QuadTo:
 		return "QuadTo"
-	case VerbCubicTo:
+	case CubicTo:
 		return "CubicTo"
-	case VerbClose:
+	case Close:
 		return "Close"
 	default:
 		return unknownStr
@@ -46,13 +46,13 @@ func (v PathVerb) String() string {
 // PointCount returns the number of points this verb consumes.
 func (v PathVerb) PointCount() int {
 	switch v {
-	case VerbMoveTo, VerbLineTo:
+	case MoveTo, LineTo:
 		return 2 // x, y
-	case VerbQuadTo:
+	case QuadTo:
 		return 4 // cx, cy, x, y
-	case VerbCubicTo:
+	case CubicTo:
 		return 6 // c1x, c1y, c2x, c2y, x, y
-	case VerbClose:
+	case Close:
 		return 0
 	default:
 		return 0
@@ -90,7 +90,7 @@ func (p *Path) Reset() {
 
 // MoveTo begins a new subpath at the specified point.
 func (p *Path) MoveTo(x, y float32) *Path {
-	p.verbs = append(p.verbs, VerbMoveTo)
+	p.verbs = append(p.verbs, MoveTo)
 	p.points = append(p.points, x, y)
 	p.bounds = p.bounds.UnionPoint(x, y)
 	p.start = [2]float32{x, y}
@@ -100,7 +100,7 @@ func (p *Path) MoveTo(x, y float32) *Path {
 
 // LineTo draws a line from the current point to (x, y).
 func (p *Path) LineTo(x, y float32) *Path {
-	p.verbs = append(p.verbs, VerbLineTo)
+	p.verbs = append(p.verbs, LineTo)
 	p.points = append(p.points, x, y)
 	p.bounds = p.bounds.UnionPoint(x, y)
 	p.cursor = [2]float32{x, y}
@@ -110,7 +110,7 @@ func (p *Path) LineTo(x, y float32) *Path {
 // QuadTo draws a quadratic Bezier curve.
 // The curve goes from the current point to (x, y) using (cx, cy) as control point.
 func (p *Path) QuadTo(cx, cy, x, y float32) *Path {
-	p.verbs = append(p.verbs, VerbQuadTo)
+	p.verbs = append(p.verbs, QuadTo)
 	p.points = append(p.points, cx, cy, x, y)
 	p.bounds = p.bounds.UnionPoint(cx, cy)
 	p.bounds = p.bounds.UnionPoint(x, y)
@@ -123,7 +123,7 @@ func (p *Path) QuadTo(cx, cy, x, y float32) *Path {
 // CubicTo draws a cubic Bezier curve.
 // The curve goes from the current point to (x, y) using (c1x, c1y) and (c2x, c2y) as control points.
 func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float32) *Path {
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.points = append(p.points, c1x, c1y, c2x, c2y, x, y)
 	p.bounds = p.bounds.UnionPoint(c1x, c1y)
 	p.bounds = p.bounds.UnionPoint(c2x, c2y)
@@ -136,7 +136,7 @@ func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float32) *Path {
 
 // Close closes the current subpath by drawing a line back to its start.
 func (p *Path) Close() *Path {
-	p.verbs = append(p.verbs, VerbClose)
+	p.verbs = append(p.verbs, Close)
 	p.cursor = p.start
 	return p
 }
@@ -370,7 +370,7 @@ func (p *Path) Reverse() *Path {
 
 	for _, verb := range p.verbs {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			if len(current.verbs) > 0 {
 				subpaths = append(subpaths, current)
 			}
@@ -381,19 +381,19 @@ func (p *Path) Reverse() *Path {
 				startY: p.points[pointIdx+1],
 			}
 			pointIdx += 2
-		case VerbLineTo:
+		case LineTo:
 			current.verbs = append(current.verbs, verb)
 			current.points = append(current.points, p.points[pointIdx], p.points[pointIdx+1])
 			pointIdx += 2
-		case VerbQuadTo:
+		case QuadTo:
 			current.verbs = append(current.verbs, verb)
 			current.points = append(current.points, p.points[pointIdx:pointIdx+4]...)
 			pointIdx += 4
-		case VerbCubicTo:
+		case CubicTo:
 			current.verbs = append(current.verbs, verb)
 			current.points = append(current.points, p.points[pointIdx:pointIdx+6]...)
 			pointIdx += 6
-		case VerbClose:
+		case Close:
 			current.verbs = append(current.verbs, verb)
 			current.closed = true
 		}
@@ -419,23 +419,23 @@ func reverseSubpath(result *Path, sp subpathData) {
 	// Find the end point (where we start the reversed path)
 	lastX, lastY := sp.startX, sp.startY
 	pointIdx := 0
-	if sp.verbs[0] == VerbMoveTo {
+	if sp.verbs[0] == MoveTo {
 		pointIdx = 2
 	}
 
 	for i := 1; i < len(sp.verbs); i++ {
 		verb := sp.verbs[i]
 		switch verb {
-		case VerbLineTo:
+		case LineTo:
 			lastX, lastY = sp.points[pointIdx], sp.points[pointIdx+1]
 			pointIdx += 2
-		case VerbQuadTo:
+		case QuadTo:
 			lastX, lastY = sp.points[pointIdx+2], sp.points[pointIdx+3]
 			pointIdx += 4
-		case VerbCubicTo:
+		case CubicTo:
 			lastX, lastY = sp.points[pointIdx+4], sp.points[pointIdx+5]
 			pointIdx += 6
-		case VerbClose:
+		case Close:
 			lastX, lastY = sp.startX, sp.startY
 		}
 	}
@@ -450,18 +450,18 @@ func reverseSubpath(result *Path, sp subpathData) {
 	for i := len(sp.verbs) - 1; i >= 1; i-- {
 		verb := sp.verbs[i]
 		switch verb {
-		case VerbClose:
+		case Close:
 			// Skip close, will add at the end if needed
-		case VerbLineTo:
+		case LineTo:
 			pointIdx -= 2
 			result.LineTo(prevX, prevY)
 			prevX, prevY = sp.points[pointIdx], sp.points[pointIdx+1]
-		case VerbQuadTo:
+		case QuadTo:
 			pointIdx -= 4
 			// Reverse: swap control point order
 			result.QuadTo(sp.points[pointIdx], sp.points[pointIdx+1], prevX, prevY)
 			prevX, prevY = sp.points[pointIdx+2], sp.points[pointIdx+3]
-		case VerbCubicTo:
+		case CubicTo:
 			pointIdx -= 6
 			// Reverse: swap control point order
 			result.CubicTo(sp.points[pointIdx+2], sp.points[pointIdx+3],
@@ -510,15 +510,15 @@ type Point struct {
 //
 //	for elem := range path.Elements() {
 //	    switch elem.Verb {
-//	    case VerbMoveTo:
+//	    case MoveTo:
 //	        fmt.Printf("Move to %v\n", elem.Points[0])
-//	    case VerbLineTo:
+//	    case LineTo:
 //	        fmt.Printf("Line to %v\n", elem.Points[0])
-//	    case VerbQuadTo:
+//	    case QuadTo:
 //	        fmt.Printf("Quad to %v via %v\n", elem.Points[1], elem.Points[0])
-//	    case VerbCubicTo:
+//	    case CubicTo:
 //	        fmt.Printf("Cubic to %v\n", elem.Points[2])
-//	    case VerbClose:
+//	    case Close:
 //	        fmt.Println("Close")
 //	    }
 //	}
@@ -531,20 +531,20 @@ func (p *Path) Elements() iter.Seq[PathElement] {
 			elem.Verb = verb
 
 			switch verb {
-			case VerbMoveTo, VerbLineTo:
+			case MoveTo, LineTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 				}
 				pointIdx += 2
 
-			case VerbQuadTo:
+			case QuadTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 					{p.points[pointIdx+2], p.points[pointIdx+3]},
 				}
 				pointIdx += 4
 
-			case VerbCubicTo:
+			case CubicTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 					{p.points[pointIdx+2], p.points[pointIdx+3]},
@@ -552,7 +552,7 @@ func (p *Path) Elements() iter.Seq[PathElement] {
 				}
 				pointIdx += 6
 
-			case VerbClose:
+			case Close:
 				elem.Points = nil
 			}
 
@@ -576,21 +576,21 @@ func (p *Path) ElementsWithCursor() iter.Seq2[Point, PathElement] {
 			prevCursor := cursor
 
 			switch verb {
-			case VerbMoveTo:
+			case MoveTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 				}
 				cursor = elem.Points[0]
 				pointIdx += 2
 
-			case VerbLineTo:
+			case LineTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 				}
 				cursor = elem.Points[0]
 				pointIdx += 2
 
-			case VerbQuadTo:
+			case QuadTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 					{p.points[pointIdx+2], p.points[pointIdx+3]},
@@ -598,7 +598,7 @@ func (p *Path) ElementsWithCursor() iter.Seq2[Point, PathElement] {
 				cursor = elem.Points[1]
 				pointIdx += 4
 
-			case VerbCubicTo:
+			case CubicTo:
 				elem.Points = []Point{
 					{p.points[pointIdx], p.points[pointIdx+1]},
 					{p.points[pointIdx+2], p.points[pointIdx+3]},
@@ -607,7 +607,7 @@ func (p *Path) ElementsWithCursor() iter.Seq2[Point, PathElement] {
 				cursor = elem.Points[2]
 				pointIdx += 6
 
-			case VerbClose:
+			case Close:
 				elem.Points = nil
 				// cursor returns to subpath start (handled by caller if needed)
 			}
@@ -674,7 +674,7 @@ func (p *Path) Contains(px, py float32) bool {
 
 	for _, verb := range p.verbs {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			// Close previous subpath if any
 			if curX != startX || curY != startY {
 				winding += windingSegment(curX, curY, startX, startY, px, py)
@@ -684,14 +684,14 @@ func (p *Path) Contains(px, py float32) bool {
 			curX, curY = startX, startY
 			pointIdx += 2
 
-		case VerbLineTo:
+		case LineTo:
 			nextX := p.points[pointIdx]
 			nextY := p.points[pointIdx+1]
 			winding += windingSegment(curX, curY, nextX, nextY, px, py)
 			curX, curY = nextX, nextY
 			pointIdx += 2
 
-		case VerbQuadTo:
+		case QuadTo:
 			// Approximate quad with lines for containment test
 			cx := p.points[pointIdx]
 			cy := p.points[pointIdx+1]
@@ -703,7 +703,7 @@ func (p *Path) Contains(px, py float32) bool {
 			curX, curY = x, y
 			pointIdx += 4
 
-		case VerbCubicTo:
+		case CubicTo:
 			// Approximate cubic with lines for containment test
 			c1x := p.points[pointIdx]
 			c1y := p.points[pointIdx+1]
@@ -716,7 +716,7 @@ func (p *Path) Contains(px, py float32) bool {
 			curX, curY = x, y
 			pointIdx += 6
 
-		case VerbClose:
+		case Close:
 			// Close the subpath
 			if curX != startX || curY != startY {
 				winding += windingSegment(curX, curY, startX, startY, px, py)

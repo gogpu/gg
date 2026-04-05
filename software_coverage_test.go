@@ -1040,7 +1040,7 @@ func TestDashPathWithClose(t *testing.T) {
 
 	dash := NewDash(20, 10)
 	result := dashPath(p, dash)
-	if len(result.Elements()) == 0 {
+	if result.NumVerbs() == 0 {
 		t.Error("dashed closed path should produce elements")
 	}
 }
@@ -1056,7 +1056,7 @@ func TestDashPathWithOffset(t *testing.T) {
 
 	dash := NewDash(10, 5).WithOffset(7) // offset into pattern
 	result := dashPath(p, dash)
-	if len(result.Elements()) == 0 {
+	if result.NumVerbs() == 0 {
 		t.Error("dashed path with offset should produce elements")
 	}
 }
@@ -1082,7 +1082,7 @@ func TestDashPathMultipleSubpaths(t *testing.T) {
 
 	dash := NewDash(10, 5)
 	result := dashPath(p, dash)
-	if len(result.Elements()) == 0 {
+	if result.NumVerbs() == 0 {
 		t.Error("dashed multi-subpath should produce elements")
 	}
 }
@@ -1098,7 +1098,7 @@ func TestDashPathWithLongPath(t *testing.T) {
 
 	dash := NewDash(15, 5)
 	result := dashPath(p, dash)
-	if len(result.Elements()) == 0 {
+	if result.NumVerbs() == 0 {
 		t.Error("dashed multi-segment path should produce elements")
 	}
 }

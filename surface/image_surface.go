@@ -384,13 +384,13 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 	pointIdx := 0
 	for _, verb := range path.verbs {
 		switch verb {
-		case raster.VerbMoveTo:
+		case raster.MoveTo:
 			startX = path.points[pointIdx]
 			startY = path.points[pointIdx+1]
 			curX, curY = startX, startY
 			pointIdx += 2
 
-		case raster.VerbLineTo:
+		case raster.LineTo:
 			x, y := path.points[pointIdx], path.points[pointIdx+1]
 			segments = append(segments, strokeSegment{
 				x0: curX, y0: curY,
@@ -399,7 +399,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 2
 
-		case raster.VerbQuadTo:
+		case raster.QuadTo:
 			// Flatten quad to lines for stroke
 			cx, cy := path.points[pointIdx], path.points[pointIdx+1]
 			x, y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -407,7 +407,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 4
 
-		case raster.VerbCubicTo:
+		case raster.CubicTo:
 			// Flatten cubic to lines for stroke
 			c1x, c1y := path.points[pointIdx], path.points[pointIdx+1]
 			c2x, c2y := path.points[pointIdx+2], path.points[pointIdx+3]
@@ -416,7 +416,7 @@ func (s *ImageSurface) expandStroke(path *Path, style StrokeStyle) *Path {
 			curX, curY = x, y
 			pointIdx += 6
 
-		case raster.VerbClose:
+		case raster.Close:
 			if curX != startX || curY != startY {
 				segments = append(segments, strokeSegment{
 					x0: curX, y0: curY,

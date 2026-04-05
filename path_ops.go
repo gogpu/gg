@@ -15,25 +15,25 @@ func (p *Path) Area() float64 {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			start = Pt(coords[0], coords[1])
 			current = start
-		case VerbLineTo:
+		case LineTo:
 			pt := Pt(coords[0], coords[1])
 			area += lineArea(current, pt)
 			current = pt
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := Pt(coords[0], coords[1])
 			pt := Pt(coords[2], coords[3])
 			area += quadArea(current, ctrl, pt)
 			current = pt
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
 			pt := Pt(coords[4], coords[5])
 			area += cubicArea(current, ctrl1, ctrl2, pt)
 			current = pt
-		case VerbClose:
+		case Close:
 			area += lineArea(current, start)
 			current = start
 		}
@@ -75,25 +75,25 @@ func (p *Path) Winding(pt Point) int {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			start = Pt(coords[0], coords[1])
 			current = start
-		case VerbLineTo:
+		case LineTo:
 			ep := Pt(coords[0], coords[1])
 			winding += lineWinding(current, ep, pt)
 			current = ep
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := Pt(coords[0], coords[1])
 			ep := Pt(coords[2], coords[3])
 			winding += quadWinding(current, ctrl, ep, pt)
 			current = ep
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
 			ep := Pt(coords[4], coords[5])
 			winding += cubicWinding(current, ctrl1, ctrl2, ep, pt)
 			current = ep
-		case VerbClose:
+		case Close:
 			winding += lineWinding(current, start, pt)
 			current = start
 		}
@@ -250,26 +250,26 @@ func (p *Path) BoundingBox() Rect {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			pt := Pt(coords[0], coords[1])
 			bbox = expandBBox(bbox, pt)
 			current = pt
-		case VerbLineTo:
+		case LineTo:
 			pt := Pt(coords[0], coords[1])
 			bbox = expandBBox(bbox, pt)
 			current = pt
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := Pt(coords[0], coords[1])
 			pt := Pt(coords[2], coords[3])
 			bbox = bbox.Union(quadBBox(current, ctrl, pt))
 			current = pt
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
 			pt := Pt(coords[4], coords[5])
 			bbox = bbox.Union(cubicBBox(current, ctrl1, ctrl2, pt))
 			current = pt
-		case VerbClose:
+		case Close:
 			// Close doesn't add new points
 		}
 	})
@@ -328,7 +328,7 @@ func (p *Path) FlattenCallback(tolerance float64, fn func(pt Point)) {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			if started {
 				fn(current) // Emit last point of previous subpath
 			}
@@ -337,22 +337,22 @@ func (p *Path) FlattenCallback(tolerance float64, fn func(pt Point)) {
 			start = pt
 			current = pt
 			started = true
-		case VerbLineTo:
+		case LineTo:
 			pt := Pt(coords[0], coords[1])
 			fn(pt)
 			current = pt
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := Pt(coords[0], coords[1])
 			pt := Pt(coords[2], coords[3])
 			flattenQuad(current, ctrl, pt, tolerance, fn)
 			current = pt
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
 			pt := Pt(coords[4], coords[5])
 			flattenCubic(current, ctrl1, ctrl2, pt, tolerance, fn)
 			current = pt
-		case VerbClose:
+		case Close:
 			if current != start {
 				fn(start)
 			}
@@ -444,15 +444,15 @@ func (p *Path) collectSubpaths() []subpathSOA {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			if len(current.verbs) > 0 {
 				subpaths = append(subpaths, current)
 			}
 			current = subpathSOA{
-				verbs:  []PathVerb{VerbMoveTo},
+				verbs:  []PathVerb{MoveTo},
 				coords: []float64{coords[0], coords[1]},
 			}
-		case VerbClose:
+		case Close:
 			current.closed = true
 			subpaths = append(subpaths, current)
 			current = subpathSOA{}
@@ -494,14 +494,14 @@ func reverseSubpath(sp subpathSOA, result *Path) {
 		prevPoint := getSOAElementStartPoint(sp, entries, i)
 
 		switch e.verb {
-		case VerbMoveTo:
+		case MoveTo:
 			continue
-		case VerbLineTo:
+		case LineTo:
 			result.LineTo(prevPoint.X, prevPoint.Y)
-		case VerbQuadTo:
+		case QuadTo:
 			// Reverse quadratic: keep control, swap endpoint
 			result.QuadraticTo(c[0], c[1], prevPoint.X, prevPoint.Y)
-		case VerbCubicTo:
+		case CubicTo:
 			// Reverse cubic: swap control points and endpoint
 			result.CubicTo(c[2], c[3], c[0], c[1], prevPoint.X, prevPoint.Y)
 		}
@@ -534,7 +534,7 @@ func getSubpathEndpointSOA(sp subpathSOA) Point {
 // getSOAElementStartPoint returns the start point of element at index i.
 func getSOAElementStartPoint(sp subpathSOA, entries []soaVerbEntry, i int) Point {
 	if i == 0 {
-		if sp.verbs[0] == VerbMoveTo {
+		if sp.verbs[0] == MoveTo {
 			return Pt(sp.coords[0], sp.coords[1])
 		}
 		return Point{}
@@ -561,24 +561,24 @@ func (p *Path) Length(accuracy float64) float64 {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			current = Pt(coords[0], coords[1])
-		case VerbLineTo:
+		case LineTo:
 			pt := Pt(coords[0], coords[1])
 			length += current.Distance(pt)
 			current = pt
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := Pt(coords[0], coords[1])
 			pt := Pt(coords[2], coords[3])
 			length += quadLength(current, ctrl, pt, accuracy)
 			current = pt
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
 			pt := Pt(coords[4], coords[5])
 			length += cubicLength(current, ctrl1, ctrl2, pt, accuracy)
 			current = pt
-		case VerbClose:
+		case Close:
 			// Close doesn't add length (already computed if there's a closing line)
 		}
 	})

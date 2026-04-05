@@ -171,19 +171,19 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	for _, seg := range outline.Segments {
 		switch seg.Op {
 		case OutlineOpMoveTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbMoveTo)
+			r.pathVerbs = append(r.pathVerbs, raster.MoveTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
 				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpLineTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbLineTo)
+			r.pathVerbs = append(r.pathVerbs, raster.LineTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
 				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpQuadTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbQuadTo)
+			r.pathVerbs = append(r.pathVerbs, raster.QuadTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
 				seg.Points[0].Y+offsetY,
@@ -191,7 +191,7 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 				seg.Points[1].Y+offsetY,
 			)
 		case OutlineOpCubicTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbCubicTo)
+			r.pathVerbs = append(r.pathVerbs, raster.CubicTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X+offsetX,
 				seg.Points[0].Y+offsetY,
@@ -205,7 +205,7 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 
 	// Close the path (fonts always have closed contours)
 	if len(r.pathVerbs) > 0 {
-		r.pathVerbs = append(r.pathVerbs, raster.VerbClose)
+		r.pathVerbs = append(r.pathVerbs, raster.Close)
 	}
 
 	if len(r.pathVerbs) == 0 {
@@ -341,19 +341,19 @@ func (r *GlyphMaskRasterizer) rasterizeLCDOutline(
 	for _, seg := range outline.Segments {
 		switch seg.Op {
 		case OutlineOpMoveTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbMoveTo)
+			r.pathVerbs = append(r.pathVerbs, raster.MoveTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X*3+offsetX,
 				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpLineTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbLineTo)
+			r.pathVerbs = append(r.pathVerbs, raster.LineTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X*3+offsetX,
 				seg.Points[0].Y+offsetY,
 			)
 		case OutlineOpQuadTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbQuadTo)
+			r.pathVerbs = append(r.pathVerbs, raster.QuadTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X*3+offsetX,
 				seg.Points[0].Y+offsetY,
@@ -361,7 +361,7 @@ func (r *GlyphMaskRasterizer) rasterizeLCDOutline(
 				seg.Points[1].Y+offsetY,
 			)
 		case OutlineOpCubicTo:
-			r.pathVerbs = append(r.pathVerbs, raster.VerbCubicTo)
+			r.pathVerbs = append(r.pathVerbs, raster.CubicTo)
 			r.pathPoints = append(r.pathPoints,
 				seg.Points[0].X*3+offsetX,
 				seg.Points[0].Y+offsetY,
@@ -374,7 +374,7 @@ func (r *GlyphMaskRasterizer) rasterizeLCDOutline(
 	}
 
 	if len(r.pathVerbs) > 0 {
-		r.pathVerbs = append(r.pathVerbs, raster.VerbClose)
+		r.pathVerbs = append(r.pathVerbs, raster.Close)
 	}
 
 	if len(r.pathVerbs) == 0 {

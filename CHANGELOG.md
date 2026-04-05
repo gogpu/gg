@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Path SOA representation — zero per-verb allocations** (ADR-010) — replaced
+  `[]PathElement` (Go interface, heap alloc per verb) with `[]PathVerb` + `[]float64`
+  (Skia/tiny-skia/Blend2D pattern). Eliminated all interface boxing. Renamed
+  `VerbMoveTo` → `MoveTo`, deleted deprecated `PathElement` types. SVG parser:
+  14 → 3 allocs. All consumers migrated to `Iterate()` zero-alloc API.
 - **Gradient rendering 2–5x faster, zero allocations** — `sortStops()` was called
   per-pixel (copying + sorting on every `ColorAt()`). Now pre-sorted at
   `AddColorStop()` time with lazy cache invalidation.

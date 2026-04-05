@@ -76,27 +76,27 @@ func convertGGPathToCorePath(p *Path) raster.PathLike {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
-			verbs = append(verbs, raster.VerbMoveTo)
+		case MoveTo:
+			verbs = append(verbs, raster.MoveTo)
 			points = append(points, float32(coords[0]), float32(coords[1]))
-		case VerbLineTo:
-			verbs = append(verbs, raster.VerbLineTo)
+		case LineTo:
+			verbs = append(verbs, raster.LineTo)
 			points = append(points, float32(coords[0]), float32(coords[1]))
-		case VerbQuadTo:
-			verbs = append(verbs, raster.VerbQuadTo)
+		case QuadTo:
+			verbs = append(verbs, raster.QuadTo)
 			points = append(points,
 				float32(coords[0]), float32(coords[1]),
 				float32(coords[2]), float32(coords[3]),
 			)
-		case VerbCubicTo:
-			verbs = append(verbs, raster.VerbCubicTo)
+		case CubicTo:
+			verbs = append(verbs, raster.CubicTo)
 			points = append(points,
 				float32(coords[0]), float32(coords[1]),
 				float32(coords[2]), float32(coords[3]),
 				float32(coords[4]), float32(coords[5]),
 			)
-		case VerbClose:
-			verbs = append(verbs, raster.VerbClose)
+		case Close:
+			verbs = append(verbs, raster.Close)
 		}
 	})
 
@@ -175,12 +175,12 @@ func pathBounds(p *Path) (minX, minY, maxX, maxY float64) {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo, VerbLineTo:
+		case MoveTo, LineTo:
 			expandPt(coords[0], coords[1])
-		case VerbQuadTo:
+		case QuadTo:
 			expandPt(coords[0], coords[1])
 			expandPt(coords[2], coords[3])
-		case VerbCubicTo:
+		case CubicTo:
 			expandPt(coords[0], coords[1])
 			expandPt(coords[2], coords[3])
 			expandPt(coords[4], coords[5])
@@ -655,22 +655,22 @@ func convertPathToStrokeElements(p *Path) []stroke.PathElement {
 	elements := make([]stroke.PathElement, 0, p.NumVerbs())
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case VerbLineTo:
+		case LineTo:
 			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case VerbQuadTo:
+		case QuadTo:
 			elements = append(elements, stroke.QuadTo{
 				Control: stroke.Point{X: coords[0], Y: coords[1]},
 				Point:   stroke.Point{X: coords[2], Y: coords[3]},
 			})
-		case VerbCubicTo:
+		case CubicTo:
 			elements = append(elements, stroke.CubicTo{
 				Control1: stroke.Point{X: coords[0], Y: coords[1]},
 				Control2: stroke.Point{X: coords[2], Y: coords[3]},
 				Point:    stroke.Point{X: coords[4], Y: coords[5]},
 			})
-		case VerbClose:
+		case Close:
 			elements = append(elements, stroke.Close{})
 		}
 	})
@@ -754,7 +754,7 @@ func dashPath(p *Path, dash *Dash) *Path {
 
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			currentX, currentY = coords[0], coords[1]
 			startX, startY = currentX, currentY
 			// Reset pattern state for new subpath
@@ -763,18 +763,18 @@ func dashPath(p *Path, dash *Dash) *Path {
 				result.MoveTo(currentX, currentY)
 			}
 
-		case VerbLineTo:
+		case LineTo:
 			dashLine(result, &currentX, &currentY, coords[0], coords[1],
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case VerbQuadTo:
+		case QuadTo:
 			// Flatten quadratic to lines for dashing
 			ctrl := Pt(coords[0], coords[1])
 			pt := Pt(coords[2], coords[3])
 			dashQuad(result, &currentX, &currentY, ctrl, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case VerbCubicTo:
+		case CubicTo:
 			// Flatten cubic to lines for dashing
 			ctrl1 := Pt(coords[0], coords[1])
 			ctrl2 := Pt(coords[2], coords[3])
@@ -782,7 +782,7 @@ func dashPath(p *Path, dash *Dash) *Path {
 			dashCubic(result, &currentX, &currentY, ctrl1, ctrl2, pt,
 				pattern, &patternIdx, &patternPos, &inDash)
 
-		case VerbClose:
+		case Close:
 			// Close by dashing line back to start
 			if currentX != startX || currentY != startY {
 				dashLine(result, &currentX, &currentY, startX, startY,

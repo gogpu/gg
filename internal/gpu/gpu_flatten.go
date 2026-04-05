@@ -429,18 +429,18 @@ func (r *GPUFlattenRasterizer) EstimateSegmentCount(path *scene.Path, transform 
 
 	for _, verb := range verbs {
 		switch verb {
-		case scene.VerbMoveTo:
+		case scene.MoveTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			curX, curY = transform.TransformPoint(x, y)
 			pointIdx += 2
 
-		case scene.VerbLineTo:
+		case scene.LineTo:
 			count++
 			x, y := points[pointIdx], points[pointIdx+1]
 			curX, curY = transform.TransformPoint(x, y)
 			pointIdx += 2
 
-		case scene.VerbQuadTo:
+		case scene.QuadTo:
 			cx, cy := points[pointIdx], points[pointIdx+1]
 			x, y := points[pointIdx+2], points[pointIdx+3]
 			tcx, tcy := transform.TransformPoint(cx, cy)
@@ -449,7 +449,7 @@ func (r *GPUFlattenRasterizer) EstimateSegmentCount(path *scene.Path, transform 
 			curX, curY = tx, ty
 			pointIdx += 4
 
-		case scene.VerbCubicTo:
+		case scene.CubicTo:
 			c1x, c1y := points[pointIdx], points[pointIdx+1]
 			c2x, c2y := points[pointIdx+2], points[pointIdx+3]
 			x, y := points[pointIdx+4], points[pointIdx+5]
@@ -460,7 +460,7 @@ func (r *GPUFlattenRasterizer) EstimateSegmentCount(path *scene.Path, transform 
 			curX, curY = tx, ty
 			pointIdx += 6
 
-		case scene.VerbClose:
+		case scene.Close:
 			count++ // Close line
 		}
 	}
@@ -547,16 +547,16 @@ func (r *GPUFlattenRasterizer) ConvertPathToGPU(path *scene.Path) ([]GPUPathElem
 		}
 
 		switch verb {
-		case scene.VerbMoveTo, scene.VerbLineTo:
+		case scene.MoveTo, scene.LineTo:
 			elem.PointCount = 2
 			pointIdx += 2
-		case scene.VerbQuadTo:
+		case scene.QuadTo:
 			elem.PointCount = 4
 			pointIdx += 4
-		case scene.VerbCubicTo:
+		case scene.CubicTo:
 			elem.PointCount = 6
 			pointIdx += 6
-		case scene.VerbClose:
+		case scene.Close:
 			elem.PointCount = 0
 		}
 
@@ -760,25 +760,25 @@ func (r *GPUFlattenRasterizer) ComputeCursorStates(path *scene.Path) []GPUCursor
 
 		// Update cursor based on verb
 		switch verb {
-		case scene.VerbMoveTo:
+		case scene.MoveTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			curX, curY = x, y
 			startX, startY = x, y
 			pointIdx += 2
 
-		case scene.VerbLineTo:
+		case scene.LineTo:
 			curX, curY = points[pointIdx], points[pointIdx+1]
 			pointIdx += 2
 
-		case scene.VerbQuadTo:
+		case scene.QuadTo:
 			curX, curY = points[pointIdx+2], points[pointIdx+3]
 			pointIdx += 4
 
-		case scene.VerbCubicTo:
+		case scene.CubicTo:
 			curX, curY = points[pointIdx+4], points[pointIdx+5]
 			pointIdx += 6
 
-		case scene.VerbClose:
+		case scene.Close:
 			curX, curY = startX, startY
 		}
 	}

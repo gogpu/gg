@@ -6,30 +6,30 @@ import "math"
 type PathVerb byte
 
 const (
-	// VerbMoveTo moves the current point without drawing. Consumes 2 coords (x, y).
-	VerbMoveTo PathVerb = iota
-	// VerbLineTo draws a line to the specified point. Consumes 2 coords (x, y).
-	VerbLineTo
-	// VerbQuadTo draws a quadratic Bezier curve. Consumes 4 coords (cx, cy, x, y).
-	VerbQuadTo
-	// VerbCubicTo draws a cubic Bezier curve. Consumes 6 coords (c1x, c1y, c2x, c2y, x, y).
-	VerbCubicTo
-	// VerbClose closes the current subpath. Consumes 0 coords.
-	VerbClose
+	// MoveTo moves the current point without drawing. Consumes 2 coords (x, y).
+	MoveTo PathVerb = iota
+	// LineTo draws a line to the specified point. Consumes 2 coords (x, y).
+	LineTo
+	// QuadTo draws a quadratic Bezier curve. Consumes 4 coords (cx, cy, x, y).
+	QuadTo
+	// CubicTo draws a cubic Bezier curve. Consumes 6 coords (c1x, c1y, c2x, c2y, x, y).
+	CubicTo
+	// Close closes the current subpath. Consumes 0 coords.
+	Close
 )
 
 // String returns a human-readable name for the verb.
 func (v PathVerb) String() string {
 	switch v {
-	case VerbMoveTo:
+	case MoveTo:
 		return "MoveTo"
-	case VerbLineTo:
+	case LineTo:
 		return "LineTo"
-	case VerbQuadTo:
+	case QuadTo:
 		return "QuadTo"
-	case VerbCubicTo:
+	case CubicTo:
 		return "CubicTo"
-	case VerbClose:
+	case Close:
 		return "Close"
 	default:
 		return "Unknown"
@@ -39,103 +39,18 @@ func (v PathVerb) String() string {
 // verbCoordCount returns the number of float64 coordinates consumed by a verb.
 func verbCoordCount(v PathVerb) int {
 	switch v {
-	case VerbMoveTo, VerbLineTo:
+	case MoveTo, LineTo:
 		return 2
-	case VerbQuadTo:
+	case QuadTo:
 		return 4
-	case VerbCubicTo:
+	case CubicTo:
 		return 6
-	case VerbClose:
+	case Close:
 		return 0
 	default:
 		return 0
 	}
 }
-
-// PathElement represents a single element in a path.
-//
-// Deprecated: Use Path.Iterate() or Path.Verbs()/Path.Coords() for zero-alloc path traversal.
-// PathElement types (MoveTo, LineTo, QuadTo, CubicTo, Close structs) remain for backward
-// compatibility and will be removed in a future version.
-type PathElement interface {
-	isPathElement()
-}
-
-// MoveToEl moves to a point without drawing.
-//
-// Deprecated: Use VerbMoveTo with Path.Iterate() instead.
-type MoveToEl struct {
-	Point Point
-}
-
-func (MoveToEl) isPathElement() {}
-
-// LineToEl draws a line to a point.
-//
-// Deprecated: Use VerbLineTo with Path.Iterate() instead.
-type LineToEl struct {
-	Point Point
-}
-
-func (LineToEl) isPathElement() {}
-
-// QuadToEl draws a quadratic Bezier curve.
-//
-// Deprecated: Use VerbQuadTo with Path.Iterate() instead.
-type QuadToEl struct {
-	Control Point
-	Point   Point
-}
-
-func (QuadToEl) isPathElement() {}
-
-// CubicToEl draws a cubic Bezier curve.
-//
-// Deprecated: Use VerbCubicTo with Path.Iterate() instead.
-type CubicToEl struct {
-	Control1 Point
-	Control2 Point
-	Point    Point
-}
-
-func (CubicToEl) isPathElement() {}
-
-// CloseEl closes the current subpath.
-//
-// Deprecated: Use VerbClose with Path.Iterate() instead.
-type CloseEl struct{}
-
-func (CloseEl) isPathElement() {}
-
-// Legacy type aliases for backward compatibility.
-// These are the original type names used by consumers throughout the codebase.
-// They will be removed in a future version along with PathElement.
-type (
-	// MoveTo is the legacy name for MoveToEl.
-	//
-	// Deprecated: Use VerbMoveTo with Path.Iterate() instead.
-	MoveTo = MoveToEl
-
-	// LineTo is the legacy name for LineToEl.
-	//
-	// Deprecated: Use VerbLineTo with Path.Iterate() instead.
-	LineTo = LineToEl
-
-	// QuadTo is the legacy name for QuadToEl.
-	//
-	// Deprecated: Use VerbQuadTo with Path.Iterate() instead.
-	QuadTo = QuadToEl
-
-	// CubicTo is the legacy name for CubicToEl.
-	//
-	// Deprecated: Use VerbCubicTo with Path.Iterate() instead.
-	CubicTo = CubicToEl
-
-	// Close is the legacy name for CloseEl.
-	//
-	// Deprecated: Use VerbClose with Path.Iterate() instead.
-	Close = CloseEl
-)
 
 // Path represents a vector path using SOA (Structure of Arrays) layout.
 //
@@ -159,7 +74,7 @@ func NewPath() *Path {
 
 // MoveTo moves to a point without drawing.
 func (p *Path) MoveTo(x, y float64) {
-	p.verbs = append(p.verbs, VerbMoveTo)
+	p.verbs = append(p.verbs, MoveTo)
 	p.coords = append(p.coords, x, y)
 	p.start = Pt(x, y)
 	p.current = p.start
@@ -167,28 +82,28 @@ func (p *Path) MoveTo(x, y float64) {
 
 // LineTo draws a line to a point.
 func (p *Path) LineTo(x, y float64) {
-	p.verbs = append(p.verbs, VerbLineTo)
+	p.verbs = append(p.verbs, LineTo)
 	p.coords = append(p.coords, x, y)
 	p.current = Pt(x, y)
 }
 
 // QuadraticTo draws a quadratic Bezier curve.
 func (p *Path) QuadraticTo(cx, cy, x, y float64) {
-	p.verbs = append(p.verbs, VerbQuadTo)
+	p.verbs = append(p.verbs, QuadTo)
 	p.coords = append(p.coords, cx, cy, x, y)
 	p.current = Pt(x, y)
 }
 
 // CubicTo draws a cubic Bezier curve.
 func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
-	p.verbs = append(p.verbs, VerbCubicTo)
+	p.verbs = append(p.verbs, CubicTo)
 	p.coords = append(p.coords, c1x, c1y, c2x, c2y, x, y)
 	p.current = Pt(x, y)
 }
 
 // Close closes the current subpath by drawing a line to the start point.
 func (p *Path) Close() {
-	p.verbs = append(p.verbs, VerbClose)
+	p.verbs = append(p.verbs, Close)
 	p.current = p.start
 }
 
@@ -225,11 +140,11 @@ func (p *Path) Append(other *Path) {
 // This is the primary zero-allocation iteration API.
 //
 // The coords slice passed to fn is a sub-slice of the path's coordinate buffer:
-//   - VerbMoveTo:  coords has 2 elements (x, y)
-//   - VerbLineTo:  coords has 2 elements (x, y)
-//   - VerbQuadTo:  coords has 4 elements (cx, cy, x, y)
-//   - VerbCubicTo: coords has 6 elements (c1x, c1y, c2x, c2y, x, y)
-//   - VerbClose:   coords has 0 elements (nil)
+//   - MoveTo:  coords has 2 elements (x, y)
+//   - LineTo:  coords has 2 elements (x, y)
+//   - QuadTo:  coords has 4 elements (cx, cy, x, y)
+//   - CubicTo: coords has 6 elements (c1x, c1y, c2x, c2y, x, y)
+//   - Close:   coords has 0 elements (nil)
 func (p *Path) Iterate(fn func(verb PathVerb, coords []float64)) {
 	ci := 0
 	for _, v := range p.verbs {
@@ -258,41 +173,6 @@ func (p *Path) NumVerbs() int {
 	return len(p.verbs)
 }
 
-// Elements returns the path elements as an interface slice.
-//
-// Deprecated: Use Iterate() for zero-alloc path traversal. This method allocates
-// one PathElement per verb for backward compatibility.
-func (p *Path) Elements() []PathElement {
-	elems := make([]PathElement, 0, len(p.verbs))
-	ci := 0
-	for _, v := range p.verbs {
-		switch v {
-		case VerbMoveTo:
-			elems = append(elems, MoveTo{Point: Pt(p.coords[ci], p.coords[ci+1])})
-			ci += 2
-		case VerbLineTo:
-			elems = append(elems, LineTo{Point: Pt(p.coords[ci], p.coords[ci+1])})
-			ci += 2
-		case VerbQuadTo:
-			elems = append(elems, QuadTo{
-				Control: Pt(p.coords[ci], p.coords[ci+1]),
-				Point:   Pt(p.coords[ci+2], p.coords[ci+3]),
-			})
-			ci += 4
-		case VerbCubicTo:
-			elems = append(elems, CubicTo{
-				Control1: Pt(p.coords[ci], p.coords[ci+1]),
-				Control2: Pt(p.coords[ci+2], p.coords[ci+3]),
-				Point:    Pt(p.coords[ci+4], p.coords[ci+5]),
-			})
-			ci += 6
-		case VerbClose:
-			elems = append(elems, Close{})
-		}
-	}
-	return elems
-}
-
 // CurrentPoint returns the current point.
 func (p *Path) CurrentPoint() Point {
 	return p.current
@@ -314,22 +194,22 @@ func (p *Path) Transform(m Matrix) *Path {
 	result := NewPath()
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			pt := m.TransformPoint(Pt(coords[0], coords[1]))
 			result.MoveTo(pt.X, pt.Y)
-		case VerbLineTo:
+		case LineTo:
 			pt := m.TransformPoint(Pt(coords[0], coords[1]))
 			result.LineTo(pt.X, pt.Y)
-		case VerbQuadTo:
+		case QuadTo:
 			ctrl := m.TransformPoint(Pt(coords[0], coords[1]))
 			pt := m.TransformPoint(Pt(coords[2], coords[3]))
 			result.QuadraticTo(ctrl.X, ctrl.Y, pt.X, pt.Y)
-		case VerbCubicTo:
+		case CubicTo:
 			ctrl1 := m.TransformPoint(Pt(coords[0], coords[1]))
 			ctrl2 := m.TransformPoint(Pt(coords[2], coords[3]))
 			pt := m.TransformPoint(Pt(coords[4], coords[5]))
 			result.CubicTo(ctrl1.X, ctrl1.Y, ctrl2.X, ctrl2.Y, pt.X, pt.Y)
-		case VerbClose:
+		case Close:
 			result.Close()
 		}
 	})

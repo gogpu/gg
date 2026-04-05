@@ -104,8 +104,8 @@ func TestResourcePool_AddPath_Clone(t *testing.T) {
 
 	// The pooled path should not be affected
 	pooled := pool.GetPath(ref)
-	originalElements := original.Elements()
-	pooledElements := pooled.Elements()
+	originalElements := original.Verbs()
+	pooledElements := pooled.Verbs()
 
 	if len(originalElements) == len(pooledElements) {
 		t.Error("Path was not cloned - modifications to original affected pooled version")

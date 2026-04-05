@@ -40,14 +40,14 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 
 	path.Iterate(func(verb gg.PathVerb, coords []float64) {
 		switch verb {
-		case gg.VerbMoveTo:
+		case gg.MoveTo:
 			lines = flushCubics(lines, cubics)
 			cubics = cubics[:0]
 			current = [2]float32{float32(coords[0]), float32(coords[1])}
 			subpathStart = current
 			hasMoveTo = true
 
-		case gg.VerbLineTo:
+		case gg.LineTo:
 			if !hasMoveTo {
 				return
 			}
@@ -57,7 +57,7 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			}
 			current = pt
 
-		case gg.VerbQuadTo:
+		case gg.QuadTo:
 			if !hasMoveTo {
 				return
 			}
@@ -71,7 +71,7 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			})
 			current = end
 
-		case gg.VerbCubicTo:
+		case gg.CubicTo:
 			if !hasMoveTo {
 				return
 			}
@@ -83,7 +83,7 @@ func convertPathToPathDef(path *gg.Path, paint *gg.Paint) tilecompute.PathDef {
 			})
 			current = [2]float32{float32(coords[4]), float32(coords[5])}
 
-		case gg.VerbClose:
+		case gg.Close:
 			lines = flushCubics(lines, cubics)
 			cubics = cubics[:0]
 			if hasMoveTo && current != subpathStart {
@@ -144,22 +144,22 @@ func convertPathToStrokeElements(path *gg.Path) []stroke.PathElement {
 	strokeElems := make([]stroke.PathElement, 0, path.NumVerbs())
 	path.Iterate(func(verb gg.PathVerb, coords []float64) {
 		switch verb {
-		case gg.VerbMoveTo:
+		case gg.MoveTo:
 			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case gg.VerbLineTo:
+		case gg.LineTo:
 			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case gg.VerbQuadTo:
+		case gg.QuadTo:
 			strokeElems = append(strokeElems, stroke.QuadTo{
 				Control: stroke.Point{X: coords[0], Y: coords[1]},
 				Point:   stroke.Point{X: coords[2], Y: coords[3]},
 			})
-		case gg.VerbCubicTo:
+		case gg.CubicTo:
 			strokeElems = append(strokeElems, stroke.CubicTo{
 				Control1: stroke.Point{X: coords[0], Y: coords[1]},
 				Control2: stroke.Point{X: coords[2], Y: coords[3]},
 				Point:    stroke.Point{X: coords[4], Y: coords[5]},
 			})
-		case gg.VerbClose:
+		case gg.Close:
 			strokeElems = append(strokeElems, stroke.Close{})
 		}
 	})

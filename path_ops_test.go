@@ -482,21 +482,21 @@ func TestPathReversed(t *testing.T) {
 			reversed := original.Reversed()
 
 			// Verify reversed path has elements
-			if len(original.Elements()) > 0 && len(reversed.Elements()) == 0 {
+			if original.NumVerbs() > 0 && reversed.NumVerbs() == 0 {
 				t.Error("Reversed path should have elements")
 			}
 
-			origElems := original.Elements()
-			revElems := reversed.Elements()
+			origVerbs := original.Verbs()
+			revVerbs := reversed.Verbs()
 
-			if len(origElems) == 0 || len(revElems) == 0 {
+			if len(origVerbs) == 0 || len(revVerbs) == 0 {
 				return
 			}
 
 			// Check if original is closed
-			_, isClosed := origElems[len(origElems)-1].(Close)
+			isClosed := origVerbs[len(origVerbs)-1] == Close
 			if isClosed {
-				verifyClosedPathReversed(t, revElems)
+				verifyClosedPathReversed(t, revVerbs)
 				return
 			}
 
@@ -507,10 +507,9 @@ func TestPathReversed(t *testing.T) {
 }
 
 // verifyClosedPathReversed verifies that a reversed closed path is also closed.
-func verifyClosedPathReversed(t *testing.T, revElems []PathElement) {
+func verifyClosedPathReversed(t *testing.T, revVerbs []PathVerb) {
 	t.Helper()
-	_, revClosed := revElems[len(revElems)-1].(Close)
-	if !revClosed {
+	if revVerbs[len(revVerbs)-1] != Close {
 		t.Error("Reversed closed path should also be closed")
 	}
 }
@@ -718,8 +717,8 @@ func TestEmptyPathOperations(t *testing.T) {
 
 	// Reversed
 	rev := p.Reversed()
-	if len(rev.Elements()) != 0 {
-		t.Errorf("Empty path Reversed() has %d elements, want 0", len(rev.Elements()))
+	if rev.NumVerbs() != 0 {
+		t.Errorf("Empty path Reversed() has %d verbs, want 0", rev.NumVerbs())
 	}
 
 	// Length

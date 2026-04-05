@@ -286,15 +286,15 @@ func (b *Backend) setPath(path *gg.Path) {
 func (b *Backend) setPathFromElements(path *gg.Path) {
 	path.Iterate(func(verb gg.PathVerb, coords []float64) {
 		switch verb {
-		case gg.VerbMoveTo:
+		case gg.MoveTo:
 			b.ctx.MoveTo(coords[0], coords[1])
-		case gg.VerbLineTo:
+		case gg.LineTo:
 			b.ctx.LineTo(coords[0], coords[1])
-		case gg.VerbQuadTo:
+		case gg.QuadTo:
 			b.ctx.QuadraticTo(coords[0], coords[1], coords[2], coords[3])
-		case gg.VerbCubicTo:
+		case gg.CubicTo:
 			b.ctx.CubicTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5])
-		case gg.VerbClose:
+		case gg.Close:
 			b.ctx.ClosePath()
 		}
 	})

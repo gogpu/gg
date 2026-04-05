@@ -15,16 +15,16 @@ type PathVerb uint8
 
 // Path verb constants.
 const (
-	// VerbMoveTo moves the current point without drawing.
-	VerbMoveTo PathVerb = iota
-	// VerbLineTo draws a line to the specified point.
-	VerbLineTo
-	// VerbQuadTo draws a quadratic Bezier curve.
-	VerbQuadTo
-	// VerbCubicTo draws a cubic Bezier curve.
-	VerbCubicTo
-	// VerbClose closes the current subpath.
-	VerbClose
+	// MoveTo moves the current point without drawing.
+	MoveTo PathVerb = iota
+	// LineTo draws a line to the specified point.
+	LineTo
+	// QuadTo draws a quadratic Bezier curve.
+	QuadTo
+	// CubicTo draws a cubic Bezier curve.
+	CubicTo
+	// Close closes the current subpath.
+	Close
 )
 
 // PathLike is the interface for path-like objects that can be processed by EdgeBuilder.
@@ -233,7 +233,7 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 
 	for _, verb := range verbs {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			// Close previous subpath if not at start
 			if curX != startX || curY != startY {
 				eb.addLine(curX, curY, startX, startY)
@@ -245,14 +245,14 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 			startX, startY = curX, curY
 			pointIdx += 2
 
-		case VerbLineTo:
+		case LineTo:
 			x, y := points[pointIdx], points[pointIdx+1]
 			nextX, nextY := transform.TransformPoint(x, y)
 			eb.addLine(curX, curY, nextX, nextY)
 			curX, curY = nextX, nextY
 			pointIdx += 2
 
-		case VerbQuadTo:
+		case QuadTo:
 			// Control point and end point
 			cx, cy := points[pointIdx], points[pointIdx+1]
 			x, y := points[pointIdx+2], points[pointIdx+3]
@@ -265,7 +265,7 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 			curX, curY = tx, ty
 			pointIdx += 4
 
-		case VerbCubicTo:
+		case CubicTo:
 			// Two control points and end point
 			c1x, c1y := points[pointIdx], points[pointIdx+1]
 			c2x, c2y := points[pointIdx+2], points[pointIdx+3]
@@ -280,7 +280,7 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 			curX, curY = tx, ty
 			pointIdx += 6
 
-		case VerbClose:
+		case Close:
 			// Close the subpath
 			if curX != startX || curY != startY {
 				eb.addLine(curX, curY, startX, startY)

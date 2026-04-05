@@ -598,7 +598,7 @@ func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pain
 
 	// Fall back to stencil-then-cover for non-convex or complex paths.
 	tess := NewFanTessellator()
-	tess.TessellatePathSOA(path)
+	tess.TessellatePath(path)
 	fanVerts := tess.Vertices()
 	if len(fanVerts) == 0 {
 		return nil // empty path, nothing to render
@@ -640,18 +640,18 @@ func extractConvexPolygon(path *gg.Path) ([]gg.Point, bool) {
 			return
 		}
 		switch verb {
-		case gg.VerbMoveTo:
+		case gg.MoveTo:
 			moveCount++
 			if moveCount > 1 {
 				hasCurves = true // abuse flag for early exit
 				return
 			}
 			points = append(points, gg.Pt(coords[0], coords[1]))
-		case gg.VerbLineTo:
+		case gg.LineTo:
 			points = append(points, gg.Pt(coords[0], coords[1]))
-		case gg.VerbQuadTo, gg.VerbCubicTo:
+		case gg.QuadTo, gg.CubicTo:
 			hasCurves = true
-		case gg.VerbClose:
+		case gg.Close:
 			closed = true
 		}
 	})

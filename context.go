@@ -634,15 +634,15 @@ func (c *Context) DrawPath(p *Path) {
 	}
 	p.Iterate(func(verb PathVerb, coords []float64) {
 		switch verb {
-		case VerbMoveTo:
+		case MoveTo:
 			c.MoveTo(coords[0], coords[1])
-		case VerbLineTo:
+		case LineTo:
 			c.LineTo(coords[0], coords[1])
-		case VerbQuadTo:
+		case QuadTo:
 			c.QuadraticTo(coords[0], coords[1], coords[2], coords[3])
-		case VerbCubicTo:
+		case CubicTo:
 			c.CubicTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5])
-		case VerbClose:
+		case Close:
 			c.ClosePath()
 		}
 	})

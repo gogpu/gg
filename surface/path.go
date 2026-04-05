@@ -42,7 +42,7 @@ func NewPath() *Path {
 
 // MoveTo starts a new subpath at the given point.
 func (p *Path) MoveTo(x, y float64) {
-	p.verbs = append(p.verbs, raster.VerbMoveTo)
+	p.verbs = append(p.verbs, raster.MoveTo)
 	p.points = append(p.points, float32(x), float32(y))
 	p.startX, p.startY = float32(x), float32(y)
 	p.curX, p.curY = float32(x), float32(y)
@@ -54,7 +54,7 @@ func (p *Path) LineTo(x, y float64) {
 		p.MoveTo(x, y)
 		return
 	}
-	p.verbs = append(p.verbs, raster.VerbLineTo)
+	p.verbs = append(p.verbs, raster.LineTo)
 	p.points = append(p.points, float32(x), float32(y))
 	p.curX, p.curY = float32(x), float32(y)
 }
@@ -65,7 +65,7 @@ func (p *Path) QuadTo(cx, cy, x, y float64) {
 	if len(p.verbs) == 0 {
 		p.MoveTo(cx, cy)
 	}
-	p.verbs = append(p.verbs, raster.VerbQuadTo)
+	p.verbs = append(p.verbs, raster.QuadTo)
 	p.points = append(p.points, float32(cx), float32(cy), float32(x), float32(y))
 	p.curX, p.curY = float32(x), float32(y)
 }
@@ -76,7 +76,7 @@ func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
 	if len(p.verbs) == 0 {
 		p.MoveTo(c1x, c1y)
 	}
-	p.verbs = append(p.verbs, raster.VerbCubicTo)
+	p.verbs = append(p.verbs, raster.CubicTo)
 	p.points = append(p.points,
 		float32(c1x), float32(c1y),
 		float32(c2x), float32(c2y),
@@ -89,7 +89,7 @@ func (p *Path) Close() {
 	if len(p.verbs) == 0 {
 		return
 	}
-	p.verbs = append(p.verbs, raster.VerbClose)
+	p.verbs = append(p.verbs, raster.Close)
 	p.curX, p.curY = p.startX, p.startY
 }
 

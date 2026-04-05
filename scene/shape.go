@@ -608,7 +608,7 @@ func (p *PieShape) ToPath() *Path {
 
 	// Copy arc verbs and points (skip the initial MoveTo)
 	for i, verb := range arc.verbs {
-		if i == 0 && verb == VerbMoveTo {
+		if i == 0 && verb == MoveTo {
 			continue // Skip initial MoveTo
 		}
 		path.verbs = append(path.verbs, verb)
