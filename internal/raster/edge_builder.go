@@ -97,7 +97,7 @@ func (r Rect) IsEmpty() bool {
 //
 //	eb := NewEdgeBuilder(2) // 4x AA quality
 //	eb.SetFlattenCurves(true) // Flatten curves to lines
-//	eb.SetClipRect(&raster.Rect{MinX: -2, MinY: -2, MaxX: 802, MaxY: 602})
+//	eb.SetClipRect(&Rect{MinX: -2, MinY: -2, MaxX: 802, MaxY: 602})
 //	eb.BuildFromPath(path, IdentityTransform{})
 //
 //	for edge := range eb.AllEdges() {
@@ -123,10 +123,15 @@ type EdgeBuilder struct {
 	// On HiDPI displays, set to baseTol/deviceScale for finer subdivision.
 	flattenTolerance float32
 
-	// clipRect when non-nil clips all edges to this rectangle.
+	// clipRect stores the clipping rectangle for edge building.
 	// Prevents FDot6→FDot16 overflow for coordinates exceeding safe range.
 	// Sentinel vertical lines are emitted at X boundaries to preserve winding.
-	clipRect *Rect
+	clipRect    Rect
+	hasClipRect bool
+
+	// sortBuf is a reusable buffer for sorted edges (AllEdges/SortedEdges).
+	// Kept across Reset() calls to amortize allocation to zero in steady state.
+	sortBuf []sortableEdge
 
 	// bounds accumulates the bounding box of all edges
 	bounds edgeBounds
@@ -204,6 +209,7 @@ func (eb *EdgeBuilder) Reset() {
 	eb.quadraticEdges = eb.quadraticEdges[:0]
 	eb.cubicEdges = eb.cubicEdges[:0]
 	eb.velloLines = eb.velloLines[:0]
+	eb.sortBuf = eb.sortBuf[:0]
 	eb.bounds = newEmptyBounds()
 }
 
@@ -295,11 +301,83 @@ func (eb *EdgeBuilder) BuildFromPath(path PathLike, transform Transform) {
 	}
 }
 
+// BuildFromPathF64 processes a path with float64 coordinates directly,
+// bypassing the PathLike interface and float64→float32 conversion buffers.
+// This eliminates 3 heap allocations per call (verb slice, point slice,
+// ScenePathAdapter) that convertGGPathToCorePath would create.
+//
+// Parameters:
+//   - verbs: path verb bytes (gg.PathVerb values: 0=MoveTo, 1=LineTo, 2=QuadTo, 3=CubicTo, 4=Close)
+//   - coords: float64 coordinate pairs (x,y for each point)
+//
+// The verb values must match raster.PathVerb constants (MoveTo=0, LineTo=1, etc.).
+// Since gg.PathVerb is byte and raster.PathVerb is uint8, this is guaranteed.
+func (eb *EdgeBuilder) BuildFromPathF64(verbs []byte, coords []float64) {
+	if len(verbs) == 0 {
+		return
+	}
+
+	var curX, curY float32
+	var startX, startY float32
+	pointIdx := 0
+
+	for _, v := range verbs {
+		switch PathVerb(v) {
+		case MoveTo:
+			if curX != startX || curY != startY {
+				eb.addLine(curX, curY, startX, startY)
+			}
+			curX = float32(coords[pointIdx])
+			curY = float32(coords[pointIdx+1])
+			startX, startY = curX, curY
+			pointIdx += 2
+
+		case LineTo:
+			nextX := float32(coords[pointIdx])
+			nextY := float32(coords[pointIdx+1])
+			eb.addLine(curX, curY, nextX, nextY)
+			curX, curY = nextX, nextY
+			pointIdx += 2
+
+		case QuadTo:
+			cx := float32(coords[pointIdx])
+			cy := float32(coords[pointIdx+1])
+			x := float32(coords[pointIdx+2])
+			y := float32(coords[pointIdx+3])
+			eb.addQuad(curX, curY, cx, cy, x, y)
+			curX, curY = x, y
+			pointIdx += 4
+
+		case CubicTo:
+			c1x := float32(coords[pointIdx])
+			c1y := float32(coords[pointIdx+1])
+			c2x := float32(coords[pointIdx+2])
+			c2y := float32(coords[pointIdx+3])
+			x := float32(coords[pointIdx+4])
+			y := float32(coords[pointIdx+5])
+			eb.addCubic(curX, curY, c1x, c1y, c2x, c2y, x, y)
+			curX, curY = x, y
+			pointIdx += 6
+
+		case Close:
+			if curX != startX || curY != startY {
+				eb.addLine(curX, curY, startX, startY)
+			}
+			curX, curY = startX, startY
+		}
+	}
+
+	// Close final subpath if not explicitly closed
+	if curX != startX || curY != startY {
+		eb.addLine(curX, curY, startX, startY)
+	}
+}
+
 // addLine adds a line edge, clipping to clipRect if set.
 // When clipRect is active, delegates to clipAndAddLine which may emit
 // sentinel vertical lines at clip boundaries to preserve winding.
 func (eb *EdgeBuilder) addLine(x0, y0, x1, y1 float32) {
-	if eb.clipRect != nil {
+	if eb.hasClipRect {
 		eb.clipAndAddLine(x0, y0, x1, y1)
 		return
 	}
@@ -371,7 +449,7 @@ func (eb *EdgeBuilder) addLineUnclipped(x0, y0, x1, y1 float32) {
 //
 // Reference: Skia SkEdgeClipper, tiny-skia edge_clipper.rs
 func (eb *EdgeBuilder) clipAndAddLine(x0, y0, x1, y1 float32) {
-	cr := eb.clipRect
+	cr := &eb.clipRect
 
 	// Ensure y0 <= y1 for consistent clipping (track original direction)
 	downward := true
@@ -418,7 +496,7 @@ func (eb *EdgeBuilder) clipAndAddLine(x0, y0, x1, y1 float32) {
 // clipLineX handles the X-clipping phase, emitting sentinel verticals
 // at clip boundaries for out-of-bounds portions.
 func (eb *EdgeBuilder) clipLineX(x0, y0, x1, y1 float32) {
-	cr := eb.clipRect
+	cr := &eb.clipRect
 	left := cr.MinX
 	right := cr.MaxX
 
@@ -546,7 +624,7 @@ func (eb *EdgeBuilder) emitSegment(
 // if the convex hull (approximated by control point bbox) is inside clip,
 // the curve itself is safe and doesn't need force-flattening.
 func (eb *EdgeBuilder) curveBBoxInsideClip(coords ...float32) bool {
-	cr := eb.clipRect
+	cr := &eb.clipRect
 	for i := 0; i < len(coords); i += 2 {
 		x, y := coords[i], coords[i+1]
 		if x < cr.MinX || x > cr.MaxX || y < cr.MinY || y > cr.MaxY {
@@ -609,12 +687,20 @@ func (eb *EdgeBuilder) effectiveFlattenTolerance() float32 {
 // Pass nil to disable clipping (default).
 // The clip rect is preserved across Reset() calls.
 func (eb *EdgeBuilder) SetClipRect(r *Rect) {
-	eb.clipRect = r
+	if r != nil {
+		eb.clipRect = *r
+		eb.hasClipRect = true
+	} else {
+		eb.hasClipRect = false
+	}
 }
 
 // ClipRect returns the current clip rectangle, or nil if not set.
 func (eb *EdgeBuilder) ClipRect() *Rect {
-	return eb.clipRect
+	if !eb.hasClipRect {
+		return nil
+	}
+	return &eb.clipRect
 }
 
 // VelloLines returns the stored float-coordinate lines.
@@ -635,7 +721,7 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 	// Safety guard: when clip rect is set and not flattening, force-flatten
 	// curves that extend beyond clip bounds to ensure line clipping catches them.
 	// This prevents FDot6→FDot16 overflow in NewQuadraticEdge. (RAST-010)
-	if eb.clipRect != nil && !eb.curveBBoxInsideClip(x0, y0, cx, cy, x1, y1) {
+	if eb.hasClipRect && !eb.curveBBoxInsideClip(x0, y0, cx, cy, x1, y1) {
 		eb.flattenQuadToLines(x0, y0, cx, cy, x1, y1)
 		return
 	}
@@ -740,7 +826,7 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 	// Safety guard: when clip rect is set and not flattening, force-flatten
 	// curves that extend beyond clip bounds to ensure line clipping catches them.
 	// This prevents FDot6→FDot16 overflow in NewCubicEdge. (RAST-010)
-	if eb.clipRect != nil && !eb.curveBBoxInsideClip(x0, y0, c1x, c1y, c2x, c2y, x1, y1) {
+	if eb.hasClipRect && !eb.curveBBoxInsideClip(x0, y0, c1x, c1y, c2x, c2y, x1, y1) {
 		eb.flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
 		return
 	}
@@ -982,57 +1068,67 @@ type sortableEdge struct {
 //	    line := edge.AsLine()
 //	    // Process edge.Line().FirstY, etc.
 //	}
+//
+// sortedEdgesSlice collects all edges into eb.sortBuf, sorts by top Y,
+// and returns the buffer. The returned slice is valid until the next
+// Reset() or sortedEdgesSlice() call.
+//
+// This reuses an internal buffer to avoid heap allocations in steady state
+// (after the first call grows the buffer to sufficient capacity).
+func (eb *EdgeBuilder) sortedEdgesSlice() []sortableEdge {
+	eb.sortBuf = eb.sortBuf[:0]
+
+	// Add line edges
+	for i := range eb.lineEdges {
+		eb.sortBuf = append(eb.sortBuf, sortableEdge{
+			topY: eb.lineEdges[i].FirstY,
+			variant: CurveEdgeVariant{
+				Type: EdgeTypeLine,
+				Line: &eb.lineEdges[i],
+			},
+		})
+	}
+
+	// Add quadratic edges (use TopY for sorting, not current segment's FirstY)
+	for _, quad := range eb.quadraticEdges {
+		eb.sortBuf = append(eb.sortBuf, sortableEdge{
+			topY: quad.TopY,
+			variant: CurveEdgeVariant{
+				Type:      EdgeTypeQuadratic,
+				Quadratic: quad,
+			},
+		})
+	}
+
+	// Add cubic edges (use TopY for sorting, not current segment's FirstY)
+	for _, cubic := range eb.cubicEdges {
+		eb.sortBuf = append(eb.sortBuf, sortableEdge{
+			topY: cubic.TopY,
+			variant: CurveEdgeVariant{
+				Type:  EdgeTypeCubic,
+				Cubic: cubic,
+			},
+		})
+	}
+
+	// Sort by top Y (stable sort preserves insertion order for equal Y)
+	slices.SortStableFunc(eb.sortBuf, func(a, b sortableEdge) int {
+		if a.topY < b.topY {
+			return -1
+		}
+		if a.topY > b.topY {
+			return 1
+		}
+		return 0
+	})
+
+	return eb.sortBuf
+}
+
 func (eb *EdgeBuilder) AllEdges() iter.Seq[CurveEdgeVariant] {
 	return func(yield func(CurveEdgeVariant) bool) {
-		// Collect all edges with their top Y for sorting
-		edges := make([]sortableEdge, 0, eb.EdgeCount())
-
-		// Add line edges
-		for i := range eb.lineEdges {
-			edges = append(edges, sortableEdge{
-				topY: eb.lineEdges[i].FirstY,
-				variant: CurveEdgeVariant{
-					Type: EdgeTypeLine,
-					Line: &eb.lineEdges[i],
-				},
-			})
-		}
-
-		// Add quadratic edges (use TopY for sorting, not current segment's FirstY)
-		for _, quad := range eb.quadraticEdges {
-			edges = append(edges, sortableEdge{
-				topY: quad.TopY,
-				variant: CurveEdgeVariant{
-					Type:      EdgeTypeQuadratic,
-					Quadratic: quad,
-				},
-			})
-		}
-
-		// Add cubic edges (use TopY for sorting, not current segment's FirstY)
-		for _, cubic := range eb.cubicEdges {
-			edges = append(edges, sortableEdge{
-				topY: cubic.TopY,
-				variant: CurveEdgeVariant{
-					Type:  EdgeTypeCubic,
-					Cubic: cubic,
-				},
-			})
-		}
-
-		// Sort by top Y (stable sort preserves insertion order for equal Y)
-		slices.SortStableFunc(edges, func(a, b sortableEdge) int {
-			if a.topY < b.topY {
-				return -1
-			}
-			if a.topY > b.topY {
-				return 1
-			}
-			return 0
-		})
-
-		// Yield edges in sorted order
-		for _, e := range edges {
+		sorted := eb.sortedEdgesSlice()
+		for _, e := range sorted {
 			if !yield(e.variant) {
 				return
 			}

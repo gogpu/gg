@@ -221,10 +221,8 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 		return gg.ErrFallbackToCPU
 	}
 
-	// Convert gg path elements to stroke package elements.
-	strokeElems := convertPathToStrokeElements(path)
-
-	// Expand stroke to filled outline.
+	// Convert gg verbs to stroke verbs and expand to filled outline.
+	strokeVerbs := convertPathVerbsToStroke(path.Verbs())
 	style := stroke.Stroke{
 		Width:      paint.EffectiveLineWidth(),
 		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
@@ -232,27 +230,13 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 		MiterLimit: paint.EffectiveMiterLimit(),
 	}
 	expander := stroke.NewStrokeExpander(style)
-	expanded := expander.Expand(strokeElems)
-	if len(expanded) == 0 {
+	outVerbs, outCoords := expander.Expand(strokeVerbs, path.Coords())
+	if len(outVerbs) == 0 {
 		return nil
 	}
 
 	// Build a gg.Path from the expanded outline.
-	fillPath := gg.NewPath()
-	for _, e := range expanded {
-		switch el := e.(type) {
-		case stroke.MoveTo:
-			fillPath.MoveTo(el.Point.X, el.Point.Y)
-		case stroke.LineTo:
-			fillPath.LineTo(el.Point.X, el.Point.Y)
-		case stroke.QuadTo:
-			fillPath.QuadraticTo(el.Control.X, el.Control.Y, el.Point.X, el.Point.Y)
-		case stroke.CubicTo:
-			fillPath.CubicTo(el.Control1.X, el.Control1.Y, el.Control2.X, el.Control2.Y, el.Point.X, el.Point.Y)
-		case stroke.Close:
-			fillPath.Close()
-		}
-	}
+	fillPath := strokeResultToPath(outVerbs, outCoords)
 
 	// Route through FillPath (accumulates into pending scene).
 	return a.FillPath(target, fillPath, paint)

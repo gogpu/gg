@@ -158,35 +158,36 @@ func DefaultStroke() Stroke {
 	}
 }
 
-// PathElement represents an element in a path.
-type PathElement interface {
-	isPathElement()
+// PathVerb represents a path construction command.
+// Values match gg.PathVerb for zero-cost conversion.
+type PathVerb byte
+
+const (
+	// VerbMoveTo moves the current point without drawing. Consumes 2 coords (x, y).
+	VerbMoveTo PathVerb = iota
+	// VerbLineTo draws a line to the specified point. Consumes 2 coords (x, y).
+	VerbLineTo
+	// VerbQuadTo draws a quadratic Bezier curve. Consumes 4 coords (cx, cy, x, y).
+	VerbQuadTo
+	// VerbCubicTo draws a cubic Bezier curve. Consumes 6 coords (c1x, c1y, c2x, c2y, x, y).
+	VerbCubicTo
+	// VerbClose closes the current subpath. Consumes 0 coords.
+	VerbClose
+)
+
+// verbCoordCount returns the number of float64 coordinates consumed by a verb.
+func verbCoordCount(v PathVerb) int {
+	switch v {
+	case VerbMoveTo, VerbLineTo:
+		return 2
+	case VerbQuadTo:
+		return 4
+	case VerbCubicTo:
+		return 6
+	default:
+		return 0
+	}
 }
-
-// MoveTo moves to a point.
-type MoveTo struct{ Point Point }
-
-func (MoveTo) isPathElement() {}
-
-// LineTo draws a line.
-type LineTo struct{ Point Point }
-
-func (LineTo) isPathElement() {}
-
-// QuadTo draws a quadratic Bezier curve.
-type QuadTo struct{ Control, Point Point }
-
-func (QuadTo) isPathElement() {}
-
-// CubicTo draws a cubic Bezier curve.
-type CubicTo struct{ Control1, Control2, Point Point }
-
-func (CubicTo) isPathElement() {}
-
-// Close closes the path.
-type Close struct{}
-
-func (Close) isPathElement() {}
 
 // StrokeExpander converts stroked paths to filled paths.
 // This follows the kurbo stroke expansion algorithm.
@@ -237,34 +238,45 @@ func (e *StrokeExpander) SetTolerance(tolerance float64) {
 	}
 }
 
-// Expand converts a stroked path to a fill path.
-func (e *StrokeExpander) Expand(elements []PathElement) []PathElement {
+// Expand converts a stroked path (given as SOA verb+coords) to a filled path.
+// Returns the expanded path as (verbs, coords) slices.
+func (e *StrokeExpander) Expand(verbs []PathVerb, coords []float64) ([]PathVerb, []float64) {
 	e.reset()
 
-	for _, el := range elements {
-		switch elem := el.(type) {
-		case MoveTo:
+	ci := 0
+	for _, v := range verbs {
+		switch v {
+		case VerbMoveTo:
+			pt := Point{X: coords[ci], Y: coords[ci+1]}
 			e.finish()
-			e.startPt = elem.Point
-			e.lastPt = elem.Point
-		case LineTo:
-			if elem.Point != e.lastPt {
-				tangent := elem.Point.Sub(e.lastPt)
+			e.startPt = pt
+			e.lastPt = pt
+			ci += 2
+		case VerbLineTo:
+			pt := Point{X: coords[ci], Y: coords[ci+1]}
+			if pt != e.lastPt {
+				tangent := pt.Sub(e.lastPt)
 				e.doJoin(tangent)
 				e.lastTan = tangent
-				e.doLine(tangent, elem.Point)
+				e.doLine(tangent, pt)
 			}
-		case QuadTo:
-			if elem.Control != e.lastPt || elem.Point != e.lastPt {
-				// Flatten quadratic to lines for simplicity
-				e.doQuad(elem.Control, elem.Point)
+			ci += 2
+		case VerbQuadTo:
+			ctrl := Point{X: coords[ci], Y: coords[ci+1]}
+			pt := Point{X: coords[ci+2], Y: coords[ci+3]}
+			if ctrl != e.lastPt || pt != e.lastPt {
+				e.doQuad(ctrl, pt)
 			}
-		case CubicTo:
-			if elem.Control1 != e.lastPt || elem.Control2 != e.lastPt || elem.Point != e.lastPt {
-				// Flatten cubic to lines for simplicity
-				e.doCubic(elem.Control1, elem.Control2, elem.Point)
+			ci += 4
+		case VerbCubicTo:
+			c1 := Point{X: coords[ci], Y: coords[ci+1]}
+			c2 := Point{X: coords[ci+2], Y: coords[ci+3]}
+			pt := Point{X: coords[ci+4], Y: coords[ci+5]}
+			if c1 != e.lastPt || c2 != e.lastPt || pt != e.lastPt {
+				e.doCubic(c1, c2, pt)
 			}
-		case Close:
+			ci += 6
+		case VerbClose:
 			if e.lastPt != e.startPt {
 				tangent := e.startPt.Sub(e.lastPt)
 				e.doJoin(tangent)
@@ -276,7 +288,7 @@ func (e *StrokeExpander) Expand(elements []PathElement) []PathElement {
 	}
 
 	e.finish()
-	return e.output.build()
+	return e.output.verbs, e.output.coords
 }
 
 // reset clears the expander state for a new expansion.
@@ -491,7 +503,7 @@ func (e *StrokeExpander) finish() {
 	// Note: lastNorm points toward backward path, but applyCap expects
 	// the normal pointing toward forward path (from where we're drawing),
 	// so we negate it.
-	if len(e.backward.elements) > 0 {
+	if len(e.backward.verbs) > 0 {
 		e.applyCap(e.style.Cap, e.lastPt, e.lastNorm.Neg(), false)
 	}
 
@@ -520,9 +532,8 @@ func (e *StrokeExpander) finishClosed() {
 	e.output.close()
 
 	// Handle backward path separately
-	backElems := e.backward.elements
-	if len(backElems) > 0 {
-		lastPt := getEndPoint(backElems[len(backElems)-1])
+	if len(e.backward.verbs) > 0 {
+		lastPt := e.backward.endPointOfLastVerb()
 		e.output.moveTo(lastPt)
 	}
 	e.appendReversed(&e.backward)
@@ -629,16 +640,40 @@ func (e *StrokeExpander) transformPoint(center Point, norm Vec2, p Point) Point 
 
 // appendReversed appends the backward path in reverse order.
 func (e *StrokeExpander) appendReversed(pb *pathBuilder) {
-	elems := pb.elements
-	for i := len(elems) - 1; i >= 1; i-- {
-		endPt := getEndPoint(elems[i-1])
-		switch el := elems[i].(type) {
-		case LineTo:
+	nv := len(pb.verbs)
+	if nv <= 1 {
+		return
+	}
+	// Build coord offsets for each verb
+	offsets := make([]int, nv+1)
+	off := 0
+	for j, v := range pb.verbs {
+		offsets[j] = off
+		off += verbCoordCount(v)
+	}
+	offsets[nv] = off
+
+	for i := nv - 1; i >= 1; i-- {
+		// endPt = endpoint of verb[i-1]
+		prevOff := offsets[i-1]
+		prevN := verbCoordCount(pb.verbs[i-1])
+		var endPt Point
+		if prevN >= 2 {
+			endPt = Point{X: pb.coords[prevOff+prevN-2], Y: pb.coords[prevOff+prevN-1]}
+		}
+
+		curOff := offsets[i]
+		switch pb.verbs[i] {
+		case VerbLineTo:
 			e.output.lineTo(endPt)
-		case QuadTo:
-			e.output.quadTo(el.Control, endPt)
-		case CubicTo:
-			e.output.cubicTo(el.Control2, el.Control1, endPt)
+		case VerbQuadTo:
+			ctrl := Point{X: pb.coords[curOff], Y: pb.coords[curOff+1]}
+			e.output.quadTo(ctrl, endPt)
+		case VerbCubicTo:
+			// Reverse: swap control1 and control2
+			ctrl2 := Point{X: pb.coords[curOff+2], Y: pb.coords[curOff+3]}
+			ctrl1 := Point{X: pb.coords[curOff], Y: pb.coords[curOff+1]}
+			e.output.cubicTo(ctrl2, ctrl1, endPt)
 		}
 	}
 }
@@ -723,81 +758,67 @@ func distanceToLine(p, a, b Point) float64 {
 	return p.Distance(closest)
 }
 
-// getEndPoint returns the endpoint of a path element.
-func getEndPoint(el PathElement) Point {
-	switch e := el.(type) {
-	case MoveTo:
-		return e.Point
-	case LineTo:
-		return e.Point
-	case QuadTo:
-		return e.Point
-	case CubicTo:
-		return e.Point
-	default:
-		return Point{}
-	}
-}
-
-// pathBuilder is a helper for building paths.
+// pathBuilder is a helper for building paths using SOA (verb+coords) layout.
 type pathBuilder struct {
-	elements []PathElement
-	current  Point
+	verbs   []PathVerb
+	coords  []float64
+	current Point
 }
 
-func newPathBuilder() *pathBuilder {
-	return &pathBuilder{
-		elements: make([]PathElement, 0, 64),
-	}
-}
-
-// reset clears the path builder for reuse, retaining the backing array.
+// reset clears the path builder for reuse, retaining the backing arrays.
 func (b *pathBuilder) reset() {
-	b.elements = b.elements[:0]
+	b.verbs = b.verbs[:0]
+	b.coords = b.coords[:0]
 	b.current = Point{}
 }
 
 func (b *pathBuilder) isEmpty() bool {
-	return len(b.elements) == 0
+	return len(b.verbs) == 0
 }
 
 func (b *pathBuilder) moveTo(p Point) {
-	b.elements = append(b.elements, MoveTo{Point: p})
+	b.verbs = append(b.verbs, VerbMoveTo)
+	b.coords = append(b.coords, p.X, p.Y)
 	b.current = p
 }
 
 func (b *pathBuilder) lineTo(p Point) {
-	b.elements = append(b.elements, LineTo{Point: p})
+	b.verbs = append(b.verbs, VerbLineTo)
+	b.coords = append(b.coords, p.X, p.Y)
 	b.current = p
 }
 
 func (b *pathBuilder) quadTo(c, p Point) {
-	b.elements = append(b.elements, QuadTo{Control: c, Point: p})
+	b.verbs = append(b.verbs, VerbQuadTo)
+	b.coords = append(b.coords, c.X, c.Y, p.X, p.Y)
 	b.current = p
 }
 
 func (b *pathBuilder) cubicTo(c1, c2, p Point) {
-	b.elements = append(b.elements, CubicTo{Control1: c1, Control2: c2, Point: p})
+	b.verbs = append(b.verbs, VerbCubicTo)
+	b.coords = append(b.coords, c1.X, c1.Y, c2.X, c2.Y, p.X, p.Y)
 	b.current = p
 }
 
 func (b *pathBuilder) close() {
-	b.elements = append(b.elements, Close{})
+	b.verbs = append(b.verbs, VerbClose)
 }
 
 func (b *pathBuilder) appendPath(other *pathBuilder) {
-	for i, el := range other.elements {
-		if i == 0 {
-			if _, ok := el.(MoveTo); ok {
-				// Copy MoveTo as-is
-				b.elements = append(b.elements, el)
-				continue
-			}
-		}
-		b.elements = append(b.elements, el)
-	}
+	b.verbs = append(b.verbs, other.verbs...)
+	b.coords = append(b.coords, other.coords...)
 }
 
-func (b *pathBuilder) build() []PathElement {
-	return b.elements
+// endPointOfLastVerb returns the endpoint of the last verb in the path.
+func (b *pathBuilder) endPointOfLastVerb() Point {
+	if len(b.verbs) == 0 {
+		return Point{}
+	}
+	lastVerb := b.verbs[len(b.verbs)-1]
+	n := verbCoordCount(lastVerb)
+	if n >= 2 {
+		cl := len(b.coords)
+		return Point{X: b.coords[cl-2], Y: b.coords[cl-1]}
+	}
+	return Point{}
 }

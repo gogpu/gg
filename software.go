@@ -2,6 +2,7 @@ package gg
 
 import (
 	"math"
+	"unsafe"
 
 	"github.com/gogpu/gg/internal/raster"
 	"github.com/gogpu/gg/internal/stroke"
@@ -344,9 +345,14 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	r.edgeBuilder.SetFlattenCurves(true)
 	defer r.edgeBuilder.SetFlattenCurves(false)
 
-	// Build edges from the path
-	pathAdapter := convertGGPathToCorePath(p)
-	r.edgeBuilder.BuildFromPath(pathAdapter, raster.IdentityTransform{})
+	// Build edges from the path directly from float64 coords (zero-alloc).
+	// PathVerb values match between gg and raster packages (both 0-4 iota).
+	// gg.PathVerb is byte, so []PathVerb has identical memory layout to []byte.
+	verbs := p.Verbs()
+	if len(verbs) > 0 {
+		verbBytes := unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(verbs))), len(verbs))
+		r.edgeBuilder.BuildFromPathF64(verbBytes, p.Coords())
+	}
 
 	// If no edges, nothing to fill
 	if r.edgeBuilder.IsEmpty() {
@@ -612,8 +618,8 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 		pathToDraw = dashPath(p, dash)
 	}
 
-	// Convert gg.Path to stroke.PathElement
-	strokeElements := convertPathToStrokeElements(pathToDraw)
+	// Convert gg.PathVerb to stroke.PathVerb (same layout, just cast)
+	strokeVerbs := convertVerbsToStroke(pathToDraw.Verbs())
 
 	// Create stroke style from paint
 	// Scale line width by transform scale (path coordinates are already transformed)
@@ -640,57 +646,45 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 	expander.SetTolerance(strokeTol)
 
-	// Expand stroke to fill path
-	expandedElements := expander.Expand(strokeElements)
+	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
+	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
 	// Convert back to gg.Path
-	strokePath := convertStrokeElementsToPath(expandedElements)
+	strokePath := strokeResultToPath(outVerbs, outCoords)
 
 	// Fill the stroke path - this gives us anti-aliased strokes
 	return r.Fill(pixmap, strokePath, paint)
 }
 
-// convertPathToStrokeElements converts gg.Path to stroke.PathElement slice.
-func convertPathToStrokeElements(p *Path) []stroke.PathElement {
-	elements := make([]stroke.PathElement, 0, p.NumVerbs())
-	p.Iterate(func(verb PathVerb, coords []float64) {
-		switch verb {
-		case MoveTo:
-			elements = append(elements, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case LineTo:
-			elements = append(elements, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case QuadTo:
-			elements = append(elements, stroke.QuadTo{
-				Control: stroke.Point{X: coords[0], Y: coords[1]},
-				Point:   stroke.Point{X: coords[2], Y: coords[3]},
-			})
-		case CubicTo:
-			elements = append(elements, stroke.CubicTo{
-				Control1: stroke.Point{X: coords[0], Y: coords[1]},
-				Control2: stroke.Point{X: coords[2], Y: coords[3]},
-				Point:    stroke.Point{X: coords[4], Y: coords[5]},
-			})
-		case Close:
-			elements = append(elements, stroke.Close{})
-		}
-	})
-	return elements
+// convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
+// Both types have identical byte values, so this is a simple cast.
+func convertVerbsToStroke(verbs []PathVerb) []stroke.PathVerb {
+	result := make([]stroke.PathVerb, len(verbs))
+	for i, v := range verbs {
+		result[i] = stroke.PathVerb(v)
+	}
+	return result
 }
 
-// convertStrokeElementsToPath converts stroke.PathElement back to gg.Path.
-func convertStrokeElementsToPath(elements []stroke.PathElement) *Path {
+// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
+func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *Path {
 	p := NewPath()
-	for _, elem := range elements {
-		switch e := elem.(type) {
-		case stroke.MoveTo:
-			p.MoveTo(e.Point.X, e.Point.Y)
-		case stroke.LineTo:
-			p.LineTo(e.Point.X, e.Point.Y)
-		case stroke.QuadTo:
-			p.QuadraticTo(e.Control.X, e.Control.Y, e.Point.X, e.Point.Y)
-		case stroke.CubicTo:
-			p.CubicTo(e.Control1.X, e.Control1.Y, e.Control2.X, e.Control2.Y, e.Point.X, e.Point.Y)
-		case stroke.Close:
+	ci := 0
+	for _, v := range verbs {
+		switch v {
+		case stroke.VerbMoveTo:
+			p.MoveTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbLineTo:
+			p.LineTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbQuadTo:
+			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			ci += 4
+		case stroke.VerbCubicTo:
+			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			ci += 6
+		case stroke.VerbClose:
 			p.Close()
 		}
 	}

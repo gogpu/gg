@@ -63,15 +63,9 @@ func TestClipStack_PushPath(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
 	// Create a simple rectangle path
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(50, 10)},
-		LineTo{Point: Pt(50, 50)},
-		LineTo{Point: Pt(10, 50)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(50, 10).lineTo(50, 50).lineTo(10, 50).close()
 
-	err := stack.PushPath(path, true)
+	err := stack.PushPath(p.verbs, p.coords, true)
 	if err != nil {
 		t.Fatalf("PushPath() error = %v", err)
 	}
@@ -90,12 +84,9 @@ func TestClipStack_PushPath(t *testing.T) {
 func TestClipStack_PushPath_EmptyBounds(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 0, 0))
 
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(50, 10)},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(50, 10)
 
-	err := stack.PushPath(path, true)
+	err := stack.PushPath(p.verbs, p.coords, true)
 	if err == nil {
 		t.Error("PushPath() expected error for empty bounds, got nil")
 	}
@@ -208,14 +199,9 @@ func TestClipStack_IsVisible_WithMask(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
 	// Create a triangle path
-	path := []PathElement{
-		MoveTo{Point: Pt(50, 20)},
-		LineTo{Point: Pt(20, 80)},
-		LineTo{Point: Pt(80, 80)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(50, 20).lineTo(20, 80).lineTo(80, 80).close()
 
-	err := stack.PushPath(path, true)
+	err := stack.PushPath(p.verbs, p.coords, true)
 	if err != nil {
 		t.Fatalf("PushPath() error = %v", err)
 	}
@@ -296,15 +282,9 @@ func TestClipStack_Coverage_WithMask(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
 	// Create a simple rectangle path
-	path := []PathElement{
-		MoveTo{Point: Pt(20, 20)},
-		LineTo{Point: Pt(80, 20)},
-		LineTo{Point: Pt(80, 80)},
-		LineTo{Point: Pt(20, 80)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(20, 20).lineTo(80, 20).lineTo(80, 80).lineTo(20, 80).close()
 
-	err := stack.PushPath(path, true)
+	err := stack.PushPath(p.verbs, p.coords, true)
 	if err != nil {
 		t.Fatalf("PushPath() error = %v", err)
 	}
@@ -353,29 +333,17 @@ func TestClipStack_Coverage_MultipleMasks(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
 	// Push first mask - rectangle
-	path1 := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(90, 10)},
-		LineTo{Point: Pt(90, 90)},
-		LineTo{Point: Pt(10, 90)},
-		Close{},
-	}
+	p1 := newSOAPath().moveTo(10, 10).lineTo(90, 10).lineTo(90, 90).lineTo(10, 90).close()
 
-	err := stack.PushPath(path1, true)
+	err := stack.PushPath(p1.verbs, p1.coords, true)
 	if err != nil {
 		t.Fatalf("PushPath(path1) error = %v", err)
 	}
 
 	// Push second mask - smaller rectangle
-	path2 := []PathElement{
-		MoveTo{Point: Pt(30, 30)},
-		LineTo{Point: Pt(70, 30)},
-		LineTo{Point: Pt(70, 70)},
-		LineTo{Point: Pt(30, 70)},
-		Close{},
-	}
+	p2 := newSOAPath().moveTo(30, 30).lineTo(70, 30).lineTo(70, 70).lineTo(30, 70).close()
 
-	err = stack.PushPath(path2, true)
+	err = stack.PushPath(p2.verbs, p2.coords, true)
 	if err != nil {
 		t.Fatalf("PushPath(path2) error = %v", err)
 	}
@@ -577,17 +545,11 @@ func BenchmarkClipStack_PushRect(b *testing.B) {
 func BenchmarkClipStack_PushPath(b *testing.B) {
 	stack := NewClipStack(NewRect(0, 0, 1000, 1000))
 
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(100, 10)},
-		LineTo{Point: Pt(100, 100)},
-		LineTo{Point: Pt(10, 100)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(100, 10).lineTo(100, 100).lineTo(10, 100).close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = stack.PushPath(path, true)
+		_ = stack.PushPath(p.verbs, p.coords, true)
 		stack.Pop()
 	}
 }
@@ -605,15 +567,9 @@ func BenchmarkClipStack_IsVisible(b *testing.B) {
 func BenchmarkClipStack_Coverage(b *testing.B) {
 	stack := NewClipStack(NewRect(0, 0, 1000, 1000))
 
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(500, 10)},
-		LineTo{Point: Pt(500, 500)},
-		LineTo{Point: Pt(10, 500)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(500, 10).lineTo(500, 500).lineTo(10, 500).close()
 
-	_ = stack.PushPath(path, true)
+	_ = stack.PushPath(p.verbs, p.coords, true)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -786,15 +742,9 @@ func TestClipStack_IsRectOnly(t *testing.T) {
 func TestClipStack_IsRectOnly_WithMask(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(90, 10)},
-		LineTo{Point: Pt(90, 90)},
-		LineTo{Point: Pt(10, 90)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(90, 10).lineTo(90, 90).lineTo(10, 90).close()
 
-	_ = stack.PushPath(path, true)
+	_ = stack.PushPath(p.verbs, p.coords, true)
 	if stack.IsRectOnly() {
 		t.Error("stack with mask should NOT be IsRectOnly")
 	}
@@ -826,14 +776,9 @@ func TestClipStack_IsRRectOnly(t *testing.T) {
 func TestClipStack_IsRRectOnly_WithMask(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 
-	path := []PathElement{
-		MoveTo{Point: Pt(10, 10)},
-		LineTo{Point: Pt(90, 10)},
-		LineTo{Point: Pt(90, 90)},
-		Close{},
-	}
+	p := newSOAPath().moveTo(10, 10).lineTo(90, 10).lineTo(90, 90).close()
 
-	_ = stack.PushPath(path, true)
+	_ = stack.PushPath(p.verbs, p.coords, true)
 	if stack.IsRRectOnly() {
 		t.Error("stack with mask should NOT be IsRRectOnly")
 	}
@@ -967,14 +912,13 @@ func BenchmarkClipStack_MultipleMasks(b *testing.B) {
 
 	// Push 3 mask clips
 	for i := 0; i < 3; i++ {
-		path := []PathElement{
-			MoveTo{Point: Pt(float64(i*10), float64(i*10))},
-			LineTo{Point: Pt(500, float64(i*10))},
-			LineTo{Point: Pt(500, 500)},
-			LineTo{Point: Pt(float64(i*10), 500)},
-			Close{},
-		}
-		_ = stack.PushPath(path, true)
+		p := newSOAPath().
+			moveTo(float64(i*10), float64(i*10)).
+			lineTo(500, float64(i*10)).
+			lineTo(500, 500).
+			lineTo(float64(i*10), 500).
+			close()
+		_ = stack.PushPath(p.verbs, p.coords, true)
 	}
 
 	b.ResetTimer()

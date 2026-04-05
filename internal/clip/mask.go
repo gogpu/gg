@@ -4,46 +4,36 @@ import (
 	"github.com/gogpu/gg/internal/image"
 )
 
-// PathElement represents a single element in a path (copy to avoid import cycle).
-type PathElement interface {
-	isPathElement()
+// PathVerb represents a path construction command.
+// Values match gg.PathVerb for zero-cost conversion.
+type PathVerb byte
+
+const (
+	// VerbMoveTo moves the current point. Consumes 2 coords (x, y).
+	VerbMoveTo PathVerb = iota
+	// VerbLineTo draws a line. Consumes 2 coords (x, y).
+	VerbLineTo
+	// VerbQuadTo draws a quadratic Bezier. Consumes 4 coords (cx, cy, x, y).
+	VerbQuadTo
+	// VerbCubicTo draws a cubic Bezier. Consumes 6 coords (c1x, c1y, c2x, c2y, x, y).
+	VerbCubicTo
+	// VerbClose closes the current subpath. Consumes 0 coords.
+	VerbClose
+)
+
+// verbCoordCount returns the number of float64 coordinates consumed by a verb.
+func verbCoordCount(v PathVerb) int {
+	switch v {
+	case VerbMoveTo, VerbLineTo:
+		return 2
+	case VerbQuadTo:
+		return 4
+	case VerbCubicTo:
+		return 6
+	default:
+		return 0
+	}
 }
-
-// MoveTo moves to a point without drawing.
-type MoveTo struct {
-	Point Point
-}
-
-func (MoveTo) isPathElement() {}
-
-// LineTo draws a line to a point.
-type LineTo struct {
-	Point Point
-}
-
-func (LineTo) isPathElement() {}
-
-// QuadTo draws a quadratic Bezier curve.
-type QuadTo struct {
-	Control Point
-	Point   Point
-}
-
-func (QuadTo) isPathElement() {}
-
-// CubicTo draws a cubic Bezier curve.
-type CubicTo struct {
-	Control1 Point
-	Control2 Point
-	Point    Point
-}
-
-func (CubicTo) isPathElement() {}
-
-// Close closes the current subpath.
-type Close struct{}
-
-func (Close) isPathElement() {}
 
 // MaskClipper performs alpha mask-based clipping for anti-aliased complex clips.
 // It rasterizes a path into a grayscale mask where each pixel's value represents
@@ -53,16 +43,17 @@ type MaskClipper struct {
 	bounds Rect
 }
 
-// NewMaskClipper creates a mask clipper by rasterizing the given path elements
-// into an alpha mask.
+// NewMaskClipper creates a mask clipper by rasterizing the given path
+// (as SOA verb+coords slices) into an alpha mask.
 //
 // Parameters:
-//   - elements: Path elements to rasterize
+//   - verbs: Path verb stream
+//   - coords: Path coordinate stream
 //   - bounds: Bounding rectangle for the mask
 //   - antiAlias: Enable anti-aliased rendering (currently always on)
 //
 // The mask is stored as FormatGray8 (1 byte per pixel) for memory efficiency.
-func NewMaskClipper(elements []PathElement, bounds Rect, antiAlias bool) (*MaskClipper, error) {
+func NewMaskClipper(verbs []PathVerb, coords []float64, bounds Rect, antiAlias bool) (*MaskClipper, error) {
 	// Validate bounds - empty bounds means no clipping needed
 	if bounds.IsEmpty() {
 		return nil, image.ErrInvalidDimensions
@@ -87,7 +78,7 @@ func NewMaskClipper(elements []PathElement, bounds Rect, antiAlias bool) (*MaskC
 	}
 
 	// Rasterize path into mask
-	mc.rasterizePath(elements, antiAlias)
+	mc.rasterizePath(verbs, coords, antiAlias)
 
 	return mc, nil
 }
@@ -149,14 +140,14 @@ func (mc *MaskClipper) Mask() *image.ImageBuf {
 	return mc.mask
 }
 
-// rasterizePath converts path elements into a coverage mask.
-func (mc *MaskClipper) rasterizePath(elements []PathElement, antiAlias bool) {
-	if len(elements) == 0 {
+// rasterizePath converts path (verb+coords) into a coverage mask.
+func (mc *MaskClipper) rasterizePath(verbs []PathVerb, coords []float64, antiAlias bool) {
+	if len(verbs) == 0 {
 		return
 	}
 
 	// Flatten path to line segments
-	points := mc.flattenPath(elements)
+	points := mc.flattenPath(verbs, coords)
 	if len(points) < 2 {
 		return
 	}
@@ -357,45 +348,52 @@ func (mc *MaskClipper) rasterizeScanline(edges []edge, y int) {
 	}
 }
 
-// flattenPath converts path elements into a sequence of points.
-func (mc *MaskClipper) flattenPath(elements []PathElement) []Point {
+// flattenPath converts path (verb+coords) into a sequence of points.
+func (mc *MaskClipper) flattenPath(verbs []PathVerb, coords []float64) []Point {
 	var points []Point
 	var current Point
+	ci := 0
 
-	for _, elem := range elements {
-		switch e := elem.(type) {
-		case MoveTo:
-			current = e.Point
+	for _, v := range verbs {
+		switch v {
+		case VerbMoveTo:
+			current = Point{X: coords[ci], Y: coords[ci+1]}
 			points = append(points, current)
+			ci += 2
 
-		case LineTo:
-			current = e.Point
+		case VerbLineTo:
+			current = Point{X: coords[ci], Y: coords[ci+1]}
 			points = append(points, current)
+			ci += 2
 
-		case QuadTo:
-			// Flatten quadratic Bezier to line segments
+		case VerbQuadTo:
+			ctrl := Point{X: coords[ci], Y: coords[ci+1]}
+			end := Point{X: coords[ci+2], Y: coords[ci+3]}
 			prev := current
-			steps := 10 // Number of segments
+			steps := 10
 			for i := 1; i <= steps; i++ {
 				t := float64(i) / float64(steps)
-				pt := evalQuadraticBezier(prev, e.Control, e.Point, t)
+				pt := evalQuadraticBezier(prev, ctrl, end, t)
 				points = append(points, pt)
 			}
-			current = e.Point
+			current = end
+			ci += 4
 
-		case CubicTo:
-			// Flatten cubic Bezier to line segments
+		case VerbCubicTo:
+			c1 := Point{X: coords[ci], Y: coords[ci+1]}
+			c2 := Point{X: coords[ci+2], Y: coords[ci+3]}
+			end := Point{X: coords[ci+4], Y: coords[ci+5]}
 			prev := current
-			steps := 16 // Number of segments
+			steps := 16
 			for i := 1; i <= steps; i++ {
 				t := float64(i) / float64(steps)
-				pt := evalCubicBezier(prev, e.Control1, e.Control2, e.Point, t)
+				pt := evalCubicBezier(prev, c1, c2, end, t)
 				points = append(points, pt)
 			}
-			current = e.Point
+			current = end
+			ci += 6
 
-		case Close:
-			// Close path by connecting to first point
+		case VerbClose:
 			if len(points) > 0 {
 				points = append(points, points[0])
 			}

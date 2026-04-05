@@ -139,31 +139,39 @@ func clampU8(v float64) uint8 {
 	return uint8(x)
 }
 
-// convertPathToStrokeElements converts gg.Path to stroke package elements.
-func convertPathToStrokeElements(path *gg.Path) []stroke.PathElement {
-	strokeElems := make([]stroke.PathElement, 0, path.NumVerbs())
-	path.Iterate(func(verb gg.PathVerb, coords []float64) {
-		switch verb {
-		case gg.MoveTo:
-			strokeElems = append(strokeElems, stroke.MoveTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case gg.LineTo:
-			strokeElems = append(strokeElems, stroke.LineTo{Point: stroke.Point{X: coords[0], Y: coords[1]}})
-		case gg.QuadTo:
-			strokeElems = append(strokeElems, stroke.QuadTo{
-				Control: stroke.Point{X: coords[0], Y: coords[1]},
-				Point:   stroke.Point{X: coords[2], Y: coords[3]},
-			})
-		case gg.CubicTo:
-			strokeElems = append(strokeElems, stroke.CubicTo{
-				Control1: stroke.Point{X: coords[0], Y: coords[1]},
-				Control2: stroke.Point{X: coords[2], Y: coords[3]},
-				Point:    stroke.Point{X: coords[4], Y: coords[5]},
-			})
-		case gg.Close:
-			strokeElems = append(strokeElems, stroke.Close{})
+// convertPathVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
+// Both types have identical byte values.
+func convertPathVerbsToStroke(verbs []gg.PathVerb) []stroke.PathVerb {
+	result := make([]stroke.PathVerb, len(verbs))
+	for i, v := range verbs {
+		result[i] = stroke.PathVerb(v)
+	}
+	return result
+}
+
+// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
+func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *gg.Path {
+	p := gg.NewPath()
+	ci := 0
+	for _, v := range verbs {
+		switch v {
+		case stroke.VerbMoveTo:
+			p.MoveTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbLineTo:
+			p.LineTo(coords[ci], coords[ci+1])
+			ci += 2
+		case stroke.VerbQuadTo:
+			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			ci += 4
+		case stroke.VerbCubicTo:
+			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			ci += 6
+		case stroke.VerbClose:
+			p.Close()
 		}
-	})
-	return strokeElems
+	}
+	return p
 }
 
 // convertShapeToPathDef converts a detected shape (circle, rect, rrect, ellipse)

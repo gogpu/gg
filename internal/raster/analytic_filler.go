@@ -56,6 +56,10 @@ type AnalyticFiller struct {
 	// edgeIdx tracks which edges we've processed from the EdgeBuilder.
 	edgeIdx int
 
+	// edgeBuf is a reusable buffer for sorted edge variants.
+	// Kept across Fill() calls to amortize allocation to zero in steady state.
+	edgeBuf []CurveEdgeVariant
+
 	// WindingCallback, if set, is called after edge accumulation with (y, winding[])
 	// before applyFillRule. Used by winding residual tests to verify contour closure.
 	WindingCallback func(y int, winding []float32)
@@ -121,15 +125,23 @@ func (af *AnalyticFiller) Fill(
 	af.aet.Reset()
 	af.edgeIdx = 0
 
-	// Collect all edges sorted by top Y (edges are sorted in sub-pixel space)
-	allEdges := make([]CurveEdgeVariant, 0, eb.EdgeCount())
-	for edge := range eb.AllEdges() {
-		allEdges = append(allEdges, edge)
+	// Get all edges sorted by top Y, using EdgeBuilder's reusable buffer.
+	// sortedEdgesSlice returns []sortableEdge from eb.sortBuf (reused across calls).
+	sortedBuf := eb.sortedEdgesSlice()
+
+	// Extract variants into af.edgeBuf (reusable, avoids per-Fill allocation).
+	if cap(af.edgeBuf) < len(sortedBuf) {
+		af.edgeBuf = make([]CurveEdgeVariant, len(sortedBuf))
+	} else {
+		af.edgeBuf = af.edgeBuf[:len(sortedBuf)]
+	}
+	for i := range sortedBuf {
+		af.edgeBuf[i] = sortedBuf[i].variant
 	}
 
 	// Process each scanline in pixel space
 	for y := yMin; y < yMax; y++ {
-		af.processScanlineWithScale(y, aaScale, allEdges, fillRule, callback)
+		af.processScanlineWithScale(y, aaScale, af.edgeBuf, fillRule, callback)
 	}
 }
 
@@ -330,7 +342,7 @@ func (af *AnalyticFiller) stepCurveSegment(edge *CurveEdgeVariant) bool {
 //   - Edges partially off-screen left: winding pre-accumulated for the off-screen portion
 //
 // This matches the algorithm in fine.go which processes all pixels in each tile row.
-func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance-critical rasterization loop, splitting hurts cache locality
+func (af *AnalyticFiller) computeSegmentCoverage( //nolint:funlen // performance-critical rasterization loop
 	line *LineEdge,
 	_, _ int32, // ySubpixel, ySubpixelEnd - reserved for future precision improvements
 	yPixel, yPixelEnd, aaScaleF float32,

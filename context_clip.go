@@ -17,10 +17,10 @@ func (c *Context) Clip() {
 	// Path elements are in user-space; clip stack operates in device-space.
 	// Transform through deviceMatrix to get device coordinates.
 	devicePath := c.deviceSpacePath()
-	elements := convertPathToClipElements(devicePath)
+	clipVerbs, clipCoords := convertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
-	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
+	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
 
 	// Clear the path
 	c.path.Clear()
@@ -36,10 +36,10 @@ func (c *Context) ClipPreserve() {
 
 	// Path elements are in user-space; clip stack operates in device-space.
 	devicePath := c.deviceSpacePath()
-	elements := convertPathToClipElements(devicePath)
+	clipVerbs, clipCoords := convertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
-	_ = c.clipStack.PushPath(elements, true) // anti-aliased by default
+	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
 	// Path is preserved
 }
 
@@ -128,30 +128,13 @@ func (c *Context) initClipStack() {
 	c.clipStack = clip.NewClipStack(bounds)
 }
 
-// convertPathToClipElements converts a gg.Path to a clip.PathElement slice
-// using zero-alloc verb/coord iteration.
-func convertPathToClipElements(p *Path) []clip.PathElement {
-	result := make([]clip.PathElement, 0, p.NumVerbs())
-	p.Iterate(func(verb PathVerb, coords []float64) {
-		switch verb {
-		case MoveTo:
-			result = append(result, clip.MoveTo{Point: clip.Pt(coords[0], coords[1])})
-		case LineTo:
-			result = append(result, clip.LineTo{Point: clip.Pt(coords[0], coords[1])})
-		case QuadTo:
-			result = append(result, clip.QuadTo{
-				Control: clip.Pt(coords[0], coords[1]),
-				Point:   clip.Pt(coords[2], coords[3]),
-			})
-		case CubicTo:
-			result = append(result, clip.CubicTo{
-				Control1: clip.Pt(coords[0], coords[1]),
-				Control2: clip.Pt(coords[2], coords[3]),
-				Point:    clip.Pt(coords[4], coords[5]),
-			})
-		case Close:
-			result = append(result, clip.Close{})
-		}
-	})
-	return result
+// convertPathToClipVerbs converts a gg.Path to clip.PathVerb + coords slices.
+// Both PathVerb types have identical byte values, so this is a simple cast.
+func convertPathToClipVerbs(p *Path) ([]clip.PathVerb, []float64) {
+	verbs := p.Verbs()
+	result := make([]clip.PathVerb, len(verbs))
+	for i, v := range verbs {
+		result[i] = clip.PathVerb(v)
+	}
+	return result, p.Coords()
 }
