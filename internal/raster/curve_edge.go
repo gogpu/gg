@@ -83,14 +83,15 @@ type LineEdge struct {
 }
 
 // NewLineEdge creates a new line edge from two points.
-// Returns nil if the edge is horizontal (no Y extent).
+// Returns (edge, true) on success, or (zero, false) if the edge is horizontal
+// (no Y extent). Returning by value avoids a heap allocation per edge.
 //
 // Parameters:
 //   - p0, p1: endpoints in pixel coordinates
 //   - shift: AA shift (0 for no AA, 2 for 4x AA quality)
 //
 //nolint:gosec // G115: shift is bounded [0, MaxCoeffShift], conversions are safe
-func NewLineEdge(p0, p1 CurvePoint, shift int) *LineEdge {
+func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	// Convert to FDot6 with AA scaling.
 	// Scale = 1 << (shift + 6), e.g., 64 for no AA, 256 for 4x AA.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
@@ -112,13 +113,13 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) *LineEdge {
 
 	// Skip zero-height lines (horizontal)
 	if top == bottom {
-		return nil
+		return LineEdge{}, false
 	}
 
 	slope := FDot6Div(x1-x0, y1-y0)
 	dy := computeDY(top, y0)
 
-	return &LineEdge{
+	return LineEdge{
 		Prev:    -1, // No link
 		Next:    -1, // No link
 		X:       FDot6ToFDot16(x0 + FDot16Mul(slope, dy)),
@@ -126,7 +127,7 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) *LineEdge {
 		FirstY:  top,
 		LastY:   bottom - 1,
 		Winding: winding,
-	}
+	}, true
 }
 
 // IsVertical returns true if the edge has zero slope.
@@ -857,13 +858,13 @@ func (e *CurveEdgeVariant) Update() bool {
 
 // NewLineEdgeVariant creates a CurveEdgeVariant for a line.
 func NewLineEdgeVariant(p0, p1 CurvePoint, shift int) *CurveEdgeVariant {
-	line := NewLineEdge(p0, p1, shift)
-	if line == nil {
+	line, ok := NewLineEdge(p0, p1, shift)
+	if !ok {
 		return nil
 	}
 	return &CurveEdgeVariant{
 		Type: EdgeTypeLine,
-		Line: line,
+		Line: &line,
 	}
 }
 

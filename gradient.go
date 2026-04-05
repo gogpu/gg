@@ -117,6 +117,8 @@ func interpolateColorLinear(c1, c2 RGBA, t float64) RGBA {
 
 // colorAtOffset returns the interpolated color at a given offset.
 // Handles edge cases: empty stops, single stop, out-of-bounds t.
+// The stops slice MUST be pre-sorted by offset. Callers are responsible
+// for sorting stops once (at AddColorStop time or lazily before first use).
 func colorAtOffset(stops []ColorStop, t float64, mode ExtendMode) RGBA {
 	// Edge case: no stops
 	if len(stops) == 0 {
@@ -128,29 +130,26 @@ func colorAtOffset(stops []ColorStop, t float64, mode ExtendMode) RGBA {
 		return stops[0].Color
 	}
 
-	// Sort stops if needed (defensive, callers should pre-sort)
-	sorted := sortStops(stops)
-
 	// Apply extend mode to normalize t
 	t = applyExtendMode(t, mode)
 
 	// Find the two stops to interpolate between
-	// Binary search for efficiency
-	idx := sort.Search(len(sorted), func(i int) bool {
-		return sorted[i].Offset >= t
+	// Binary search for efficiency (no allocation)
+	idx := sort.Search(len(stops), func(i int) bool {
+		return stops[i].Offset >= t
 	})
 
 	// Handle edge cases after extend mode
 	if idx == 0 {
-		return sorted[0].Color
+		return stops[0].Color
 	}
-	if idx >= len(sorted) {
-		return sorted[len(sorted)-1].Color
+	if idx >= len(stops) {
+		return stops[len(stops)-1].Color
 	}
 
 	// Interpolate between stops[idx-1] and stops[idx]
-	stop1 := sorted[idx-1]
-	stop2 := sorted[idx]
+	stop1 := stops[idx-1]
+	stop2 := stops[idx]
 
 	// Avoid division by zero for coincident stops
 	if stop2.Offset == stop1.Offset {

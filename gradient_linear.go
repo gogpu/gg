@@ -19,6 +19,11 @@ type LinearGradientBrush struct {
 	End    Point       // End point of the gradient
 	Stops  []ColorStop // Color stops defining the gradient
 	Extend ExtendMode  // How gradient extends beyond bounds
+
+	// sortedStops caches stops sorted by offset. Populated lazily on first
+	// ColorAt call. Invalidated by AddColorStop (sorted set to false).
+	sortedStops []ColorStop
+	sorted      bool
 }
 
 // NewLinearGradientBrush creates a new linear gradient from (x0, y0) to (x1, y1).
@@ -36,6 +41,7 @@ func NewLinearGradientBrush(x0, y0, x1, y1 float64) *LinearGradientBrush {
 // Returns the gradient for method chaining.
 func (g *LinearGradientBrush) AddColorStop(offset float64, c RGBA) *LinearGradientBrush {
 	g.Stops = append(g.Stops, ColorStop{Offset: offset, Color: c})
+	g.sorted = false // invalidate cached sort
 	return g
 }
 
@@ -58,7 +64,7 @@ func (g *LinearGradientBrush) ColorAt(x, y float64) RGBA {
 	lengthSq := dx*dx + dy*dy
 
 	if lengthSq == 0 {
-		return firstStopColor(g.Stops)
+		return firstStopColor(g.ensureSorted())
 	}
 
 	// Project point onto the gradient line
@@ -67,15 +73,25 @@ func (g *LinearGradientBrush) ColorAt(x, y float64) RGBA {
 	py := y - g.Start.Y
 	t := (px*dx + py*dy) / lengthSq
 
-	return colorAtOffset(g.Stops, t, g.Extend)
+	return colorAtOffset(g.ensureSorted(), t, g.Extend)
+}
+
+// ensureSorted returns stops sorted by offset, using a cached copy.
+// The cache is invalidated by AddColorStop.
+func (g *LinearGradientBrush) ensureSorted() []ColorStop {
+	if g.sorted {
+		return g.sortedStops
+	}
+	g.sortedStops = sortStops(g.Stops)
+	g.sorted = true
+	return g.sortedStops
 }
 
 // firstStopColor returns the first stop's color or Transparent if empty.
+// The stops slice MUST be pre-sorted by offset.
 func firstStopColor(stops []ColorStop) RGBA {
 	if len(stops) == 0 {
 		return Transparent
 	}
-	// Find stop with minimum offset
-	sorted := sortStops(stops)
-	return sorted[0].Color
+	return stops[0].Color
 }

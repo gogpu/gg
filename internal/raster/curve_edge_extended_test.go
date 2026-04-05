@@ -59,15 +59,15 @@ func TestNewLineEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewLineEdge(tt.p0, tt.p1, tt.shift)
+			edge, ok := NewLineEdge(tt.p0, tt.p1, tt.shift)
 			if tt.wantNil {
-				if edge != nil {
-					t.Errorf("expected nil edge")
+				if ok {
+					t.Errorf("expected ok=false")
 				}
 				return
 			}
-			if edge == nil {
-				t.Fatal("expected non-nil edge")
+			if !ok {
+				t.Fatal("expected ok=true")
 			}
 			if edge.Winding != tt.wantWinding {
 				t.Errorf("Winding = %d, want %d", edge.Winding, tt.wantWinding)
@@ -82,25 +82,25 @@ func TestNewLineEdge(t *testing.T) {
 
 // TestLineEdge_IsVertical tests vertical edge detection.
 func TestLineEdge_IsVertical(t *testing.T) {
-	vertical := NewLineEdge(
+	vertical, ok := NewLineEdge(
 		CurvePoint{X: 5, Y: 0},
 		CurvePoint{X: 5, Y: 20},
 		0,
 	)
-	if vertical == nil {
-		t.Fatal("expected non-nil vertical edge")
+	if !ok {
+		t.Fatal("expected ok=true for vertical edge")
 	}
 	if !vertical.IsVertical() {
 		t.Error("edge with same X should be vertical")
 	}
 
-	diagonal := NewLineEdge(
+	diagonal, ok := NewLineEdge(
 		CurvePoint{X: 0, Y: 0},
 		CurvePoint{X: 10, Y: 10},
 		0,
 	)
-	if diagonal == nil {
-		t.Fatal("expected non-nil diagonal edge")
+	if !ok {
+		t.Fatal("expected ok=true for diagonal edge")
 	}
 	if diagonal.IsVertical() {
 		t.Error("diagonal edge should not be vertical")

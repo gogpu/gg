@@ -39,6 +39,10 @@ type Scene struct {
 
 	// imageRegistry maps image handles to indices
 	imageRegistry []*Image
+
+	// pathPool reuses Path objects to avoid per-shape allocations in Fill/Stroke.
+	// Each shape.ToPath() creates a new Path; pooling eliminates this overhead.
+	pathPool PathPool
 }
 
 // NewScene creates a new empty scene.
@@ -103,12 +107,13 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 		enc.EncodeTransform(combinedTransform)
 	}
 
-	// Convert shape to path and encode
-	path := shape.ToPath()
+	// Convert shape to path and encode — use pooled path when possible.
+	path := s.shapeToPath(shape)
 	if path == nil || path.IsEmpty() {
 		return
 	}
 	s.encodeScenePath(enc, path)
+	s.pathPool.Put(path)
 
 	// Encode fill command
 	enc.EncodeFill(brush, style)
@@ -147,12 +152,13 @@ func (s *Scene) Stroke(style *StrokeStyle, transform Affine, brush Brush, shape 
 		enc.EncodeTransform(combinedTransform)
 	}
 
-	// Convert shape to path and encode
-	path := shape.ToPath()
+	// Convert shape to path and encode — use pooled path when possible.
+	path := s.shapeToPath(shape)
 	if path == nil || path.IsEmpty() {
 		return
 	}
 	s.encodeScenePath(enc, path)
+	s.pathPool.Put(path)
 
 	// Encode stroke command
 	enc.EncodeStroke(brush, style)
@@ -242,9 +248,10 @@ func (s *Scene) PushLayer(blend BlendMode, alpha float32, clip Shape) {
 
 	// If there's a clip, encode it
 	if clip != nil {
-		path := clip.ToPath()
+		path := s.shapeToPath(clip)
 		if path != nil && !path.IsEmpty() {
 			s.encodeScenePath(parentEnc, path)
+			s.pathPool.Put(path)
 			parentEnc.EncodeBeginClip()
 		}
 	}
@@ -303,13 +310,14 @@ func (s *Scene) PushClip(shape Shape) {
 
 	// Encode clip in current layer
 	enc := s.currentEncoding()
-	path := shape.ToPath()
+	path := s.shapeToPath(shape)
 	if path != nil && !path.IsEmpty() {
 		// Encode transform if not identity
 		if !s.currentTransform.IsIdentity() {
 			enc.EncodeTransform(s.currentTransform)
 		}
 		s.encodeScenePath(enc, path)
+		s.pathPool.Put(path)
 		enc.EncodeBeginClip()
 	}
 
@@ -550,6 +558,18 @@ func (s *Scene) flattenLayers() {
 		s.encoding.Append(rootLayer.Encoding)
 		rootLayer.Encoding.Reset()
 	}
+}
+
+// shapeToPath converts a shape to a path, using a pooled Path when the shape
+// implements PathBuilder. The returned path should be returned to s.pathPool
+// after use via s.pathPool.Put(path).
+func (s *Scene) shapeToPath(shape Shape) *Path {
+	if builder, ok := shape.(PathBuilder); ok {
+		p := s.pathPool.Get()
+		builder.BuildPathInto(p)
+		return p
+	}
+	return shape.ToPath()
 }
 
 // registerImage adds an image to the registry and returns its index.

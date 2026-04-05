@@ -190,6 +190,10 @@ func (Close) isPathElement() {}
 
 // StrokeExpander converts stroked paths to filled paths.
 // This follows the kurbo stroke expansion algorithm.
+//
+// StrokeExpander is designed for reuse: call Expand() multiple times on the same
+// instance. Internal buffers are retained and reused between calls to minimize
+// heap allocations.
 type StrokeExpander struct {
 	style Stroke
 
@@ -197,10 +201,10 @@ type StrokeExpander struct {
 	// Smaller values produce more accurate results but more segments.
 	tolerance float64
 
-	// Build state
-	forward  *pathBuilder
-	backward *pathBuilder
-	output   *pathBuilder
+	// Build state — embedded structs, reused between Expand() calls.
+	forward  pathBuilder
+	backward pathBuilder
+	output   pathBuilder
 
 	// Current segment state
 	startPt   Point
@@ -212,6 +216,10 @@ type StrokeExpander struct {
 
 	// Join threshold for skipping small joins
 	joinThresh float64
+
+	// Reusable buffer for curve flattening (flattenQuad/flattenCubic).
+	// Retained between calls to avoid per-curve allocations.
+	flattenBuf []Point
 }
 
 // NewStrokeExpander creates a new stroke expander with the given style.
@@ -272,10 +280,11 @@ func (e *StrokeExpander) Expand(elements []PathElement) []PathElement {
 }
 
 // reset clears the expander state for a new expansion.
+// Buffers are truncated but retain their backing arrays for reuse.
 func (e *StrokeExpander) reset() {
-	e.forward = newPathBuilder()
-	e.backward = newPathBuilder()
-	e.output = newPathBuilder()
+	e.forward.reset()
+	e.backward.reset()
+	e.output.reset()
 	e.startPt = Point{}
 	e.startNorm = Vec2{}
 	e.startTan = Vec2{}
@@ -339,12 +348,12 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 	switch {
 	case cross > 0.0:
 		// Left turn: forward path is outer (convex), backward is inner (concave).
-		e.applyOuterJoin(e.forward, p0, lastNorm.Neg(), norm.Neg(), ab, cd, cross, dot, hypot)
-		e.handleInnerJoin(e.backward, p0, norm)
+		e.applyOuterJoin(&e.forward, p0, lastNorm.Neg(), norm.Neg(), ab, cd, cross, dot, hypot)
+		e.handleInnerJoin(&e.backward, p0, norm)
 	case cross < 0.0:
 		// Right turn: backward path is outer (convex), forward is inner (concave).
-		e.applyOuterJoin(e.backward, p0, lastNorm, norm, ab, cd, -cross, dot, hypot)
-		e.handleInnerJoin(e.forward, p0, norm.Neg())
+		e.applyOuterJoin(&e.backward, p0, lastNorm, norm, ab, cd, -cross, dot, hypot)
+		e.handleInnerJoin(&e.forward, p0, norm.Neg())
 	default:
 		// Exactly parallel (cross == 0). This includes near-180-degree reversals
 		// (dot < 0) and exactly collinear (dot > 0). Just connect both sides.
@@ -474,7 +483,7 @@ func (e *StrokeExpander) finish() {
 	}
 
 	// Copy forward path to output
-	e.output.appendPath(e.forward)
+	e.output.appendPath(&e.forward)
 
 	// Apply end cap using saved normal from last line segment.
 	// This follows the tiny-skia pattern: use prev_normal instead of
@@ -487,14 +496,14 @@ func (e *StrokeExpander) finish() {
 	}
 
 	// Append reversed backward path
-	e.appendReversed(e.backward)
+	e.appendReversed(&e.backward)
 
 	// Apply start cap and close
 	e.applyCap(e.style.Cap, e.startPt, e.startNorm, true)
 
-	// Clear for next subpath
-	e.forward = newPathBuilder()
-	e.backward = newPathBuilder()
+	// Clear for next subpath (truncate, keep backing arrays)
+	e.forward.reset()
+	e.backward.reset()
 }
 
 // finishClosed completes a closed subpath.
@@ -507,7 +516,7 @@ func (e *StrokeExpander) finishClosed() {
 	e.doJoin(e.startTan)
 
 	// Copy forward path and close
-	e.output.appendPath(e.forward)
+	e.output.appendPath(&e.forward)
 	e.output.close()
 
 	// Handle backward path separately
@@ -516,12 +525,12 @@ func (e *StrokeExpander) finishClosed() {
 		lastPt := getEndPoint(backElems[len(backElems)-1])
 		e.output.moveTo(lastPt)
 	}
-	e.appendReversed(e.backward)
+	e.appendReversed(&e.backward)
 	e.output.close()
 
-	// Clear for next subpath
-	e.forward = newPathBuilder()
-	e.backward = newPathBuilder()
+	// Clear for next subpath (truncate, keep backing arrays)
+	e.forward.reset()
+	e.backward.reset()
 }
 
 // applyCap applies a line cap at the given position.
@@ -537,19 +546,19 @@ func (e *StrokeExpander) applyCap(capStyle LineCap, center Point, norm Vec2, clo
 		}
 
 	case LineCapRound:
-		e.roundCap(e.output, center, norm)
+		e.roundCap(center, norm)
 		if closePath {
 			e.output.close()
 		}
 
 	case LineCapSquare:
-		e.squareCap(e.output, center, norm, closePath)
+		e.squareCap(&e.output, center, norm, closePath)
 	}
 }
 
-// roundCap adds a rounded cap.
-func (e *StrokeExpander) roundCap(out *pathBuilder, center Point, norm Vec2) {
-	e.roundJoin(out, center, norm, math.Pi)
+// roundCap adds a rounded cap using the output path builder.
+func (e *StrokeExpander) roundCap(center Point, norm Vec2) {
+	e.roundJoin(&e.output, center, norm, math.Pi)
 }
 
 // roundJoin adds a round join arc.
@@ -635,17 +644,18 @@ func (e *StrokeExpander) appendReversed(pb *pathBuilder) {
 }
 
 // flattenQuad flattens a quadratic Bezier curve to line segments.
+// Uses the reusable flattenBuf to avoid per-curve allocations.
 func (e *StrokeExpander) flattenQuad(p0, p1, p2 Point) []Point {
-	points := []Point{p0}
-	e.flattenQuadRec(p0, p1, p2, &points)
-	return points
+	e.flattenBuf = append(e.flattenBuf[:0], p0)
+	e.flattenQuadRec(p0, p1, p2)
+	return e.flattenBuf
 }
 
-func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point, points *[]Point) {
+func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point) {
 	// Check if curve is flat enough
 	dist := distanceToLine(p1, p0, p2)
 	if dist < e.tolerance {
-		*points = append(*points, p2)
+		e.flattenBuf = append(e.flattenBuf, p2)
 		return
 	}
 
@@ -654,25 +664,26 @@ func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point, points *[]Point) {
 	q1 := p1.Lerp(p2, 0.5)
 	q2 := q0.Lerp(q1, 0.5)
 
-	e.flattenQuadRec(p0, q0, q2, points)
-	e.flattenQuadRec(q2, q1, p2, points)
+	e.flattenQuadRec(p0, q0, q2)
+	e.flattenQuadRec(q2, q1, p2)
 }
 
 // flattenCubic flattens a cubic Bezier curve to line segments.
+// Uses the reusable flattenBuf to avoid per-curve allocations.
 func (e *StrokeExpander) flattenCubic(p0, p1, p2, p3 Point) []Point {
-	points := []Point{p0}
-	e.flattenCubicRec(p0, p1, p2, p3, &points)
-	return points
+	e.flattenBuf = append(e.flattenBuf[:0], p0)
+	e.flattenCubicRec(p0, p1, p2, p3)
+	return e.flattenBuf
 }
 
-func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point, points *[]Point) {
+func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point) {
 	// Check if curve is flat enough
 	d1 := distanceToLine(p1, p0, p3)
 	d2 := distanceToLine(p2, p0, p3)
 	dist := math.Max(d1, d2)
 
 	if dist < e.tolerance {
-		*points = append(*points, p3)
+		e.flattenBuf = append(e.flattenBuf, p3)
 		return
 	}
 
@@ -684,8 +695,8 @@ func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point, points *[]Point) 
 	r1 := q1.Lerp(q2, 0.5)
 	s := r0.Lerp(r1, 0.5)
 
-	e.flattenCubicRec(p0, q0, r0, s, points)
-	e.flattenCubicRec(s, r1, q2, p3, points)
+	e.flattenCubicRec(p0, q0, r0, s)
+	e.flattenCubicRec(s, r1, q2, p3)
 }
 
 // distanceToLine calculates the perpendicular distance from point p to line segment (a, b).
@@ -738,6 +749,12 @@ func newPathBuilder() *pathBuilder {
 	return &pathBuilder{
 		elements: make([]PathElement, 0, 64),
 	}
+}
+
+// reset clears the path builder for reuse, retaining the backing array.
+func (b *pathBuilder) reset() {
+	b.elements = b.elements[:0]
+	b.current = Point{}
 }
 
 func (b *pathBuilder) isEmpty() bool {

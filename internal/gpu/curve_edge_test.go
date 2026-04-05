@@ -257,14 +257,14 @@ func TestLineEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := raster.NewLineEdge(tt.p0, tt.p1, tt.shift)
+			edge, ok := raster.NewLineEdge(tt.p0, tt.p1, tt.shift)
 
-			if (edge == nil) != tt.wantNil {
-				t.Errorf("raster.NewLineEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+			if ok == tt.wantNil {
+				t.Errorf("raster.NewLineEdge() ok = %v, want ok = %v", ok, !tt.wantNil)
 				return
 			}
 
-			if edge == nil {
+			if !ok {
 				return
 			}
 

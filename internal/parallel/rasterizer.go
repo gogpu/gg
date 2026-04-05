@@ -100,16 +100,10 @@ func (pr *ParallelRasterizer) Clear(c color.Color) {
 	// Convert color to RGBA bytes once
 	rgba := colorToRGBA(c)
 
-	// Create work for each tile
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			pr.clearTile(t, rgba)
-		}
-	}
-
-	pr.pool.ExecuteAll(work)
+	// Execute tile clears in parallel using indexed dispatch (no per-tile closures).
+	pr.pool.ExecuteIndexed(len(tiles), func(i int) {
+		pr.clearTile(tiles[i], rgba)
+	})
 }
 
 // clearTile fills a single tile with a solid color.
@@ -174,16 +168,10 @@ func (pr *ParallelRasterizer) FillRect(x, y, w, h int, c color.Color) {
 	// Convert color to RGBA bytes once
 	rgba := colorToRGBA(c)
 
-	// Create work for each tile
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			pr.fillRectInTile(t, x, y, w, h, rgba)
-		}
-	}
-
-	pr.pool.ExecuteAll(work)
+	// Execute fill operations in parallel using indexed dispatch.
+	pr.pool.ExecuteIndexed(len(tiles), func(i int) {
+		pr.fillRectInTile(tiles[i], x, y, w, h, rgba)
+	})
 }
 
 // fillRectInTile fills the intersection of rect and tile.
@@ -230,15 +218,9 @@ func (pr *ParallelRasterizer) FillTiles(tiles []*Tile, fn func(t *Tile)) {
 		return
 	}
 
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			fn(t)
-		}
-	}
-
-	pr.pool.ExecuteAll(work)
+	pr.pool.ExecuteIndexed(len(tiles), func(i int) {
+		fn(tiles[i])
+	})
 }
 
 // Composite copies all tile data to a destination buffer in row-major RGBA order.
@@ -255,15 +237,9 @@ func (pr *ParallelRasterizer) Composite(dst []byte, stride int) {
 		return
 	}
 
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			pr.compositeTile(t, dst, stride)
-		}
-	}
-
-	pr.pool.ExecuteAll(work)
+	pr.pool.ExecuteIndexed(len(tiles), func(i int) {
+		pr.compositeTile(tiles[i], dst, stride)
+	})
 }
 
 // compositeTile copies a single tile's data to the destination buffer.
@@ -309,15 +285,9 @@ func (pr *ParallelRasterizer) CompositeDirty(dst []byte, stride int) {
 		return
 	}
 
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			pr.compositeTile(t, dst, stride)
-		}
-	}
-
-	pr.pool.ExecuteAll(work)
+	pr.pool.ExecuteIndexed(len(tiles), func(i int) {
+		pr.compositeTile(tiles[i], dst, stride)
+	})
 }
 
 // MarkAllDirty marks all tiles for redraw.

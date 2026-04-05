@@ -332,15 +332,15 @@ func (eb *EdgeBuilder) addLineUnclipped(x0, y0, x1, y1 float32) {
 	p0 := CurvePoint{X: x0, Y: y0}
 	p1 := CurvePoint{X: x1, Y: y1}
 
-	edge := NewLineEdge(p0, p1, eb.aaShift)
-	if edge == nil {
+	edge, ok := NewLineEdge(p0, p1, eb.aaShift)
+	if !ok {
 		return // Horizontal or degenerate
 	}
 
 	// Try to combine with previous vertical edge
 	if edge.IsVertical() && len(eb.lineEdges) > 0 {
 		last := &eb.lineEdges[len(eb.lineEdges)-1]
-		combine := combineVertical(edge, last)
+		combine := combineVertical(&edge, last)
 		switch combine {
 		case combineTotal:
 			// Edges cancel out - remove the last edge
@@ -354,7 +354,7 @@ func (eb *EdgeBuilder) addLineUnclipped(x0, y0, x1, y1 float32) {
 		}
 	}
 
-	eb.lineEdges = append(eb.lineEdges, *edge)
+	eb.lineEdges = append(eb.lineEdges, edge)
 }
 
 // clipAndAddLine clips a line to clipRect and emits clipped segments.

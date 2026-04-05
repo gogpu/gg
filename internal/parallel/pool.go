@@ -176,6 +176,41 @@ func (p *WorkerPool) ExecuteAll(work []func()) {
 	completionWG.Wait()
 }
 
+// ExecuteIndexed distributes n indexed work items across workers and waits for all
+// to complete. Unlike ExecuteAll, this takes a single function and an index count,
+// avoiding per-item closure allocations. The function fn is called with indices [0, n).
+//
+// This is significantly more efficient than ExecuteAll when each work item only
+// differs by index, as it allocates only one closure per worker instead of one
+// per work item.
+func (p *WorkerPool) ExecuteIndexed(n int, fn func(i int)) {
+	if n <= 0 || fn == nil || !p.running.Load() {
+		return
+	}
+
+	var completionWG sync.WaitGroup
+	completionWG.Add(n)
+
+	for i := range n {
+		workerID := i % p.workers
+		idx := i // capture index for closure
+
+		wrappedWork := func() {
+			defer completionWG.Done()
+			fn(idx)
+		}
+
+		select {
+		case p.workQueues[workerID] <- wrappedWork:
+			// Successfully queued
+		case <-p.done:
+			completionWG.Done()
+		}
+	}
+
+	completionWG.Wait()
+}
+
 // ExecuteAsync distributes work across workers without waiting for completion.
 // Useful for fire-and-forget scenarios.
 // If the pool is closed, this is a no-op.

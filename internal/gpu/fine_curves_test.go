@@ -343,14 +343,14 @@ func TestLineEdgeToSegment(t *testing.T) {
 	// Create a line edge
 	p0 := raster.CurvePoint{X: 10, Y: 5}
 	p1 := raster.CurvePoint{X: 20, Y: 15}
-	line := raster.NewLineEdge(p0, p1, 2)
+	line, ok := raster.NewLineEdge(p0, p1, 2)
 
-	if line == nil {
+	if !ok {
 		t.Fatal("failed to create line edge")
 	}
 
 	// Convert to segment
-	segment := fr.lineEdgeToSegment(line, 0, 0)
+	segment := fr.lineEdgeToSegment(&line, 0, 0)
 
 	// Verify Y coordinates are correct
 	if segment.Y0 > segment.Y1 {

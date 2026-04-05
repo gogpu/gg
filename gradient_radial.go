@@ -30,6 +30,11 @@ type RadialGradientBrush struct {
 	EndRadius   float64     // Outer radius where gradient ends (t=1)
 	Stops       []ColorStop // Color stops defining the gradient
 	Extend      ExtendMode  // How gradient extends beyond bounds
+
+	// sortedStops caches stops sorted by offset. Populated lazily on first
+	// ColorAt call. Invalidated by AddColorStop (sorted set to false).
+	sortedStops []ColorStop
+	sorted      bool
 }
 
 // NewRadialGradientBrush creates a new radial gradient.
@@ -60,6 +65,7 @@ func (g *RadialGradientBrush) SetFocus(fx, fy float64) *RadialGradientBrush {
 // Returns the gradient for method chaining.
 func (g *RadialGradientBrush) AddColorStop(offset float64, c RGBA) *RadialGradientBrush {
 	g.Stops = append(g.Stops, ColorStop{Offset: offset, Color: c})
+	g.sorted = false // invalidate cached sort
 	return g
 }
 
@@ -79,11 +85,22 @@ func (g *RadialGradientBrush) ColorAt(x, y float64) RGBA {
 	// Handle degenerate gradient (zero radius difference)
 	radiusDiff := g.EndRadius - g.StartRadius
 	if radiusDiff == 0 {
-		return firstStopColor(g.Stops)
+		return firstStopColor(g.ensureSorted())
 	}
 
 	t := g.computeT(x, y)
-	return colorAtOffset(g.Stops, t, g.Extend)
+	return colorAtOffset(g.ensureSorted(), t, g.Extend)
+}
+
+// ensureSorted returns stops sorted by offset, using a cached copy.
+// The cache is invalidated by AddColorStop.
+func (g *RadialGradientBrush) ensureSorted() []ColorStop {
+	if g.sorted {
+		return g.sortedStops
+	}
+	g.sortedStops = sortStops(g.Stops)
+	g.sorted = true
+	return g.sortedStops
 }
 
 // computeT calculates the gradient parameter t for a point.

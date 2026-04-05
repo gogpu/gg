@@ -884,7 +884,7 @@ func dashQuad(result *Path, currentX, currentY *float64, control, end Point,
 	tolerance := 0.5 // reasonable tolerance for dashing
 	points := flattenQuadForDash(*currentX, *currentY, control.X, control.Y, end.X, end.Y, tolerance)
 
-	for i := 1; i < len(points); i += 2 {
+	for i := 2; i < len(points); i += 2 {
 		dashLine(result, currentX, currentY, points[i], points[i+1],
 			pattern, patternIdx, patternPos, inDash)
 	}
@@ -898,7 +898,7 @@ func dashCubic(result *Path, currentX, currentY *float64, c1, c2, end Point,
 	points := flattenCubicForDash(*currentX, *currentY,
 		c1.X, c1.Y, c2.X, c2.Y, end.X, end.Y, tolerance)
 
-	for i := 1; i < len(points); i += 2 {
+	for i := 2; i < len(points); i += 2 {
 		dashLine(result, currentX, currentY, points[i], points[i+1],
 			pattern, patternIdx, patternPos, inDash)
 	}

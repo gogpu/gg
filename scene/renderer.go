@@ -11,11 +11,16 @@ import (
 )
 
 // tilePool manages pooled resources for per-tile rendering.
-// SoftwareRenderers and Pixmaps are expensive to allocate, so we reuse them
-// across tiles and frames via sync.Pool.
+// SoftwareRenderers, Pixmaps, Decoders, Paths, Paints, and clip masks are
+// expensive to allocate, so we reuse them across tiles and frames via sync.Pool.
 type tilePool struct {
-	renderers sync.Pool // *gg.SoftwareRenderer
-	pixmaps   sync.Pool // *gg.Pixmap
+	renderers  sync.Pool // *gg.SoftwareRenderer
+	pixmaps    sync.Pool // *gg.Pixmap
+	decoders   sync.Pool // *Decoder
+	scenePaths sync.Pool // *Path (scene.Path for decode loop)
+	ggPaths    sync.Pool // *gg.Path (for convertPath)
+	fillPaints sync.Pool // *gg.Paint (for convertFillPaint)
+	clipMasks  sync.Pool // *[]byte (for clip mask buffers)
 }
 
 // getRenderer returns a SoftwareRenderer from the pool, resizing if necessary.
@@ -49,6 +54,82 @@ func (p *tilePool) getPixmap(w, h int) *gg.Pixmap {
 // putPixmap returns a Pixmap to the pool for reuse.
 func (p *tilePool) putPixmap(pm *gg.Pixmap) {
 	p.pixmaps.Put(pm)
+}
+
+// getDecoder returns a Decoder from the pool, reset to the given encoding.
+func (p *tilePool) getDecoder(enc *Encoding) *Decoder {
+	if v := p.decoders.Get(); v != nil {
+		dec := v.(*Decoder)
+		dec.Reset(enc)
+		return dec
+	}
+	return NewDecoder(enc)
+}
+
+// putDecoder returns a Decoder to the pool for reuse.
+func (p *tilePool) putDecoder(dec *Decoder) {
+	p.decoders.Put(dec)
+}
+
+// getScenePath returns a scene.Path from the pool, reset for reuse.
+func (p *tilePool) getScenePath() *Path {
+	if v := p.scenePaths.Get(); v != nil {
+		sp := v.(*Path)
+		sp.Reset()
+		return sp
+	}
+	return NewPath()
+}
+
+// putScenePath returns a scene.Path to the pool for reuse.
+func (p *tilePool) putScenePath(sp *Path) {
+	p.scenePaths.Put(sp)
+}
+
+// getGGPath returns a gg.Path from the pool, cleared for reuse.
+func (p *tilePool) getGGPath() *gg.Path {
+	if v := p.ggPaths.Get(); v != nil {
+		gp := v.(*gg.Path)
+		gp.Clear()
+		return gp
+	}
+	return gg.NewPath()
+}
+
+// putGGPath returns a gg.Path to the pool for reuse.
+func (p *tilePool) putGGPath(gp *gg.Path) {
+	p.ggPaths.Put(gp)
+}
+
+// getFillPaint returns a Paint from the pool, reset for fill use.
+func (p *tilePool) getFillPaint() *gg.Paint {
+	if v := p.fillPaints.Get(); v != nil {
+		return v.(*gg.Paint)
+	}
+	return gg.NewPaint()
+}
+
+// putFillPaint returns a Paint to the pool for reuse.
+func (p *tilePool) putFillPaint(paint *gg.Paint) {
+	p.fillPaints.Put(paint)
+}
+
+// getClipMask returns a clip mask buffer from the pool (at least size bytes).
+func (p *tilePool) getClipMask(size int) []byte {
+	if v := p.clipMasks.Get(); v != nil {
+		buf := v.(*[]byte)
+		if cap(*buf) >= size {
+			b := (*buf)[:size]
+			clear(b)
+			return b
+		}
+	}
+	return make([]byte, size)
+}
+
+// putClipMask returns a clip mask buffer to the pool for reuse.
+func (p *tilePool) putClipMask(buf []byte) {
+	p.clipMasks.Put(&buf)
 }
 
 // Renderer renders Scene content to a target Pixmap using parallel tile-based processing.
@@ -373,24 +454,17 @@ func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel
 		checkInterval = len(tiles) / 16
 	}
 
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		idx := i
-		work[i] = func() {
-			// Check for cancellation periodically
-			if idx%checkInterval == 0 {
-				select {
-				case <-ctx.Done():
-					return // Stop processing on cancellation
-				default:
-				}
+	r.workerPool.ExecuteIndexed(len(tiles), func(i int) {
+		// Check for cancellation periodically
+		if i%checkInterval == 0 {
+			select {
+			case <-ctx.Done():
+				return // Stop processing on cancellation
+			default:
 			}
-			r.renderTile(t, enc, target)
 		}
-	}
-
-	r.workerPool.ExecuteAll(work)
+		r.renderTile(tiles[i], enc, target)
+	})
 
 	// Check if context was canceled during execution
 	select {
@@ -430,9 +504,9 @@ func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap) 
 	// Acquire pooled resources for this tile
 	pm := r.pool.getPixmap(tileW, tileH)
 	sr := r.pool.getRenderer(tileW, tileH)
+	dec := r.pool.getDecoder(enc)
 
-	// Create decoder and render commands using gg.SoftwareRenderer
-	dec := NewDecoder(enc)
+	// Render commands using gg.SoftwareRenderer
 	r.executeEncodingOnTile(dec, tile, pm, sr)
 
 	// Copy rendered pixmap data into the tile buffer.
@@ -441,6 +515,7 @@ func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap) 
 	copy(tile.Data, pmData)
 
 	// Return resources to pool
+	r.pool.putDecoder(dec)
 	r.pool.putPixmap(pm)
 	r.pool.putRenderer(sr)
 
@@ -460,7 +535,11 @@ type tileClipState struct {
 //
 //nolint:gocyclo,cyclop,gocognit,funlen // Command interpreter with multiple cases is inherently complex
 func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
-	var currentPath *Path
+	// Reusable scene.Path for the decode loop — reset per TagBeginPath instead of allocating.
+	currentPath := r.pool.getScenePath()
+	defer r.pool.putScenePath(currentPath)
+	pathActive := false // true between TagBeginPath and fill/stroke/clip consume
+
 	currentTransform := IdentityAffine()
 
 	tileX, tileY, _, _ := tile.Bounds()
@@ -472,31 +551,40 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 	// clipStack tracks nested clip states for BeginClip/EndClip pairs.
 	var clipStack []tileClipState
 
+	// Reusable gg.Path for convertPath — avoids per-fill/stroke allocation.
+	ggPath := r.pool.getGGPath()
+	defer r.pool.putGGPath(ggPath)
+
+	// Reusable Paint for fill operations.
+	fillPaint := r.pool.getFillPaint()
+	defer r.pool.putFillPaint(fillPaint)
+
 	for dec.Next() {
 		switch dec.Tag() {
 		case TagTransform:
 			currentTransform = dec.Transform()
 
 		case TagBeginPath:
-			currentPath = NewPath()
+			currentPath.Reset()
+			pathActive = true
 
 		case TagMoveTo:
 			x, y := dec.MoveTo()
-			if currentPath != nil {
+			if pathActive {
 				tx, ty := currentTransform.TransformPoint(x, y)
 				currentPath.MoveTo(tx, ty)
 			}
 
 		case TagLineTo:
 			x, y := dec.LineTo()
-			if currentPath != nil {
+			if pathActive {
 				tx, ty := currentTransform.TransformPoint(x, y)
 				currentPath.LineTo(tx, ty)
 			}
 
 		case TagQuadTo:
 			cx, cy, x, y := dec.QuadTo()
-			if currentPath != nil {
+			if pathActive {
 				tcx, tcy := currentTransform.TransformPoint(cx, cy)
 				tx, ty := currentTransform.TransformPoint(x, y)
 				currentPath.QuadTo(tcx, tcy, tx, ty)
@@ -504,7 +592,7 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 
 		case TagCubicTo:
 			c1x, c1y, c2x, c2y, x, y := dec.CubicTo()
-			if currentPath != nil {
+			if pathActive {
 				tc1x, tc1y := currentTransform.TransformPoint(c1x, c1y)
 				tc2x, tc2y := currentTransform.TransformPoint(c2x, c2y)
 				tx, ty := currentTransform.TransformPoint(x, y)
@@ -512,7 +600,7 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			}
 
 		case TagClosePath:
-			if currentPath != nil {
+			if pathActive {
 				currentPath.Close()
 			}
 
@@ -521,11 +609,12 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 
 		case TagFill:
 			brush, style := dec.Fill()
-			if currentPath != nil && !currentPath.IsEmpty() {
-				ggPath := convertPath(currentPath, tileX, tileY)
-				paint := convertFillPaint(brush, style)
-				_ = sr.Fill(activePM, ggPath, paint)
+			if pathActive && !currentPath.IsEmpty() {
+				convertPathInto(currentPath, tileX, tileY, ggPath)
+				resetFillPaint(fillPaint, brush, style)
+				_ = sr.Fill(activePM, ggPath, fillPaint)
 			}
+			pathActive = false
 
 		case TagFillRoundRect:
 			brush, _, rect, rx, ry := dec.FillRoundRect()
@@ -533,11 +622,12 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 
 		case TagStroke:
 			brush, style := dec.Stroke()
-			if currentPath != nil && !currentPath.IsEmpty() {
-				ggPath := convertPath(currentPath, tileX, tileY)
+			if pathActive && !currentPath.IsEmpty() {
+				convertPathInto(currentPath, tileX, tileY, ggPath)
 				paint := convertStrokePaint(brush, style)
 				_ = sr.Stroke(activePM, ggPath, paint)
 			}
+			pathActive = false
 
 		case TagPushLayer:
 			// Layer management - skip for now
@@ -550,16 +640,16 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			tileW := activePM.Width()
 			tileH := activePM.Height()
 
-			if currentPath != nil && !currentPath.IsEmpty() {
+			if pathActive && !currentPath.IsEmpty() {
 				// 1. Render clip path as white on a temporary pixmap to get coverage.
 				maskPM := r.pool.getPixmap(tileW, tileH)
-				clipGGPath := convertPath(currentPath, tileX, tileY)
-				whitePaint := gg.NewPaint()
-				whitePaint.SetBrush(gg.Solid(gg.RGBA{R: 1, G: 1, B: 1, A: 1}))
-				_ = sr.Fill(maskPM, clipGGPath, whitePaint)
+				convertPathInto(currentPath, tileX, tileY, ggPath)
+				resetFillPaint(fillPaint, Brush{Kind: BrushSolid, Color: gg.RGBA{R: 1, G: 1, B: 1, A: 1}}, FillNonZero)
+				_ = sr.Fill(maskPM, ggPath, fillPaint)
 
-				// 2. Extract alpha channel as R8 mask.
-				clipMask := extractAlphaMask(maskPM)
+				// 2. Extract alpha channel as R8 mask (reuse pooled buffer).
+				clipMask := r.pool.getClipMask(tileW * tileH)
+				extractAlphaMaskInto(maskPM, clipMask)
 				r.pool.putPixmap(maskPM)
 
 				// 3. Save current pixmap and allocate a fresh one for clipped content.
@@ -570,12 +660,12 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 				clipStack = append(clipStack, tileClipState{mask: clipMask, savedPM: savedPM})
 			} else {
 				// Empty clip path clips everything (fully transparent mask).
-				clipMask := make([]byte, tileW*tileH)
+				clipMask := r.pool.getClipMask(tileW * tileH)
 				savedPM := activePM
 				activePM = r.pool.getPixmap(tileW, tileH)
 				clipStack = append(clipStack, tileClipState{mask: clipMask, savedPM: savedPM})
 			}
-			currentPath = nil // consumed by clip
+			pathActive = false // consumed by clip
 
 		case TagEndClip:
 			if len(clipStack) > 0 {
@@ -588,8 +678,9 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 				// Composite masked content onto the saved pixmap (source-over).
 				compositePixmaps(state.savedPM, activePM)
 
-				// Return the temporary pixmap and restore the saved one.
+				// Return the temporary pixmap and clip mask, restore the saved pixmap.
 				r.pool.putPixmap(activePM)
+				r.pool.putClipMask(state.mask)
 				activePM = state.savedPM
 			}
 
@@ -610,6 +701,7 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 		applyAlphaMask(activePM, state.mask)
 		compositePixmaps(state.savedPM, activePM)
 		r.pool.putPixmap(activePM)
+		r.pool.putClipMask(state.mask)
 		activePM = state.savedPM
 	}
 
@@ -625,16 +717,15 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 // Clip Helpers (alpha mask compositing)
 // ---------------------------------------------------------------------------
 
-// extractAlphaMask extracts the alpha channel from a pixmap as a byte slice.
-// The result has one byte per pixel (R8 coverage), suitable for clip masking.
-func extractAlphaMask(pm *gg.Pixmap) []byte {
+// extractAlphaMaskInto extracts the alpha channel from a pixmap into a pre-allocated
+// buffer. The buffer must have at least Width*Height bytes. This avoids per-clip
+// allocation of the mask buffer.
+func extractAlphaMaskInto(pm *gg.Pixmap, mask []byte) {
 	data := pm.Data()
 	pixelCount := pm.Width() * pm.Height()
-	mask := make([]byte, pixelCount)
-	for i := range mask {
+	for i := 0; i < pixelCount && i*4+3 < len(data); i++ {
 		mask[i] = data[i*4+3] // alpha channel (offset 3 in RGBA)
 	}
-	return mask
 }
 
 // applyAlphaMask multiplies each pixel's channels by the corresponding mask value.
@@ -790,11 +881,11 @@ func clampByte(v float32) byte {
 	return byte(v + 0.5)
 }
 
-// convertPath converts a scene.Path (float32, canvas space) to a gg.Path
-// (float64, tile-local space) by subtracting the tile origin offset.
-// The scene.Path is already in transformed canvas coordinates.
-func convertPath(scenePath *Path, tileOffsetX, tileOffsetY int) *gg.Path {
-	p := gg.NewPath()
+// convertPathInto converts a scene.Path (float32, canvas space) into an existing
+// gg.Path (float64, tile-local space), avoiding allocation. The gg.Path is cleared
+// first, then populated with the scene path data offset by the tile origin.
+func convertPathInto(scenePath *Path, tileOffsetX, tileOffsetY int, p *gg.Path) {
+	p.Clear()
 	ox := float64(tileOffsetX)
 	oy := float64(tileOffsetY)
 
@@ -825,20 +916,46 @@ func convertPath(scenePath *Path, tileOffsetX, tileOffsetY int) *gg.Path {
 			p.Close()
 		}
 	}
-	return p
 }
 
-// convertFillPaint converts a scene.Brush and FillStyle to a gg.Paint
-// suitable for gg.SoftwareRenderer.Fill.
-func convertFillPaint(brush Brush, style FillStyle) *gg.Paint {
-	paint := gg.NewPaint()
+// resetFillPaint resets a Paint for fill use with the given brush and style.
+// This avoids allocating a new Paint per fill command.
+func resetFillPaint(paint *gg.Paint, brush Brush, style FillStyle) {
 	if brush.Kind == BrushSolid {
 		paint.SetBrush(gg.Solid(brush.Color))
 	}
 	if style == FillEvenOdd {
 		paint.FillRule = gg.FillRuleEvenOdd
+	} else {
+		paint.FillRule = gg.FillRuleNonZero
 	}
+	paint.Stroke = nil
+}
+
+// convertPath converts a scene.Path to a new gg.Path. This allocates a new gg.Path
+// and is kept for compatibility. The renderer hot path uses convertPathInto instead.
+func convertPath(scenePath *Path, tileOffsetX, tileOffsetY int) *gg.Path {
+	p := gg.NewPath()
+	convertPathInto(scenePath, tileOffsetX, tileOffsetY, p)
+	return p
+}
+
+// convertFillPaint converts a scene.Brush and FillStyle to a new gg.Paint.
+// This allocates a new Paint and is kept for compatibility. The renderer hot path
+// uses resetFillPaint instead.
+func convertFillPaint(brush Brush, style FillStyle) *gg.Paint {
+	paint := gg.NewPaint()
+	resetFillPaint(paint, brush, style)
 	return paint
+}
+
+// extractAlphaMask extracts the alpha channel from a pixmap as a new byte slice.
+// This allocates a new buffer and is kept for compatibility. The renderer hot path
+// uses extractAlphaMaskInto with pooled buffers instead.
+func extractAlphaMask(pm *gg.Pixmap) []byte {
+	mask := make([]byte, pm.Width()*pm.Height())
+	extractAlphaMaskInto(pm, mask)
+	return mask
 }
 
 // convertStrokePaint converts a scene.Brush and StrokeStyle to a gg.Paint
@@ -890,15 +1007,9 @@ func (r *Renderer) compositeTiles(tiles []*parallel.Tile, target *gg.Pixmap) {
 	targetData := target.Data()
 	stride := target.Width() * 4
 
-	work := make([]func(), len(tiles))
-	for i, tile := range tiles {
-		t := tile
-		work[i] = func() {
-			r.compositeTile(t, targetData, stride)
-		}
-	}
-
-	r.workerPool.ExecuteAll(work)
+	r.workerPool.ExecuteIndexed(len(tiles), func(i int) {
+		r.compositeTile(tiles[i], targetData, stride)
+	})
 }
 
 // compositeTile blends a single tile's data onto the target buffer using

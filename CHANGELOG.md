@@ -7,9 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.38.3] - 2026-04-05
 
+### Performance
+
+- **Gradient rendering 2–5x faster, zero allocations** — `sortStops()` was called
+  per-pixel (copying + sorting on every `ColorAt()`). Now pre-sorted at
+  `AddColorStop()` time with lazy cache invalidation.
+  LinearGradient: 181ns/4allocs → 33ns/0allocs (5.5x).
+  RadialGradient: 253ns/4allocs → 105ns/0allocs (2.4x).
+- **Circle/curve rendering 90–95% fewer allocations** — `NewLineEdge()` returns
+  value type instead of heap pointer. FillCircle r500: 270 → 14 allocs.
+- **Scene renderer 40% fewer allocs, 71% less memory** — pooled Paths, Paints,
+  Decoders, clip masks per tile. 4K render: 4M → 2.4M allocs, 238MB → 68MB.
+- **Scene build 75% fewer allocs** — `PathBuilder` interface + path pool.
+  10K shapes: 40K → 10K allocs.
+- **Worker pool 50% fewer allocs** — `ExecuteIndexed()` eliminates per-tile
+  closure + work slice allocations. 4K clear: 4083 → 2043 allocs.
+- **Stroke expansion 2–13x faster, up to 98% less memory** — embedded path
+  builders, reusable flatten buffer. SimpleLine: 13x faster, 98% less memory.
+
 ### Fixed
 
-- **Removed 3 dead naga SPIR-V workarounds** in Vello compute shaders — naga v0.16.4
+- **Removed 3 dead naga SPIR-V workarounds** in Vello compute shaders — naga v0.16.6
   fixed the codegen bugs. All three verified with GPU golden comparison (CPU vs GPU
   pixel-perfect match) on Vulkan, DX12, and GLES:
   - `backdrop.wgsl`: flat loop → nested for-loops (Rust Vello pattern)
@@ -17,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `path_tiling.wgsl`: let-chain + `select()` → `var` + `if/else` clipping
 - **Standalone compute adapter selection** — `RequestAdapter(nil)` instead of
   `HighPerformance` which rejected IntegratedGPU (Intel Iris Xe).
+- **dashQuad/dashCubic off-by-one** — flattened curve points loop started at
+  index 1 instead of 2, mixing up x/y coordinates for dashed curves.
 
 ### Changed
 
@@ -24,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GLES binding counters, StagingBelt alignment, GLES scissor/blit fix (#226)
 - **deps: naga v0.15.0 → v0.16.6** — +45 SPIR-V fixes, full Rust parity, GLSL backend fixes
 - **deps: gputypes v0.3.0 → v0.4.0**
+- **deps: golang.org/x/image v0.37.0 → v0.38.0**
 
 ## [0.38.2] - 2026-03-31
 

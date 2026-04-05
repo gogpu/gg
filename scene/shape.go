@@ -12,6 +12,14 @@ type Shape interface {
 	Bounds() Rect
 }
 
+// PathBuilder is an optional interface that shapes can implement to build
+// their path into an existing Path object, avoiding allocation of a new Path.
+// Scene.Fill/Stroke check for this interface and use a pooled Path when available.
+type PathBuilder interface {
+	// BuildPathInto resets p and builds the shape's path data into it.
+	BuildPathInto(p *Path)
+}
+
 // RectShape represents an axis-aligned rectangle.
 type RectShape struct {
 	X, Y          float32 // Top-left corner
@@ -26,6 +34,12 @@ func NewRectShape(x, y, width, height float32) *RectShape {
 // ToPath converts the rectangle to a Path.
 func (r *RectShape) ToPath() *Path {
 	return NewPath().Rectangle(r.X, r.Y, r.Width, r.Height)
+}
+
+// BuildPathInto builds the rectangle path into an existing Path, avoiding allocation.
+func (r *RectShape) BuildPathInto(p *Path) {
+	p.Reset()
+	p.Rectangle(r.X, r.Y, r.Width, r.Height)
 }
 
 // Bounds returns the bounding rectangle.
@@ -63,6 +77,12 @@ func (r *RoundedRectShape) ToPath() *Path {
 	return NewPath().RoundedRectangle(r.X, r.Y, r.Width, r.Height, r.Radius)
 }
 
+// BuildPathInto builds the rounded rectangle path into an existing Path.
+func (r *RoundedRectShape) BuildPathInto(p *Path) {
+	p.Reset()
+	p.RoundedRectangle(r.X, r.Y, r.Width, r.Height, r.Radius)
+}
+
 // Bounds returns the bounding rectangle.
 func (r *RoundedRectShape) Bounds() Rect {
 	return Rect{
@@ -87,6 +107,12 @@ func NewCircleShape(cx, cy, r float32) *CircleShape {
 // ToPath converts the circle to a Path.
 func (c *CircleShape) ToPath() *Path {
 	return NewPath().Circle(c.CX, c.CY, c.R)
+}
+
+// BuildPathInto builds the circle path into an existing Path.
+func (c *CircleShape) BuildPathInto(p *Path) {
+	p.Reset()
+	p.Circle(c.CX, c.CY, c.R)
 }
 
 // Bounds returns the bounding rectangle.
@@ -120,6 +146,12 @@ func NewEllipseShape(cx, cy, rx, ry float32) *EllipseShape {
 // ToPath converts the ellipse to a Path.
 func (e *EllipseShape) ToPath() *Path {
 	return NewPath().Ellipse(e.CX, e.CY, e.RX, e.RY)
+}
+
+// BuildPathInto builds the ellipse path into an existing Path.
+func (e *EllipseShape) BuildPathInto(p *Path) {
+	p.Reset()
+	p.Ellipse(e.CX, e.CY, e.RX, e.RY)
 }
 
 // Bounds returns the bounding rectangle.
@@ -261,6 +293,13 @@ func (l *LineShape) ToPath() *Path {
 	return NewPath().MoveTo(l.X1, l.Y1).LineTo(l.X2, l.Y2)
 }
 
+// BuildPathInto builds the line path into an existing Path.
+func (l *LineShape) BuildPathInto(p *Path) {
+	p.Reset()
+	p.MoveTo(l.X1, l.Y1)
+	p.LineTo(l.X2, l.Y2)
+}
+
 // Bounds returns the bounding rectangle.
 func (l *LineShape) Bounds() Rect {
 	return Rect{
@@ -334,6 +373,19 @@ func (p *PolygonShape) ToPath() *Path {
 	}
 
 	return path.Close()
+}
+
+// BuildPathInto builds the polygon path into an existing Path.
+func (p *PolygonShape) BuildPathInto(dst *Path) {
+	dst.Reset()
+	if len(p.points) < 4 {
+		return
+	}
+	dst.MoveTo(p.points[0], p.points[1])
+	for i := 2; i < len(p.points); i += 2 {
+		dst.LineTo(p.points[i], p.points[i+1])
+	}
+	dst.Close()
 }
 
 // Bounds returns the bounding rectangle.

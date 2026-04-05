@@ -28,6 +28,11 @@ type SweepGradientBrush struct {
 	EndAngle   float64     // End angle in radians (if 0, defaults to StartAngle + 2*Pi)
 	Stops      []ColorStop // Color stops defining the gradient
 	Extend     ExtendMode  // How gradient extends beyond bounds
+
+	// sortedStops caches stops sorted by offset. Populated lazily on first
+	// ColorAt call. Invalidated by AddColorStop (sorted set to false).
+	sortedStops []ColorStop
+	sorted      bool
 }
 
 // NewSweepGradientBrush creates a new sweep (conic) gradient centered at (cx, cy).
@@ -55,6 +60,7 @@ func (g *SweepGradientBrush) SetEndAngle(endAngle float64) *SweepGradientBrush {
 // Returns the gradient for method chaining.
 func (g *SweepGradientBrush) AddColorStop(offset float64, c RGBA) *SweepGradientBrush {
 	g.Stops = append(g.Stops, ColorStop{Offset: offset, Color: c})
+	g.sorted = false // invalidate cached sort
 	return g
 }
 
@@ -75,7 +81,7 @@ func (g *SweepGradientBrush) ColorAt(x, y float64) RGBA {
 	dx := x - g.Center.X
 	dy := y - g.Center.Y
 	if dx == 0 && dy == 0 {
-		return firstStopColor(g.Stops)
+		return firstStopColor(g.ensureSorted())
 	}
 
 	// Calculate angle from center to point
@@ -85,7 +91,18 @@ func (g *SweepGradientBrush) ColorAt(x, y float64) RGBA {
 	// Normalize angle relative to start angle
 	t := g.angleToT(angle)
 
-	return colorAtOffset(g.Stops, t, g.Extend)
+	return colorAtOffset(g.ensureSorted(), t, g.Extend)
+}
+
+// ensureSorted returns stops sorted by offset, using a cached copy.
+// The cache is invalidated by AddColorStop.
+func (g *SweepGradientBrush) ensureSorted() []ColorStop {
+	if g.sorted {
+		return g.sortedStops
+	}
+	g.sortedStops = sortStops(g.Stops)
+	g.sorted = true
+	return g.sortedStops
 }
 
 // angleToT converts an angle to a gradient parameter t in [0, 1].

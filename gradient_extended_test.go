@@ -109,14 +109,14 @@ func TestColorAtOffset_EdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("unsorted stops are sorted", func(t *testing.T) {
-		stops := []ColorStop{
+	t.Run("pre-sorted stops work correctly", func(t *testing.T) {
+		stops := sortStops([]ColorStop{
 			{Offset: 1.0, Color: Blue},
 			{Offset: 0.0, Color: Red},
-		}
+		})
 		got := colorAtOffset(stops, 0, ExtendPad)
 		if !colorsEqual(got, Red, 0.001) {
-			t.Errorf("colorAtOffset(unsorted, t=0) = %+v, want Red", got)
+			t.Errorf("colorAtOffset(sorted, t=0) = %+v, want Red", got)
 		}
 	})
 }
@@ -471,14 +471,14 @@ func TestFirstStopColor(t *testing.T) {
 		}
 	})
 
-	t.Run("unsorted returns minimum offset", func(t *testing.T) {
-		stops := []ColorStop{
+	t.Run("sorted returns minimum offset", func(t *testing.T) {
+		stops := sortStops([]ColorStop{
 			{Offset: 0.7, Color: Blue},
 			{Offset: 0.3, Color: Red},
-		}
+		})
 		got := firstStopColor(stops)
 		if !colorsEqual(got, Red, 0.001) {
-			t.Errorf("firstStopColor(unsorted) = %+v, want Red (min offset)", got)
+			t.Errorf("firstStopColor(sorted) = %+v, want Red (min offset)", got)
 		}
 	})
 }
