@@ -1197,9 +1197,7 @@ func (a *VelloAccelerator) initGPU() error {
 	}
 	a.instance = instance
 
-	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
-		PowerPreference: wgpu.PowerPreferenceHighPerformance,
-	})
+	adapter, err := instance.RequestAdapter(nil)
 	if err != nil {
 		return fmt.Errorf("request adapter: %w", err)
 	}

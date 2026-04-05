@@ -14,6 +14,7 @@
 *.jpg
 *.jpeg
 *.out
+*.log
 
 # Exception: golden test files (must be tracked)
 !testdata/golden/**/*.png

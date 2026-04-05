@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.3] - 2026-04-05
+
+### Fixed
+
+- **Removed 3 dead naga SPIR-V workarounds** in Vello compute shaders — naga v0.16.4
+  fixed the codegen bugs. All three verified with GPU golden comparison (CPU vs GPU
+  pixel-perfect match) on Vulkan, DX12, and GLES:
+  - `backdrop.wgsl`: flat loop → nested for-loops (Rust Vello pattern)
+  - `fine.wgsl`: `select()` → `if/else` for y_edge contribution
+  - `path_tiling.wgsl`: let-chain + `select()` → `var` + `if/else` clipping
+- **Standalone compute adapter selection** — `RequestAdapter(nil)` instead of
+  `HighPerformance` which rejected IntegratedGPU (Intel Iris Xe).
+
+### Changed
+
+- **deps: wgpu v0.23.0 → v0.23.9** — adapter limits, PowerPreference fallback,
+  GLES binding counters, StagingBelt alignment, GLES scissor/blit fix (#226)
+- **deps: naga v0.15.0 → v0.16.6** — +45 SPIR-V fixes, full Rust parity, GLSL backend fixes
+- **deps: gputypes v0.3.0 → v0.4.0**
+
 ## [0.38.2] - 2026-03-31
 
 ### Fixed

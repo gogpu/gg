@@ -192,79 +192,68 @@ fn main(
     let tile_x1_f = tile_x_f + f32(TILE_WIDTH);
     let tile_y1_f = tile_y_f + f32(TILE_HEIGHT);
 
-    // WORKAROUND: ALL clipping uses let-chain (no vec2 var reassignment) to avoid
-    // naga SPIR-V codegen bug where vec2 var stores are silently dropped.
-    // Also uses select() instead of if/else to avoid naga store-at-merge-point bug.
-
+    // Clipping: var + if/else pattern (Rust Vello style, no workarounds).
     let dy_full = xy1.y - xy0.y;
     let dx_full = xy1.x - xy0.x;
     let safe_dy = select(dy_full, 1.0, abs(dy_full) < EPSILON);
     let safe_dx = select(dx_full, 1.0, abs(dx_full) < EPSILON);
 
     // --- Top clipping ---
-    let do_top = seg_within_line > 0u;
-    var z_prev_val = 0.0;
-    z_prev_val = floor(a * (f32(seg_within_line) - 1.0) + b);
-    let is_top_edge = z == z_prev_val;
+    var p0 = xy0;
+    if seg_within_line > 0u {
+        let z_prev = floor(a * (f32(seg_within_line) - 1.0) + b);
+        let is_top_edge = z == z_prev;
 
-    let xt_top = clamp(
-        xy0.x + dx_full * (tile_y_f - xy0.y) / safe_dy,
-        tile_x_f + 1e-3, tile_x1_f
-    );
-    let top_edge_x = xt_top;
-    let top_edge_y = tile_y_f;
+        let xt_top = clamp(
+            xy0.x + dx_full * (tile_y_f - xy0.y) / safe_dy,
+            tile_x_f + 1e-3, tile_x1_f
+        );
+        let x_clip_top = select(tile_x1_f, tile_x_f, is_positive_slope);
+        let yt_top = clamp(
+            xy0.y + dy_full * (x_clip_top - xy0.x) / safe_dx,
+            tile_y_f + 1e-3, tile_y1_f
+        );
 
-    let x_clip_top = select(tile_x1_f, tile_x_f, is_positive_slope);
-    let yt_top = clamp(
-        xy0.y + dy_full * (x_clip_top - xy0.x) / safe_dx,
-        tile_y_f + 1e-3, tile_y1_f
-    );
-    let side_edge_x = x_clip_top;
-    let side_edge_y = yt_top;
+        if is_top_edge {
+            p0 = vec2<f32>(xt_top, tile_y_f);
+        } else {
+            p0 = vec2<f32>(x_clip_top, yt_top);
+        }
+    }
 
-    // Choose top vs side entry point.
-    let clip_top_x = select(side_edge_x, top_edge_x, is_top_edge);
-    let clip_top_y = select(side_edge_y, top_edge_y, is_top_edge);
-    // Apply only if this segment needs top clipping.
-    let xy0_x = select(xy0.x, clip_top_x, do_top);
-    let xy0_y = select(xy0.y, clip_top_y, do_top);
+    // --- Bottom clipping (uses top-clipped p0) ---
+    var p1 = xy1;
+    if seg_within_line < count - 1u {
+        let z_next = floor(a * (f32(seg_within_line) + 1.0) + b);
+        let is_bottom_edge = z == z_next;
 
-    // --- Bottom clipping (uses top-clipped xy0) ---
-    let do_bottom = seg_within_line < count - 1u;
-    var z_next_val = 0.0;
-    z_next_val = floor(a * (f32(seg_within_line) + 1.0) + b);
-    let is_bottom_edge = z == z_next_val;
+        let dy_bc = xy1.y - p0.y;
+        let dx_bc = xy1.x - p0.x;
+        let safe_dy_bc = select(dy_bc, 1.0, abs(dy_bc) < EPSILON);
+        let safe_dx_bc = select(dx_bc, 1.0, abs(dx_bc) < EPSILON);
 
-    let dy_bc = xy1.y - xy0_y;
-    let dx_bc = xy1.x - xy0_x;
-    let safe_dy_bc = select(dy_bc, 1.0, abs(dy_bc) < EPSILON);
-    let safe_dx_bc = select(dx_bc, 1.0, abs(dx_bc) < EPSILON);
+        let xt_bot = clamp(
+            p0.x + dx_bc * (tile_y1_f - p0.y) / safe_dy_bc,
+            tile_x_f + 1e-3, tile_x1_f
+        );
+        let x_clip_bot = select(tile_x_f, tile_x1_f, is_positive_slope);
+        let yt_bot = clamp(
+            p0.y + dy_bc * (x_clip_bot - p0.x) / safe_dx_bc,
+            tile_y_f + 1e-3, tile_y1_f
+        );
 
-    let xt_bot = clamp(
-        xy0_x + dx_bc * (tile_y1_f - xy0_y) / safe_dy_bc,
-        tile_x_f + 1e-3, tile_x1_f
-    );
-    let bot_edge_x = xt_bot;
-    let bot_edge_y = tile_y1_f;
-
-    let x_clip_bot = select(tile_x_f, tile_x1_f, is_positive_slope);
-    let yt_bot = clamp(
-        xy0_y + dy_bc * (x_clip_bot - xy0_x) / safe_dx_bc,
-        tile_y_f + 1e-3, tile_y1_f
-    );
-    let side_bot_x = x_clip_bot;
-    let side_bot_y = yt_bot;
-
-    let clip_bot_x = select(side_bot_x, bot_edge_x, is_bottom_edge);
-    let clip_bot_y = select(side_bot_y, bot_edge_y, is_bottom_edge);
-    let xy1_x = select(xy1.x, clip_bot_x, do_bottom);
-    let xy1_y = select(xy1.y, clip_bot_y, do_bottom);
+        if is_bottom_edge {
+            p1 = vec2<f32>(xt_bot, tile_y1_f);
+        } else {
+            p1 = vec2<f32>(x_clip_bot, yt_bot);
+        }
+    }
 
     // --- Tile-local coordinates ---
-    let p0x = xy0_x - tile_x_f;
-    let p0y = xy0_y - tile_y_f;
-    let p1x = xy1_x - tile_x_f;
-    let p1y = xy1_y - tile_y_f;
+    let p0x = p0.x - tile_x_f;
+    let p0y = p0.y - tile_y_f;
+    let p1x = p1.x - tile_x_f;
+    let p1y = p1.y - tile_y_f;
 
     // --- y_edge computation ---
     let p0_on_left = p0x == 0.0;
