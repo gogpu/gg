@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.1] - 2026-04-07
+
+### Changed
+
+- **Dependencies:** wgpu v0.23.9 → v0.24.2 (Metal texture flicker fix, DX12 encoder pool,
+  HEAP_TYPE_CUSTOM, unified encoder lifecycle, Metal SetBindGroup slot fix),
+  naga v0.16.6 → v0.17.0 (DXIL backend)
+
 ## [0.39.0] - 2026-04-05
 
 ### Breaking Changes
