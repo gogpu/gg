@@ -101,12 +101,8 @@ func (e *GPUTextEngine) LayoutText(
 	defer e.mu.Unlock()
 
 	logicalSize := face.Size()
-	// Apply device scale to get effective physical font size.
-	// On HiDPI displays (deviceScale > 1) this produces higher-quality MSDF
-	// rendering because screenPxRange scales proportionally with physical size.
-	fontSize := logicalSize * deviceScale
-	if fontSize <= 0 {
-		fontSize = logicalSize // fallback: never zero
+	if logicalSize <= 0 {
+		logicalSize = 16 // fallback: never zero
 	}
 	fontSource := face.Source()
 	fontID := computeFontID(fontSource)
@@ -115,10 +111,13 @@ func (e *GPUTextEngine) LayoutText(
 	var quads []TextQuad
 	var glyphCount, outlineSkip, atlasSkip, boundsSkip int
 
-	// Scale ratio: outline is extracted at msdfSize, positions are at fontSize.
-	// All outline-space values are multiplied by ratio to get screen pixels.
+	// Scale ratio: outline is extracted at msdfSize, quad positions are in user space.
+	// All outline-space values are multiplied by ratio to get user-space coordinates.
+	// Use logicalSize (not fontSize which includes deviceScale) because the CTM
+	// already handles device scaling — quads must be in logical user-space coords.
+	// (BUG-MSDF-RETINA-001: was fontSize/refSize which doubled positions on Retina)
 	refSize := float64(e.msdfSize)
-	ratio := fontSize / refSize
+	ratio := logicalSize / refSize
 
 	for glyph := range face.Glyphs(s) {
 		glyphCount++
