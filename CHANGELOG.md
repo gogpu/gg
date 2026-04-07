@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.2] - 2026-04-07
+
+### Added
+
+- **`ParseHex()`** — hex color parsing with error handling. Returns `(RGBA, error)` for invalid input. Existing `Hex()` unchanged (returns black opaque on error). Validates hex characters, supports `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`. (PR #237 by @adamsanclemente)
+
 ## [0.39.1] - 2026-04-07
 
 ### Changed
