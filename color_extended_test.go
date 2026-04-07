@@ -289,23 +289,89 @@ func TestCommonColors(t *testing.T) {
 
 func TestParseHex(t *testing.T) {
 	tests := []struct {
-		name string
-		s    string
-		want uint32
+		name    string
+		hex     string
+		want    RGBA
+		wantErr bool
 	}{
-		{"single digit", "F", 15},
-		{"two digits", "FF", 255},
-		{"lowercase", "ff", 255},
-		{"mixed", "Ab", 171},
-		{"zero", "00", 0},
-		{"invalid char", "GG", 0},
+		{"6-char with hash", "#FF0000", RGB(1, 0, 0), false},
+		{"6-char no hash", "00FF00", RGB(0, 1, 0), false},
+		{"6-char blue", "#0000FF", RGB(0, 0, 1), false},
+		{"3-char red", "#F00", RGB(1, 0, 0), false},
+		{"3-char white", "#FFF", RGB(1, 1, 1), false},
+		{"3-char black", "#000", RGB(0, 0, 0), false},
+		{"8-char with alpha", "#FF000080", RGBA{1, 0, 0, 128.0 / 255.0}, false},
+		{"8-char fully opaque", "#FF0000FF", RGB(1, 0, 0), false},
+		{"8-char fully transparent", "#FF000000", RGBA{1, 0, 0, 0}, false},
+		{"4-char with alpha", "#F008", RGBA{1, 0, 0, 136.0 / 255.0}, false},
+		{"4-char opaque", "#F00F", RGB(1, 0, 0), false},
+		{"lowercase", "#ff8800", RGB(1, 136.0/255.0, 0), false},
+		{"mixed case", "#Ff8800", RGB(1, 136.0/255.0, 0), false},
+		{"gray", "#808080", RGB(128.0/255.0, 128.0/255.0, 128.0/255.0), false},
+		{"empty string", "", RGBA{}, true},
+		{"hash only", "#", RGBA{}, true},
+		{"1 char", "#F", RGBA{}, true},
+		{"2 chars", "#FF", RGBA{}, true},
+		{"5 chars", "#12345", RGBA{}, true},
+		{"7 chars", "#1234567", RGBA{}, true},
+		{"9 chars", "#123456789", RGBA{}, true},
+		{"invalid hex chars 6", "#GGGGGG", RGBA{}, true},
+		{"invalid hex chars 3", "#GGG", RGBA{}, true},
+		{"invalid hex chars 8", "#GGGGGGGG", RGBA{}, true},
+		{"partial invalid", "#FF00GG", RGBA{}, true},
+		{"spaces", "#FF 00 FF", RGBA{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseHex(tt.hex)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ParseHex(%q) expected error, got nil", tt.hex)
+				}
+				wantBlack := RGB(0, 0, 0)
+				if !colorsNear(got, wantBlack, 0.001) {
+					t.Errorf("ParseHex(%q) on error = %v, want black opaque %v", tt.hex, got, wantBlack)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseHex(%q) unexpected error: %v", tt.hex, err)
+			}
+			if !colorsNear(got, tt.want, 0.01) {
+				t.Errorf("ParseHex(%q) = %v, want %v", tt.hex, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseHexHelper(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      string
+		want   uint32
+		wantOk bool
+	}{
+		{"single 0", "0", 0, true},
+		{"single F", "F", 15, true},
+		{"single a", "a", 10, true},
+		{"two digit FF", "FF", 255, true},
+		{"two digit 80", "80", 128, true},
+		{"mixed case Ab", "Ab", 171, true},
+		{"invalid G", "G", 0, false},
+		{"invalid GG", "GG", 0, false},
+		{"invalid after valid", "1G", 0, false},
+		{"space", " F", 0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got uint32
-			parseHex(tt.s, &got)
-			if got != tt.want {
+			ok := parseHex(tt.s, &got)
+			if ok != tt.wantOk {
+				t.Errorf("parseHex(%q) ok = %v, want %v", tt.s, ok, tt.wantOk)
+			}
+			if ok && got != tt.want {
 				t.Errorf("parseHex(%q) = %d, want %d", tt.s, got, tt.want)
 			}
 		})

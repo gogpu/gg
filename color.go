@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 )
@@ -60,39 +61,35 @@ func RGBA2(r, g, b, a float64) RGBA {
 	return RGBA{R: r, G: g, B: b, A: a}
 }
 
-// Hex creates a color from a hex string.
+// ParseHex creates a color from a hex string, returning an error for invalid formats.
 // Supports formats: "RGB", "RGBA", "RRGGBB", "RRGGBBAA".
-func Hex(hex string) RGBA {
+func ParseHex(hex string) (RGBA, error) {
+	original := hex
 	if hex != "" && hex[0] == '#' {
 		hex = hex[1:]
 	}
 
 	var r, g, b, a uint32
 	a = 255
+	var valid bool
 
 	switch len(hex) {
 	case 3: // RGB
-		parseHex(hex[0:1], &r)
-		parseHex(hex[1:2], &g)
-		parseHex(hex[2:3], &b)
+		valid = parseHex(hex[0:1], &r) && parseHex(hex[1:2], &g) && parseHex(hex[2:3], &b)
 		r, g, b = r*17, g*17, b*17
 	case 4: // RGBA
-		parseHex(hex[0:1], &r)
-		parseHex(hex[1:2], &g)
-		parseHex(hex[2:3], &b)
-		parseHex(hex[3:4], &a)
+		valid = parseHex(hex[0:1], &r) && parseHex(hex[1:2], &g) && parseHex(hex[2:3], &b) && parseHex(hex[3:4], &a)
 		r, g, b, a = r*17, g*17, b*17, a*17
 	case 6: // RRGGBB
-		parseHex(hex[0:2], &r)
-		parseHex(hex[2:4], &g)
-		parseHex(hex[4:6], &b)
+		valid = parseHex(hex[0:2], &r) && parseHex(hex[2:4], &g) && parseHex(hex[4:6], &b)
 	case 8: // RRGGBBAA
-		parseHex(hex[0:2], &r)
-		parseHex(hex[2:4], &g)
-		parseHex(hex[4:6], &b)
-		parseHex(hex[6:8], &a)
+		valid = parseHex(hex[0:2], &r) && parseHex(hex[2:4], &g) && parseHex(hex[4:6], &b) && parseHex(hex[6:8], &a)
 	default:
-		return RGBA{R: 0, G: 0, B: 0, A: 1}
+		valid = false
+	}
+
+	if !valid {
+		return RGBA{R: 0, G: 0, B: 0, A: 1}, fmt.Errorf("invalid hex color format: %q", original)
 	}
 
 	return RGBA{
@@ -100,11 +97,20 @@ func Hex(hex string) RGBA {
 		G: float64(g) / 255,
 		B: float64(b) / 255,
 		A: float64(a) / 255,
-	}
+	}, nil
 }
 
-// parseHex is a helper for hex parsing
-func parseHex(s string, val *uint32) {
+// Hex creates a color from a hex string.
+// Supports formats: "RGB", "RGBA", "RRGGBB", "RRGGBBAA".
+func Hex(hex string) RGBA {
+	if c, err := ParseHex(hex); err == nil {
+		return c
+	}
+	return RGBA{R: 0, G: 0, B: 0, A: 1}
+}
+
+// parseHex is a helper for hex parsing. Returns false if any character is not valid hex.
+func parseHex(s string, val *uint32) bool {
 	*val = 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -117,9 +123,10 @@ func parseHex(s string, val *uint32) {
 		case 'A' <= c && c <= 'F':
 			*val += uint32(c - 'A' + 10)
 		default:
-			return
+			return false
 		}
 	}
+	return true
 }
 
 // Premultiply returns a premultiplied color.
