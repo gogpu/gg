@@ -41,7 +41,7 @@
 | **Rendering** | Immediate and retained mode, six-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask), Vello analytic AA, GPU scissor rect clipping, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
-| **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation |
+| **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks (per-shape, per-layer, luminance, post-process) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
 | **Vector Export** | Recording system with PDF and SVG backends |
@@ -389,17 +389,33 @@ dc.PopLayer()
 
 ### Alpha Masks
 
-Sophisticated compositing with masks:
+Per-shape masking — each draw individually masked:
 
 ```go
+// Create a circular mask
 dc.DrawCircle(200, 200, 100)
-dc.Fill()
-mask := dc.AsMask()
+mask := dc.AsMask() // capture path as mask (before Fill!)
+dc.ClearPath()
 
-dc2 := gg.NewContext(400, 400)
-dc2.SetMask(mask)
-dc2.DrawRectangle(0, 0, 400, 400)
-dc2.Fill() // Only visible through mask
+// Apply mask: only the circle area is visible
+dc.SetMask(mask)
+dc.SetRGB(0, 0, 1)
+dc.DrawRectangle(0, 0, 400, 400)
+dc.Fill() // blue only inside the circle
+```
+
+Per-layer masking — mask an entire group of draws:
+
+```go
+mask := gg.NewMask(400, 400)
+// ... fill mask with desired shape ...
+
+dc.PushMaskLayer(mask)
+dc.DrawCircle(100, 100, 50)
+dc.Fill()
+dc.DrawRectangle(200, 200, 80, 80)
+dc.Fill()
+dc.PopLayer() // entire layer masked, then composited
 ```
 
 ### Recording & Vector Export
