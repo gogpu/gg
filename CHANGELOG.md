@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] - 2026-04-08
+
+### Added
+
+- **Alpha mask API** — complete enterprise-level masking system following Vello/tiny-skia patterns.
+  Fixes #238 (SetMask ignored during Fill) and #236 (AsMask documentation). (@Rider21)
+
+  **Per-shape masking** (`SetMask`/`ClearMask`):
+  - `SetMask(mask)` modulates each Fill/Stroke individually — mask value (0-255) multiplies pixel coverage
+  - Mask and clip compose multiplicatively when both active
+  - Saved/restored with Push/Pop
+
+  **Per-layer masking** (`PushMaskLayer`/`PopLayer`):
+  - `PushMaskLayer(mask)` creates isolated layer; all drawing goes to layer unmasked
+  - `PopLayer()` applies mask to entire layer before compositing back
+  - Nested layers compose correctly; `PushMaskLayer(nil)` = regular `PushLayer`
+
+  **Post-processing** (`ApplyMask`):
+  - `ApplyMask(mask)` applies DestinationIn blend to already-drawn content
+  - All premultiplied channels scaled by mask value
+
+  **Mask constructors:**
+  - `NewLuminanceMask(img)` — CSS Masking Level 1 formula (Y = 0.2126R + 0.7152G + 0.0722B)
+  - `NewMaskFromData(data, w, h)` — raw byte constructor with copy semantics
+
+  **GPU integration:**
+  - `MaskAware` interface for GPU accelerators to support mask textures
+  - GPU path uploads mask as R8Unorm texture when accelerator supports it
+  - Falls back to CPU when accelerator does not implement `MaskAware`
+
+### Improved
+
+- **AsMask documentation** — clarified that it works with the current unfilled path,
+  added three correct usage patterns and documented the common mistake of calling
+  AsMask after Fill (which clears the path)
+
 ## [0.39.4] - 2026-04-08
 
 ### Changed

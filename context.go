@@ -1108,19 +1108,39 @@ func (c *Context) flushGPUAccelerator() {
 }
 
 // tryGPUFill attempts to fill the current path using the GPU accelerator.
+// When a mask is active and the accelerator implements MaskAware, the mask
+// is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUFill() error {
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	if c.mask != nil {
+		if ma, ok := a.(MaskAware); ok {
+			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
+			defer ma.ClearMaskTexture()
+		} else {
+			return ErrFallbackToCPU
+		}
+	}
 	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
 
 // tryGPUStroke attempts to stroke the current path using the GPU accelerator.
+// When a mask is active and the accelerator implements MaskAware, the mask
+// is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUStroke() error {
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
+	}
+	if c.mask != nil {
+		if ma, ok := a.(MaskAware); ok {
+			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
+			defer ma.ClearMaskTexture()
+		} else {
+			return ErrFallbackToCPU
+		}
 	}
 	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
 }
@@ -1214,6 +1234,10 @@ func (c *Context) doFill() error {
 	c.applyClipToPaint()
 	defer func() { c.paint.ClipCoverage = nil }()
 
+	// Set mask coverage function on paint so the renderer can apply alpha masking.
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
+
 	return c.renderer.Fill(c.pixmap, devicePath, c.paint)
 }
 
@@ -1247,6 +1271,10 @@ func (c *Context) doStroke() error {
 	c.applyClipToPaint()
 	defer func() { c.paint.ClipCoverage = nil }()
 
+	// Set mask coverage function on paint so the renderer can apply alpha masking.
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
+
 	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)
 }
 
@@ -1260,6 +1288,19 @@ func (c *Context) applyClipToPaint() {
 	cs := c.clipStack
 	c.paint.ClipCoverage = func(x, y float64) byte {
 		return cs.Coverage(x, y)
+	}
+}
+
+// applyMaskToPaint sets the MaskCoverage function on the paint when an alpha
+// mask is active. This allows the renderer to apply per-pixel mask modulation
+// during compositing. Mask and clip compose multiplicatively.
+func (c *Context) applyMaskToPaint() {
+	if c.mask == nil {
+		return
+	}
+	m := c.mask
+	c.paint.MaskCoverage = func(x, y int) uint8 {
+		return m.At(x, y)
 	}
 }
 
