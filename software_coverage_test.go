@@ -310,6 +310,50 @@ func TestApplyClipCoverage(t *testing.T) {
 	}
 }
 
+// --- applyMaskCoverage tests ---
+
+func TestApplyMaskCoverage(t *testing.T) {
+	tests := []struct {
+		name     string
+		maskFn   func(x, y int) uint8
+		coverage uint8
+		want     uint8
+	}{
+		{
+			name:     "nil mask returns unchanged",
+			maskFn:   nil,
+			coverage: 200,
+			want:     200,
+		},
+		{
+			name:     "mask returns zero",
+			maskFn:   func(_, _ int) uint8 { return 0 },
+			coverage: 200,
+			want:     0,
+		},
+		{
+			name:     "mask returns full",
+			maskFn:   func(_, _ int) uint8 { return 255 },
+			coverage: 200,
+			want:     200,
+		},
+		{
+			name:     "mask returns half",
+			maskFn:   func(_, _ int) uint8 { return 128 },
+			coverage: 200,
+			want:     uint8(uint16(200) * 128 / 255),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := applyMaskCoverage(tt.maskFn, 5, 5, tt.coverage)
+			if got != tt.want {
+				t.Errorf("applyMaskCoverage() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- SoftwareRenderer Fill integration tests ---
 
 func TestSoftwareRendererFillSimplePath(t *testing.T) {

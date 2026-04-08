@@ -1,7 +1,13 @@
 package gg
 
 // SetMask sets an alpha mask for subsequent drawing operations.
-// The mask modulates the alpha of all drawing operations.
+// The mask modulates the alpha of all Fill and Stroke operations —
+// each pixel's coverage is multiplied by the mask value at that pixel.
+// A mask value of 255 means fully visible, 0 means fully transparent.
+//
+// When both a mask and a clip are active, they compose multiplicatively:
+// finalCoverage = shapeCoverage * clipCoverage * maskCoverage / (255*255).
+//
 // Pass nil to clear the mask.
 func (c *Context) SetMask(mask *Mask) {
 	c.mask = mask
@@ -25,9 +31,37 @@ func (c *Context) ClearMask() {
 	c.mask = nil
 }
 
-// AsMask creates a mask from the current path.
-// The mask is filled according to the current fill rule.
-// The path is NOT cleared after this operation.
+// AsMask creates a mask from the current unfilled path.
+// The current path is rasterized (filled with white on a transparent background)
+// and the alpha channel is extracted into a Mask. The fill rule from the context
+// is used for rasterization. The path is NOT cleared after this operation.
+//
+// IMPORTANT: AsMask works with the current path, which is cleared by [Context.Fill].
+// Call AsMask BEFORE Fill, or use [Context.FillPreserve] to keep the path.
+//
+// Correct usage patterns:
+//
+//	// Pattern 1: AsMask before Fill
+//	dc.DrawCircle(50, 50, 30)
+//	mask := dc.AsMask()    // captures the circle path as a mask
+//	dc.Fill()              // fills the circle (clears the path)
+//
+//	// Pattern 2: FillPreserve + AsMask
+//	dc.DrawCircle(50, 50, 30)
+//	dc.FillPreserve()      // fills but keeps the path
+//	mask := dc.AsMask()    // still has the circle path
+//	dc.ClearPath()
+//
+//	// Pattern 3: Capture rendered output as mask
+//	dc.DrawCircle(50, 50, 30)
+//	dc.Fill()              // path is now cleared
+//	mask := NewMaskFromAlpha(dc.Image()) // capture from rendered pixels
+//
+// Common mistake (returns empty mask):
+//
+//	dc.DrawCircle(50, 50, 30)
+//	dc.Fill()              // clears the path!
+//	mask := dc.AsMask()    // path is empty → mask is all zeros
 func (c *Context) AsMask() *Mask {
 	mask := NewMask(c.Width(), c.Height())
 

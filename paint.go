@@ -88,6 +88,13 @@ type Paint struct {
 	// pixel alpha by this coverage to apply the clip mask.
 	// Set automatically by Context before rendering when a clip is active.
 	ClipCoverage func(x, y float64) byte
+
+	// MaskCoverage is a function that returns the alpha mask coverage (0-255)
+	// at a given pixel coordinate. When non-nil, the renderer multiplies
+	// pixel alpha by this coverage to apply the alpha mask.
+	// Uses int coords because masks are pixel-aligned (no sub-pixel sampling).
+	// Set automatically by Context before rendering when a mask is active.
+	MaskCoverage func(x, y int) uint8
 }
 
 // NewPaint creates a new Paint with default values.
