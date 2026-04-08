@@ -1108,27 +1108,39 @@ func (c *Context) flushGPUAccelerator() {
 }
 
 // tryGPUFill attempts to fill the current path using the GPU accelerator.
-// Falls back to CPU when an alpha mask is active (GPU mask support is Phase 2).
+// When a mask is active and the accelerator implements MaskAware, the mask
+// is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUFill() error {
-	if c.mask != nil {
-		return ErrFallbackToCPU
-	}
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
+	}
+	if c.mask != nil {
+		if ma, ok := a.(MaskAware); ok {
+			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
+			defer ma.ClearMaskTexture()
+		} else {
+			return ErrFallbackToCPU
+		}
 	}
 	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
 
 // tryGPUStroke attempts to stroke the current path using the GPU accelerator.
-// Falls back to CPU when an alpha mask is active (GPU mask support is Phase 2).
+// When a mask is active and the accelerator implements MaskAware, the mask
+// is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUStroke() error {
-	if c.mask != nil {
-		return ErrFallbackToCPU
-	}
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
+	}
+	if c.mask != nil {
+		if ma, ok := a.(MaskAware); ok {
+			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
+			defer ma.ClearMaskTexture()
+		} else {
+			return ErrFallbackToCPU
+		}
 	}
 	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
 }

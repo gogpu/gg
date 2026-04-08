@@ -12,6 +12,7 @@ type Layer struct {
 	pixmap    *Pixmap
 	blendMode BlendMode
 	opacity   float64
+	mask      *Mask // optional alpha mask, applied on PopLayer (nil = no mask)
 }
 
 // layerStack manages the layer hierarchy for the context.
@@ -113,11 +114,75 @@ func (c *Context) PopLayer() {
 		c.basePixmap = nil
 	}
 
+	// Apply mask to layer content before compositing (PushMaskLayer).
+	if layer.mask != nil {
+		c.applyMaskToPixmap(layer.pixmap, layer.mask)
+	}
+
 	// Composite layer onto parent
 	c.compositeLayer(layer, parentPixmap)
 
 	// Restore parent pixmap as current drawing target
 	c.pixmap = parentPixmap
+}
+
+// PushMaskLayer creates an isolated layer with an associated alpha mask.
+// All subsequent drawing operations render to this layer normally (without masking).
+// When PopLayer is called, the ENTIRE layer is masked by the mask and then
+// composited onto the parent using source-over blending with full opacity.
+//
+// This produces different results from SetMask: PushMaskLayer masks the
+// composited group, while SetMask masks each shape individually.
+//
+// Matches Vello push_mask_layer() semantics (research §4).
+//
+// Example:
+//
+//	mask := gg.NewMaskFromAlpha(maskImage)
+//	dc.PushMaskLayer(mask)
+//	dc.DrawCircle(100, 100, 50)
+//	dc.Fill()
+//	dc.DrawRect(80, 80, 40, 40)
+//	dc.Fill()
+//	dc.PopLayer() // entire layer content masked, then composited
+func (c *Context) PushMaskLayer(mask *Mask) {
+	// Clamp: nil mask means no masking (equivalent to PushLayer).
+	if mask == nil {
+		c.PushLayer(BlendNormal, 1.0)
+		return
+	}
+
+	// Initialize layer stack if needed.
+	if c.layerStack == nil {
+		c.layerStack = newLayerStack()
+	}
+
+	// Save base pixmap on first push.
+	if len(c.layerStack.layers) == 0 && c.basePixmap == nil {
+		c.basePixmap = c.pixmap
+	}
+
+	// Create new pixmap for the layer (same size as context).
+	layerPixmap := NewPixmap(c.width, c.height)
+	layerPixmap.Clear(Transparent)
+
+	// Create layer with mask.
+	layer := &Layer{
+		pixmap:    layerPixmap,
+		blendMode: BlendNormal,
+		opacity:   1.0,
+		mask:      mask,
+	}
+
+	// Switch to layer pixmap.
+	c.layerStack.layers = append(c.layerStack.layers, layer)
+	c.pixmap = layerPixmap
+}
+
+// applyMaskToPixmap applies a DestinationIn mask to a pixmap's pixel data.
+// For each pixel: all channels are scaled by mask.At(x,y) / 255.
+func (c *Context) applyMaskToPixmap(pm *Pixmap, mask *Mask) {
+	applyMaskToPixmapData(pm, mask)
 }
 
 // SetBlendMode sets the blend mode for subsequent fill and stroke operations.

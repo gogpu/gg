@@ -415,6 +415,26 @@ type LCDLayoutAware interface {
 	SetLCDLayout(layout LCDLayout)
 }
 
+// MaskAware is an optional interface for accelerators that support
+// GPU-accelerated alpha masking. When the Context has an active mask,
+// it uploads the mask data to the accelerator as a texture. The fragment
+// shader multiplies output alpha by the mask texel, eliminating the need
+// to fall back to CPU rendering for masked shapes.
+//
+// SetMaskTexture uploads the mask data (8-bit per pixel, row-major).
+// Pass nil data to clear the mask texture.
+// ClearMaskTexture removes the mask, restoring unmasked rendering.
+type MaskAware interface {
+	// SetMaskTexture uploads an alpha mask for GPU rendering.
+	// data is an 8-bit grayscale buffer (width*height bytes).
+	// The accelerator creates an R8Unorm texture and samples it in the
+	// fragment shader to modulate output alpha.
+	SetMaskTexture(data []byte, width, height int)
+
+	// ClearMaskTexture removes the GPU mask texture.
+	ClearMaskTexture()
+}
+
 // SceneStatsTracker is an optional interface for accelerators that track
 // per-frame scene statistics for auto pipeline selection. The Context
 // does not call these methods directly — the accelerator uses them internally.

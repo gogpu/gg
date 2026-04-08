@@ -557,6 +557,377 @@ func TestSetMask_NoMask(t *testing.T) {
 	}
 }
 
+// --- Phase 2 tests ---
+
+func TestNewLuminanceMask(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 3, 1))
+	// Pure red: Y = 0.2126*255 = 54.2 → 54
+	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
+	// Pure green: Y = 0.7152*255 = 182.4 → 182
+	img.Set(1, 0, color.RGBA{0, 255, 0, 255})
+	// Pure blue: Y = 0.0722*255 = 18.4 → 18
+	img.Set(2, 0, color.RGBA{0, 0, 255, 255})
+
+	mask := NewLuminanceMask(img)
+	if mask == nil {
+		t.Fatal("expected non-nil mask")
+	}
+	if mask.Width() != 3 || mask.Height() != 1 {
+		t.Fatalf("expected 3x1, got %dx%d", mask.Width(), mask.Height())
+	}
+
+	// Allow ±1 tolerance for rounding.
+	tests := []struct {
+		x    int
+		want uint8
+		name string
+	}{
+		{0, 54, "red luminance"},
+		{1, 182, "green luminance"},
+		{2, 18, "blue luminance"},
+	}
+	for _, tt := range tests {
+		got := mask.At(tt.x, 0)
+		diff := int(got) - int(tt.want)
+		if diff < -1 || diff > 1 {
+			t.Errorf("%s: got %d, want %d (±1)", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestNewLuminanceMask_White(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{255, 255, 255, 255})
+
+	mask := NewLuminanceMask(img)
+	got := mask.At(0, 0)
+	// White luminance should be ~255.
+	if got < 254 {
+		t.Errorf("white luminance should be ~255, got %d", got)
+	}
+}
+
+func TestNewLuminanceMask_Black(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{0, 0, 0, 255})
+
+	mask := NewLuminanceMask(img)
+	if mask.At(0, 0) != 0 {
+		t.Errorf("black luminance should be 0, got %d", mask.At(0, 0))
+	}
+}
+
+func TestNewMaskFromData(t *testing.T) {
+	data := []byte{0, 64, 128, 192, 255, 0, 0, 0, 0, 0, 0, 0}
+	mask := NewMaskFromData(data, 4, 3)
+	if mask == nil {
+		t.Fatal("expected non-nil mask")
+	}
+	if mask.Width() != 4 || mask.Height() != 3 {
+		t.Fatalf("expected 4x3, got %dx%d", mask.Width(), mask.Height())
+	}
+	if mask.At(0, 0) != 0 {
+		t.Errorf("expected 0, got %d", mask.At(0, 0))
+	}
+	if mask.At(1, 0) != 64 {
+		t.Errorf("expected 64, got %d", mask.At(1, 0))
+	}
+	if mask.At(2, 0) != 128 {
+		t.Errorf("expected 128, got %d", mask.At(2, 0))
+	}
+
+	// Verify independence: modifying original data doesn't affect mask.
+	data[0] = 99
+	if mask.At(0, 0) != 0 {
+		t.Error("mask should be independent of original data")
+	}
+}
+
+func TestNewMaskFromData_InvalidLength(t *testing.T) {
+	data := []byte{1, 2, 3}
+	mask := NewMaskFromData(data, 2, 2) // needs 4 bytes, got 3
+	if mask != nil {
+		t.Error("expected nil mask for invalid data length")
+	}
+}
+
+func TestNewMaskFromData_RoundTrip(t *testing.T) {
+	original := NewMask(10, 10)
+	original.Fill(42)
+	original.Set(5, 5, 200)
+
+	reconstructed := NewMaskFromData(original.Data(), 10, 10)
+	if reconstructed == nil {
+		t.Fatal("expected non-nil mask")
+	}
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			if reconstructed.At(x, y) != original.At(x, y) {
+				t.Fatalf("mismatch at (%d,%d): got %d, want %d",
+					x, y, reconstructed.At(x, y), original.At(x, y))
+			}
+		}
+	}
+}
+
+func TestApplyMask_Basic(t *testing.T) {
+	const size = 100
+	dc := NewContext(size, size)
+
+	// Fill entire canvas with opaque red.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	// Create a mask: left half = 255, right half = 0.
+	mask := NewMask(size, size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size/2; x++ {
+			mask.Set(x, y, 255)
+		}
+	}
+
+	dc.ApplyMask(mask)
+	img := dc.Image()
+
+	// Left half should still have red.
+	r25, _, _, a25 := pixelRGBA(img, 25, 50)
+	if r25 == 0 || a25 == 0 {
+		t.Errorf("left half should have color after mask, got r=%d a=%d", r25, a25)
+	}
+
+	// Right half should be transparent (mask=0).
+	a75 := pixelAlpha(img, 75, 50)
+	if a75 != 0 {
+		t.Errorf("right half should be transparent after mask, got a=%d", a75)
+	}
+}
+
+func TestApplyMask_NilMask(t *testing.T) {
+	dc := NewContext(50, 50)
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, 50, 50)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	aBefore := pixelAlpha(dc.Image(), 25, 25)
+
+	// ApplyMask(nil) should be a no-op.
+	dc.ApplyMask(nil)
+
+	aAfter := pixelAlpha(dc.Image(), 25, 25)
+	if aBefore != aAfter {
+		t.Errorf("nil mask should be no-op, alpha changed from %d to %d", aBefore, aAfter)
+	}
+}
+
+func TestApplyMask_PartialAlpha(t *testing.T) {
+	const size = 50
+	dc := NewContext(size, size)
+
+	// Fill with opaque red.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	// Apply mask with 128 everywhere.
+	mask := NewMask(size, size)
+	mask.Fill(128)
+	dc.ApplyMask(mask)
+
+	img := dc.Image()
+	a := pixelAlpha(img, 25, 25)
+	// Alpha should be roughly 128/255 * 65535 ≈ 32896. Allow tolerance.
+	if a > 40000 || a < 25000 {
+		t.Errorf("expected roughly half alpha (~32896), got %d", a)
+	}
+}
+
+// --- Phase 3 tests ---
+
+func TestPushMaskLayer_Basic(t *testing.T) {
+	const size = 100
+	dc := NewContext(size, size)
+
+	// Create mask: circle in center.
+	circleMask := NewMask(size, size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			dx := float64(x) - 50
+			dy := float64(y) - 50
+			if dx*dx+dy*dy <= 30*30 {
+				circleMask.Set(x, y, 255)
+			}
+		}
+	}
+
+	dc.PushMaskLayer(circleMask)
+
+	// Draw full-screen red rect into the layer.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	dc.PopLayer()
+
+	img := dc.Image()
+
+	// Center should have red.
+	rCenter, _, _, aCenter := pixelRGBA(img, 50, 50)
+	if rCenter == 0 || aCenter == 0 {
+		t.Errorf("center should have color, got r=%d a=%d", rCenter, aCenter)
+	}
+
+	// Corner should be transparent.
+	aCorner := pixelAlpha(img, 5, 5)
+	if aCorner != 0 {
+		t.Errorf("corner should be transparent, got a=%d", aCorner)
+	}
+}
+
+func TestPushMaskLayer_Nested(t *testing.T) {
+	const size = 100
+	dc := NewContext(size, size)
+
+	// Outer mask: left half.
+	outerMask := NewMask(size, size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size/2; x++ {
+			outerMask.Set(x, y, 255)
+		}
+	}
+
+	// Inner mask: top half.
+	innerMask := NewMask(size, size)
+	for y := 0; y < size/2; y++ {
+		for x := 0; x < size; x++ {
+			innerMask.Set(x, y, 255)
+		}
+	}
+
+	dc.PushMaskLayer(outerMask)
+	dc.PushMaskLayer(innerMask)
+
+	// Fill everything red.
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	dc.PopLayer() // inner mask applied: only top half visible in inner layer
+	dc.PopLayer() // outer mask applied: only left half visible in outer layer
+
+	img := dc.Image()
+
+	// Top-left quadrant: should have color (both masks allow).
+	aTL := pixelAlpha(img, 25, 25)
+	if aTL == 0 {
+		t.Error("top-left should have color")
+	}
+
+	// Top-right: inner allows, outer blocks.
+	aTR := pixelAlpha(img, 75, 25)
+	if aTR != 0 {
+		t.Errorf("top-right should be transparent, got a=%d", aTR)
+	}
+
+	// Bottom-left: inner blocks.
+	aBL := pixelAlpha(img, 25, 75)
+	if aBL != 0 {
+		t.Errorf("bottom-left should be transparent, got a=%d", aBL)
+	}
+
+	// Bottom-right: both block.
+	aBR := pixelAlpha(img, 75, 75)
+	if aBR != 0 {
+		t.Errorf("bottom-right should be transparent, got a=%d", aBR)
+	}
+}
+
+func TestPushMaskLayer_NilMask(t *testing.T) {
+	const size = 50
+	dc := NewContext(size, size)
+
+	dc.PushMaskLayer(nil) // nil mask = PushLayer(Normal, 1.0)
+
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	dc.PopLayer()
+
+	// Everything should be visible (no mask applied).
+	a := pixelAlpha(dc.Image(), 25, 25)
+	if a == 0 {
+		t.Error("nil mask should not block content")
+	}
+}
+
+func TestPushMaskLayer_WithSetMask(t *testing.T) {
+	// PushMaskLayer + SetMask should compose: SetMask applies per-shape,
+	// PushMaskLayer applies to the entire layer on pop.
+	const size = 100
+	dc := NewContext(size, size)
+
+	// Layer mask: left half.
+	layerMask := NewMask(size, size)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size/2; x++ {
+			layerMask.Set(x, y, 255)
+		}
+	}
+
+	// Per-shape mask: top half.
+	shapeMask := NewMask(size, size)
+	for y := 0; y < size/2; y++ {
+		for x := 0; x < size; x++ {
+			shapeMask.Set(x, y, 255)
+		}
+	}
+
+	dc.PushMaskLayer(layerMask)
+	dc.SetMask(shapeMask)
+
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, size, size)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+
+	dc.ClearMask()
+	dc.PopLayer()
+
+	img := dc.Image()
+
+	// Top-left: both allow → visible.
+	aTL := pixelAlpha(img, 25, 25)
+	if aTL == 0 {
+		t.Error("top-left should have color (both masks allow)")
+	}
+
+	// Top-right: shape allows, layer blocks → transparent.
+	aTR := pixelAlpha(img, 75, 25)
+	if aTR != 0 {
+		t.Errorf("top-right should be transparent (layer mask blocks), got a=%d", aTR)
+	}
+
+	// Bottom-left: shape blocks drawing into layer → transparent.
+	aBL := pixelAlpha(img, 25, 75)
+	if aBL != 0 {
+		t.Errorf("bottom-left should be transparent (shape mask blocks), got a=%d", aBL)
+	}
+}
+
 func TestMaskNestedPushPop(t *testing.T) {
 	dc := NewContext(100, 100)
 

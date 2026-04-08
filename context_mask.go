@@ -31,6 +31,23 @@ func (c *Context) ClearMask() {
 	c.mask = nil
 }
 
+// ApplyMask applies a mask to already-drawn content using DestinationIn blending.
+// For each pixel, the alpha is modulated by the mask value:
+//
+//	pixel.A = pixel.A * mask.At(x,y) / 255
+//
+// RGB channels are also scaled proportionally (premultiplied alpha).
+// This is a post-processing operation — it modifies existing pixel content,
+// not future draws. Pass nil to no-op.
+//
+// Matches tiny-skia apply_mask() with DestinationIn blend (research §3).
+func (c *Context) ApplyMask(mask *Mask) {
+	if mask == nil {
+		return
+	}
+	applyMaskToPixmapData(c.pixmap, mask)
+}
+
 // AsMask creates a mask from the current unfilled path.
 // The current path is rasterized (filled with white on a transparent background)
 // and the alpha channel is extracted into a Mask. The fill rule from the context
