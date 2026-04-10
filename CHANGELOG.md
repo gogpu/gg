@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.1] - 2026-04-10
+
+### Fixed
+
+- **Adreno Vulkan miscompilation** — Vello `fine.wgsl` compute shader caused Qualcomm
+  Adreno LLVM to silently miscompile, making text invisible on Snapdragon X Elite.
+  Root cause: Adreno compiler uses uncached `ldib` instruction (instead of cached `isam`)
+  when shader reads and writes the same buffer — `array<vec4<f32>, 4>` clip stack
+  triggered this for ALL memory reads (per Raph Levien's analysis). Two fixes:
+  - **Packed blend stack**: `array<vec4<f32>, 4>` (64 bytes, shared buffer) →
+    `array<array<u32, 4>, 4>` packed via `pack4x8unorm` + separate `blend_spill` SSBO.
+    Separating read-only and read-write buffers is the real Adreno fix.
+  - **Thread model**: `workgroup_size(256,1,1)` → `workgroup_size(4,16,1)` with
+    `PIXELS_PER_THREAD=4`. Amortizes PTCL reads (1 read → 4 pixels). Matches Vello
+    reference. No performance difference on Intel (12-13% both variants). See ADR-011.
+  Fixes [#252](https://github.com/gogpu/gg/issues/252), upstream ui#67.
+  Reference: linebender/vello#83, vello PR #77, PR #150.
+
 ## [0.40.0] - 2026-04-08
 
 ### Added

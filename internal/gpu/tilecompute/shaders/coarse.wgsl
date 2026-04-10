@@ -17,10 +17,11 @@
 // Pipeline order: path_count → backdrop → **coarse** → path_tiling → fine
 //
 // PTCL encoding (from ptcl.go):
-//   CmdFill:  [1, (segCount<<1)|evenOdd, segIndex, backdrop_as_u32]
-//   CmdSolid: [3]
-//   CmdColor: [5, packed_rgba]
-//   CmdEnd:   [0]
+//   Word 0:    blend_offset (for blend_spill SSBO, 0 if no deep clips)
+//   CmdFill:   [1, (segCount<<1)|evenOdd, segIndex, backdrop_as_u32]
+//   CmdSolid:  [3]
+//   CmdColor:  [5, packed_rgba]
+//   CmdEnd:    [0]
 
 // --- Shared types ---
 
@@ -65,7 +66,7 @@ struct Config {
 struct BumpAlloc {
     seg_counts: atomic<u32>,
     segments: atomic<u32>,
-    _pad0: atomic<u32>,
+    blend: atomic<u32>,
     _pad1: atomic<u32>,
 }
 
@@ -75,8 +76,17 @@ const CMD_END: u32 = 0u;
 const CMD_FILL: u32 = 1u;
 const CMD_SOLID: u32 = 3u;
 const CMD_COLOR: u32 = 5u;
+const CMD_BEGIN_CLIP: u32 = 10u;
+const CMD_END_CLIP: u32 = 11u;
 
 const DRAWTAG_COLOR: u32 = 0x44u;
+
+const TILE_WIDTH: u32 = 16u;
+const TILE_HEIGHT: u32 = 16u;
+
+// The "split" point between using local memory for the blend stack and
+// spilling to the blend_spill buffer. Matches Vello's BLEND_STACK_SPLIT.
+const BLEND_STACK_SPLIT: u32 = 4u;
 
 // Maximum number of u32 words per tile PTCL.
 const PTCL_MAX_PER_TILE: u32 = 1024u;
@@ -111,8 +121,12 @@ fn main(
     let tile_x = tile_idx % config.width_in_tiles;
     let tile_y = tile_idx / config.width_in_tiles;
 
-    // Local PTCL write offset — no atomics needed, one thread per tile.
-    var ptcl_offset = 0u;
+    // Reserve word 0 for blend_offset (set at the end).
+    let blend_offset_pos = tile_idx * PTCL_MAX_PER_TILE;
+    var ptcl_offset = 1u; // Start writing commands after blend_offset word.
+
+    // Blend depth tracking for blend_spill allocation.
+    var max_blend_depth = 0u;
 
     // Iterate all draw objects in Z-order (path 0 first, path 1 second, ...).
     for (var draw_ix = 0u; draw_ix < config.n_drawobj; draw_ix = draw_ix + 1u) {
@@ -187,4 +201,13 @@ fn main(
     // CMD_END is implicit (PTCL buffer initialized to zeros).
     // Store final offset for diagnostics.
     atomicStore(&tile_ptcl_offsets[tile_idx], ptcl_offset);
+
+    // Write blend_offset at word 0. If max_blend_depth > BLEND_STACK_SPLIT,
+    // allocate space in blend_spill via atomicAdd on bump.blend.
+    var blend_ix = 0u;
+    if max_blend_depth > BLEND_STACK_SPLIT {
+        let scratch_size = (max_blend_depth - BLEND_STACK_SPLIT) * TILE_WIDTH * TILE_HEIGHT;
+        blend_ix = atomicAdd(&bump.blend, scratch_size);
+    }
+    ptcl[blend_offset_pos] = blend_ix;
 }

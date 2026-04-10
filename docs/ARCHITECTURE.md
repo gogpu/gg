@@ -123,7 +123,7 @@ Output ← [9] fine ← [8] path_tiling ← [7] coarse ← [6] backdrop ← [5] 
 | 6 | `backdrop.wgsl` | Left-to-right backdrop prefix sum per row |
 | 7 | `coarse.wgsl` | Per-tile command list (PTCL) generation |
 | 8 | `path_tiling.wgsl` | Segment clipping and tile assignment |
-| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 256 threads) |
+| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 64 threads × 4 pixels each) |
 
 #### PipelineMode Selection
 
