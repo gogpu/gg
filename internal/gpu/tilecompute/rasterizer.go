@@ -252,7 +252,12 @@ func (r *Rasterizer) RasterizeScenePTCL(bgColor [4]uint8, paths []PathDef) *imag
 
 	// Step 4: Draw reduce/scan.
 	drawReduced := drawReduce(scene)
-	drawMonoids, info := drawLeafScan(scene, drawReduced)
+	drawMonoids, info, clipInps := drawLeafScan(scene, drawReduced)
+
+	// Step 4b: Clip leaf — fix up EndClip draw monoids.
+	if enc.NumClips > 0 && len(clipInps) > 0 {
+		clipLeafScan(clipInps, drawMonoids)
+	}
 
 	// Step 5: Build allLines with correct PathIx for each path.
 	var allLines []LineSoup
@@ -279,6 +284,115 @@ func (r *Rasterizer) RasterizeScenePTCL(bgColor [4]uint8, paths []PathDef) *imag
 			tilePixels := fineRasterizeTile(coarseOut.TilePTCLs[tileIdx], coarseOut.Segments, bgFloat)
 
 			// Write tile pixels to output image.
+			globalTileX := tx * TileWidth
+			globalTileY := ty * TileHeight
+			for ly := 0; ly < TileHeight; ly++ {
+				py := globalTileY + ly
+				if py >= r.height {
+					break
+				}
+				for lx := 0; lx < TileWidth; lx++ {
+					px := globalTileX + lx
+					if px >= r.width {
+						break
+					}
+					pm := tilePixels[ly*TileWidth+lx]
+					straight := premulToStraightU8(pm)
+					img.SetRGBA(px, py, color.RGBA{
+						R: straight[0],
+						G: straight[1],
+						B: straight[2],
+						A: straight[3],
+					})
+				}
+			}
+		}
+	}
+
+	return img
+}
+
+// RasterizeSceneDefPTCL renders a scene defined by SceneElements (with clip support)
+// using the full Vello compute pipeline. This is the clip-aware version of RasterizeScenePTCL.
+//
+// SceneElements can include Draw, BeginClip, and EndClip operations. BeginClip/EndClip
+// pairs define clip regions: only content drawn between them that falls inside the
+// clip path is visible.
+func (r *Rasterizer) RasterizeSceneDefPTCL(bgColor [4]uint8, elements []SceneElement) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+
+	// Convert bgColor (straight uint8) to premultiplied float32.
+	bgA := float32(bgColor[3]) / 255.0
+	bgFloat := [4]float32{
+		float32(bgColor[0]) / 255.0 * bgA,
+		float32(bgColor[1]) / 255.0 * bgA,
+		float32(bgColor[2]) / 255.0 * bgA,
+		bgA,
+	}
+
+	if len(elements) == 0 {
+		bg := color.RGBA{R: bgColor[0], G: bgColor[1], B: bgColor[2], A: bgColor[3]}
+		for y := 0; y < r.height; y++ {
+			for x := 0; x < r.width; x++ {
+				img.SetRGBA(x, y, bg)
+			}
+		}
+		return img
+	}
+
+	// Step 1: Encode scene with clip support.
+	enc := EncodeSceneDef(elements)
+
+	// Step 2: Pack scene.
+	scene := PackScene(enc)
+
+	// Step 3: Path tag reduce/scan.
+	reduced := pathtagReduce(scene)
+	_ = pathtagScan(scene, reduced)
+
+	// Step 4: Draw reduce/scan.
+	drawReduced := drawReduce(scene)
+	drawMonoids, info, clipInps := drawLeafScan(scene, drawReduced)
+
+	// Step 4b: Clip leaf — fix up EndClip draw monoids.
+	if enc.NumClips > 0 && len(clipInps) > 0 {
+		clipLeafScan(clipInps, drawMonoids)
+	}
+
+	// Step 5: Build allLines with correct PathIx for each path.
+	// SceneElements may have different path indices than their element order;
+	// path_ix is assigned by the encoder (one per Draw/BeginClip, also for EndClip dummy).
+	var allLines []LineSoup
+	pathIdx := uint32(0)
+	for _, el := range elements {
+		switch el.Type {
+		case ElementDraw, ElementBeginClip:
+			for _, line := range el.Lines {
+				allLines = append(allLines, LineSoup{
+					PathIx: pathIdx,
+					P0:     line.P0,
+					P1:     line.P1,
+				})
+			}
+			pathIdx++
+		case ElementEndClip:
+			// EndClip has a dummy path (no lines), but path index is still incremented.
+			pathIdx++
+		}
+	}
+
+	// Step 6: Coarse rasterize.
+	coarseOut := CoarseRasterize(scene, drawMonoids, info, allLines, r.width, r.height)
+
+	// Step 7: Fine rasterize each tile.
+	widthInTiles := coarseOut.WidthInTiles
+	heightInTiles := coarseOut.HeightInTiles
+
+	for ty := 0; ty < heightInTiles; ty++ {
+		for tx := 0; tx < widthInTiles; tx++ {
+			tileIdx := ty*widthInTiles + tx
+			tilePixels := fineRasterizeTile(coarseOut.TilePTCLs[tileIdx], coarseOut.Segments, bgFloat)
+
 			globalTileX := tx * TileWidth
 			globalTileY := ty * TileHeight
 			for ly := 0; ly < TileHeight; ly++ {

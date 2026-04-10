@@ -74,14 +74,16 @@ func drawReduce(scene *PackedScene) []DrawMonoid {
 }
 
 // drawLeafScan computes the exclusive prefix sum of DrawMonoids.
-// Also extracts draw info (color, transform metadata) for each draw object.
+// Also extracts draw info (color, transform metadata) for each draw object,
+// and populates clip input data for any clip operations.
 //
 // Returns:
 //   - drawMonoids: one DrawMonoid per draw object (exclusive prefix sum)
 //   - info: extracted draw info buffer (packed uint32s)
+//   - clipInps: clip input array (one per clip op, indexed by ClipIx); nil if no clips
 //
 // This is the CPU version of draw_leaf.wgsl.
-func drawLeafScan(scene *PackedScene, reduced []DrawMonoid) ([]DrawMonoid, []uint32) {
+func drawLeafScan(scene *PackedScene, reduced []DrawMonoid) ([]DrawMonoid, []uint32, []ClipInp) {
 	numDrawObjects := scene.Layout.NumDrawObjects
 	drawMonoids := make([]DrawMonoid, numDrawObjects)
 	nWG := uint32(len(reduced))
@@ -105,7 +107,14 @@ func drawLeafScan(scene *PackedScene, reduced []DrawMonoid) ([]DrawMonoid, []uin
 	totalInfoSize := prefix.InfoOffset
 	info := make([]uint32, totalInfoSize)
 
-	// Second pass: extract draw info for each draw object.
+	// Allocate clip input array if there are clips.
+	var clipInps []ClipInp
+	if scene.Layout.NumClips > 0 {
+		clipInps = make([]ClipInp, scene.Layout.NumClips)
+	}
+
+	// Second pass: extract draw info and clip inputs for each draw object.
+	// Reference: draw_leaf.wgsl lines 275-281.
 	for idx := uint32(0); idx < numDrawObjects; idx++ {
 		tag := scene.Data[scene.Layout.DrawTagBase+idx]
 		dm := drawMonoids[idx]
@@ -118,11 +127,25 @@ func drawLeafScan(scene *PackedScene, reduced []DrawMonoid) ([]DrawMonoid, []uin
 			if sceneOff < uint32(len(scene.Data)) && dm.InfoOffset < uint32(len(info)) {
 				info[dm.InfoOffset] = scene.Data[sceneOff]
 			}
-		case DrawTagBeginClip, DrawTagEndClip:
-			// Clip operations: info is handled differently in the full pipeline.
-			// For our simplified version, no additional data is needed.
+		case DrawTagBeginClip:
+			// BeginClip: store draw index and path_ix (positive).
+			if dm.ClipIx < uint32(len(clipInps)) {
+				clipInps[dm.ClipIx] = ClipInp{
+					Ix:     idx,
+					PathIx: int32(dm.PathIx),
+				}
+			}
+		case DrawTagEndClip:
+			// EndClip: store draw index and ^idx (negative = bitwise complement).
+			// Reference: draw_leaf.wgsl line 276: path_ix = ~ix
+			if dm.ClipIx < uint32(len(clipInps)) {
+				clipInps[dm.ClipIx] = ClipInp{
+					Ix:     idx,
+					PathIx: ^int32(idx), //nolint:gosec // Intentional: Vello uses ~ix for EndClip marker
+				}
+			}
 		}
 	}
 
-	return drawMonoids, info
+	return drawMonoids, info, clipInps
 }

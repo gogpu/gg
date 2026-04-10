@@ -446,15 +446,16 @@ gg/
 │   │   ├── golden_test.go  # GPU vs CPU golden comparison tests
 │   │   │
 │   │   ├── tilecompute/    # Vello compute pipeline CPU reference
-│   │   │   ├── types.go         # PathDef, LineSoup, Path, Tile, PathSegment
-│   │   │   ├── scene_encode.go  # EncodeScene, PackScene (scene → flat buffer)
+│   │   │   ├── types.go         # PathDef, SceneElement, LineSoup, Tile, PathSegment
+│   │   │   ├── scene_encode.go  # EncodeScene/EncodeSceneDef, PackScene
 │   │   │   ├── flatten.go       # Euler spiral curve flattening
 │   │   │   ├── pathtag.go       # Path tag monoid reduce/scan
-│   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + info extraction
+│   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + ClipInp generation
+│   │   │   ├── clip_leaf.go     # Clip matching (sequential stack, Vello parity)
 │   │   │   ├── path_count.go    # Per-tile segment counting
-│   │   │   ├── rasterizer.go    # RasterizeScenePTCL (full 9-stage CPU pipeline)
-│   │   │   ├── coarse.go        # Coarse rasterization + PTCL generation
-│   │   │   ├── fine.go          # Fine per-pixel rasterization
+│   │   │   ├── rasterizer.go    # RasterizeScenePTCL/SceneDefPTCL (full pipeline)
+│   │   │   ├── coarse.go        # Coarse rasterization + PTCL + clip state
+│   │   │   ├── fine.go          # Fine per-pixel rasterization + packed blend stack
 │   │   │   └── shaders/         # WGSL compute shaders (9 stages)
 │   │   │       ├── pathtag_reduce.wgsl
 │   │   │       ├── pathtag_scan.wgsl

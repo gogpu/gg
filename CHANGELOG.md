@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.40.1] - 2026-04-10
 
+### Added
+
+- **Clip layer support in Vello compute pipeline** — `SceneElement` API with
+  `BeginClip`/`EndClip` for scene encoding. Full pipeline: scene encoding →
+  draw_leaf (ClipInp generation) → clip_leaf (sequential stack matching, EndClip
+  fixup) → coarse (per-tile clip state, clipZeroDepth optimization) → fine
+  (packed blend stack, already implemented). Matches Vello clip_reduce/clip_leaf
+  architecture. `RasterizeSceneDefPTCL()` for clip-aware rendering.
+  6 integration tests including nested clips, alpha modulation, backward compat.
+
 ### Fixed
 
 - **Adreno Vulkan miscompilation** — Vello `fine.wgsl` compute shader caused Qualcomm

@@ -463,7 +463,7 @@ func runCoarsePipeline(t *testing.T, paths []PathDef, widthPx, heightPx int) *Co
 
 	// Run draw monoid stages.
 	reduced := drawReduce(scene)
-	drawMonoids, info := drawLeafScan(scene, reduced)
+	drawMonoids, info, _ := drawLeafScan(scene, reduced)
 
 	// Run coarse rasterization.
 	out := CoarseRasterize(scene, drawMonoids, info, allLines, widthPx, heightPx)
