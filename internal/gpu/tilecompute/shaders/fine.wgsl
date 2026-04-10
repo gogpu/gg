@@ -192,47 +192,51 @@ fn main(
             break;
         }
 
-        if tag == CMD_FILL {
-            // Read CmdFill payload: [(segCount<<1)|evenOdd, segIndex, backdrop_bits]
-            let packed = ptcl[ptcl_base + cmd_offset];
-            let seg_index = ptcl[ptcl_base + cmd_offset + 1u];
-            let backdrop_bits = ptcl[ptcl_base + cmd_offset + 2u];
-            cmd_offset = cmd_offset + 3u;
+        // switch generates OpSwitch in SPIR-V (structured control flow).
+        // Adreno LLVM miscompiles if/else if chains inside loops (llama.cpp #5186).
+        // Matches original Vello fine.wgsl pattern.
+        switch tag {
+            case CMD_FILL: {
+                // Read CmdFill payload: [(segCount<<1)|evenOdd, segIndex, backdrop_bits]
+                let packed = ptcl[ptcl_base + cmd_offset];
+                let seg_index = ptcl[ptcl_base + cmd_offset + 1u];
+                let backdrop_bits = ptcl[ptcl_base + cmd_offset + 2u];
+                cmd_offset = cmd_offset + 3u;
 
-            let seg_count = packed >> 1u;
-            let even_odd = (packed & 1u) != 0u;
-            let backdrop = bitcast<i32>(backdrop_bits);
+                let seg_count = packed >> 1u;
+                let even_odd = (packed & 1u) != 0u;
+                let backdrop = bitcast<i32>(backdrop_bits);
 
-            area = fill_path(local_x, local_y, seg_index, seg_count, backdrop, even_odd);
-
-        } else if tag == CMD_SOLID {
-            area = 1.0;
-
-        } else if tag == CMD_COLOR {
-            // Read packed premultiplied RGBA.
-            let packed_rgba = ptcl[ptcl_base + cmd_offset];
-            cmd_offset = cmd_offset + 1u;
-
-            // Unpack premultiplied RGBA from u32.
-            let r = f32(packed_rgba & 0xffu) / 255.0;
-            let g = f32((packed_rgba >> 8u) & 0xffu) / 255.0;
-            let b = f32((packed_rgba >> 16u) & 0xffu) / 255.0;
-            let a = f32((packed_rgba >> 24u) & 0xffu) / 255.0;
-
-            // Source-over compositing: fg = color * area, rgba = rgba * (1 - fg.a) + fg.
-            let fg = vec4<f32>(r * area, g * area, b * area, a * area);
-            let inv = 1.0 - fg.a;
-            rgba = rgba * inv + fg;
-
-        } else if tag == CMD_BEGIN_CLIP {
-            // Push current color to clip stack, clear to transparent.
-            if clip_depth < MAX_CLIP_DEPTH {
-                clip_stack[clip_depth] = rgba;
-                clip_depth = clip_depth + 1u;
+                area = fill_path(local_x, local_y, seg_index, seg_count, backdrop, even_odd);
             }
-            rgba = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            case CMD_SOLID: {
+                area = 1.0;
+            }
+            case CMD_COLOR: {
+                // Read packed premultiplied RGBA.
+                let packed_rgba = ptcl[ptcl_base + cmd_offset];
+                cmd_offset = cmd_offset + 1u;
 
-        } else if tag == CMD_END_CLIP {
+                // Unpack premultiplied RGBA from u32.
+                let r = f32(packed_rgba & 0xffu) / 255.0;
+                let g = f32((packed_rgba >> 8u) & 0xffu) / 255.0;
+                let b = f32((packed_rgba >> 16u) & 0xffu) / 255.0;
+                let a = f32((packed_rgba >> 24u) & 0xffu) / 255.0;
+
+                // Source-over compositing: fg = color * area, rgba = rgba * (1 - fg.a) + fg.
+                let fg = vec4<f32>(r * area, g * area, b * area, a * area);
+                let inv = 1.0 - fg.a;
+                rgba = rgba * inv + fg;
+            }
+            case CMD_BEGIN_CLIP: {
+                // Push current color to clip stack, clear to transparent.
+                if clip_depth < MAX_CLIP_DEPTH {
+                    clip_stack[clip_depth] = rgba;
+                    clip_depth = clip_depth + 1u;
+                }
+                rgba = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            }
+            case CMD_END_CLIP: {
             // Read CmdEndClip payload: [blend_mode, alpha_bits]
             let blend = ptcl[ptcl_base + cmd_offset];
             let alpha_bits = ptcl[ptcl_base + cmd_offset + 1u];
@@ -252,10 +256,11 @@ fn main(
                 let inv = 1.0 - fg.a;
                 rgba = saved * inv + fg;
             }
-
-        } else {
-            // Unknown command: stop to avoid infinite loop.
-            break;
+            }
+            default: {
+                // Unknown command: stop to avoid infinite loop.
+                break;
+            }
         }
     }
 
