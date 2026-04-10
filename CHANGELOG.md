@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (packed blend stack, already implemented). Matches Vello clip_reduce/clip_leaf
   architecture. `RasterizeSceneDefPTCL()` for clip-aware rendering.
   6 integration tests including nested clips, alpha modulation, backward compat.
+  See ADR-012.
+
+- **Clip demo examples** — `examples/compute_clip/` (CLI: CPU vs GPU pixel comparison
+  with 14-element clip scene, rounded-rect clip path, diagnostic pixel checks) and
+  `examples/clip_demo/` (windowed animated demo: rotating circles without clip +
+  pulsing rounded-rect clip region with bouncing shapes, 49 FPS on Vulkan).
 
 ### Fixed
 
