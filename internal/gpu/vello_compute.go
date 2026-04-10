@@ -326,6 +326,13 @@ type VelloComputeBuffers struct {
 	// Size: target_width * target_height * sizeof(u32).
 	// Written by fine.
 	Output *wgpu.Buffer
+
+	// BlendSpill holds spilled blend stack entries for deep clip levels.
+	// When clip_depth >= BLEND_STACK_SPLIT (4), rgba values are packed as
+	// u32 via pack4x8unorm and stored here. Allocated by coarse stage via
+	// atomicAdd on bump.blend. Read/written by fine stage.
+	// Size: estimated from max clip depth × total tiles × TILE_WIDTH × TILE_HEIGHT.
+	BlendSpill *wgpu.Buffer
 }
 
 // =============================================================================
@@ -530,8 +537,9 @@ func stageBindGroupLayoutEntries(stage VelloComputeStage) []gputypes.BindGroupLa
 		// @binding(2) storage(read) segments
 		// @binding(3) storage(read) info
 		// @binding(4) storage(read_write) output
+		// @binding(5) storage(read_write) blend_spill
 		return []gputypes.BindGroupLayoutEntry{
-			configUniform, storageRO(1), storageRO(2), storageRO(3), storageRW(4),
+			configUniform, storageRO(1), storageRO(2), storageRO(3), storageRW(4), storageRW(5),
 		}
 
 	default:
@@ -679,7 +687,8 @@ func (d *VelloComputeDispatcher) Close() {
 // Special cases:
 //   - VelloStageBackdrop: one workgroup per path (elementCount = n_paths),
 //     dispatched as (n_paths, 1, 1).
-//   - VelloStageFine: one workgroup per tile (elementCount = width_in_tiles * height_in_tiles).
+//   - VelloStageFine: handled via 2D dispatch (widthInTiles, heightInTiles, 1),
+//     not through this function.
 func (d *VelloComputeDispatcher) ComputeWorkgroupCount(stage VelloComputeStage, elementCount uint32) uint32 {
 	if elementCount == 0 {
 		return 0
@@ -689,11 +698,6 @@ func (d *VelloComputeDispatcher) ComputeWorkgroupCount(stage VelloComputeStage, 
 	case VelloStageBackdrop:
 		// Backdrop dispatches one workgroup per path. Thread 0 of each
 		// workgroup performs the sequential left-to-right scan for that path.
-		return elementCount
-
-	case VelloStageFine:
-		// Fine dispatches one workgroup per tile. Each workgroup has 256 threads
-		// covering 16x16 = 256 pixels.
 		return elementCount
 
 	default:
@@ -721,6 +725,7 @@ type velloBufSizes struct {
 	tilePTCLOffsets uint64
 	pathStyles      uint64
 	output          uint64
+	blendSpill      uint64
 }
 
 // computeBufferSizes calculates byte sizes for all Vello pipeline buffers.
@@ -759,6 +764,12 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 	maxTileCrossings := uint64(config.WidthInTiles + config.HeightInTiles)
 	estimatedSegments := uint64(numLines) * maxTileCrossings
 
+	// Blend spill buffer: conservative estimate for deep clip levels.
+	// Each clip level beyond BlendStackSplit needs TILE_WIDTH * TILE_HEIGHT u32s
+	// per tile. We estimate up to 4 extra levels (configurable).
+	const maxExtraClipLevels = 4
+	blendSpillSize := uint64(maxExtraClipLevels) * uint64(globalTiles) * 16 * 16 * 4
+
 	return velloBufSizes{
 		config:          config.sizeInBytes(),
 		scene:           uint64(sceneWords) * 4,
@@ -777,6 +788,7 @@ func (d *VelloComputeDispatcher) computeBufferSizes(
 		tilePTCLOffsets: uint64(globalTiles) * 4,
 		pathStyles:      uint64(config.NumPaths) * 4,
 		output:          uint64(config.TargetWidth) * uint64(config.TargetHeight) * 4,
+		blendSpill:      blendSpillSize,
 	}
 }
 
@@ -864,6 +876,7 @@ func (d *VelloComputeDispatcher) AllocateBuffers(
 		{&bufs.TilePTCLOffsets, "vello_tile_ptcl_offsets", sz.tilePTCLOffsets, storageZero, true},            // coarse write positions
 		{&bufs.PathStyles, "vello_path_styles", sz.pathStyles, storageCPU, false},
 		{&bufs.Output, "vello_output", sz.output, storageOut, false},
+		{&bufs.BlendSpill, "vello_blend_spill", sz.blendSpill, storageZero, true}, // blend stack spill for deep clips
 	}
 
 	for _, s := range specs {
@@ -926,6 +939,7 @@ func (d *VelloComputeDispatcher) DestroyBuffers(bufs *VelloComputeBuffers) {
 	destroyBuf(bufs.TilePTCLOffsets)
 	destroyBuf(bufs.PathStyles)
 	destroyBuf(bufs.Output)
+	destroyBuf(bufs.BlendSpill)
 
 	// Zero out all fields to prevent accidental reuse.
 	*bufs = VelloComputeBuffers{}
@@ -1024,6 +1038,7 @@ func stageBindGroupEntries(stage VelloComputeStage, bufs *VelloComputeBuffers) [
 			entry(2, bufs.Segments),
 			entry(3, bufs.Info),
 			entry(4, bufs.Output),
+			entry(5, bufs.BlendSpill),
 		}
 
 	default:
@@ -1095,15 +1110,17 @@ func (d *VelloComputeDispatcher) Dispatch(bufs *VelloComputeBuffers, config Vell
 	pathTilingElements := config.NumLines * 4
 
 	stages := [VelloStageCount]stageDispatch{
-		{VelloStagePathtagReduce, nTagWords},
-		{VelloStagePathtagScan, nTagWords},
-		{VelloStageDrawReduce, config.NumDrawObj},
-		{VelloStageDrawLeaf, config.NumDrawObj},
-		{VelloStagePathCount, config.NumLines},
-		{VelloStageBackdrop, config.NumPaths},
-		{VelloStageCoarse, totalTiles},
-		{VelloStagePathTiling, pathTilingElements},
-		{VelloStageFine, totalTiles},
+		{VelloStagePathtagReduce, nTagWords, 0},
+		{VelloStagePathtagScan, nTagWords, 0},
+		{VelloStageDrawReduce, config.NumDrawObj, 0},
+		{VelloStageDrawLeaf, config.NumDrawObj, 0},
+		{VelloStagePathCount, config.NumLines, 0},
+		{VelloStageBackdrop, config.NumPaths, 0},
+		{VelloStageCoarse, totalTiles, 0},
+		{VelloStagePathTiling, pathTilingElements, 0},
+		// Fine: 2D dispatch (widthInTiles, heightInTiles, 1).
+		// workgroup_size(4,16,1) = 64 threads per tile, one workgroup per tile.
+		{VelloStageFine, config.WidthInTiles, config.HeightInTiles},
 	}
 
 	res := &dispatchResources{device: d.device}
@@ -1130,8 +1147,17 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 	}
 
 	for _, sd := range stages {
-		wgCount := d.ComputeWorkgroupCount(sd.stage, sd.elements)
-		if wgCount == 0 {
+		var wgX, wgY uint32
+		if sd.wgY > 0 {
+			// 2D dispatch: (elements, wgY, 1) — used for fine stage.
+			wgX = sd.elements
+			wgY = sd.wgY
+		} else {
+			// 1D dispatch: (ComputeWorkgroupCount(elements), 1, 1).
+			wgX = d.ComputeWorkgroupCount(sd.stage, sd.elements)
+			wgY = 1
+		}
+		if wgX == 0 {
 			continue
 		}
 
@@ -1155,13 +1181,14 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 		}
 		pass.SetPipeline(d.pipelines[sd.stage])
 		pass.SetBindGroup(0, bg, nil)
-		pass.Dispatch(wgCount, 1, 1)
+		pass.Dispatch(wgX, wgY, 1)
 		_ = pass.End()
 
 		slogger().Debug("vello compute: dispatched stage",
 			"stage", sd.stage.String(),
 			"elements", sd.elements,
-			"workgroups", wgCount)
+			"workgroups_x", wgX,
+			"workgroups_y", wgY)
 	}
 
 	cmdBuf, err := encoder.Finish()
@@ -1176,6 +1203,10 @@ func (d *VelloComputeDispatcher) encodeComputeStages(
 type stageDispatch struct {
 	stage    VelloComputeStage
 	elements uint32
+	// For 2D dispatch (fine stage): wgY is the Y workgroup count.
+	// When 0, dispatch is 1D: (ComputeWorkgroupCount(elements), 1, 1).
+	// When >0, dispatch is 2D: (elements, wgY, 1) — elements is used as X count directly.
+	wgY uint32
 }
 
 // submitAndWait submits the command buffer and waits for GPU completion.

@@ -26,6 +26,10 @@ const (
 // ptclInitialAlloc is the initial capacity (in uint32s) for a PTCL.
 const ptclInitialAlloc = 64
 
+// BlendStackSplit is the number of clip levels stored in local registers
+// before spilling to the blend_spill SSBO. Matches Vello's BLEND_STACK_SPLIT.
+const BlendStackSplit = 4
+
 // CmdFillData is the payload for CmdFill.
 // Encoded as 3 uint32 after the tag:
 //
@@ -57,16 +61,41 @@ type CmdEndClipData struct {
 
 // PTCL is a Per-Tile Command List.
 // Commands are encoded as a flat stream of uint32 words.
+// The first word is reserved for the blend_offset (index into the blend_spill
+// buffer for deep clip levels). Commands start at word index 1.
 type PTCL struct {
-	Cmds []uint32 // Raw command stream
+	Cmds []uint32 // Raw command stream (word 0 = blend_offset, words 1+ = commands)
 }
 
 // NewPTCL creates a new PTCL with initial capacity.
+// The first word (blend_offset) is initialized to 0.
 func NewPTCL() *PTCL {
+	cmds := make([]uint32, 1, ptclInitialAlloc)
+	cmds[0] = 0 // blend_offset — set by coarse if max_blend_depth > BlendStackSplit
 	return &PTCL{
-		Cmds: make([]uint32, 0, ptclInitialAlloc),
+		Cmds: cmds,
 	}
 }
+
+// SetBlendOffset sets the blend spill offset for this tile's PTCL.
+// This value is stored in word 0 and read by the fine rasterizer to locate
+// spilled blend stack entries in the blend_spill buffer.
+func (p *PTCL) SetBlendOffset(offset uint32) {
+	if len(p.Cmds) > 0 {
+		p.Cmds[0] = offset
+	}
+}
+
+// BlendOffset returns the blend spill offset stored in word 0.
+func (p *PTCL) BlendOffset() uint32 {
+	if len(p.Cmds) > 0 {
+		return p.Cmds[0]
+	}
+	return 0
+}
+
+// CmdStartOffset is the word offset where commands begin (after blend_offset).
+const CmdStartOffset = 1
 
 // WriteFill writes a CmdFill command.
 // Payload: [(segCount << 1) | evenOdd, segIndex, backdrop_as_uint32]
