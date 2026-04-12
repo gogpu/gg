@@ -3,6 +3,7 @@
 package gpu
 
 import (
+	"context"
 	_ "embed"
 	"encoding/binary"
 	"fmt"
@@ -528,18 +529,23 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	}
 	// cmdBuf freed after fence wait
 
-	// Submit and wait.
+	// Submit (auto-polls pending maps at tail).
 	if _, err := p.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	if err := p.device.WaitIdle(); err != nil {
-		return fmt.Errorf("wait for GPU: %w", err)
-	}
 
-	readback := make([]byte, pixelBufSize)
-	if err := p.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
-		return fmt.Errorf("readback: %w", err)
+	// Map staging buffer; blocks until GPU completes via submission tracking.
+	if err := stagingBuf.Map(context.Background(), wgpu.MapModeRead, 0, pixelBufSize); err != nil {
+		return fmt.Errorf("map staging: %w", err)
 	}
+	rng, err := stagingBuf.MappedRange(0, pixelBufSize)
+	if err != nil {
+		stagingBuf.Unmap()
+		return fmt.Errorf("mapped range: %w", err)
+	}
+	readback := make([]byte, pixelBufSize)
+	copy(readback, rng.Bytes())
+	stagingBuf.Unmap()
 
 	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil

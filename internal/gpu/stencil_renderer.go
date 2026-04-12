@@ -3,6 +3,7 @@
 package gpu
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -432,14 +433,18 @@ func (sr *StencilRenderer) submitAndReadback(
 	if _, err := sr.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	if err := sr.device.WaitIdle(); err != nil {
-		return fmt.Errorf("wait for GPU: %w", err)
-	}
 
-	readback := make([]byte, pixelBufSize)
-	if err := sr.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
-		return fmt.Errorf("readback: %w", err)
+	if err := stagingBuf.Map(context.Background(), wgpu.MapModeRead, 0, pixelBufSize); err != nil {
+		return fmt.Errorf("map staging: %w", err)
 	}
+	rng, err := stagingBuf.MappedRange(0, pixelBufSize)
+	if err != nil {
+		stagingBuf.Unmap()
+		return fmt.Errorf("mapped range: %w", err)
+	}
+	readback := make([]byte, pixelBufSize)
+	copy(readback, rng.Bytes())
+	stagingBuf.Unmap()
 
 	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil
