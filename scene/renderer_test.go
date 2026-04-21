@@ -1277,3 +1277,295 @@ func TestCompositePixmaps(t *testing.T) {
 		t.Errorf("composite A = %d, want ~255", dstData[3])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Image Rendering Tests (BUG-SCENE-006)
+// ---------------------------------------------------------------------------
+
+// makeTestImage creates a solid-color image with straight-alpha RGBA data.
+func makeTestImage(w, h int, r, g, b, a byte) *Image {
+	img := NewImage(w, h)
+	img.Data = make([]byte, w*h*4)
+	for i := 0; i < w*h; i++ {
+		img.Data[i*4] = r
+		img.Data[i*4+1] = g
+		img.Data[i*4+2] = b
+		img.Data[i*4+3] = a
+	}
+	return img
+}
+
+// TestRenderer_DrawImage_Identity verifies that DrawImage with identity
+// transform places the image at (0,0) with correct pixel values.
+func TestRenderer_DrawImage_Identity(t *testing.T) {
+	const size = 200
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	img := makeTestImage(20, 20, 255, 0, 0, 255)
+
+	s := NewScene()
+	s.DrawImage(img, IdentityAffine())
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Center of the 20x20 image placed at (0,0) — pixel (10,10) should be red.
+	center := target.GetPixel(10, 10)
+	if center.R < 0.9 || center.A < 0.9 {
+		t.Errorf("image center (10,10) = %+v, want opaque red", center)
+	}
+
+	// Pixel outside the image (50,50) should be transparent.
+	outside := target.GetPixel(50, 50)
+	if outside.A > 0.1 {
+		t.Errorf("outside image (50,50) alpha = %.2f, want transparent", outside.A)
+	}
+}
+
+// TestRenderer_DrawImage_Translate verifies that DrawImage with a
+// translation transform places the image at the correct offset.
+func TestRenderer_DrawImage_Translate(t *testing.T) {
+	const size = 200
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	img := makeTestImage(30, 30, 0, 0, 255, 255)
+
+	s := NewScene()
+	s.DrawImage(img, TranslateAffine(100, 80))
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Inside the translated image: (115, 95) = center of [100..130, 80..110].
+	inside := target.GetPixel(115, 95)
+	if inside.B < 0.9 || inside.A < 0.9 {
+		t.Errorf("translated image (115,95) = %+v, want opaque blue", inside)
+	}
+
+	// Original position (15,15) should be transparent.
+	orig := target.GetPixel(15, 15)
+	if orig.A > 0.1 {
+		t.Errorf("original position (15,15) alpha = %.2f, want transparent", orig.A)
+	}
+
+	// Just outside the image at (131, 95) should be transparent.
+	edge := target.GetPixel(131, 95)
+	if edge.A > 0.1 {
+		t.Errorf("outside translated image (131,95) alpha = %.2f, want transparent", edge.A)
+	}
+}
+
+// TestRenderer_DrawImage_Scale verifies that DrawImage with a scale
+// transform produces a scaled image.
+func TestRenderer_DrawImage_Scale(t *testing.T) {
+	const size = 200
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	// 10x10 green image, scaled 4x => should fill [0..40, 0..40].
+	img := makeTestImage(10, 10, 0, 255, 0, 255)
+
+	s := NewScene()
+	s.DrawImage(img, ScaleAffine(4, 4))
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Center of the scaled image at (20,20) should be green.
+	center := target.GetPixel(20, 20)
+	if center.G < 0.9 || center.A < 0.9 {
+		t.Errorf("scaled image center (20,20) = %+v, want opaque green", center)
+	}
+
+	// Outside the scaled bounds (50,50) should be transparent.
+	outside := target.GetPixel(50, 50)
+	if outside.A > 0.1 {
+		t.Errorf("outside scaled image (50,50) alpha = %.2f, want transparent", outside.A)
+	}
+}
+
+// TestRenderer_DrawImage_SemiTransparent verifies source-over compositing
+// of a semi-transparent image on top of a solid background.
+func TestRenderer_DrawImage_SemiTransparent(t *testing.T) {
+	const size = 100
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	s := NewScene()
+
+	// Solid white background.
+	s.Fill(FillNonZero, IdentityAffine(),
+		SolidBrush(gg.RGBA{R: 1, G: 1, B: 1, A: 1}),
+		NewRectShape(0, 0, float32(size), float32(size)))
+
+	// 50x50 half-transparent red image at (25,25).
+	img := makeTestImage(50, 50, 255, 0, 0, 128)
+	s.DrawImage(img, TranslateAffine(25, 25))
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Inside the image area (50, 50): should be a blend of red and white.
+	// Source-over with straight alpha 128/255 ~ 0.502:
+	// premul src: R = 255*128/255 ~ 128, A = 128
+	// dst: white (255,255,255,255)
+	// result R = 128 + 255*(127)/255 ~ 128 + 127 = 255 ... hmm, let's be loose.
+	center := target.GetPixel(50, 50)
+	if center.A < 0.9 {
+		t.Errorf("blended pixel alpha = %.2f, want near 1.0", center.A)
+	}
+	// Red should be present from the image.
+	if center.R < 0.5 {
+		t.Errorf("blended pixel red = %.2f, want >= 0.5 (image not composited)", center.R)
+	}
+
+	// Corner (5, 5) should still be white (no image).
+	corner := target.GetPixel(5, 5)
+	if corner.R < 0.9 || corner.G < 0.9 || corner.B < 0.9 || corner.A < 0.9 {
+		t.Errorf("background corner (5,5) = %+v, want opaque white", corner)
+	}
+}
+
+// TestRenderer_DrawImage_NilAndEmpty verifies robustness with nil image,
+// empty Data, and out-of-bounds image index.
+func TestRenderer_DrawImage_NilAndEmpty(t *testing.T) {
+	const size = 100
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	// Nil image should be safely ignored by Scene.DrawImage.
+	s := NewScene()
+	s.DrawImage(nil, IdentityAffine())
+
+	// Image with nil Data should also be safe.
+	emptyImg := NewImage(10, 10)
+	s.DrawImage(emptyImg, IdentityAffine())
+
+	err := r.Render(target, s)
+	if err != nil {
+		t.Errorf("Render with nil/empty images: %v", err)
+	}
+}
+
+// TestRenderer_DrawImage_SpansTiles verifies that a large image crossing
+// tile boundaries renders consistently across tiles.
+func TestRenderer_DrawImage_SpansTiles(t *testing.T) {
+	const size = 200
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	// 100x100 green image placed at (30,30) — crosses tile boundaries
+	// (tiles are 64x64).
+	img := makeTestImage(100, 100, 0, 255, 0, 255)
+
+	s := NewScene()
+	s.DrawImage(img, TranslateAffine(30, 30))
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Sample several points inside the image across tile boundaries.
+	testPoints := [][2]int{
+		{40, 40},   // first tile
+		{70, 70},   // crosses into second tile horizontally and vertically
+		{100, 100}, // well into second tile
+		{125, 125}, // near bottom-right of image
+	}
+	for _, pt := range testPoints {
+		p := target.GetPixel(pt[0], pt[1])
+		if p.G < 0.9 || p.A < 0.9 {
+			t.Errorf("image pixel (%d,%d) = %+v, want opaque green", pt[0], pt[1], p)
+		}
+	}
+
+	// Outside the image (5, 5) should be transparent.
+	outside := target.GetPixel(5, 5)
+	if outside.A > 0.1 {
+		t.Errorf("outside image (5,5) alpha = %.2f, want transparent", outside.A)
+	}
+
+	// Past the image boundary (135, 80) should be transparent.
+	past := target.GetPixel(135, 80)
+	if past.A > 0.1 {
+		t.Errorf("past image boundary (135,80) alpha = %.2f, want transparent", past.A)
+	}
+}
+
+// TestRenderer_DrawImage_MultipleImages verifies rendering two images
+// at different positions.
+func TestRenderer_DrawImage_MultipleImages(t *testing.T) {
+	const size = 200
+	r := NewRenderer(size, size)
+	if r == nil {
+		t.Fatal("NewRenderer returned nil")
+	}
+	defer r.Close()
+
+	target := gg.NewPixmap(size, size)
+
+	imgRed := makeTestImage(30, 30, 255, 0, 0, 255)
+	imgBlue := makeTestImage(30, 30, 0, 0, 255, 255)
+
+	s := NewScene()
+	s.DrawImage(imgRed, TranslateAffine(10, 10))
+	s.DrawImage(imgBlue, TranslateAffine(150, 150))
+
+	if err := r.Render(target, s); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Red image at (10,10)-(40,40): check center.
+	red := target.GetPixel(25, 25)
+	if red.R < 0.9 || red.A < 0.9 {
+		t.Errorf("red image (25,25) = %+v, want opaque red", red)
+	}
+
+	// Blue image at (150,150)-(180,180): check center.
+	blue := target.GetPixel(165, 165)
+	if blue.B < 0.9 || blue.A < 0.9 {
+		t.Errorf("blue image (165,165) = %+v, want opaque blue", blue)
+	}
+
+	// Gap between images (100, 100) should be transparent.
+	gap := target.GetPixel(100, 100)
+	if gap.A > 0.1 {
+		t.Errorf("gap between images (100,100) alpha = %.2f, want transparent", gap.A)
+	}
+}

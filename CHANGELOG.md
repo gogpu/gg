@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scene TagImage rendering** (BUG-SCENE-006) — `scene.Renderer` now renders
+  images added via `scene.DrawImage()`. Previously the renderer skipped `TagImage`
+  commands with a stub, producing invisible output. Implementation uses inverse
+  affine mapping (Cairo/Skia pattern) with premultiplied alpha source-over
+  compositing. Supports all affine transforms (translation, scale, rotation, shear).
+  Unblocks UI incremental rendering (ADR-004) where text is rendered through
+  temp `gg.Context` → captured as `scene.Image`.
+
+### Added
+
+- **Partial texture upload** (PERF-GG-001) — `ggcanvas.Canvas` now supports
+  uploading only the changed region of the pixmap to the GPU instead of the full
+  texture. New `MarkDirtyRegion(r image.Rectangle)` method accumulates dirty
+  regions. When the underlying texture supports sub-region upload (e.g.,
+  `gogpu.Texture.UpdateRegion`), only the dirty sub-rectangle is uploaded.
+  For 1080p@2x displays, this reduces upload from ~33MB to only the changed area.
+  Falls back to full upload when no dirty region is set or the texture does not
+  support partial updates.
+
 ### Changed
 
 - **GPU render target: per-pass routing** (TASK-GG-OFFSCREEN-001) — `GPURenderTarget.View` (`gpucontext.TextureView`) enables per-render-pass target selection per WebGPU spec. Eliminates session-level `surfaceView` override that forced all rendering to surface. Enables multi-context GPU rendering (RepaintBoundary, offscreen export, multi-window).

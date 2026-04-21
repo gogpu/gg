@@ -6,6 +6,7 @@ package ggcanvas
 import (
 	"errors"
 	"fmt"
+	"image"
 	"io"
 
 	"github.com/gogpu/gg"
@@ -33,6 +34,14 @@ type textureDestroyer interface {
 	Destroy()
 }
 
+// textureRegionUpdater is an optional interface for textures that support
+// partial region upload. When the underlying texture implements this,
+// only the dirty region is uploaded instead of the full pixmap.
+// gogpu.Texture satisfies this via structural typing.
+type textureRegionUpdater interface {
+	UpdateRegion(x, y, w, h int, data []byte) error
+}
+
 // resourceTracker is a duck-typed interface matching gogpu.ResourceTracker.
 // Using a local interface avoids importing gogpu (which would create a
 // circular dependency gg -> gogpu). Go's structural typing ensures that
@@ -50,10 +59,11 @@ type resourceTracker interface {
 type Canvas struct {
 	ctx         *gg.Context
 	provider    gpucontext.DeviceProvider
-	texture     any  // Lazy-created texture (*gogpu.Texture)
-	oldTexture  any  // Previous texture awaiting deferred destruction
-	dirty       bool // Needs GPU upload
-	sizeChanged bool // Resize pending — texture must be recreated
+	texture     any             // Lazy-created texture (*gogpu.Texture)
+	oldTexture  any             // Previous texture awaiting deferred destruction
+	dirty       bool            // Needs GPU upload
+	dirtyRect   image.Rectangle // Accumulated dirty region (zero = full upload)
+	sizeChanged bool            // Resize pending — texture must be recreated
 	width       int
 	height      int
 	closed      bool
@@ -218,7 +228,30 @@ func (c *Canvas) SetDeviceScale(scale float64) {
 // MarkDirty flags the canvas for GPU upload on next Flush().
 // Call this after drawing operations if you want explicit control
 // over when uploads happen.
+//
+// MarkDirty invalidates the entire canvas. For partial invalidation,
+// use MarkDirtyRegion to upload only the changed region.
 func (c *Canvas) MarkDirty() {
+	c.dirty = true
+	c.dirtyRect = image.Rectangle{}
+}
+
+// MarkDirtyRegion flags a rectangular region of the canvas as dirty.
+// On the next Flush(), only the accumulated dirty region is uploaded
+// to the GPU (if the texture supports partial upload), which can be
+// significantly faster than uploading the entire pixmap.
+//
+// Multiple calls accumulate into the bounding rectangle of all dirty regions.
+// The region is in physical pixel coordinates (after device scale).
+func (c *Canvas) MarkDirtyRegion(r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	if c.dirtyRect.Empty() {
+		c.dirtyRect = r
+	} else {
+		c.dirtyRect = c.dirtyRect.Union(r)
+	}
 	c.dirty = true
 }
 
@@ -319,17 +352,17 @@ func (c *Canvas) Flush() (any, error) {
 	if c.texture == nil {
 		c.texture = c.createTexture(data)
 		c.dirty = false
+		c.dirtyRect = image.Rectangle{}
 		return c.texture, nil
 	}
 
-	// Update existing texture
-	if updater, ok := c.texture.(gpucontext.TextureUpdater); ok {
-		if err := updater.UpdateData(data); err != nil {
-			return nil, fmt.Errorf("ggcanvas: texture update failed: %w", err)
-		}
+	// Update existing texture — prefer partial upload when possible.
+	if err := c.uploadTexture(pixmap, data); err != nil {
+		return nil, err
 	}
 
 	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
 	return c.texture, nil
 }
 
@@ -394,6 +427,7 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 	err := c.ctx.FlushGPUWithView(surfaceView, width, height)
 
 	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
 	return err
 }
 
@@ -528,6 +562,53 @@ func (c *Canvas) Close() error {
 
 	c.provider = nil
 	return nil
+}
+
+// uploadTexture uploads pixmap data to the existing texture. When the texture
+// supports partial region upload and a specific dirty rect is set, only the
+// dirty region is extracted and uploaded. Otherwise falls back to full upload.
+func (c *Canvas) uploadTexture(pixmap *gg.Pixmap, fullData []byte) error {
+	dr := c.dirtyRect
+	regionUpdater, hasRegion := c.texture.(textureRegionUpdater)
+
+	// Use partial upload when: texture supports it, dirty rect is set (non-empty),
+	// and the dirty rect is strictly smaller than the full pixmap.
+	if hasRegion && !dr.Empty() {
+		// Clamp dirty rect to pixmap bounds.
+		bounds := image.Rect(0, 0, pixmap.Width(), pixmap.Height())
+		dr = dr.Intersect(bounds)
+		if !dr.Empty() && dr != bounds {
+			regionData := extractRegion(fullData, pixmap.Width(), dr)
+			if err := regionUpdater.UpdateRegion(dr.Min.X, dr.Min.Y, dr.Dx(), dr.Dy(), regionData); err != nil {
+				return fmt.Errorf("ggcanvas: region update failed: %w", err)
+			}
+			return nil
+		}
+	}
+
+	// Full upload fallback.
+	if updater, ok := c.texture.(gpucontext.TextureUpdater); ok {
+		if err := updater.UpdateData(fullData); err != nil {
+			return fmt.Errorf("ggcanvas: texture update failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// extractRegion copies a rectangular sub-region from RGBA row-major pixel data
+// into a densely packed buffer suitable for UpdateRegion.
+func extractRegion(data []byte, pixmapWidth int, r image.Rectangle) []byte {
+	const bytesPerPixel = 4
+	stride := pixmapWidth * bytesPerPixel
+	regionW := r.Dx() * bytesPerPixel
+	buf := make([]byte, r.Dx()*r.Dy()*bytesPerPixel)
+	dst := 0
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		srcStart := y*stride + r.Min.X*bytesPerPixel
+		copy(buf[dst:dst+regionW], data[srcStart:srcStart+regionW])
+		dst += regionW
+	}
+	return buf
 }
 
 // deferTextureDestruction moves the current texture to oldTexture so it can
