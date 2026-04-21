@@ -91,13 +91,14 @@ func renderWithAnalyticFiller(
 //
 // This matches Skia Fiddle golden generation with canvas->clear(SK_ColorWHITE).
 //
-// Source-over compositing on opaque white:
+// Source-over compositing uses Skia's exact formula (SkAlphaMulQ):
 //
-//	srcR = paintR * cov / 255  (premultiplied source)
-//	srcA = paintA * cov / 255
-//	invA = 255 - srcA
-//	dstR = srcR + (255 * invA + 128) / 255   (white bg contributes 255 * (1-srcA))
-//	dstA = 255  (always opaque)
+//	scale = cov + 1                          (SkAlpha255To256)
+//	srcR = (paintR * scale) >> 8             (SkAlphaMulQ)
+//	srcA = (paintA * scale) >> 8
+//	invScale = (255 - srcA) + 1              (SkAlpha255To256)
+//	dstR = srcR + (255 * invScale) >> 8      (source-over on white)
+//	dstA = 255
 func renderWithAnalyticFillerOnWhite(
 	width, height int,
 	path PathLike,
@@ -105,36 +106,32 @@ func renderWithAnalyticFillerOnWhite(
 	paint tinySkiaColor,
 	aaShift int,
 ) *image.RGBA {
-	// Build edges from path
 	eb := NewEdgeBuilder(aaShift)
 	eb.SetFlattenCurves(true)
 	eb.BuildFromPath(path, IdentityTransform{})
 
-	// Rasterize coverage
 	coverageBuf := make([]uint8, width*height)
 	FillToBuffer(eb, width, height, fillRule, coverageBuf)
 
-	// Fill with white background, then composite paint using source-over.
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
-			cov := uint16(coverageBuf[y*width+x])
+			cov := uint32(coverageBuf[y*width+x])
 			if cov == 0 {
-				// No coverage — pure white pixel.
 				img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
 				continue
 			}
-			// Premultiplied source color scaled by coverage.
-			srcR := uint16(div255(uint16(paint.R), cov))
-			srcG := uint16(div255(uint16(paint.G), cov))
-			srcB := uint16(div255(uint16(paint.B), cov))
-			srcA := uint16(div255(uint16(paint.A), cov))
+			// Skia's SkAlphaMulQ: scale = cov + 1, result = (ch * scale) >> 8
+			scale := cov + 1
+			srcR := (uint32(paint.R) * scale) >> 8
+			srcG := (uint32(paint.G) * scale) >> 8
+			srcB := (uint32(paint.B) * scale) >> 8
+			srcA := (uint32(paint.A) * scale) >> 8
 
-			// Source-over on white: dst = src + white * (1 - srcA)
-			invA := 255 - srcA
-			r := uint8(srcR + uint16(div255(255, invA)))
-			g := uint8(srcG + uint16(div255(255, invA)))
-			b := uint8(srcB + uint16(div255(255, invA)))
+			invScale := (255 - srcA) + 1
+			r := uint8(srcR + (255*invScale)>>8)
+			g := uint8(srcG + (255*invScale)>>8)
+			b := uint8(srcB + (255*invScale)>>8)
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
