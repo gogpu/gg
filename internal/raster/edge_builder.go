@@ -959,6 +959,11 @@ const (
 
 // combineVertical attempts to combine two vertical edges.
 // This optimization reduces edge count for paths with coincident vertical segments.
+//
+// IMPORTANT: When modifying FirstY/LastY, we must also update UpperY/LowerY
+// (SkFixed pixel-space endpoints used by Skia AAA sub-strip boundaries).
+// Otherwise resolveEdgeLineFixed() sees inconsistent Y ranges and culls
+// edges for scanlines where they should be active (circle rendering regression).
 func combineVertical(edge, last *LineEdge) combineResult {
 	// Both must be vertical and at the same X
 	if last.DX != 0 || edge.X != last.X {
@@ -969,10 +974,12 @@ func combineVertical(edge, last *LineEdge) combineResult {
 	if edge.Winding == last.Winding {
 		if edge.LastY+1 == last.FirstY {
 			last.FirstY = edge.FirstY
+			last.UpperY = edge.UpperY // Keep UpperY consistent with FirstY
 			return combinePartial
 		}
 		if edge.FirstY == last.LastY+1 {
 			last.LastY = edge.LastY
+			last.LowerY = edge.LowerY // Keep LowerY consistent with LastY
 			return combinePartial
 		}
 		return combineNo
@@ -985,11 +992,14 @@ func combineVertical(edge, last *LineEdge) combineResult {
 		}
 		if edge.LastY < last.LastY {
 			last.FirstY = edge.LastY + 1
+			last.UpperY = edge.LowerY // New start = edge's end
 			return combinePartial
 		}
 		// edge.LastY > last.LastY
 		last.FirstY = last.LastY + 1
+		last.UpperY = last.LowerY // New start = last's end
 		last.LastY = edge.LastY
+		last.LowerY = edge.LowerY
 		last.Winding = edge.Winding
 		return combinePartial
 	}
@@ -997,11 +1007,14 @@ func combineVertical(edge, last *LineEdge) combineResult {
 	if edge.LastY == last.LastY {
 		if edge.FirstY > last.FirstY {
 			last.LastY = edge.FirstY - 1
+			last.LowerY = edge.UpperY // New end = edge's start
 			return combinePartial
 		}
 		// edge.FirstY < last.FirstY
 		last.LastY = last.FirstY - 1
+		last.LowerY = last.UpperY // New end = last's start
 		last.FirstY = edge.FirstY
+		last.UpperY = edge.UpperY
 		last.Winding = edge.Winding
 		return combinePartial
 	}

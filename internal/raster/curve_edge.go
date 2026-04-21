@@ -155,7 +155,7 @@ func snapY(y FDot16) FDot16 {
 	const accuracy = 2
 	const half = int32(1) << (16 - accuracy - 1)
 	const mask = ^(int32(1)<<(16-accuracy) - 1)
-	return FDot16((int32(y) + half) & mask)
+	return (y + half) & mask
 }
 
 // IsVertical returns true if the edge has zero slope.

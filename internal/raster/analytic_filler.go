@@ -65,8 +65,9 @@ type AnalyticFiller struct {
 	// resolvedEdges is a reusable buffer for resolved edge states per sub-strip.
 	resolvedEdges []edgeLineState
 
-	// stripYBuf is a reusable buffer for sub-strip Y boundaries within a pixel row.
-	stripYBuf []float32
+	// stripYBuf is a reusable buffer for sub-strip Y boundaries in SkFixed (16.16).
+	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
+	stripYBuf []int32
 
 	// WindingCallback, if set, is called after edge accumulation with (y, winding[])
 	// before applyFillRule. Used by winding residual tests to verify contour closure.
@@ -189,25 +190,24 @@ func (af *AnalyticFiller) processScanlineAAA(
 		af.edgeIdx++
 	}
 
-	aaScaleF := float32(aaScale)
-	yPixelF := float32(y)
-	yPixelEndF := yPixelF + 1.0
+	// All Y tracking in SkFixed (16.16) — matches Skia's aaa_walk_edges exactly.
+	// No float32 intermediary for Y positions.
+	yFixed := intToSkFixed(int32(y))        // pixel row start in SkFixed
+	yFixedEnd := intToSkFixed(int32(y) + 1) // pixel row end in SkFixed
 
 	// Collect fractional Y boundaries from active edges within this pixel row.
-	// This is the core of Skia AAA's adaptive stepping: sub-strips at edge
-	// endpoints give fractional alpha at shape top/bottom boundaries.
-	stripYs := af.collectStripBoundaries(yPixelF, yPixelEndF, aaScaleF)
+	// Returns sorted SkFixed values defining sub-strip boundaries.
+	stripYs := af.collectStripBoundariesFixed(yFixed, yFixedEnd, aaScale)
 
 	// Process each sub-strip. Coverage accumulates additively.
 	for si := 0; si < len(stripYs)-1; si++ {
 		stripTop := stripYs[si]
 		stripBot := stripYs[si+1]
-		stripH := stripBot - stripTop
-		if stripH < 1e-6 {
+		if stripBot <= stripTop {
 			continue
 		}
 
-		af.processSubStrip(aaScaleF, stripTop, stripBot, fillRule)
+		af.processSubStripFixed(aaScale, stripTop, stripBot, fillRule)
 	}
 
 	// WindingCallback compatibility: synthesize winding from coverage
@@ -225,52 +225,47 @@ func (af *AnalyticFiller) processScanlineAAA(
 	callback(y, af.alphaRuns)
 }
 
-// collectStripBoundaries gathers unique fractional Y values from active edge
-// endpoints that fall within [yTop, yBot), plus the row boundaries themselves.
-// Returns sorted, deduplicated Y values defining sub-strip boundaries.
+// collectStripBoundariesFixed gathers unique SkFixed Y values from active edge
+// endpoints that fall within [yTopFixed, yBotFixed), plus the row boundaries.
+// Returns sorted, deduplicated SkFixed values defining sub-strip boundaries.
 //
-// This mirrors Skia's update_next_next_y / nextY tracking but computed
-// upfront for all edges in the current pixel row.
+// All computation is in SkFixed (16.16) integer arithmetic — no float32.
+// This matches Skia's update_next_next_y / nextY tracking.
 //
-// When LineEdge has UpperY/LowerY set (FDot16 precision, 16.16 fixed-point),
-// those are used instead of FirstY/LastY for sub-strip boundaries. This gives
-// 1/65536 pixel precision instead of 1/aaScale, matching Skia AAA's fUpperY/fLowerY
-// which preserve fractional Y positions through SnapY (1/4 pixel granularity in 16.16).
-func (af *AnalyticFiller) collectStripBoundaries(yTop, yBot, aaScaleF float32) []float32 {
-	// Reuse buffer to avoid allocation per scanline.
+// Parameters:
+//   - yTopFixed, yBotFixed: pixel row boundaries in SkFixed
+//   - aaScale: AA subdivision factor (1, 2, or 4)
+func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaScale int32) []int32 {
 	af.stripYBuf = af.stripYBuf[:0]
-	af.stripYBuf = append(af.stripYBuf, yTop, yBot)
+	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
 
 	n := af.aet.Len()
 	for i := 0; i < n; i++ {
 		edge := af.aet.EdgeAt(i)
 
-		// Get top/bottom of the edge's current segment in pixel coordinates.
 		line := edge.AsLine()
 		if line == nil {
 			continue
 		}
 
-		// Use precise FDot16 Y endpoints when available (Skia AAA precision).
-		// UpperY/LowerY store the original float Y converted to 16.16 fixed-point,
-		// giving sub-pixel precision that FirstY/LastY (integer sub-pixel rows) lack.
-		var segTopF, segBotF float32
+		// Convert edge Y endpoints to pixel-space SkFixed.
+		// UpperY/LowerY are already pixel-space SkFixed (from snapY in NewLineEdge).
+		// FirstY/LastY are integer sub-pixel rows — convert to pixel-space SkFixed.
+		var segTopFixed, segBotFixed int32
 		if line.UpperY != 0 || line.LowerY != 0 {
-			segTopF = FDot16ToFloat32(line.UpperY)
-			segBotF = FDot16ToFloat32(line.LowerY)
+			segTopFixed = line.UpperY
+			segBotFixed = line.LowerY
 		} else {
-			segTopF = float32(line.FirstY) / aaScaleF
-			segBotF = float32(line.LastY+1) / aaScaleF
+			segTopFixed = int32(int64(line.FirstY) * int64(skFixed1) / int64(aaScale))
+			segBotFixed = int32(int64(line.LastY+1) * int64(skFixed1) / int64(aaScale))
 		}
 
-		// Also consider the edge's overall bounds (for curve edges the
-		// current segment may not span the full extent).
-		edgeTopF := float32(edge.TopY()) / aaScaleF
-		edgeBotF := float32(edge.BottomY()) / aaScaleF
+		// Also consider the edge's overall bounds (for curve edges).
+		edgeTopFixed := int32(int64(edge.TopY()) * int64(skFixed1) / int64(aaScale))
+		edgeBotFixed := int32(int64(edge.BottomY()) * int64(skFixed1) / int64(aaScale))
 
-		// Add any Y boundary that falls strictly inside the pixel row.
-		for _, ey := range [4]float32{segTopF, segBotF, edgeTopF, edgeBotF} {
-			if ey > yTop && ey < yBot {
+		for _, ey := range [4]int32{segTopFixed, segBotFixed, edgeTopFixed, edgeBotFixed} {
+			if ey > yTopFixed && ey < yBotFixed {
 				af.stripYBuf = append(af.stripYBuf, ey)
 			}
 		}
@@ -279,26 +274,26 @@ func (af *AnalyticFiller) collectStripBoundaries(yTop, yBot, aaScaleF float32) [
 	// Also check edges not yet in the AET but starting within this pixel row.
 	for idx := af.edgeIdx; idx < len(af.edgeBuf); idx++ {
 		edge := &af.edgeBuf[idx]
-		topF := float32(edge.TopY()) / aaScaleF
-		if topF >= yBot {
+		topFixed := int32(int64(edge.TopY()) * int64(skFixed1) / int64(aaScale))
+		if topFixed >= yBotFixed {
 			break
 		}
-		if topF > yTop {
-			af.stripYBuf = append(af.stripYBuf, topF)
+		if topFixed > yTopFixed {
+			af.stripYBuf = append(af.stripYBuf, topFixed)
 		}
 	}
 
-	// Sort and deduplicate.
-	sortFloat32s(af.stripYBuf)
-	af.stripYBuf = deduplicateFloat32s(af.stripYBuf)
+	sortInt32s(af.stripYBuf)
+	af.stripYBuf = deduplicateInt32s(af.stripYBuf)
 
 	return af.stripYBuf
 }
 
-// processSubStrip resolves edges and blits trapezoids for a single sub-strip
+// processSubStripFixed resolves edges and blits trapezoids for a single sub-strip
 // within a pixel row. Coverage is added to the existing coverage buffer.
-func (af *AnalyticFiller) processSubStrip(
-	aaScaleF, stripTopF, stripBotF float32,
+// All Y parameters are in SkFixed (16.16) — no float32 conversion.
+func (af *AnalyticFiller) processSubStripFixed(
+	aaScale int32, stripTopFixed, stripBotFixed int32,
 	fillRule FillRule,
 ) {
 	n := af.aet.Len()
@@ -307,9 +302,17 @@ func (af *AnalyticFiller) processSubStrip(
 	}
 	af.resolvedEdges = af.resolvedEdges[:0]
 
+	// Compute fullAlpha from SkFixed Y difference — Skia's fixed_to_alpha.
+	// fullAlpha = get_partial_alpha(0xFF, nextY - y) = SkFixedRoundToInt(255 * (nextY - y))
+	yDiff := stripBotFixed - stripTopFixed
+	fullAlpha := fixedToAlpha(yDiff)
+	if fullAlpha == 0 {
+		return
+	}
+
 	for i := 0; i < n; i++ {
 		edge := af.aet.EdgeAt(i)
-		lineState := af.resolveEdgeLine(edge, aaScaleF, stripTopF, stripBotF)
+		lineState := af.resolveEdgeLineFixed(edge, aaScale, stripTopFixed, stripBotFixed, fullAlpha)
 		if lineState.valid {
 			af.resolvedEdges = append(af.resolvedEdges, lineState)
 		}
@@ -352,9 +355,8 @@ func (af *AnalyticFiller) processSubStrip(
 	_ = inInterval
 }
 
-// sortFloat32s sorts a slice of float32 in ascending order.
-func sortFloat32s(s []float32) {
-	// Insertion sort — typically <10 elements.
+// sortInt32s sorts a slice of int32 in ascending order (insertion sort).
+func sortInt32s(s []int32) {
 	for i := 1; i < len(s); i++ {
 		key := s[i]
 		j := i - 1
@@ -366,13 +368,13 @@ func sortFloat32s(s []float32) {
 	}
 }
 
-// deduplicateFloat32s removes duplicate values from a sorted slice.
-// Values within 1/512 of each other are considered equal (sub-pixel tolerance).
-func deduplicateFloat32s(s []float32) []float32 {
+// deduplicateInt32s removes duplicate values from a sorted int32 slice.
+// Values within 128 units of each other (< 1/512 pixel in SkFixed) are considered equal.
+func deduplicateInt32s(s []int32) []int32 {
 	if len(s) <= 1 {
 		return s
 	}
-	const eps = 1.0 / 512.0
+	const eps int32 = 128 // ~1/512 pixel in SkFixed (65536 per pixel)
 	n := 1
 	for i := 1; i < len(s); i++ {
 		if s[i]-s[n-1] > eps {
@@ -383,14 +385,15 @@ func deduplicateFloat32s(s []float32) []float32 {
 	return s[:n]
 }
 
-// sortEdgesByMidX sorts resolved edges by their midpoint X position.
+// sortEdgesByMidX sorts resolved edges by their midpoint X position (SkFixed).
 func sortEdgesByMidX(edges []edgeLineState) {
 	// Simple insertion sort — edge count per scanline is typically small (<20)
 	for i := 1; i < len(edges); i++ {
 		key := edges[i]
-		keyX := (key.topX + key.botX) * 0.5
+		// Midpoint in SkFixed — use int64 to avoid overflow in addition.
+		keyX := int64(key.topX) + int64(key.botX)
 		j := i - 1
-		for j >= 0 && (edges[j].topX+edges[j].botX)*0.5 > keyX {
+		for j >= 0 && int64(edges[j].topX)+int64(edges[j].botX) > keyX {
 			edges[j+1] = edges[j]
 			j--
 		}
@@ -398,110 +401,140 @@ func sortEdgesByMidX(edges []edgeLineState) {
 	}
 }
 
-// edgeLineState holds resolved line parameters for one edge in pixel coordinates.
+// edgeLineState holds resolved line parameters for one edge.
+// All positions are in SkFixed (16.16 fixed-point pixel coordinates) to match Skia's
+// integer-only pipeline. No float32 intermediary — avoids round-trip precision loss.
 type edgeLineState struct {
-	valid   bool
-	topX    float32 // X position at top of strip (pixel coords)
-	botX    float32 // X position at bottom of strip (pixel coords)
-	topY    float32 // Y position at top of strip
-	botY    float32 // Y position at bottom of strip
-	dy      float32 // Skia fDY: abs(1/slope) = abs(dY/dX). Used by partialTriangleToAlpha.
-	height  float32 // vertical extent within strip (= botY - topY)
-	winding int8
+	valid     bool
+	topX      int32 // X position at top of strip (SkFixed pixel coords)
+	botX      int32 // X position at bottom of strip (SkFixed pixel coords)
+	dy        int32 // Skia fDY: abs(1/slope) in SkFixed. Used by partialTriangleToAlpha.
+	fullAlpha uint8 // strip height as alpha [0, 255], computed from SkFixed Y difference
+	winding   int8
 }
 
-// resolveEdgeLine resolves an edge to its line parameters in pixel coordinates
-// for the current scanline strip. Handles curve segment stepping.
-func (af *AnalyticFiller) resolveEdgeLine(
+// resolveEdgeLineFixed resolves an edge to its line parameters for the current
+// scanline strip. All computation is in SkFixed (16.16) integer math — no float32.
+//
+// Matches Skia's goY(): fX = fUpperX + SkFixedMul(fDX, y - fUpperY)
+//
+// Our edge stores X and DX in sub-pixel FDot16 space (4x pixel for aaShift=2).
+// Coordinate conversion:
+//   - line.X is sub-pixel FDot16 at line.FirstY. Pixel SkFixed = line.X / aaScale.
+//   - line.DX is FDot6Div(dx, dy) = slope ratio, same in pixel and sub-pixel space.
+//   - X_at_Y = upperX_pixel + SkFixedMul(DX, Y_pixel - upperY_pixel)
+func (af *AnalyticFiller) resolveEdgeLineFixed(
 	edge *CurveEdgeVariant,
-	aaScaleF, yPixelF, yPixelEndF float32,
+	aaScale int32, yTopFixed, yBotFixed int32, fullAlpha uint8,
 ) edgeLineState {
-	// Walk through segments that are before or within this scanline
 	for {
 		line := edge.AsLine()
 		if line == nil {
 			return edgeLineState{}
 		}
 
-		// Determine segment Y range. When precise FDot16 endpoints are available,
-		// use them for intersection testing. This avoids the precision loss from
-		// FDot6Round that causes edges starting at y=15.4 to appear as y=15.5.
-		var segTopPixel, segBotPixel float32
+		// Determine segment Y range in pixel-space SkFixed.
+		var segTopFixed, segBotFixed int32
 		hasPrecise := line.UpperY != 0 || line.LowerY != 0
 		if hasPrecise {
-			segTopPixel = FDot16ToFloat32(line.UpperY)
-			segBotPixel = FDot16ToFloat32(line.LowerY)
+			segTopFixed = line.UpperY
+			segBotFixed = line.LowerY
 		} else {
-			segTopPixel = float32(line.FirstY) / aaScaleF
-			segBotPixel = float32(line.LastY+1) / aaScaleF
+			segTopFixed = int32(int64(line.FirstY) * int64(skFixed1) / int64(aaScale))
+			segBotFixed = int32(int64(line.LastY+1) * int64(skFixed1) / int64(aaScale))
 		}
 
-		// Quick cull: segment is entirely after this strip
-		if segTopPixel >= yPixelEndF {
+		// Quick cull: segment entirely after this strip.
+		if segTopFixed >= yBotFixed {
 			return edgeLineState{}
 		}
 
-		// Quick cull: segment is entirely before this strip — step curve
-		if segBotPixel <= yPixelF {
+		// Quick cull: segment entirely before this strip — step curve.
+		if segBotFixed <= yTopFixed {
 			if !af.stepCurveSegment(edge) {
 				return edgeLineState{}
 			}
 			continue
 		}
 
-		// Segment intersects scanline — compute pixel-space parameters.
-		x := FDot16ToFloat32(line.X) / aaScaleF
-		dx := FDot16ToFloat32(line.DX)
-		firstY := segTopPixel
-		lastY := segBotPixel
-
-		yTop := yPixelF
-		yBot := yPixelEndF
-		if yTop < firstY {
-			yTop = firstY
+		// Clamp strip Y to segment range (all SkFixed).
+		clampedTop := yTopFixed
+		clampedBot := yBotFixed
+		if clampedTop < segTopFixed {
+			clampedTop = segTopFixed
 		}
-		if yBot > lastY {
-			yBot = lastY
+		if clampedBot > segBotFixed {
+			clampedBot = segBotFixed
 		}
 
-		h := yBot - yTop
-		if h <= 0 {
+		if clampedBot <= clampedTop {
 			return edgeLineState{}
 		}
 
-		topX := x + dx*(yTop-firstY)
-		botX := x + dx*(yBot-firstY)
-
-		// Compute Skia's fDY = abs(1/slope) = abs(dY/dX).
-		// slope = DX = change in X per scanline step (dimensionless).
-		// fDY = abs(1/slope). For vertical edges (DX=0), fDY → infinity.
-		// Used by partialTriangleToAlpha to compute edge-exclusion triangles.
-		absDX := dx
-		if absDX < 0 {
-			absDX = -absDX
-		}
-		var fDY float32
-		if absDX < 1e-7 {
-			// Nearly vertical edge — fDY is very large (Skia uses SK_MaxS32)
-			fDY = float32(0x7FFFFFFF) / float32(skFixed1) // ≈ 32767.0
-		} else {
-			fDY = 1.0 / absDX
-			if fDY > float32(0x7FFFFFFF)/float32(skFixed1) {
-				fDY = float32(0x7FFFFFFF) / float32(skFixed1)
+		// Recompute fullAlpha if we clamped the strip to the segment range.
+		// This happens when the edge starts/ends within the sub-strip.
+		edgeAlpha := fullAlpha
+		if clampedTop != yTopFixed || clampedBot != yBotFixed {
+			edgeAlpha = fixedToAlpha(clampedBot - clampedTop)
+			if edgeAlpha == 0 {
+				return edgeLineState{}
 			}
 		}
 
+		topX, botX := computeEdgeX(line, aaScale, hasPrecise, clampedTop, clampedBot)
+		fDY := computeEdgeDY(line.DX)
+
 		return edgeLineState{
-			valid:   true,
-			topX:    topX,
-			botX:    botX,
-			topY:    yTop,
-			botY:    yBot,
-			dy:      fDY,
-			height:  h,
-			winding: line.Winding,
+			valid:     true,
+			topX:      topX,
+			botX:      botX,
+			dy:        fDY,
+			fullAlpha: edgeAlpha,
+			winding:   line.Winding,
 		}
 	}
+}
+
+// computeEdgeX computes X positions at clampedTop and clampedBot for an edge.
+// Uses the Skia goY() pattern: X(Y) = upperX + slope * (Y - upperY).
+// line.X is at sub-pixel FirstY center; we project to UpperY, then to the target Y.
+func computeEdgeX(line *LineEdge, aaScale int32, hasPrecise bool, clampedTop, clampedBot int32) (topX, botX int32) {
+	slope := line.DX
+	refXPixel := int32(int64(line.X) / int64(aaScale))
+	refYPixel := int32((int64(line.FirstY)*int64(skFixed1) + int64(skFixedHalf)) / int64(aaScale))
+
+	var upperXPixel, upperYPixel int32
+	if hasPrecise {
+		upperYPixel = line.UpperY
+		dY := int64(upperYPixel) - int64(refYPixel)
+		correction := int32((int64(slope)*dY + int64(skFixedHalf)) >> 16)
+		upperXPixel = refXPixel + correction
+	} else {
+		upperYPixel = refYPixel
+		upperXPixel = refXPixel
+	}
+
+	topX = upperXPixel + skFixedMul(slope, clampedTop-upperYPixel)
+	botX = upperXPixel + skFixedMul(slope, clampedBot-upperYPixel)
+	return topX, botX
+}
+
+// computeEdgeDY computes Skia's fDY = abs(1/slope) in SkFixed.
+// Used by partialTriangleToAlpha for coverage computation.
+func computeEdgeDY(slope int32) int32 {
+	absSlope := slope
+	if absSlope < 0 {
+		absSlope = -absSlope
+	}
+	absSlopeFDot6 := absSlope >> (FDot16Shift - FDot6Shift)
+	if absSlopeFDot6 == 0 {
+		return 0x7FFFFFFF
+	}
+	fDY := FDot6Div(FDot6One, absSlopeFDot6)
+	if fDY < 0 {
+		return 0x7FFFFFFF
+	}
+	return fDY
 }
 
 // blitTrapezoidBetweenEdges computes per-pixel alpha for the trapezoid formed
@@ -516,29 +549,24 @@ func (af *AnalyticFiller) blitTrapezoidBetweenEdges(left, right edgeLineState) {
 		return
 	}
 
-	// Skia uses SkFixed (16.16) for precision. We convert our float pixel
-	// coordinates to 16.16 fixed-point for the trapezoid computation.
-	ul := floatToSkFixed(left.topX)
-	ll := floatToSkFixed(left.botX)
-	ur := floatToSkFixed(right.topX)
-	lr := floatToSkFixed(right.botX)
+	ul := left.topX
+	ll := left.botX
+	ur := right.topX
+	lr := right.botX
 
-	// fullAlpha is proportional to strip height.
-	// For a full pixel height strip, fullAlpha = 255.
-	// For partial strips (edge starts/ends mid-pixel), scale proportionally.
-	height := left.height
-	if right.height < height {
-		height = right.height
+	// Use the minimum fullAlpha of the two edges. When both edges span the
+	// full sub-strip, they have the same fullAlpha. When one edge starts/ends
+	// mid-strip (clamped), it has a smaller fullAlpha.
+	fullAlpha := left.fullAlpha
+	if right.fullAlpha < fullAlpha {
+		fullAlpha = right.fullAlpha
 	}
-	fullAlpha := uint8(clamp32(height*255.0+0.5, 0, 255))
 	if fullAlpha == 0 {
 		return
 	}
 
-	// Skia fDY = abs(dY/dX) = abs(1/slope) for left and right edges.
-	// Used by partialTriangleToAlpha to compute edge-exclusion triangles.
-	lDY := floatToSkFixed(left.dy)
-	rDY := floatToSkFixed(right.dy)
+	lDY := left.dy
+	rDY := right.dy
 
 	af.blitTrapezoidRow(ul, ur, ll, lr, lDY, rDY, fullAlpha)
 }
@@ -564,11 +592,15 @@ func (af *AnalyticFiller) blitTrapezoidRow(
 		rDY = -rDY
 	}
 
+	// Edge crossing at top: precision-induced at vertices where edges
+	// share the same start point. Clamp to midpoint (degenerate triangle).
 	if ul > ur {
-		return
+		mid := (ul + ur) / 2
+		ul = mid
+		ur = mid
 	}
 
-	// Edge crossing approximation (precision-induced)
+	// Edge crossing at bottom: precision-induced.
 	if ll > lr {
 		mid := approximateIntersection(ul, ll, ur, lr)
 		ll = mid
@@ -949,8 +981,24 @@ func approximateIntersection(l1, r1, l2, r2 int32) int32 {
 
 // --- Fixed-point helper functions ---
 
-func floatToSkFixed(f float32) int32 {
-	return int32(f * float32(skFixed1))
+// fixedToAlpha converts a SkFixed height (16.16) to an alpha value [0, 255].
+// Port of Skia's fixed_to_alpha: get_partial_alpha(0xFF, f) = SkFixedRoundToInt(255 * f).
+func fixedToAlpha(f int32) uint8 {
+	if f <= 0 {
+		return 0
+	}
+	if f >= skFixed1 {
+		return 255
+	}
+	// SkFixedRoundToInt(255 * f) = (255 * f + SK_FixedHalf) >> 16
+	v := (int64(255)*int64(f) + int64(skFixedHalf)) >> 16
+	if v > 255 {
+		return 255
+	}
+	if v < 0 {
+		return 0
+	}
+	return uint8(v) //nolint:gosec // clamped above
 }
 
 func intToSkFixed(n int32) int32 {
