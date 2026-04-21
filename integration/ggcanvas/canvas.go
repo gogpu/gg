@@ -34,14 +34,6 @@ type textureDestroyer interface {
 	Destroy()
 }
 
-// textureRegionUpdater is an optional interface for textures that support
-// partial region upload. When the underlying texture implements this,
-// only the dirty region is uploaded instead of the full pixmap.
-// gogpu.Texture satisfies this via structural typing.
-type textureRegionUpdater interface {
-	UpdateRegion(x, y, w, h int, data []byte) error
-}
-
 // resourceTracker is a duck-typed interface matching gogpu.ResourceTracker.
 // Using a local interface avoids importing gogpu (which would create a
 // circular dependency gg -> gogpu). Go's structural typing ensures that
@@ -570,7 +562,7 @@ func (c *Canvas) Close() error {
 // dirty region is extracted and uploaded. Otherwise falls back to full upload.
 func (c *Canvas) uploadTexture(pixmap *gg.Pixmap, fullData []byte) error {
 	dr := c.dirtyRect
-	regionUpdater, hasRegion := c.texture.(textureRegionUpdater)
+	regionUpdater, hasRegion := c.texture.(gpucontext.TextureRegionUpdater)
 
 	// Use partial upload when: texture supports it, dirty rect is set (non-empty),
 	// and the dirty rect is strictly smaller than the full pixmap.

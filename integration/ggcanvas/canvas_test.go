@@ -53,7 +53,7 @@ type regionUpdate struct {
 }
 
 // mockTexture implements the texture interfaces for testing.
-// Implements gpucontext.Texture, gpucontext.TextureUpdater, and textureRegionUpdater.
+// Implements gpucontext.Texture, gpucontext.TextureUpdater, and gpucontext.TextureRegionUpdater.
 type mockTexture struct {
 	width         int
 	height        int
@@ -86,8 +86,8 @@ func (m *mockTexture) Destroy() {
 
 // Compile-time checks.
 var (
-	_ gpucontext.TextureUpdater = (*mockTexture)(nil)
-	_ textureRegionUpdater      = (*mockTexture)(nil)
+	_ gpucontext.TextureUpdater       = (*mockTexture)(nil)
+	_ gpucontext.TextureRegionUpdater = (*mockTexture)(nil)
 )
 
 // mockRenderer implements gpucontext.TextureCreator for testing.
