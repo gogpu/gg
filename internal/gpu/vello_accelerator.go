@@ -748,12 +748,16 @@ func (a *VelloAccelerator) readbackBuffer(outputBuffer *wgpu.Buffer, size uint64
 	}
 	rng, err := stagingBuffer.MappedRange(0, size)
 	if err != nil {
-		if err := stagingBuffer.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
+		if err := stagingBuffer.Unmap(); err != nil {
+			slogger().Warn("unmap failed", "err", err)
+		}
 		return nil, fmt.Errorf("mapped range: %w", err)
 	}
 	resultBytes := make([]byte, size)
 	copy(resultBytes, rng.Bytes())
-	if err := stagingBuffer.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
+	if err := stagingBuffer.Unmap(); err != nil {
+		slogger().Warn("unmap failed", "err", err)
+	}
 
 	return resultBytes, nil
 }

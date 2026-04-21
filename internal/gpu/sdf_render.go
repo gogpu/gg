@@ -540,12 +540,16 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	}
 	rng, err := stagingBuf.MappedRange(0, pixelBufSize)
 	if err != nil {
-		if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
+		if err := stagingBuf.Unmap(); err != nil {
+			slogger().Warn("unmap failed", "err", err)
+		}
 		return fmt.Errorf("mapped range: %w", err)
 	}
 	readback := make([]byte, pixelBufSize)
 	copy(readback, rng.Bytes())
-	if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
+	if err := stagingBuf.Unmap(); err != nil {
+		slogger().Warn("unmap failed", "err", err)
+	}
 
 	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil
