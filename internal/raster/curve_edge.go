@@ -110,11 +110,11 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	x1 := int32(p1.X * scale)
 	y1 := int32(p1.Y * scale)
 
-	// Preserve precise Y endpoints BEFORE any rounding, for Skia AAA sub-strip
-	// boundaries. Convert original float coordinates directly to FDot16 (16.16).
-	// This gives 1/65536 pixel precision vs 1/64 from FDot6.
-	preciseY0 := FDot16FromFloat32(p0.Y)
-	preciseY1 := FDot16FromFloat32(p1.Y)
+	// Preserve precise Y endpoints for Skia AAA sub-strip boundaries.
+	// Apply Skia's SnapY (accuracy=2): round to nearest 1/4 pixel in 16.16 space.
+	// This matches SkAnalyticEdge.h:52 SnapY() with kDefaultAccuracy=2.
+	preciseY0 := snapY(FDot16FromFloat32(p0.Y))
+	preciseY1 := snapY(FDot16FromFloat32(p1.Y))
 
 	winding := int8(1)
 	if y0 > y1 {
@@ -147,6 +147,15 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 		LowerY:  preciseY1,
 		Winding: winding,
 	}, true
+}
+
+// snapY applies Skia's SnapY rounding (SkAnalyticEdge.h:52) with accuracy=2.
+// Rounds FDot16 Y to nearest 1/4 pixel boundary.
+func snapY(y FDot16) FDot16 {
+	const accuracy = 2
+	const half = int32(1) << (16 - accuracy - 1)
+	const mask = ^(int32(1)<<(16-accuracy) - 1)
+	return FDot16((int32(y) + half) & mask)
 }
 
 // IsVertical returns true if the edge has zero slope.
