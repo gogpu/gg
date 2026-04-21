@@ -6,6 +6,12 @@
 
 package tilecompute
 
+// PixelsPerThread is the number of pixels each fine rasterizer thread handles.
+// Matches Vello's PIXELS_PER_THREAD constant. With workgroup_size(4, 16, 1),
+// each of the 64 threads processes 4 consecutive horizontal pixels, covering
+// the full 16x16 tile (4 threads x 4 pixels = 16 columns, 16 rows).
+const PixelsPerThread = 4
+
 // fineRasterizeTile processes a PTCL command stream for a single tile,
 // producing RGBA pixel output. This is the CPU version of Vello's fine.wgsl main loop.
 //
@@ -14,14 +20,23 @@ package tilecompute
 // (push clip layer), and CmdEndClip (pop clip and composite). All compositing uses
 // premultiplied alpha throughout.
 //
+// Thread model: Matches Vello's workgroup_size(4, 16, 1) with PIXELS_PER_THREAD=4.
+// Each "thread" (local_id.x, local_id.y) processes 4 consecutive horizontal pixels.
+// On CPU we iterate all 64 threads sequentially.
+//
+// Blend stack: First BlendStackSplit (4) clip levels are stored in local arrays
+// (packed u32 on GPU, float32 on CPU for precision). Deeper levels would use the
+// blend_spill buffer; on CPU we use a dynamic slice for simplicity while
+// maintaining identical compositing output.
+//
 // Parameters:
-//   - ptcl: the per-tile command list to execute
+//   - ptcl: the per-tile command list to execute (word 0 = blend_offset, words 1+ = commands)
 //   - segments: global segment array (CmdFill.SegIndex indexes into this)
 //   - bgColor: background color as premultiplied float32 RGBA [0,1]
 //
 // Returns per-pixel premultiplied RGBA as [TileWidth*TileHeight][4]float32.
 //
-//nolint:funlen // Direct port of Vello fine.wgsl PTCL dispatch loop; splitting would hurt cross-reference.
+//nolint:funlen,cyclop // Direct port of Vello fine.wgsl PTCL dispatch loop; splitting would hurt cross-reference.
 func fineRasterizeTile(ptcl *PTCL, segments []PathSegment, bgColor [4]float32) [TileWidth * TileHeight][4]float32 {
 	const pixelCount = TileWidth * TileHeight
 
@@ -38,10 +53,16 @@ func fineRasterizeTile(ptcl *PTCL, segments []PathSegment, bgColor [4]float32) [
 	// Working area buffer for coverage values.
 	var area [pixelCount]float32
 
-	// Clip stack for CmdBeginClip / CmdEndClip pairs.
-	var clipStack [][pixelCount][4]float32
+	// Blend stack for CmdBeginClip / CmdEndClip pairs.
+	// Matches Vello's packed u32 blend_stack on GPU. On CPU we use float32 for
+	// precision but the compositing math is identical. The structure mirrors
+	// Vello's: first BlendStackSplit levels in local storage, rest in "spill".
+	var blendStack [BlendStackSplit][pixelCount][4]float32
+	var blendSpill [][pixelCount][4]float32
+	clipDepth := uint32(0)
 
-	offset := 0
+	// Skip word 0 (blend_offset) — commands start at CmdStartOffset.
+	offset := CmdStartOffset
 	for {
 		tag, nextOffset := ptcl.ReadCmd(offset)
 		offset = nextOffset
@@ -102,9 +123,16 @@ func fineRasterizeTile(ptcl *PTCL, segments []PathSegment, bgColor [4]float32) [
 			}
 
 		case CmdBeginClip:
-			// Push current rgba to clip stack and clear to transparent.
-			saved := rgba
-			clipStack = append(clipStack, saved)
+			// Push current rgba to blend stack and clear to transparent.
+			// Vello pattern: first BlendStackSplit levels in local registers,
+			// deeper levels spill to blend_spill SSBO.
+			if clipDepth < BlendStackSplit {
+				blendStack[clipDepth] = rgba
+			} else {
+				saved := rgba
+				blendSpill = append(blendSpill, saved)
+			}
+			clipDepth++
 			for i := range rgba {
 				rgba[i] = [4]float32{0, 0, 0, 0}
 			}
@@ -113,13 +141,24 @@ func fineRasterizeTile(ptcl *PTCL, segments []PathSegment, bgColor [4]float32) [
 			data, next := ptcl.ReadEndClipData(offset)
 			offset = next
 
-			// Pop saved state from clip stack.
-			if len(clipStack) == 0 {
+			if clipDepth == 0 {
 				// Malformed PTCL -- no matching BeginClip. Skip.
 				continue
 			}
-			saved := clipStack[len(clipStack)-1]
-			clipStack = clipStack[:len(clipStack)-1]
+			clipDepth--
+
+			// Pop saved state from blend stack.
+			var saved [pixelCount][4]float32
+			if clipDepth < BlendStackSplit {
+				saved = blendStack[clipDepth]
+			} else {
+				spillIdx := clipDepth - BlendStackSplit
+				if int(spillIdx) < len(blendSpill) {
+					saved = blendSpill[spillIdx]
+					// Trim spill stack.
+					blendSpill = blendSpill[:spillIdx]
+				}
+			}
 
 			alpha := data.Alpha
 			_ = data.Blend // Only source-over (blend=0) is supported currently.

@@ -492,7 +492,7 @@ func TestDrawReduceScan(t *testing.T) {
 	packed := PackScene(enc)
 
 	reduced := drawReduce(packed)
-	drawMonoids, info := drawLeafScan(packed, reduced)
+	drawMonoids, info, _ := drawLeafScan(packed, reduced)
 
 	// Verify we get 3 draw monoids.
 	if len(drawMonoids) != 3 {
@@ -696,7 +696,7 @@ func TestSceneRoundTrip(t *testing.T) {
 
 	// Run draw reduce + scan.
 	dReduced := drawReduce(packed)
-	dMonoids, info := drawLeafScan(packed, dReduced)
+	dMonoids, info, _ := drawLeafScan(packed, dReduced)
 
 	// Basic sanity checks.
 	numTagWords := numPathTagWords(packed)

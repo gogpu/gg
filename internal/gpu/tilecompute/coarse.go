@@ -310,7 +310,21 @@ type drawParams struct {
 	totalSegs     uint32
 }
 
+// tileClipState tracks per-tile clip state during PTCL generation.
+// Matches Vello coarse.wgsl clip state variables.
+type tileClipState struct {
+	clipDepth     uint32 // Current clip nesting depth
+	clipZeroDepth uint32 // >0 means inside an empty clip; suppress all drawing
+	blendDepth    uint32 // Current render blend depth
+	maxBlendDepth uint32 // Maximum blend depth seen (for blend_spill allocation)
+}
+
 // generatePTCLs processes draw objects in scene order and generates per-tile PTCLs.
+// Handles DrawTagColor, DrawTagBeginClip, and DrawTagEndClip.
+//
+// Reference: vello_shaders/shader/coarse.wgsl lines 194-467.
+//
+//nolint:funlen,cyclop // Vello coarse PTCL generation handles 3 tag types with per-tile clip state tracking.
 func generatePTCLs(
 	out *CoarseOutput,
 	scene *PackedScene,
@@ -318,23 +332,296 @@ func generatePTCLs(
 	info []uint32,
 ) {
 	numDrawObjects := int(scene.Layout.NumDrawObjects)
+	numTiles := out.WidthInTiles * out.HeightInTiles
 	pathFillRules := extractPathFillRules(scene)
+
+	// Per-tile clip state (allocated once, indexed by global tile index).
+	clipState := make([]tileClipState, numTiles)
 
 	for drawIx := 0; drawIx < numDrawObjects; drawIx++ {
 		tag := scene.Data[scene.Layout.DrawTagBase+uint32(drawIx)]
-		if tag != DrawTagColor {
-			continue
-		}
-
 		dm := drawMonoids[drawIx]
 		pathIx := int(dm.PathIx)
-		if pathIx >= len(out.Paths) {
-			continue
+
+		switch tag {
+		case DrawTagColor:
+			if pathIx >= len(out.Paths) {
+				continue
+			}
+			dp := resolveDrawParams(dm, pathIx, info, pathFillRules, out)
+			emitDrawToTilesClipAware(out, dp, clipState)
+
+		case DrawTagBeginClip:
+			if pathIx >= len(out.Paths) {
+				continue
+			}
+			emitBeginClipToTiles(out, pathIx, clipState)
+
+		case DrawTagEndClip:
+			// After clipLeafScan, EndClip's PathIx and SceneOffset
+			// have been fixed up to match the BeginClip.
+			if pathIx >= len(out.Paths) {
+				continue
+			}
+			// Read blend_mode and alpha from draw data (via fixed-up scene_offset).
+			var blend uint32
+			var alpha float32
+			sceneOff := scene.Layout.DrawDataBase + dm.SceneOffset
+			if sceneOff+1 < uint32(len(scene.Data)) {
+				blend = scene.Data[sceneOff]
+				alpha = math.Float32frombits(scene.Data[sceneOff+1])
+			}
+			emitEndClipToTiles(out, pathIx, blend, alpha, clipState)
+		}
+	}
+}
+
+// emitDrawToTilesClipAware writes PTCL commands for a draw object,
+// skipping tiles that are inside an empty clip (clipZeroDepth > 0).
+func emitDrawToTilesClipAware(out *CoarseOutput, dp drawParams, clipState []tileClipState) {
+	path := out.Paths[dp.pathIx]
+	bbox := path.BBox
+	bboxW := int(bbox[2] - bbox[0])
+	bboxH := int(bbox[3] - bbox[1])
+	if bboxW == 0 || bboxH == 0 {
+		return
+	}
+
+	tilesStart := int(path.Tiles)
+
+	for ty := 0; ty < bboxH; ty++ {
+		for tx := 0; tx < bboxW; tx++ {
+			globalTX := int(bbox[0]) + tx
+			globalTY := int(bbox[1]) + ty
+			if globalTX < 0 || globalTX >= out.WidthInTiles ||
+				globalTY < 0 || globalTY >= out.HeightInTiles {
+				continue
+			}
+
+			globalTileIdx := globalTY*out.WidthInTiles + globalTX
+
+			// Skip draws inside empty clips (Vello clip_zero_depth optimization).
+			if clipState[globalTileIdx].clipZeroDepth > 0 {
+				continue
+			}
+
+			localTileIdx := ty*bboxW + tx
+			tileIdx := tilesStart + localTileIdx
+			if tileIdx >= len(out.Tiles) {
+				continue
+			}
+
+			tile := out.Tiles[tileIdx]
+			segCount, segStart := tileSegRange(
+				tile, localTileIdx, bboxW*bboxH, out.Tiles[tilesStart:], dp.totalSegs,
+			)
+
+			ptcl := out.TilePTCLs[globalTileIdx]
+
+			switch {
+			case segCount > 0:
+				ptcl.WriteFill(segCount, dp.evenOdd, dp.globalSegBase+segStart, tile.Backdrop)
+				ptcl.WriteColor(dp.rgba)
+			case tile.Backdrop != 0:
+				ptcl.WriteSolid()
+				ptcl.WriteColor(dp.rgba)
+			}
+		}
+	}
+}
+
+// emitBeginClipToTiles processes a BeginClip draw object across all tiles.
+// For each tile in the clip path's bbox:
+//   - If already inside an empty clip: just increment clipDepth
+//   - If tile is empty (no segments, backdrop=0): set clipZeroDepth
+//   - Otherwise: emit CmdBeginClip to PTCL
+//
+// Reference: coarse.wgsl DRAWTAG_BEGIN_CLIP case (lines 412-420).
+func emitBeginClipToTiles(out *CoarseOutput, pathIx int, clipState []tileClipState) {
+	path := out.Paths[pathIx]
+	bbox := path.BBox
+	bboxW := int(bbox[2] - bbox[0])
+	bboxH := int(bbox[3] - bbox[1])
+
+	for ty := 0; ty < bboxH; ty++ {
+		for tx := 0; tx < bboxW; tx++ {
+			globalTX := int(bbox[0]) + tx
+			globalTY := int(bbox[1]) + ty
+			if globalTX < 0 || globalTX >= out.WidthInTiles ||
+				globalTY < 0 || globalTY >= out.HeightInTiles {
+				continue
+			}
+
+			globalTileIdx := globalTY*out.WidthInTiles + globalTX
+			cs := &clipState[globalTileIdx]
+
+			if cs.clipZeroDepth > 0 {
+				// Already inside an empty clip. Just track depth.
+				cs.clipDepth++
+				continue
+			}
+
+			// Check if this tile has any coverage for the clip path.
+			localTileIdx := ty*bboxW + tx
+			tileIdx := int(path.Tiles) + localTileIdx
+			var hasSegments bool
+			var hasBackdrop bool
+			if tileIdx < len(out.Tiles) {
+				tile := out.Tiles[tileIdx]
+				hasSegments = tile.SegmentCountOrIx != 0
+				hasBackdrop = tile.Backdrop != 0
+			}
+
+			if !hasSegments && !hasBackdrop {
+				// Empty tile — clip produces zero coverage here.
+				// Set clipZeroDepth to suppress all draws until matching EndClip.
+				cs.clipZeroDepth = cs.clipDepth + 1
+			} else {
+				out.TilePTCLs[globalTileIdx].WriteBeginClip()
+				cs.blendDepth++
+				if cs.blendDepth > cs.maxBlendDepth {
+					cs.maxBlendDepth = cs.blendDepth
+				}
+			}
+			cs.clipDepth++
+		}
+	}
+
+	// Handle tiles OUTSIDE the clip path bbox — they have zero coverage.
+	// We need to set clipZeroDepth for them too.
+	for tileY := 0; tileY < out.HeightInTiles; tileY++ {
+		for tileX := 0; tileX < out.WidthInTiles; tileX++ {
+			// Skip tiles inside bbox (already handled above).
+			if uint32(tileX) >= bbox[0] && uint32(tileX) < bbox[2] &&
+				uint32(tileY) >= bbox[1] && uint32(tileY) < bbox[3] {
+				continue
+			}
+			globalTileIdx := tileY*out.WidthInTiles + tileX
+			cs := &clipState[globalTileIdx]
+			if cs.clipZeroDepth == 0 {
+				cs.clipZeroDepth = cs.clipDepth + 1
+			}
+			cs.clipDepth++
+		}
+	}
+}
+
+// emitEndClipToTiles processes an EndClip draw object across all tiles.
+// For each tile:
+//   - Decrement clipDepth
+//   - If exiting the empty clip level: reset clipZeroDepth
+//   - Otherwise: emit CmdFill + CmdEndClip to PTCL
+//
+// Reference: coarse.wgsl DRAWTAG_END_CLIP case (lines 422-429) + clip_zero path (lines 434-447).
+func emitEndClipToTiles(
+	out *CoarseOutput,
+	pathIx int,
+	blend uint32,
+	alpha float32,
+	clipState []tileClipState,
+) {
+	path := out.Paths[pathIx]
+	bbox := path.BBox
+	bboxW := int(bbox[2] - bbox[0])
+	bboxH := int(bbox[3] - bbox[1])
+
+	// Process tiles inside clip path bbox.
+	for ty := 0; ty < bboxH; ty++ {
+		for tx := 0; tx < bboxW; tx++ {
+			globalTX := int(bbox[0]) + tx
+			globalTY := int(bbox[1]) + ty
+			if globalTX < 0 || globalTX >= out.WidthInTiles ||
+				globalTY < 0 || globalTY >= out.HeightInTiles {
+				continue
+			}
+
+			globalTileIdx := globalTY*out.WidthInTiles + globalTX
+			endClipForTile(out, globalTileIdx, pathIx, bboxW, bboxH, tx, ty, blend, alpha, clipState)
+		}
+	}
+
+	// Process tiles OUTSIDE the clip path bbox.
+	for tileY := 0; tileY < out.HeightInTiles; tileY++ {
+		for tileX := 0; tileX < out.WidthInTiles; tileX++ {
+			if uint32(tileX) >= bbox[0] && uint32(tileX) < bbox[2] &&
+				uint32(tileY) >= bbox[1] && uint32(tileY) < bbox[3] {
+				continue
+			}
+			globalTileIdx := tileY*out.WidthInTiles + tileX
+			cs := &clipState[globalTileIdx]
+			cs.clipDepth--
+			if cs.clipZeroDepth == cs.clipDepth+1 {
+				cs.clipZeroDepth = 0
+			}
+			// No PTCL commands needed for tiles outside the clip path —
+			// they were in clipZeroDepth from BeginClip.
+		}
+	}
+}
+
+// endClipForTile handles the EndClip for a single tile inside the clip path bbox.
+func endClipForTile(
+	out *CoarseOutput,
+	globalTileIdx int,
+	pathIx int,
+	bboxW, bboxH, tx, ty int,
+	blend uint32,
+	alpha float32,
+	clipState []tileClipState,
+) {
+	cs := &clipState[globalTileIdx]
+	cs.clipDepth--
+
+	if cs.clipZeroDepth == cs.clipDepth+1 {
+		// Exiting the empty clip level — reset.
+		cs.clipZeroDepth = 0
+		return
+	}
+	if cs.clipZeroDepth > 0 {
+		// Still inside a deeper empty clip — no commands.
+		return
+	}
+
+	// Emit CmdFill for the clip path coverage, then CmdEndClip.
+	// "A clip shape is always a non-zero fill" — coarse.wgsl line 425.
+	path := out.Paths[pathIx]
+	localTileIdx := ty*bboxW + tx
+	tileIdx := int(path.Tiles) + localTileIdx
+	if tileIdx < len(out.Tiles) {
+		tile := out.Tiles[tileIdx]
+
+		var totalSegs uint32
+		if pathIx < len(out.pathTotalSegs) {
+			totalSegs = out.pathTotalSegs[pathIx]
+		}
+		var globalSegBase uint32
+		if pathIx < len(out.pathSegBase) {
+			globalSegBase = out.pathSegBase[pathIx]
 		}
 
-		dp := resolveDrawParams(dm, pathIx, info, pathFillRules, out)
-		emitDrawToTiles(out, dp)
+		segCount, segStart := tileSegRange(
+			tile, localTileIdx, bboxW*bboxH,
+			out.Tiles[int(path.Tiles):int(path.Tiles)+bboxW*bboxH],
+			totalSegs,
+		)
+
+		ptcl := out.TilePTCLs[globalTileIdx]
+		switch {
+		case segCount > 0:
+			// Non-zero fill (draw_flags=0 for clip shapes).
+			ptcl.WriteFill(segCount, false, globalSegBase+segStart, tile.Backdrop)
+		case tile.Backdrop != 0:
+			ptcl.WriteSolid()
+		default:
+			// Empty tile — just write solid with 0 area (fine rasterizer will handle).
+			// Actually, for EndClip the area is needed. If no coverage, endclip sees 0.
+			// This shouldn't happen for tiles that had BeginClip (non-zero-depth).
+			ptcl.WriteSolid()
+		}
+		ptcl.WriteEndClip(blend, alpha)
 	}
+
+	cs.blendDepth--
 }
 
 // resolveDrawParams extracts all parameters needed to emit PTCL commands for a draw.
@@ -361,53 +648,6 @@ func resolveDrawParams(
 	}
 
 	return dp
-}
-
-// emitDrawToTiles writes PTCL commands for one draw object across all tiles it covers.
-func emitDrawToTiles(out *CoarseOutput, dp drawParams) {
-	path := out.Paths[dp.pathIx]
-	bbox := path.BBox
-	bboxW := int(bbox[2] - bbox[0])
-	bboxH := int(bbox[3] - bbox[1])
-	if bboxW == 0 || bboxH == 0 {
-		return
-	}
-
-	tilesStart := int(path.Tiles)
-
-	for ty := 0; ty < bboxH; ty++ {
-		for tx := 0; tx < bboxW; tx++ {
-			localTileIdx := ty*bboxW + tx
-			tileIdx := tilesStart + localTileIdx
-			if tileIdx >= len(out.Tiles) {
-				continue
-			}
-
-			globalTX := int(bbox[0]) + tx
-			globalTY := int(bbox[1]) + ty
-			if globalTX < 0 || globalTX >= out.WidthInTiles ||
-				globalTY < 0 || globalTY >= out.HeightInTiles {
-				continue
-			}
-
-			tile := out.Tiles[tileIdx]
-			segCount, segStart := tileSegRange(
-				tile, localTileIdx, bboxW*bboxH, out.Tiles[tilesStart:], dp.totalSegs,
-			)
-
-			globalTileIdx := globalTY*out.WidthInTiles + globalTX
-			ptcl := out.TilePTCLs[globalTileIdx]
-
-			switch {
-			case segCount > 0:
-				ptcl.WriteFill(segCount, dp.evenOdd, dp.globalSegBase+segStart, tile.Backdrop)
-				ptcl.WriteColor(dp.rgba)
-			case tile.Backdrop != 0:
-				ptcl.WriteSolid()
-				ptcl.WriteColor(dp.rgba)
-			}
-		}
-	}
 }
 
 // tileSegRange computes the segment count and local start index for a tile

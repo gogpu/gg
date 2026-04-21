@@ -123,7 +123,7 @@ Output ← [9] fine ← [8] path_tiling ← [7] coarse ← [6] backdrop ← [5] 
 | 6 | `backdrop.wgsl` | Left-to-right backdrop prefix sum per row |
 | 7 | `coarse.wgsl` | Per-tile command list (PTCL) generation |
 | 8 | `path_tiling.wgsl` | Segment clipping and tile assignment |
-| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 256 threads) |
+| 9 | `fine.wgsl` | Per-pixel rasterization (16×16 tiles, 64 threads × 4 pixels each) |
 
 #### PipelineMode Selection
 
@@ -432,7 +432,6 @@ gg/
 │   │   ├── coarse.go       # Coarse rasterization pass
 │   │   ├── fine.go         # Fine rasterization pass
 │   │   ├── pipeline.go     # Render pipeline management
-│   │   ├── pipeline_mode.go    # PipelineMode (Auto/RenderPass/Compute)
 │   │   ├── pipeline_cache_core.go  # PipelineCache (FNV-1a)
 │   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
@@ -446,15 +445,16 @@ gg/
 │   │   ├── golden_test.go  # GPU vs CPU golden comparison tests
 │   │   │
 │   │   ├── tilecompute/    # Vello compute pipeline CPU reference
-│   │   │   ├── types.go         # PathDef, LineSoup, Path, Tile, PathSegment
-│   │   │   ├── scene_encode.go  # EncodeScene, PackScene (scene → flat buffer)
+│   │   │   ├── types.go         # PathDef, SceneElement, LineSoup, Tile, PathSegment
+│   │   │   ├── scene_encode.go  # EncodeScene/EncodeSceneDef, PackScene
 │   │   │   ├── flatten.go       # Euler spiral curve flattening
 │   │   │   ├── pathtag.go       # Path tag monoid reduce/scan
-│   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + info extraction
+│   │   │   ├── draw_leaf.go     # Draw monoid reduce/scan + ClipInp generation
+│   │   │   ├── clip_leaf.go     # Clip matching (sequential stack, Vello parity)
 │   │   │   ├── path_count.go    # Per-tile segment counting
-│   │   │   ├── rasterizer.go    # RasterizeScenePTCL (full 9-stage CPU pipeline)
-│   │   │   ├── coarse.go        # Coarse rasterization + PTCL generation
-│   │   │   ├── fine.go          # Fine per-pixel rasterization
+│   │   │   ├── rasterizer.go    # RasterizeScenePTCL/SceneDefPTCL (full pipeline)
+│   │   │   ├── coarse.go        # Coarse rasterization + PTCL + clip state
+│   │   │   ├── fine.go          # Fine per-pixel rasterization + packed blend stack
 │   │   │   └── shaders/         # WGSL compute shaders (9 stages)
 │   │   │       ├── pathtag_reduce.wgsl
 │   │   │       ├── pathtag_scan.wgsl
@@ -478,7 +478,9 @@ gg/
 │   │       ├── blit.wgsl          # Blit / copy
 │   │       ├── composite.wgsl     # Compositing
 │   │       ├── strip.wgsl         # Strip rendering
-│   │       └── msdf_text.wgsl     # MSDF text rendering
+│   │       ├── msdf_text.wgsl     # MSDF text rendering (Tier 4)
+│   │       ├── glyph_mask.wgsl    # Glyph mask rendering (Tier 6)
+│   │       └── glyph_mask_lcd.wgsl # LCD ClearType subpixel (Tier 6)
 │   │
 │   ├── cache/              # LRU caching infrastructure
 │   │   ├── cache.go        # Generic cache

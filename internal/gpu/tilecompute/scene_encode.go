@@ -190,6 +190,110 @@ func packPathTags(rawTags []uint8) []uint32 {
 	return words
 }
 
+// EncodeSceneDef converts a list of SceneElements (with clip support) into a SceneEncoding.
+// This extends EncodeScene to handle BeginClip/EndClip elements alongside Draw elements.
+//
+// Encoding rules (from Vello encoding.rs):
+//   - Draw: same as EncodeScene — Transform + Style + path segments + PATH + DrawTagColor + RGBA
+//   - BeginClip: Transform + Style + clip path segments + PATH + DrawTagBeginClip + blend_mode + alpha_bits
+//   - EndClip: DrawTagEndClip + dummy PATH tag (increments NumPaths) + NO draw data
+//
+// NumClips counts the total number of BeginClip + EndClip elements.
+//
+//nolint:funlen,cyclop // Scene encoding handles 3 element types with shared path logic.
+func EncodeSceneDef(elements []SceneElement) *SceneEncoding {
+	enc := &SceneEncoding{}
+	var rawTags []uint8
+
+	for _, el := range elements {
+		switch el.Type {
+		case ElementDraw:
+			encodePath(enc, &rawTags, el.Lines, el.FillRule)
+
+			// Draw command.
+			enc.DrawTags = append(enc.DrawTags, DrawTagColor)
+
+			// Pack color as premultiplied RGBA.
+			a := float32(el.Color[3]) / 255.0
+			r := uint32(float32(el.Color[0])*a + 0.5)
+			g := uint32(float32(el.Color[1])*a + 0.5)
+			b := uint32(float32(el.Color[2])*a + 0.5)
+			aU := uint32(el.Color[3])
+			packedColor := r | (g << 8) | (b << 16) | (aU << 24)
+			enc.DrawData = append(enc.DrawData, packedColor)
+
+			enc.NumPaths++
+			enc.NumDrawObjects++
+
+		case ElementBeginClip:
+			encodePath(enc, &rawTags, el.Lines, FillRuleNonZero)
+
+			// BeginClip draw command with 2 u32s of draw data.
+			enc.DrawTags = append(enc.DrawTags, DrawTagBeginClip)
+			enc.DrawData = append(enc.DrawData, el.BlendMode)
+			enc.DrawData = append(enc.DrawData, math.Float32bits(el.Alpha))
+
+			enc.NumPaths++
+			enc.NumDrawObjects++
+			enc.NumClips++
+
+		case ElementEndClip:
+			// EndClip: emit dummy PATH tag (Vello encoding.rs:491).
+			// This increments NumPaths so draw_leaf path_ix tracking stays correct.
+			rawTags = append(rawTags, PathTagPath)
+
+			enc.DrawTags = append(enc.DrawTags, DrawTagEndClip)
+			// EndClip has NO draw data (scene_size from tag bits 2-4 = 0).
+
+			enc.NumPaths++
+			enc.NumDrawObjects++
+			enc.NumClips++
+		}
+	}
+
+	enc.PathTags = packPathTags(rawTags)
+	return enc
+}
+
+// encodePath emits Transform + Style + path line segments + PATH marker
+// into the encoding. Shared by Draw and BeginClip elements.
+func encodePath(enc *SceneEncoding, rawTags *[]uint8, lines []LineSoup, fillRule FillRule) {
+	// 1. Transform tag — identity.
+	*rawTags = append(*rawTags, PathTagTransform)
+	enc.Transforms = append(enc.Transforms, 1, 0, 0, 1, 0, 0)
+
+	// 2. Style tag — fill rule.
+	*rawTags = append(*rawTags, PathTagStyle)
+	var styleFlags uint32
+	if fillRule == FillRuleEvenOdd {
+		styleFlags = 0x02
+	}
+	enc.Styles = append(enc.Styles, styleFlags)
+
+	// 3. Path segments.
+	needsMoveTo := true
+	var lastPoint [2]float32
+	for _, line := range lines {
+		if needsMoveTo || line.P0 != lastPoint {
+			*rawTags = append(*rawTags, PathTagLineToF32)
+			enc.PathData = append(enc.PathData,
+				math.Float32bits(line.P0[0]),
+				math.Float32bits(line.P0[1]),
+			)
+			needsMoveTo = false
+		}
+		*rawTags = append(*rawTags, PathTagLineToF32)
+		enc.PathData = append(enc.PathData,
+			math.Float32bits(line.P1[0]),
+			math.Float32bits(line.P1[1]),
+		)
+		lastPoint = line.P1
+	}
+
+	// 4. PATH marker.
+	*rawTags = append(*rawTags, PathTagPath)
+}
+
 // PackScene resolves a SceneEncoding into a flat PackedScene buffer.
 // This is our simplified version of Vello's resolve stage.
 // The packed buffer concatenates: pathTags (padded) | pathData | drawTags | drawData | transforms | styles

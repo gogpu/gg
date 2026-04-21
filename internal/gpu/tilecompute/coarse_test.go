@@ -26,7 +26,7 @@ func TestPTCLWriteRead(t *testing.T) {
 	p.WriteEnd()
 
 	// Read back and verify.
-	offset := 0
+	offset := CmdStartOffset
 	var tag uint32
 
 	// Cmd 1: CmdFill (non-zero, 10 segments at index 42, backdrop 3)
@@ -134,7 +134,7 @@ func TestPTCLEmpty(t *testing.T) {
 	p := NewPTCL()
 	p.WriteEnd()
 
-	tag, _ := p.ReadCmd(0)
+	tag, _ := p.ReadCmd(CmdStartOffset)
 	if tag != CmdEnd {
 		t.Errorf("got tag %d, want CmdEnd(%d)", tag, CmdEnd)
 	}
@@ -145,21 +145,23 @@ func TestPTCLFillEncoding(t *testing.T) {
 	p := NewPTCL()
 	p.WriteFill(7, true, 99, -1)
 
-	// Expected: [CmdFill, (7<<1)|1, 99, uint32(-1)]
-	if p.Cmds[0] != CmdFill {
-		t.Errorf("Cmds[0] = %d, want %d", p.Cmds[0], CmdFill)
+	// Expected: [blend_offset, CmdFill, (7<<1)|1, 99, uint32(-1)]
+	// Word 0 = blend_offset (0), commands start at CmdStartOffset (1).
+	o := CmdStartOffset
+	if p.Cmds[o] != CmdFill {
+		t.Errorf("Cmds[%d] = %d, want %d", o, p.Cmds[o], CmdFill)
 	}
 	wantPacked := uint32(7<<1) | 1 // 15
-	if p.Cmds[1] != wantPacked {
-		t.Errorf("Cmds[1] = %d, want %d", p.Cmds[1], wantPacked)
+	if p.Cmds[o+1] != wantPacked {
+		t.Errorf("Cmds[%d] = %d, want %d", o+1, p.Cmds[o+1], wantPacked)
 	}
-	if p.Cmds[2] != 99 {
-		t.Errorf("Cmds[2] = %d, want 99", p.Cmds[2])
+	if p.Cmds[o+2] != 99 {
+		t.Errorf("Cmds[%d] = %d, want 99", o+2, p.Cmds[o+2])
 	}
 	// -1 as int32 = 0xFFFFFFFF as uint32 (two's complement).
 	wantBackdrop := ^uint32(0) // 0xFFFFFFFF
-	if p.Cmds[3] != wantBackdrop {
-		t.Errorf("Cmds[3] = 0x%08X, want 0x%08X", p.Cmds[3], wantBackdrop)
+	if p.Cmds[o+3] != wantBackdrop {
+		t.Errorf("Cmds[%d] = 0x%08X, want 0x%08X", o+3, p.Cmds[o+3], wantBackdrop)
 	}
 }
 
@@ -187,7 +189,7 @@ func TestCoarseRasterizeSingleTriangle(t *testing.T) {
 	// Count how many tiles have at least one command (not just CmdEnd).
 	tilesWithCmds := 0
 	for i, ptcl := range out.TilePTCLs {
-		if len(ptcl.Cmds) > 1 { // More than just CmdEnd
+		if len(ptcl.Cmds) > CmdStartOffset+1 { // More than blend_offset + CmdEnd
 			tilesWithCmds++
 			ty := i / out.WidthInTiles
 			tx := i % out.WidthInTiles
@@ -331,8 +333,9 @@ func TestCoarseEmptyTiles(t *testing.T) {
 	// Bottom-right tile (3,3) should be empty (only CmdEnd).
 	brIdx := 3*out.WidthInTiles + 3
 	ptcl := out.TilePTCLs[brIdx]
-	if len(ptcl.Cmds) != 1 || ptcl.Cmds[0] != CmdEnd {
-		t.Errorf("tile (3,3) has %d commands, want [CmdEnd]", len(ptcl.Cmds))
+	// Empty tile: blend_offset (0) + CmdEnd = 2 words.
+	if len(ptcl.Cmds) != CmdStartOffset+1 || ptcl.Cmds[CmdStartOffset] != CmdEnd {
+		t.Errorf("tile (3,3) has %d commands, want [blend_offset, CmdEnd]", len(ptcl.Cmds))
 	}
 }
 
@@ -357,7 +360,7 @@ func TestCoarseBackdropSolid(t *testing.T) {
 	ptcl := out.TilePTCLs[centerIdx]
 
 	hasSolid := false
-	offset := 0
+	offset := CmdStartOffset
 	for offset < len(ptcl.Cmds) {
 		tag, next := ptcl.ReadCmd(offset)
 		offset = next
@@ -429,8 +432,9 @@ func TestCoarseNoLines(t *testing.T) {
 	out := CoarseRasterize(scene, nil, nil, nil, 32, 32)
 
 	for i, ptcl := range out.TilePTCLs {
-		if len(ptcl.Cmds) != 1 || ptcl.Cmds[0] != CmdEnd {
-			t.Errorf("tile %d: expected only CmdEnd, got %v", i, ptcl.Cmds)
+		// Empty tile: blend_offset (0) + CmdEnd = 2 words.
+		if len(ptcl.Cmds) != CmdStartOffset+1 || ptcl.Cmds[CmdStartOffset] != CmdEnd {
+			t.Errorf("tile %d: expected [blend_offset, CmdEnd], got %v", i, ptcl.Cmds)
 		}
 	}
 }
@@ -459,7 +463,7 @@ func runCoarsePipeline(t *testing.T, paths []PathDef, widthPx, heightPx int) *Co
 
 	// Run draw monoid stages.
 	reduced := drawReduce(scene)
-	drawMonoids, info := drawLeafScan(scene, reduced)
+	drawMonoids, info, _ := drawLeafScan(scene, reduced)
 
 	// Run coarse rasterization.
 	out := CoarseRasterize(scene, drawMonoids, info, allLines, widthPx, heightPx)
@@ -474,7 +478,7 @@ func runCoarsePipeline(t *testing.T, paths []PathDef, widthPx, heightPx int) *Co
 // followed by CmdColor.
 func hasFillOrSolidWithColor(ptcl *PTCL) bool {
 	sawFillOrSolid := false
-	offset := 0
+	offset := CmdStartOffset
 	for offset < len(ptcl.Cmds) {
 		tag, next := ptcl.ReadCmd(offset)
 		offset = next
@@ -500,7 +504,7 @@ func hasFillOrSolidWithColor(ptcl *PTCL) bool {
 
 // ptclContainsTag checks if a PTCL contains the given command tag.
 func ptclContainsTag(ptcl *PTCL, target uint32) bool {
-	offset := 0
+	offset := CmdStartOffset
 	for offset < len(ptcl.Cmds) {
 		tag, next := ptcl.ReadCmd(offset)
 		offset = next
@@ -522,7 +526,7 @@ func ptclContainsTag(ptcl *PTCL, target uint32) bool {
 
 // findFirstFill returns the first CmdFill data in a PTCL, or false if none found.
 func findFirstFill(ptcl *PTCL) (CmdFillData, bool) {
-	offset := 0
+	offset := CmdStartOffset
 	for offset < len(ptcl.Cmds) {
 		tag, next := ptcl.ReadCmd(offset)
 		offset = next
@@ -544,7 +548,7 @@ func findFirstFill(ptcl *PTCL) (CmdFillData, bool) {
 // extractColors reads all CmdColor payloads from a PTCL in order.
 func extractColors(ptcl *PTCL) []uint32 {
 	var colors []uint32
-	offset := 0
+	offset := CmdStartOffset
 	for offset < len(ptcl.Cmds) {
 		tag, next := ptcl.ReadCmd(offset)
 		offset = next

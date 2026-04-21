@@ -3,6 +3,7 @@
 package gpu
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gogpu/gg"
@@ -1740,17 +1741,27 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	}
 	// cmdBuf freed after fence wait
 
-	// Submit and wait.
+	// Submit (auto-polls pending maps at tail).
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
 	}
-	if err := s.device.WaitIdle(); err != nil {
-		return fmt.Errorf("wait for GPU: %w", err)
-	}
 
+	// Map the staging buffer. Map blocks until the GPU finishes the copy
+	// via Device.Poll-driven submission tracking (no manual WaitIdle needed).
+	if err := stagingBuf.Map(context.Background(), wgpu.MapModeRead, 0, stagingBufSize); err != nil {
+		return fmt.Errorf("map staging: %w", err)
+	}
+	rng, err := stagingBuf.MappedRange(0, stagingBufSize)
+	if err != nil {
+		if err := stagingBuf.Unmap(); err != nil {
+			slogger().Warn("unmap failed", "err", err)
+		}
+		return fmt.Errorf("mapped range: %w", err)
+	}
 	readback := make([]byte, stagingBufSize)
-	if err := s.queue.ReadBuffer(stagingBuf, 0, readback); err != nil {
-		return fmt.Errorf("readback: %w", err)
+	copy(readback, rng.Bytes())
+	if err := stagingBuf.Unmap(); err != nil {
+		slogger().Warn("unmap failed", "err", err)
 	}
 
 	// Strip row padding (if any) and composite BGRA over existing RGBA pixmap.

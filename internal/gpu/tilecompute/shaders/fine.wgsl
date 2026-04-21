@@ -4,16 +4,23 @@
 // fine.wgsl — Per-pixel rasterization driven by PTCL command streams.
 //
 // CPU reference: tilecompute/fine.go fineRasterizeTile(), fillPath()
-// One workgroup per tile, 256 threads = 16x16 pixels. Each thread handles
-// one pixel of the tile and walks the same PTCL command stream, but computes
-// pixel-specific coverage and color values.
 //
-// PTCL command dispatch loop (from fine.go):
-//   CMD_END   -> break (done with this tile)
-//   CMD_FILL  -> compute per-pixel area via fill_path
-//   CMD_SOLID -> area = 1.0 for all pixels
-//   CMD_COLOR -> source-over blend: fg = color * area, rgba = rgba*(1-fg.a) + fg
-//   CMD_BEGIN_CLIP -> push rgba to clip stack, clear
+// Thread model (matches Vello):
+//   workgroup_size(4, 16, 1) = 64 threads per tile.
+//   Each thread handles PIXELS_PER_THREAD=4 consecutive horizontal pixels.
+//   4 threads × 4 pixels = 16 columns, 16 rows = 256 pixels per tile.
+//   Dispatch: (width_in_tiles, height_in_tiles, 1) workgroups.
+//
+// Blend stack (matches Vello):
+//   First BLEND_STACK_SPLIT=4 clip levels stored as packed u32 in registers.
+//   Deeper levels spill to blend_spill SSBO. Uses pack4x8unorm/unpack4x8unorm.
+//
+// PTCL format (word 0 = blend_offset, word 1+ = commands):
+//   CMD_END        -> break (done with this tile)
+//   CMD_FILL       -> compute per-pixel area via fill_path (4 pixels per thread)
+//   CMD_SOLID      -> area = 1.0 for all pixels
+//   CMD_COLOR      -> source-over blend: fg = color * area, rgba = rgba*(1-fg.a) + fg
+//   CMD_BEGIN_CLIP -> push rgba to blend stack (packed u32), clear
 //   CMD_END_CLIP   -> pop, composite with alpha
 //
 // Output: packed RGBA u32 per pixel to the output buffer.
@@ -50,6 +57,11 @@ struct Config {
 
 const TILE_WIDTH: u32 = 16u;
 const TILE_HEIGHT: u32 = 16u;
+const PIXELS_PER_THREAD: u32 = 4u;
+
+// The "split" point between using local memory for the blend stack and
+// spilling to the blend_spill buffer. Matches Vello's BLEND_STACK_SPLIT.
+const BLEND_STACK_SPLIT: u32 = 4u;
 
 const CMD_END: u32 = 0u;
 const CMD_FILL: u32 = 1u;
@@ -61,9 +73,6 @@ const CMD_END_CLIP: u32 = 11u;
 // Maximum PTCL words per tile (must match coarse shader).
 const PTCL_MAX_PER_TILE: u32 = 1024u;
 
-// Maximum clip stack depth (in-register, no dynamic allocation on GPU).
-const MAX_CLIP_DEPTH: u32 = 4u;
-
 // --- Bindings ---
 
 @group(0) @binding(0) var<uniform> config: Config;
@@ -71,208 +80,249 @@ const MAX_CLIP_DEPTH: u32 = 4u;
 @group(0) @binding(2) var<storage, read> segments: array<PathSegment>;
 @group(0) @binding(3) var<storage, read> info: array<u32>;
 @group(0) @binding(4) var<storage, read_write> output: array<u32>;
+@group(0) @binding(5) var<storage, read_write> blend_spill: array<u32>;
 
-// --- fill_path: compute per-pixel area (coverage) from segments ---
-
-// fill_path is a direct port of fine.go fillPath().
-// Computes the area (coverage) for a single pixel at (pixel_x, pixel_y)
-// from tile-relative path segments, given a backdrop winding number.
+// --- fill_path: compute per-pixel area (coverage) for PIXELS_PER_THREAD pixels ---
+//
+// Direct port of Vello fine.wgsl fill_path(). Returns area for 4 consecutive
+// horizontal pixels starting at local_xy. Uses output parameter (naga #1930).
 fn fill_path(
-    pixel_x: u32,
-    pixel_y: u32,
     seg_start: u32,
     seg_count: u32,
     backdrop: i32,
     even_odd: bool,
-) -> f32 {
-    var area = f32(backdrop);
-    let px = f32(pixel_x);
-    let py = f32(pixel_y);
+    local_xy: vec2<f32>,
+    result: ptr<function, array<f32, PIXELS_PER_THREAD>>,
+) {
+    var area: array<f32, PIXELS_PER_THREAD>;
+    let backdrop_f = f32(backdrop);
+    for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+        area[i] = backdrop_f;
+    }
 
-    for (var i = 0u; i < seg_count; i = i + 1u) {
-        let seg = segments[seg_start + i];
+    for (var si = 0u; si < seg_count; si = si + 1u) {
+        let seg = segments[seg_start + si];
         let delta_x = seg.point1_x - seg.point0_x;
         let delta_y = seg.point1_y - seg.point0_y;
 
-        // fine.go line 202: y = segment.Point0[1] - float32(yi)
-        let y = seg.point0_y - py;
+        let y = seg.point0_y - local_xy.y;
         let y0 = clamp(y, 0.0, 1.0);
         let y1 = clamp(y + delta_y, 0.0, 1.0);
         let dy = y0 - y1;
-
-        // fine.go line 209: y_edge contribution (Rust Vello pattern)
-        let ye_clamp = clamp(py - seg.y_edge + 1.0, 0.0, 1.0);
-        var y_edge_val = 0.0;
-        if delta_x > 0.0 {
-            y_edge_val = ye_clamp;
-        } else if delta_x < 0.0 {
-            y_edge_val = -ye_clamp;
-        }
 
         if dy != 0.0 {
             let vec_y_recip = 1.0 / delta_y;
             let t0 = (y0 - y) * vec_y_recip;
             let t1 = (y1 - y) * vec_y_recip;
-            let start_x = seg.point0_x;
-            let x0 = start_x + t0 * delta_x;
-            let x1 = start_x + t1 * delta_x;
+            let startx = seg.point0_x - local_xy.x;
+            let x0 = startx + t0 * delta_x;
+            let x1 = startx + t1 * delta_x;
             let xmin0 = min(x0, x1);
             let xmax0 = max(x0, x1);
-            let xmin_val = min(xmin0 - px, 1.0) - 1e-6;
-            let xmax_val = xmax0 - px;
-            let b_val = min(xmax_val, 1.0);
-            let c_val = max(b_val, 0.0);
-            let d_val = max(xmin_val, 0.0);
-            let a_val = (b_val + 0.5 * (d_val * d_val - c_val * c_val) - xmin_val) / (xmax_val - xmin_val);
-            area = area + y_edge_val + a_val * dy;
-        } else if y_edge_val != 0.0 {
-            area = area + y_edge_val;
+            for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                let i_f = f32(i);
+                let xmin = min(xmin0 - i_f, 1.0) - 1e-6;
+                let xmax = xmax0 - i_f;
+                let b = min(xmax, 1.0);
+                let c = max(b, 0.0);
+                let d = max(xmin, 0.0);
+                let a = (b + 0.5 * (d * d - c * c) - xmin) / (xmax - xmin);
+                area[i] += a * dy;
+            }
+        }
+
+        // y_edge contribution (Vello pattern).
+        let y_edge = sign(delta_x) * clamp(local_xy.y - seg.y_edge + 1.0, 0.0, 1.0);
+        for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+            area[i] += y_edge;
         }
     }
 
     // Apply fill rule.
     if even_odd {
-        // fine.go line 242: area = abs(area - 2.0 * round(0.5 * area))
-        area = abs(area - 2.0 * round(0.5 * area));
+        for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+            let a = area[i];
+            area[i] = abs(a - 2.0 * round(0.5 * a));
+        }
     } else {
-        // fine.go line 247: area = min(abs(area), 1.0)
-        area = min(abs(area), 1.0);
+        for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+            area[i] = min(abs(area[i]), 1.0);
+        }
     }
 
-    return area;
+    *result = area;
 }
 
 // --- Main entry point ---
-// One workgroup per tile, 256 threads = 16x16 pixels.
-// Dispatch: (width_in_tiles * height_in_tiles, 1, 1) workgroups.
+// Thread model: workgroup_size(4, 16, 1) = 64 threads per tile.
+// Each thread processes PIXELS_PER_THREAD=4 consecutive horizontal pixels.
+// Dispatch: (width_in_tiles, height_in_tiles, 1) workgroups.
 
-@compute @workgroup_size(256, 1, 1)
+@compute @workgroup_size(4, 16, 1)
 fn main(
     @builtin(local_invocation_id) local_id: vec3<u32>,
     @builtin(workgroup_id) wg_id: vec3<u32>,
 ) {
-    let tile_ix = wg_id.x;
+    // One workgroup per tile.
+    let tile_ix = wg_id.y * config.width_in_tiles + wg_id.x;
     if tile_ix >= config.width_in_tiles * config.height_in_tiles {
         return;
     }
 
-    // Pixel coordinates within the tile.
-    let local_x = local_id.x % TILE_WIDTH;
-    let local_y = local_id.x / TILE_WIDTH;
+    // local_id.x: 0..3 (4 threads per row)
+    // local_id.y: 0..15 (16 rows)
+    // Each thread handles 4 consecutive horizontal pixels.
+    let local_xy = vec2<f32>(f32(local_id.x * PIXELS_PER_THREAD), f32(local_id.y));
 
-    // Global pixel coordinates.
-    let tile_x = tile_ix % config.width_in_tiles;
-    let tile_y = tile_ix / config.width_in_tiles;
-    let global_x = tile_x * TILE_WIDTH + local_x;
-    let global_y = tile_y * TILE_HEIGHT + local_y;
+    // Global pixel coordinates (base of this thread's 4-pixel strip).
+    let global_base_x = wg_id.x * TILE_WIDTH + local_id.x * PIXELS_PER_THREAD;
+    let global_y = wg_id.y * TILE_HEIGHT + local_id.y;
 
-    // Initialize pixel color to background color (matching CPU reference fine.go:28-31).
+    // Initialize pixel colors to background color.
     let bg_r = f32(config.bg_color & 0xffu) / 255.0;
     let bg_g = f32((config.bg_color >> 8u) & 0xffu) / 255.0;
     let bg_b = f32((config.bg_color >> 16u) & 0xffu) / 255.0;
     let bg_a = f32((config.bg_color >> 24u) & 0xffu) / 255.0;
-    var rgba = vec4<f32>(bg_r * bg_a, bg_g * bg_a, bg_b * bg_a, bg_a);
+    let bg = vec4<f32>(bg_r * bg_a, bg_g * bg_a, bg_b * bg_a, bg_a);
 
-    // Working area (coverage) for this pixel.
-    var area = 0.0;
+    var rgba: array<vec4<f32>, PIXELS_PER_THREAD>;
+    for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+        rgba[i] = bg;
+    }
 
-    // Clip stack (fixed-size array, GPU-friendly).
-    var clip_stack: array<vec4<f32>, 4>; // MAX_CLIP_DEPTH = 4
+    // Working area (coverage) for PIXELS_PER_THREAD pixels.
+    var area: array<f32, PIXELS_PER_THREAD>;
+
+    // Packed u32 blend stack — first BLEND_STACK_SPLIT levels in registers.
+    // Deeper levels spill to blend_spill SSBO.
+    var blend_stack: array<array<u32, PIXELS_PER_THREAD>, BLEND_STACK_SPLIT>;
     var clip_depth = 0u;
 
     // Walk the PTCL command stream for this tile.
+    // Word 0 = blend_offset (for blend_spill SSBO), commands start at word 1.
     let ptcl_base = tile_ix * PTCL_MAX_PER_TILE;
-    var cmd_offset = 0u;
+    let blend_offset = ptcl[ptcl_base];
+    var cmd_ix = ptcl_base + 1u;
 
     loop {
-        let tag = ptcl[ptcl_base + cmd_offset];
-        cmd_offset = cmd_offset + 1u;
-
+        let tag = ptcl[cmd_ix];
         if tag == CMD_END {
             break;
         }
 
-        if tag == CMD_FILL {
-            // Read CmdFill payload: [(segCount<<1)|evenOdd, segIndex, backdrop_bits]
-            let packed = ptcl[ptcl_base + cmd_offset];
-            let seg_index = ptcl[ptcl_base + cmd_offset + 1u];
-            let backdrop_bits = ptcl[ptcl_base + cmd_offset + 2u];
-            cmd_offset = cmd_offset + 3u;
+        // switch generates OpSwitch in SPIR-V (structured control flow).
+        // Adreno LLVM miscompiles if/else if chains inside loops (llama.cpp #5186).
+        switch tag {
+            case CMD_FILL: {
+                // Read CmdFill payload: [(segCount<<1)|evenOdd, segIndex, backdrop_bits]
+                let packed = ptcl[cmd_ix + 1u];
+                let seg_index = ptcl[cmd_ix + 2u];
+                let backdrop_bits = ptcl[cmd_ix + 3u];
+                cmd_ix = cmd_ix + 4u;
 
-            let seg_count = packed >> 1u;
-            let even_odd = (packed & 1u) != 0u;
-            let backdrop = bitcast<i32>(backdrop_bits);
+                let seg_count = packed >> 1u;
+                let even_odd = (packed & 1u) != 0u;
+                let backdrop = bitcast<i32>(backdrop_bits);
 
-            area = fill_path(local_x, local_y, seg_index, seg_count, backdrop, even_odd);
+                fill_path(seg_index, seg_count, backdrop, even_odd, local_xy, &area);
+            }
+            case CMD_SOLID: {
+                for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                    area[i] = 1.0;
+                }
+                cmd_ix = cmd_ix + 1u;
+            }
+            case CMD_COLOR: {
+                // Read packed premultiplied RGBA.
+                let packed_rgba = ptcl[cmd_ix + 1u];
+                cmd_ix = cmd_ix + 2u;
 
-        } else if tag == CMD_SOLID {
-            area = 1.0;
+                // Unpack premultiplied RGBA from u32.
+                let fg = vec4<f32>(
+                    f32(packed_rgba & 0xffu) / 255.0,
+                    f32((packed_rgba >> 8u) & 0xffu) / 255.0,
+                    f32((packed_rgba >> 16u) & 0xffu) / 255.0,
+                    f32((packed_rgba >> 24u) & 0xffu) / 255.0,
+                );
 
-        } else if tag == CMD_COLOR {
-            // Read packed premultiplied RGBA.
-            let packed_rgba = ptcl[ptcl_base + cmd_offset];
-            cmd_offset = cmd_offset + 1u;
-
-            // Unpack premultiplied RGBA from u32.
-            let r = f32(packed_rgba & 0xffu) / 255.0;
-            let g = f32((packed_rgba >> 8u) & 0xffu) / 255.0;
-            let b = f32((packed_rgba >> 16u) & 0xffu) / 255.0;
-            let a = f32((packed_rgba >> 24u) & 0xffu) / 255.0;
-
-            // Source-over compositing: fg = color * area, rgba = rgba * (1 - fg.a) + fg.
-            let fg = vec4<f32>(r * area, g * area, b * area, a * area);
-            let inv = 1.0 - fg.a;
-            rgba = rgba * inv + fg;
-
-        } else if tag == CMD_BEGIN_CLIP {
-            // Push current color to clip stack, clear to transparent.
-            if clip_depth < MAX_CLIP_DEPTH {
-                clip_stack[clip_depth] = rgba;
+                // Source-over compositing for each of 4 pixels.
+                for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                    let fg_i = fg * area[i];
+                    rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
+                }
+            }
+            case CMD_BEGIN_CLIP: {
+                // Push current color to blend stack (packed u32), clear to transparent.
+                if clip_depth < BLEND_STACK_SPLIT {
+                    for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                        blend_stack[clip_depth][i] = pack4x8unorm(rgba[i]);
+                        rgba[i] = vec4<f32>(0.0);
+                    }
+                } else {
+                    // Spill to blend_spill SSBO.
+                    let blend_in_scratch = clip_depth - BLEND_STACK_SPLIT;
+                    let local_tile_ix = local_id.x * PIXELS_PER_THREAD + local_id.y * TILE_WIDTH;
+                    let local_blend_start = blend_offset + blend_in_scratch * TILE_WIDTH * TILE_HEIGHT + local_tile_ix;
+                    for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                        blend_spill[local_blend_start + i] = pack4x8unorm(rgba[i]);
+                        rgba[i] = vec4<f32>(0.0);
+                    }
+                }
                 clip_depth = clip_depth + 1u;
+                cmd_ix = cmd_ix + 1u;
             }
-            rgba = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            case CMD_END_CLIP: {
+                // Read CmdEndClip payload: [blend_mode, alpha_bits]
+                let blend = ptcl[cmd_ix + 1u];
+                let alpha_bits = ptcl[cmd_ix + 2u];
+                cmd_ix = cmd_ix + 3u;
 
-        } else if tag == CMD_END_CLIP {
-            // Read CmdEndClip payload: [blend_mode, alpha_bits]
-            let blend = ptcl[ptcl_base + cmd_offset];
-            let alpha_bits = ptcl[ptcl_base + cmd_offset + 1u];
-            cmd_offset = cmd_offset + 2u;
+                let alpha = bitcast<f32>(alpha_bits);
+                _ = blend; // Only source-over (blend=0) supported currently.
 
-            let alpha = bitcast<f32>(alpha_bits);
-            _ = blend; // Only source-over (blend=0) supported currently.
-
-            // Pop saved state from clip stack.
-            if clip_depth > 0u {
                 clip_depth = clip_depth - 1u;
-                let saved = clip_stack[clip_depth];
 
-                // fg = rgba * area * alpha, then saved * (1 - fg.a) + fg.
-                let scale = area * alpha;
-                let fg = rgba * scale;
-                let inv = 1.0 - fg.a;
-                rgba = saved * inv + fg;
+                // Pop saved state from blend stack.
+                for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+                    var bg_rgba: u32;
+                    if clip_depth < BLEND_STACK_SPLIT {
+                        bg_rgba = blend_stack[clip_depth][i];
+                    } else {
+                        let blend_in_scratch = clip_depth - BLEND_STACK_SPLIT;
+                        let local_tile_ix = local_id.x * PIXELS_PER_THREAD + local_id.y * TILE_WIDTH;
+                        let local_blend_start = blend_offset + blend_in_scratch * TILE_WIDTH * TILE_HEIGHT + local_tile_ix;
+                        bg_rgba = blend_spill[local_blend_start + i];
+                    }
+                    let saved = unpack4x8unorm(bg_rgba);
+
+                    // fg = rgba * area * alpha, then saved * (1 - fg.a) + fg.
+                    let fg = rgba[i] * area[i] * alpha;
+                    let inv = 1.0 - fg.a;
+                    rgba[i] = saved * inv + fg;
+                }
             }
-
-        } else {
-            // Unknown command: stop to avoid infinite loop.
-            break;
+            default: {
+                // Unknown command: stop to avoid infinite loop.
+                break;
+            }
         }
     }
 
-    // Clamp to [0, 1].
-    rgba = clamp(rgba, vec4<f32>(0.0), vec4<f32>(1.0));
+    // Clamp and write 4 pixels.
+    for (var i = 0u; i < PIXELS_PER_THREAD; i = i + 1u) {
+        let px = global_base_x + i;
+        if px < config.target_width && global_y < config.target_height {
+            let c = clamp(rgba[i], vec4<f32>(0.0), vec4<f32>(1.0));
 
-    // Pack RGBA as u32: R | (G << 8) | (B << 16) | (A << 24).
-    let r_u32 = u32(rgba.x * 255.0 + 0.5);
-    let g_u32 = u32(rgba.y * 255.0 + 0.5);
-    let b_u32 = u32(rgba.z * 255.0 + 0.5);
-    let a_u32 = u32(rgba.w * 255.0 + 0.5);
-    let packed = r_u32 | (g_u32 << 8u) | (b_u32 << 16u) | (a_u32 << 24u);
+            // Pack RGBA as u32: R | (G << 8) | (B << 16) | (A << 24).
+            let r_u32 = u32(c.x * 255.0 + 0.5);
+            let g_u32 = u32(c.y * 255.0 + 0.5);
+            let b_u32 = u32(c.z * 255.0 + 0.5);
+            let a_u32 = u32(c.w * 255.0 + 0.5);
+            let packed = r_u32 | (g_u32 << 8u) | (b_u32 << 16u) | (a_u32 << 24u);
 
-    // Write to output buffer.
-    // Output layout: tiles stored contiguously, 256 pixels per tile.
-    if global_x < config.target_width && global_y < config.target_height {
-        let pixel_idx = global_y * config.target_width + global_x;
-        output[pixel_idx] = packed;
+            let pixel_idx = global_y * config.target_width + px;
+            output[pixel_idx] = packed;
+        }
     }
 }

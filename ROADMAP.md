@@ -19,12 +19,17 @@
 
 ---
 
-## Current State: v0.37.4
+## Current State: v0.40.1
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
 - **Six-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute + Glyph Mask)
 - **Smart multi-engine rasterizer** — 5 algorithms with per-path auto-selection
+- **Zero-alloc rasterizer** — FillRect/FillCircle: 0 allocs/op (Skia-level)
+- **Path SOA representation** — `[]PathVerb` + `[]float64` (ADR-010, enterprise standard)
+- **Vello compute clip pipeline** — BeginClip/EndClip with packed blend stack (ADR-012)
+- **Adreno-compatible compute shaders** — workgroup_size(4,16) × PIXELS_PER_THREAD=4 (ADR-011)
+- **Alpha mask API** — per-shape, per-layer, luminance masks, GPU interface
 - Vello 9-stage compute pipeline for full-scene GPU rasterization
 - GPU MSDF text + Glyph mask dual-strategy text rendering
 - GPU stroke rendering, RenderDirect zero-copy GPU surface rendering
@@ -34,7 +39,6 @@
 - **SVG renderer** (`gg/svg` package) — parse + render SVG XML for JB-quality icons
 - **SVG path parser** — `ParseSVGPath()` for SVG `d` attribute
 - Recording System for vector export (PDF, SVG)
-- wgpu public API migration (zero hal imports in production GPU code)
 - Font hinting, ClearType LCD subpixel rendering
 - Premultiplied alpha, 29 blend modes, structured logging
 
@@ -42,17 +46,32 @@
 
 ## Upcoming
 
-### v0.38.0 — Planned
+### v0.41.0 — Planned
 - [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
-- [ ] naga MSL compute shader support (threadgroup vars, mem_flags)
-- [ ] Fix dashQuad/dashCubic off-by-one iteration bug (found by tests)
+- [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
+- [ ] Game input system (EPIC-INPUT) — gamepad/joystick support
 
-### v0.37.4 — HiDPI Coordinate Fix 🔧 In Progress
-- [x] Separate deviceMatrix from user CTM (Cairo/Skia/Blend2D pattern) (#218)
-- [x] Test coverage 77% → 81.5% for awesome-go submission
-- [x] Found dashQuad/dashCubic off-by-one bug via tests
+### v0.40.0–v0.40.1 ✅ Released
+- [x] Alpha mask API — per-shape, per-layer, luminance, GPU interface (v0.40.0)
+- [x] Adreno Vulkan fix — packed blend stack + PIXELS_PER_THREAD=4 (#252)
+- [x] Vello compute clip pipeline — SceneElement BeginClip/EndClip (ADR-012)
+- [x] Buffer.Map API migration, deps update (wgpu v0.25.1, naga v0.17.4)
+- [x] Removed incorrect gogpu dependency from go.mod
+
+### v0.39.0–v0.39.4 ✅ Released
+- [x] Path SOA representation — zero per-verb allocs (ADR-010)
+- [x] Zero-alloc rasterizer — FillRect/FillCircle 0 allocs/op
+- [x] Comprehensive allocation reduction (gradients, scene, stroke, worker pool)
+- [x] 3 dead naga SPIR-V workarounds removed (GPU golden verified)
+- [x] Clear() API fix (#227), MSDF Retina fix (#247), ParseHex (#237)
+- [x] dashQuad/dashCubic off-by-one fix
+
+### v0.37.4–v0.38.1 ✅ Released
+- [x] Separate deviceMatrix from user CTM (#218), test coverage 81.5%
+- [x] Enterprise SVG renderer, SVG path parser, ClearType LCD pipeline
+- [x] DrawImage rotation fix (#224), GLES blit fix (#226)
 
 ### v0.37.0–v0.37.3 ✅ Released
 - [x] Migrate internal/gpu from hal to wgpu public API (zero hal imports)
@@ -121,7 +140,7 @@
       SoftwareRenderer                GPUAccelerator
       (always available)              (opt-in via gpu/)
               │                             │
-    internal/raster              internal/gpu (five-tier)
+    internal/raster              internal/gpu (six-tier)
                                  ├── Tiers 1-4 (render pass)
                                  └── Tier 5 (compute pipeline)
 ```
@@ -132,6 +151,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.40.1** | 2026-04 | Adreno fix (#252), Vello compute clip, Buffer.Map, deps update |
+| v0.40.0 | 2026-04 | Alpha mask API — per-shape, per-layer, luminance, GPU |
+| v0.39.0–4 | 2026-04 | Path SOA (ADR-010), zero-alloc rasterizer, MSDF Retina fix |
+| v0.38.0–2 | 2026-03 | SVG renderer, Clear() fix (#227), DrawImage rotation (#224) |
 | **v0.37.4** | 2026-03 | Separate deviceMatrix/userMatrix (#218), test coverage 81.5% |
 | v0.37.3 | 2026-03 | Universal `ggcanvas.Render()`, GLES/Software support |
 | v0.37.2 | 2026-03 | Pipeline clip recreation + wgpu v0.21.2 validation |

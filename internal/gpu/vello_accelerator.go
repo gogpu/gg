@@ -6,6 +6,7 @@
 package gpu
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -736,19 +737,26 @@ func (a *VelloAccelerator) readbackBuffer(outputBuffer *wgpu.Buffer, size uint64
 	}
 	// cmdBuf freed after fence wait
 
-	// Submit and wait.
+	// Submit (auto-polls pending maps at tail).
 	if _, err := a.queue.Submit(cmdBuf); err != nil {
 		return nil, fmt.Errorf("submit readback: %w", err)
 	}
 
-	if err := a.device.WaitIdle(); err != nil {
-		return nil, fmt.Errorf("wait for readback: %w", err)
+	// Map staging; blocks until GPU completes via submission tracking.
+	if err := stagingBuffer.Map(context.Background(), wgpu.MapModeRead, 0, size); err != nil {
+		return nil, fmt.Errorf("map staging: %w", err)
 	}
-
-	// Read data.
+	rng, err := stagingBuffer.MappedRange(0, size)
+	if err != nil {
+		if err := stagingBuffer.Unmap(); err != nil {
+			slogger().Warn("unmap failed", "err", err)
+		}
+		return nil, fmt.Errorf("mapped range: %w", err)
+	}
 	resultBytes := make([]byte, size)
-	if err := a.queue.ReadBuffer(stagingBuffer, 0, resultBytes); err != nil {
-		return nil, fmt.Errorf("read staging buffer: %w", err)
+	copy(resultBytes, rng.Bytes())
+	if err := stagingBuffer.Unmap(); err != nil {
+		slogger().Warn("unmap failed", "err", err)
 	}
 
 	return resultBytes, nil

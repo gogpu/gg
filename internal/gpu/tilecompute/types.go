@@ -67,3 +67,42 @@ type PathDef struct {
 	Color    [4]uint8 // RGBA (straight alpha)
 	FillRule FillRule
 }
+
+// ElementType distinguishes draw, clip-begin, and clip-end scene elements.
+type ElementType uint8
+
+const (
+	// ElementDraw is a solid color fill.
+	ElementDraw ElementType = iota
+
+	// ElementBeginClip pushes a clip layer with a clip path.
+	ElementBeginClip
+
+	// ElementEndClip pops the innermost clip layer.
+	ElementEndClip
+)
+
+// SceneElement describes a single element in a scene with clip support.
+// It replaces PathDef for scenes that use clip layers.
+//
+// For ElementDraw: Lines + Color + FillRule are used.
+// For ElementBeginClip: Lines + BlendMode + Alpha are used.
+// For ElementEndClip: no fields are needed (the match is done by clip_leaf).
+type SceneElement struct {
+	Type      ElementType
+	Lines     []LineSoup // Path geometry (for Draw and BeginClip)
+	Color     [4]uint8   // RGBA straight alpha (for Draw)
+	FillRule  FillRule   // Fill rule (for Draw)
+	BlendMode uint32     // Blend mode (for BeginClip; 0x8003 = simple clip)
+	Alpha     float32    // Group alpha (for BeginClip; [0.0, 1.0])
+}
+
+// ClipInp holds input data for clip matching (output of draw_leaf, input to clip_leaf).
+// Matches Vello's ClipInp struct from clip_leaf.wgsl.
+type ClipInp struct {
+	// Ix is the draw object index.
+	Ix uint32
+	// PathIx encodes the path index for BeginClip (positive) or
+	// the bitwise complement of the draw object index for EndClip (negative).
+	PathIx int32
+}

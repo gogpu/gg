@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.1] - 2026-04-11
+
+### Fixed
+
+- **Adreno Vulkan miscompilation** ([#252](https://github.com/gogpu/gg/issues/252)) —
+  Vello `fine.wgsl` compute shader caused invisible text on Snapdragon X Elite
+  (Adreno X1-85). Root cause: Adreno LLVM uses uncached `ldib` reads when shader
+  reads/writes same buffer (per Raph Levien's analysis). Two fixes:
+  - Packed blend stack: `array<vec4<f32>, 4>` (64B) → packed `u32` + separate
+    `blend_spill` SSBO (separates read/write buffers — the real Adreno fix)
+  - Thread model: `workgroup_size(256,1,1)` → `workgroup_size(4,16,1)` with
+    `PIXELS_PER_THREAD=4` (amortizes PTCL reads, matches Vello). See ADR-011.
+  CPU==GPU pixel-perfect match verified (0/120000 diff). 12-13% GPU on Intel (no regression).
+- **Removed gogpu dependency** from gg go.mod — gg is fully independent of gogpu.
+  Was incorrectly pulled in by temp files.
+
+### Changed
+
+- **Internal: Vello compute clip pipeline** — `SceneElement` API with
+  `BeginClip`/`EndClip` for scene encoding. Full clip pipeline matching Vello
+  architecture (clip_leaf, per-tile clipZeroDepth). See ADR-012.
+  Clip demo examples: `examples/compute_clip/` (CLI) and `examples/clip_demo/`
+  (windowed animated, 60 FPS).
+- **Internal: Queue.ReadBuffer → Buffer.Map API** migration.
+- **deps:** wgpu v0.24.4 → v0.25.1, gpucontext v0.11.0 → v0.12.0,
+  naga v0.17.0 → v0.17.4, x/image v0.38.0 → v0.39.0, x/text v0.35.0 → v0.36.0
+
 ## [0.40.0] - 2026-04-08
 
 ### Added

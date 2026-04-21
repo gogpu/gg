@@ -1146,7 +1146,7 @@ func TestLoadWebPNonexistent(t *testing.T) {
 }
 
 // makeTestImage creates a solid-color test image with the given RGBA values.
-func makeTestImage(t *testing.T, width, height int, r, g, b, a uint8) *ImageBuf { //nolint:unparam // a=255 is intentional in tests; keeping param for completeness
+func makeTestImage(t *testing.T, width, height int, r, g, b, a uint8) *ImageBuf { //nolint:nolintlint,unparam // a=255 is intentional in tests
 	t.Helper()
 	img, err := NewImageBuf(width, height, FormatRGBA8)
 	if err != nil {
