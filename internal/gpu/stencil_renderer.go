@@ -439,12 +439,12 @@ func (sr *StencilRenderer) submitAndReadback(
 	}
 	rng, err := stagingBuf.MappedRange(0, pixelBufSize)
 	if err != nil {
-		stagingBuf.Unmap()
+		if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
 		return fmt.Errorf("mapped range: %w", err)
 	}
 	readback := make([]byte, pixelBufSize)
 	copy(readback, rng.Bytes())
-	stagingBuf.Unmap()
+	if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
 
 	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
 	return nil

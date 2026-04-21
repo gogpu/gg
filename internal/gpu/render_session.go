@@ -1753,12 +1753,12 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	}
 	rng, err := stagingBuf.MappedRange(0, stagingBufSize)
 	if err != nil {
-		stagingBuf.Unmap()
+		if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
 		return fmt.Errorf("mapped range: %w", err)
 	}
 	readback := make([]byte, stagingBufSize)
 	copy(readback, rng.Bytes())
-	stagingBuf.Unmap()
+	if err := stagingBuf.Unmap(); err != nil { slogger().Warn("unmap failed", "err", err) }
 
 	// Strip row padding (if any) and composite BGRA over existing RGBA pixmap.
 	// Compositing (Porter-Duff "over") preserves existing pixmap content where
