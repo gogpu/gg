@@ -432,7 +432,6 @@ gg/
 │   │   ├── coarse.go       # Coarse rasterization pass
 │   │   ├── fine.go         # Fine rasterization pass
 │   │   ├── pipeline.go     # Render pipeline management
-│   │   ├── pipeline_mode.go    # PipelineMode (Auto/RenderPass/Compute)
 │   │   ├── pipeline_cache_core.go  # PipelineCache (FNV-1a)
 │   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
@@ -479,7 +478,9 @@ gg/
 │   │       ├── blit.wgsl          # Blit / copy
 │   │       ├── composite.wgsl     # Compositing
 │   │       ├── strip.wgsl         # Strip rendering
-│   │       └── msdf_text.wgsl     # MSDF text rendering
+│   │       ├── msdf_text.wgsl     # MSDF text rendering (Tier 4)
+│   │       ├── glyph_mask.wgsl    # Glyph mask rendering (Tier 6)
+│   │       └── glyph_mask_lcd.wgsl # LCD ClearType subpixel (Tier 6)
 │   │
 │   ├── cache/              # LRU caching infrastructure
 │   │   ├── cache.go        # Generic cache

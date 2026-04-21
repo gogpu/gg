@@ -160,14 +160,14 @@ func buildClipScene() []tilecompute.SceneElement {
 			Alpha:     1.0,
 		},
 		// 3-10. Eight colored circles inside the clip region.
-		circleElement(140, 110, 22, [4]uint8{220, 40, 40, 220}),   // red
-		circleElement(200, 110, 28, [4]uint8{40, 40, 220, 220}),   // blue
-		circleElement(260, 110, 20, [4]uint8{220, 40, 220, 220}),  // magenta
-		circleElement(170, 155, 30, [4]uint8{40, 200, 200, 220}),  // cyan
-		circleElement(230, 155, 26, [4]uint8{220, 180, 40, 220}),  // orange
-		circleElement(140, 200, 24, [4]uint8{180, 40, 220, 220}),  // purple
-		circleElement(200, 200, 32, [4]uint8{40, 220, 40, 220}),   // green
-		circleElement(260, 200, 18, [4]uint8{220, 220, 40, 220}),  // yellow
+		circleElement(140, 110, 22, [4]uint8{220, 40, 40, 220}),  // red
+		circleElement(200, 110, 28, [4]uint8{40, 40, 220, 220}),  // blue
+		circleElement(260, 110, 20, [4]uint8{220, 40, 220, 220}), // magenta
+		circleElement(170, 155, 30, [4]uint8{40, 200, 200, 220}), // cyan
+		circleElement(230, 155, 26, [4]uint8{220, 180, 40, 220}), // orange
+		circleElement(140, 200, 24, [4]uint8{180, 40, 220, 220}), // purple
+		circleElement(200, 200, 32, [4]uint8{40, 220, 40, 220}),  // green
+		circleElement(260, 200, 18, [4]uint8{220, 220, 40, 220}), // yellow
 		// 11. Blue rectangle inside clip (extends beyond clip bounds to test clipping).
 		{
 			Type:     tilecompute.ElementDraw,
