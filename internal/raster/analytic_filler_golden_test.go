@@ -41,6 +41,7 @@ func div255(a, b uint16) uint8 {
 
 // renderWithAnalyticFiller rasterizes a path using AnalyticFiller and composites
 // the result into a premultiplied RGBA image using the given paint color.
+// The image has a transparent background (A=0 where no coverage).
 //
 // Parameters:
 //   - width, height: canvas dimensions
@@ -78,6 +79,63 @@ func renderWithAnalyticFiller(
 			b := div255(uint16(paint.B), cov)
 			a := div255(uint16(paint.A), cov)
 			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
+		}
+	}
+	return img
+}
+
+// renderWithAnalyticFillerOnWhite rasterizes a path using AnalyticFiller and
+// composites the result onto a WHITE background using source-over blending.
+// All output pixels have A=255, making the image lossless through PNG round-trip
+// (no un-premultiply/re-premultiply precision loss).
+//
+// This matches Skia Fiddle golden generation with canvas->clear(SK_ColorWHITE).
+//
+// Source-over compositing on opaque white:
+//
+//	srcR = paintR * cov / 255  (premultiplied source)
+//	srcA = paintA * cov / 255
+//	invA = 255 - srcA
+//	dstR = srcR + (255 * invA + 128) / 255   (white bg contributes 255 * (1-srcA))
+//	dstA = 255  (always opaque)
+func renderWithAnalyticFillerOnWhite(
+	width, height int,
+	path PathLike,
+	fillRule FillRule,
+	paint tinySkiaColor,
+	aaShift int,
+) *image.RGBA {
+	// Build edges from path
+	eb := NewEdgeBuilder(aaShift)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	// Rasterize coverage
+	coverageBuf := make([]uint8, width*height)
+	FillToBuffer(eb, width, height, fillRule, coverageBuf)
+
+	// Fill with white background, then composite paint using source-over.
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			cov := uint16(coverageBuf[y*width+x])
+			if cov == 0 {
+				// No coverage — pure white pixel.
+				img.SetRGBA(x, y, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+				continue
+			}
+			// Premultiplied source color scaled by coverage.
+			srcR := uint16(div255(uint16(paint.R), cov))
+			srcG := uint16(div255(uint16(paint.G), cov))
+			srcB := uint16(div255(uint16(paint.B), cov))
+			srcA := uint16(div255(uint16(paint.A), cov))
+
+			// Source-over on white: dst = src + white * (1 - srcA)
+			invA := 255 - srcA
+			r := uint8(srcR + uint16(div255(255, invA)))
+			g := uint8(srcG + uint16(div255(255, invA)))
+			b := uint8(srcB + uint16(div255(255, invA)))
+			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
 	return img
@@ -170,18 +228,17 @@ func compareImages(got, want *image.RGBA) goldenCompareResult {
 
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			gR, gG, gB, gA := got.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
-			wR, wG, wB, wA := want.At(x+wantBounds.Min.X, y+wantBounds.Min.Y).RGBA()
+			gc := got.RGBAAt(x+bounds.Min.X, y+bounds.Min.Y)
+			wc := want.RGBAAt(x+wantBounds.Min.X, y+wantBounds.Min.Y)
 
-			// Convert from 16-bit to 8-bit for comparison
-			gr8 := uint8(gR >> 8)
-			gg8 := uint8(gG >> 8)
-			gb8 := uint8(gB >> 8)
-			ga8 := uint8(gA >> 8)
-			wr8 := uint8(wR >> 8)
-			wg8 := uint8(wG >> 8)
-			wb8 := uint8(wB >> 8)
-			wa8 := uint8(wA >> 8)
+			gr8 := gc.R
+			gg8 := gc.G
+			gb8 := gc.B
+			ga8 := gc.A
+			wr8 := wc.R
+			wg8 := wc.G
+			wb8 := wc.B
+			wa8 := wc.A
 
 			// Per-channel absolute differences
 			dR := absDiffU8(gr8, wr8)
@@ -414,6 +471,7 @@ func TestAnalyticFiller_TinySkiaStarAAGolden(t *testing.T) {
 
 // TestAnalyticFiller_SkiaAAAPolygonGolden compares against Skia AAA output
 // for the polygon test case (no AA, Winding fill).
+// Uses white background to eliminate PNG premultiply round-trip precision loss.
 func TestAnalyticFiller_SkiaAAAPolygonGolden(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
@@ -433,12 +491,12 @@ func TestAnalyticFiller_SkiaAAAPolygonGolden(t *testing.T) {
 	}
 
 	paint := premultipliedColor()
-	got := renderWithAnalyticFiller(100, 100, path, FillRuleNonZero, paint, 0)
+	got := renderWithAnalyticFillerOnWhite(100, 100, path, FillRuleNonZero, paint, 0)
 
-	golden := loadGoldenPNG(t, "skia-aaa-polygon.png")
+	golden := loadGoldenPNG(t, "skia-aaa-polygon-white.png")
 
 	result := compareImages(got, golden)
-	logCompareResult(t, "skia-aaa-polygon (no AA, Winding)", result)
+	logCompareResult(t, "skia-aaa-polygon (no AA, Winding, white bg)", result)
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_polygon.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_polygon.png")
@@ -446,6 +504,7 @@ func TestAnalyticFiller_SkiaAAAPolygonGolden(t *testing.T) {
 
 // TestAnalyticFiller_SkiaAAAFloatRectGolden compares against Skia AAA output
 // for the float-coordinate rectangle with AA.
+// Uses white background to eliminate PNG premultiply round-trip precision loss.
 func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
@@ -464,12 +523,12 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 	}
 
 	paint := premultipliedColor()
-	got := renderWithAnalyticFiller(100, 100, path, FillRuleNonZero, paint, 2)
+	got := renderWithAnalyticFillerOnWhite(100, 100, path, FillRuleNonZero, paint, 2)
 
-	golden := loadGoldenPNG(t, "skia-aaa-float-rect-aa.png")
+	golden := loadGoldenPNG(t, "skia-aaa-float-rect-aa-white.png")
 
 	result := compareImages(got, golden)
-	logCompareResult(t, "skia-aaa-float-rect-aa (AA, Winding)", result)
+	logCompareResult(t, "skia-aaa-float-rect-aa (AA, Winding, white bg)", result)
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_float_rect.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_float_rect.png")
@@ -477,6 +536,7 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 
 // TestAnalyticFiller_SkiaAAAStarGolden compares against Skia AAA output
 // for the star with AA. NOTE: Skia golden uses Winding fill (not EvenOdd).
+// Uses white background to eliminate PNG premultiply round-trip precision loss.
 func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
@@ -498,15 +558,32 @@ func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 
 	paint := premultipliedColor()
 	// Skia AAA star golden uses Winding fill, not EvenOdd
-	got := renderWithAnalyticFiller(100, 100, path, FillRuleNonZero, paint, 2)
+	got := renderWithAnalyticFillerOnWhite(100, 100, path, FillRuleNonZero, paint, 2)
 
-	golden := loadGoldenPNG(t, "skia-aaa-star-aa.png")
+	golden := loadGoldenPNG(t, "skia-aaa-star-aa-white.png")
 
 	result := compareImages(got, golden)
-	logCompareResult(t, "skia-aaa-star-aa (AA, Winding)", result)
+	logCompareResult(t, "skia-aaa-star-aa (AA, Winding, white bg)", result)
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_star.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_star.png")
+}
+
+func TestAnalyticFiller_StarCoverageDiag(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+	buf := make([]uint8, 100*100)
+	FillToBuffer(eb, 100, 100, FillRuleNonZero, buf)
+	t.Logf("Star interior (50,30): cov=%d (want 255)", buf[30*100+50])
+	t.Logf("Star interior (50,50): cov=%d (want 255)", buf[50*100+50])
+	t.Logf("Star interior (40,40): cov=%d (want 255)", buf[40*100+40])
+	t.Logf("Star edge (49,7): cov=%d", buf[7*100+49])
+	t.Logf("Star edge (49,8): cov=%d", buf[8*100+49])
 }
 
 func TestAnalyticFiller_CoverageDiag(t *testing.T) {
@@ -570,12 +647,12 @@ func reportPixelSamples(t *testing.T, got, want *image.RGBA, samplePoints [][2]i
 	t.Helper()
 	for _, pt := range samplePoints {
 		x, y := pt[0], pt[1]
-		gR, gG, gB, gA := got.At(x, y).RGBA()
-		wR, wG, wB, wA := want.At(x, y).RGBA()
+		gc := got.RGBAAt(x, y)
+		wc := want.RGBAAt(x, y)
 		t.Logf("  pixel(%d,%d): got=(%3d,%3d,%3d,%3d) want=(%3d,%3d,%3d,%3d)",
 			x, y,
-			gR>>8, gG>>8, gB>>8, gA>>8,
-			wR>>8, wG>>8, wB>>8, wA>>8,
+			gc.R, gc.G, gc.B, gc.A,
+			wc.R, wc.G, wc.B, wc.A,
 		)
 	}
 }
