@@ -72,11 +72,21 @@ type LineEdge struct {
 	// DX is the slope: change in X per scanline (in FDot16).
 	DX FDot16
 
-	// FirstY is the first scanline this edge covers.
+	// FirstY is the first scanline this edge covers (integer sub-pixel row, for AET).
 	FirstY int32
 
-	// LastY is the last scanline this edge covers (inclusive).
+	// LastY is the last scanline this edge covers (inclusive, integer sub-pixel row, for AET).
 	LastY int32
+
+	// UpperY is the precise upper Y endpoint in FDot16 (16.16 fixed-point).
+	// Used by AnalyticFiller for sub-strip boundary computation (Skia AAA precision).
+	// When zero, falls back to FirstY-based computation.
+	UpperY FDot16
+
+	// LowerY is the precise lower Y endpoint in FDot16 (16.16 fixed-point).
+	// Used by AnalyticFiller for sub-strip boundary computation (Skia AAA precision).
+	// When zero, falls back to LastY-based computation.
+	LowerY FDot16
 
 	// Winding indicates direction: +1 for downward, -1 for upward.
 	Winding int8
@@ -100,11 +110,18 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	x1 := int32(p1.X * scale)
 	y1 := int32(p1.Y * scale)
 
+	// Preserve precise Y endpoints BEFORE any rounding, for Skia AAA sub-strip
+	// boundaries. Convert original float coordinates directly to FDot16 (16.16).
+	// This gives 1/65536 pixel precision vs 1/64 from FDot6.
+	preciseY0 := FDot16FromFloat32(p0.Y)
+	preciseY1 := FDot16FromFloat32(p1.Y)
+
 	winding := int8(1)
 	if y0 > y1 {
 		// Swap to ensure y0 <= y1 (edge goes downward)
 		x0, x1 = x1, x0
 		y0, y1 = y1, y0
+		preciseY0, preciseY1 = preciseY1, preciseY0
 		winding = -1
 	}
 
@@ -126,6 +143,8 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 		DX:      slope,
 		FirstY:  top,
 		LastY:   bottom - 1,
+		UpperY:  preciseY0,
+		LowerY:  preciseY1,
 		Winding: winding,
 	}, true
 }
@@ -138,6 +157,11 @@ func (e *LineEdge) IsVertical() bool {
 // update updates the line edge for a new line segment.
 // Called by QuadraticEdge and CubicEdge during stepping.
 // Returns true if a valid segment was produced.
+//
+// Note: UpperY/LowerY are NOT set here because the y0/y1 values from curve
+// forward differencing are in the FDot6-scaled coordinate system (not pixel-
+// space FDot16). Only NewLineEdge sets precise pixel-space UpperY/LowerY.
+// Curve segments are already subdivided finely, so FDot6-rounded Y is adequate.
 func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
 	// Convert from FDot16 to FDot6 (shift right by 10)
 	y0 >>= (FDot16Shift - FDot6Shift)
@@ -161,6 +185,9 @@ func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
 	e.DX = slope
 	e.FirstY = top
 	e.LastY = bottom - 1
+	// Clear precise Y — curve segments use FDot6 system, not pixel-space FDot16.
+	e.UpperY = 0
+	e.LowerY = 0
 
 	return true
 }

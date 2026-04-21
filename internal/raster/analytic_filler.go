@@ -207,14 +207,7 @@ func (af *AnalyticFiller) processScanlineAAA(
 			continue
 		}
 
-		// Convert sub-strip boundaries to subpixel coordinates for edge resolution.
-		stripTopSub := int32(stripTop * aaScaleF)
-		stripBotSub := int32(stripBot * aaScaleF)
-		if stripBotSub <= stripTopSub {
-			stripBotSub = stripTopSub + 1
-		}
-
-		af.processSubStrip(stripTopSub, stripBotSub, aaScaleF, stripTop, stripBot, fillRule)
+		af.processSubStrip(aaScaleF, stripTop, stripBot, fillRule)
 	}
 
 	// WindingCallback compatibility: synthesize winding from coverage
@@ -238,6 +231,11 @@ func (af *AnalyticFiller) processScanlineAAA(
 //
 // This mirrors Skia's update_next_next_y / nextY tracking but computed
 // upfront for all edges in the current pixel row.
+//
+// When LineEdge has UpperY/LowerY set (FDot16 precision, 16.16 fixed-point),
+// those are used instead of FirstY/LastY for sub-strip boundaries. This gives
+// 1/65536 pixel precision instead of 1/aaScale, matching Skia AAA's fUpperY/fLowerY
+// which preserve fractional Y positions through SnapY (1/4 pixel granularity in 16.16).
 func (af *AnalyticFiller) collectStripBoundaries(yTop, yBot, aaScaleF float32) []float32 {
 	// Reuse buffer to avoid allocation per scanline.
 	af.stripYBuf = af.stripYBuf[:0]
@@ -252,8 +250,18 @@ func (af *AnalyticFiller) collectStripBoundaries(yTop, yBot, aaScaleF float32) [
 		if line == nil {
 			continue
 		}
-		segTopF := float32(line.FirstY) / aaScaleF
-		segBotF := float32(line.LastY+1) / aaScaleF
+
+		// Use precise FDot16 Y endpoints when available (Skia AAA precision).
+		// UpperY/LowerY store the original float Y converted to 16.16 fixed-point,
+		// giving sub-pixel precision that FirstY/LastY (integer sub-pixel rows) lack.
+		var segTopF, segBotF float32
+		if line.UpperY != 0 || line.LowerY != 0 {
+			segTopF = FDot16ToFloat32(line.UpperY)
+			segBotF = FDot16ToFloat32(line.LowerY)
+		} else {
+			segTopF = float32(line.FirstY) / aaScaleF
+			segBotF = float32(line.LastY+1) / aaScaleF
+		}
 
 		// Also consider the edge's overall bounds (for curve edges the
 		// current segment may not span the full extent).
@@ -290,7 +298,6 @@ func (af *AnalyticFiller) collectStripBoundaries(yTop, yBot, aaScaleF float32) [
 // processSubStrip resolves edges and blits trapezoids for a single sub-strip
 // within a pixel row. Coverage is added to the existing coverage buffer.
 func (af *AnalyticFiller) processSubStrip(
-	ySubpixel, ySubpixelEnd int32,
 	aaScaleF, stripTopF, stripBotF float32,
 	fillRule FillRule,
 ) {
@@ -302,8 +309,7 @@ func (af *AnalyticFiller) processSubStrip(
 
 	for i := 0; i < n; i++ {
 		edge := af.aet.EdgeAt(i)
-		lineState := af.resolveEdgeLine(edge, ySubpixel, ySubpixelEnd, aaScaleF,
-			stripTopF, stripBotF)
+		lineState := af.resolveEdgeLine(edge, aaScaleF, stripTopF, stripBotF)
 		if lineState.valid {
 			af.resolvedEdges = append(af.resolvedEdges, lineState)
 		}
@@ -399,7 +405,7 @@ type edgeLineState struct {
 	botX    float32 // X position at bottom of strip (pixel coords)
 	topY    float32 // Y position at top of strip
 	botY    float32 // Y position at bottom of strip
-	dy      float32 // absolute |dY| for the edge within this strip
+	dy      float32 // Skia fDY: abs(1/slope) = abs(dY/dX). Used by partialTriangleToAlpha.
 	height  float32 // vertical extent within strip (= botY - topY)
 	winding int8
 }
@@ -408,7 +414,6 @@ type edgeLineState struct {
 // for the current scanline strip. Handles curve segment stepping.
 func (af *AnalyticFiller) resolveEdgeLine(
 	edge *CurveEdgeVariant,
-	ySubpixel, ySubpixelEnd int32,
 	aaScaleF, yPixelF, yPixelEndF float32,
 ) edgeLineState {
 	// Walk through segments that are before or within this scanline
@@ -418,25 +423,37 @@ func (af *AnalyticFiller) resolveEdgeLine(
 			return edgeLineState{}
 		}
 
-		segFirstY := line.FirstY
-		segLastY := line.LastY + 1
+		// Determine segment Y range. When precise FDot16 endpoints are available,
+		// use them for intersection testing. This avoids the precision loss from
+		// FDot6Round that causes edges starting at y=15.4 to appear as y=15.5.
+		var segTopPixel, segBotPixel float32
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		if hasPrecise {
+			segTopPixel = FDot16ToFloat32(line.UpperY)
+			segBotPixel = FDot16ToFloat32(line.LowerY)
+		} else {
+			segTopPixel = float32(line.FirstY) / aaScaleF
+			segBotPixel = float32(line.LastY+1) / aaScaleF
+		}
 
-		if segFirstY >= ySubpixelEnd {
+		// Quick cull: segment is entirely after this strip
+		if segTopPixel >= yPixelEndF {
 			return edgeLineState{}
 		}
 
-		if segLastY <= ySubpixel {
+		// Quick cull: segment is entirely before this strip — step curve
+		if segBotPixel <= yPixelF {
 			if !af.stepCurveSegment(edge) {
 				return edgeLineState{}
 			}
 			continue
 		}
 
-		// Segment intersects scanline — compute pixel-space parameters
+		// Segment intersects scanline — compute pixel-space parameters.
 		x := FDot16ToFloat32(line.X) / aaScaleF
 		dx := FDot16ToFloat32(line.DX)
-		firstY := float32(line.FirstY) / aaScaleF
-		lastY := float32(segLastY) / aaScaleF
+		firstY := segTopPixel
+		lastY := segBotPixel
 
 		yTop := yPixelF
 		yBot := yPixelEndF
@@ -455,10 +472,23 @@ func (af *AnalyticFiller) resolveEdgeLine(
 		topX := x + dx*(yTop-firstY)
 		botX := x + dx*(yBot-firstY)
 
-		// Absolute dY for use in Skia's trapezoid_to_alpha (always positive)
-		absDY := h
-		if absDY < 0 {
-			absDY = -absDY
+		// Compute Skia's fDY = abs(1/slope) = abs(dY/dX).
+		// slope = DX = change in X per scanline step (dimensionless).
+		// fDY = abs(1/slope). For vertical edges (DX=0), fDY → infinity.
+		// Used by partialTriangleToAlpha to compute edge-exclusion triangles.
+		absDX := dx
+		if absDX < 0 {
+			absDX = -absDX
+		}
+		var fDY float32
+		if absDX < 1e-7 {
+			// Nearly vertical edge — fDY is very large (Skia uses SK_MaxS32)
+			fDY = float32(0x7FFFFFFF) / float32(skFixed1) // ≈ 32767.0
+		} else {
+			fDY = 1.0 / absDX
+			if fDY > float32(0x7FFFFFFF)/float32(skFixed1) {
+				fDY = float32(0x7FFFFFFF) / float32(skFixed1)
+			}
 		}
 
 		return edgeLineState{
@@ -467,7 +497,7 @@ func (af *AnalyticFiller) resolveEdgeLine(
 			botX:    botX,
 			topY:    yTop,
 			botY:    yBot,
-			dy:      absDY,
+			dy:      fDY,
 			height:  h,
 			winding: line.Winding,
 		}
@@ -505,7 +535,8 @@ func (af *AnalyticFiller) blitTrapezoidBetweenEdges(left, right edgeLineState) {
 		return
 	}
 
-	// DY for left and right edges (absolute, in fixed-point)
+	// Skia fDY = abs(dY/dX) = abs(1/slope) for left and right edges.
+	// Used by partialTriangleToAlpha to compute edge-exclusion triangles.
 	lDY := floatToSkFixed(left.dy)
 	rDY := floatToSkFixed(right.dy)
 

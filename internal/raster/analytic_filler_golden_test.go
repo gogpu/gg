@@ -509,6 +509,26 @@ func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_star.png")
 }
 
+func TestAnalyticFiller_CoverageDiag(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{10.3, 15.4, 90.8, 15.4, 90.8, 86.0, 10.3, 86.0},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+	buf := make([]uint8, 100*100)
+	FillToBuffer(eb, 100, 100, FillRuleNonZero, buf)
+
+	t.Logf("Interior (50,50): cov=%d (want 255)", buf[50*100+50])
+	t.Logf("Interior (50,40): cov=%d (want 255)", buf[40*100+50])
+	t.Logf("Top edge (11,15): cov=%d (want ~153 for y=15.4, h=0.6)", buf[15*100+11])
+	t.Logf("Top edge (11,16): cov=%d (want 255)", buf[16*100+11])
+	t.Logf("Left edge (10,50): cov=%d (want ~179 for x=10.3, w=0.7)", buf[50*100+10])
+	t.Logf("Right edge (90,50): cov=%d (want ~204 for x=90.8, w=0.8)", buf[50*100+90])
+	t.Logf("Corner (10,15): cov=%d", buf[15*100+10])
+}
+
 // --- Utility functions ---
 
 func absDiffU8(a, b uint8) uint8 {
