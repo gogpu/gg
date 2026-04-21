@@ -63,6 +63,7 @@ type Canvas struct {
 	oldTexture  any             // Previous texture awaiting deferred destruction
 	dirty       bool            // Needs GPU upload
 	dirtyRect   image.Rectangle // Accumulated dirty region (zero = full upload)
+	regionBuf   []byte          // Reusable buffer for partial texture upload
 	sizeChanged bool            // Resize pending — texture must be recreated
 	width       int
 	height      int
@@ -578,7 +579,7 @@ func (c *Canvas) uploadTexture(pixmap *gg.Pixmap, fullData []byte) error {
 		bounds := image.Rect(0, 0, pixmap.Width(), pixmap.Height())
 		dr = dr.Intersect(bounds)
 		if !dr.Empty() && dr != bounds {
-			regionData := extractRegion(fullData, pixmap.Width(), dr)
+			regionData := c.extractRegion(fullData, pixmap.Width(), dr)
 			if err := regionUpdater.UpdateRegion(dr.Min.X, dr.Min.Y, dr.Dx(), dr.Dy(), regionData); err != nil {
 				return fmt.Errorf("ggcanvas: region update failed: %w", err)
 			}
@@ -597,11 +598,16 @@ func (c *Canvas) uploadTexture(pixmap *gg.Pixmap, fullData []byte) error {
 
 // extractRegion copies a rectangular sub-region from RGBA row-major pixel data
 // into a densely packed buffer suitable for UpdateRegion.
-func extractRegion(data []byte, pixmapWidth int, r image.Rectangle) []byte {
+// Reuses c.regionBuf to avoid allocation on the 60fps hot path.
+func (c *Canvas) extractRegion(data []byte, pixmapWidth int, r image.Rectangle) []byte {
 	const bytesPerPixel = 4
 	stride := pixmapWidth * bytesPerPixel
 	regionW := r.Dx() * bytesPerPixel
-	buf := make([]byte, r.Dx()*r.Dy()*bytesPerPixel)
+	needed := r.Dx() * r.Dy() * bytesPerPixel
+	if cap(c.regionBuf) < needed {
+		c.regionBuf = make([]byte, needed)
+	}
+	buf := c.regionBuf[:needed]
 	dst := 0
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		srcStart := y*stride + r.Min.X*bytesPerPixel

@@ -860,7 +860,8 @@ func TestExtractRegion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractRegion(data, w, tt.r)
+			c := &Canvas{}
+			got := c.extractRegion(data, w, tt.r)
 			if len(got) != len(tt.want) {
 				t.Fatalf("len(extractRegion) = %d, want %d", len(got), len(tt.want))
 			}
