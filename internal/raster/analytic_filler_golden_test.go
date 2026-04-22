@@ -583,6 +583,240 @@ func TestAnalyticFiller_StarCoverageDiag(t *testing.T) {
 	t.Logf("Star edge (49,8): cov=%d", buf[8*100+49])
 }
 
+// TestAnalyticFiller_StarY56Debug traces the full sub-strip processing at y=56
+// to diagnose the 2-pixel outlier (diff=31) at (34,56) and (65,56).
+//
+// At y=56, the star has 4 edges crossing in close pairs:
+//   - e4: x≈34.69 (w=-1) and e1: x≈34.70 (w=-1) — within 0.01px
+//   - e3: x≈65.30 (w=+1) and e0: x≈65.31 (w=+1) — within 0.01px
+//
+// With NonZero fill, paired walk produces ONE trapezoid from e4(34.69) to e0(65.31).
+// Our coverage at pixel 34 = 80, Skia gives 129. Delta = 49 coverage units.
+func TestAnalyticFiller_StarY56Debug(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+
+	const aaShift = 2
+	eb := NewEdgeBuilder(aaShift)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	filler := NewAnalyticFiller(100, 100)
+
+	sortedBuf := eb.sortedEdgesSlice()
+	filler.edgeBuf = make([]CurveEdgeVariant, len(sortedBuf))
+	for i := range sortedBuf {
+		filler.edgeBuf[i] = sortedBuf[i].variant
+	}
+	filler.edgeIdx = 0
+
+	//nolint:gosec // aaShift bounded
+	aaScale := int32(1) << aaShift
+
+	// Process scanlines 0..55 to advance AET to y=56
+	for y := 0; y < 56; y++ {
+		filler.processScanlineAAA(y, aaScale, filler.edgeBuf, FillRuleNonZero,
+			func(_ int, _ *AlphaRuns) {})
+	}
+
+	// Now process y=56 and inspect everything
+	t.Logf("=== Processing y=56 ===")
+	t.Logf("AET has %d edges before processing", filler.aet.Len())
+
+	// Clear coverage
+	for i := range filler.coverage {
+		filler.coverage[i] = 0
+	}
+
+	ySubpixel := int32(56) * aaScale
+	ySubpixelNext := ySubpixel + aaScale
+	filler.aet.RemoveExpiredSubpixel(ySubpixel)
+
+	for filler.edgeIdx < len(filler.edgeBuf) {
+		edge := filler.edgeBuf[filler.edgeIdx]
+		topY := edge.TopY()
+		if topY >= ySubpixelNext {
+			break
+		}
+		filler.aet.Insert(edge)
+		filler.edgeIdx++
+	}
+
+	t.Logf("AET has %d edges after insertion", filler.aet.Len())
+
+	// Log all AET edges
+	for i := 0; i < filler.aet.Len(); i++ {
+		edge := filler.aet.EdgeAt(i)
+		line := edge.AsLine()
+		if line == nil {
+			continue
+		}
+		t.Logf("  AET[%d]: type=%d winding=%+d firstY=%d lastY=%d X=%d DX=%d upperY=%d lowerY=%d",
+			i, edge.Type, line.Winding, line.FirstY, line.LastY, line.X, line.DX,
+			line.UpperY, line.LowerY)
+	}
+
+	// Collect sub-strip boundaries
+	yFixed := intToSkFixed(56)
+	yFixedEnd := intToSkFixed(57)
+	stripYs := filler.collectStripBoundariesFixed(yFixed, yFixedEnd, aaScale)
+
+	t.Logf("Sub-strip boundaries (SkFixed): %v", stripYs)
+	for i, sy := range stripYs {
+		t.Logf("  stripY[%d] = %d (%.6f pixels)", i, sy, float64(sy)/65536.0)
+	}
+
+	// Process each sub-strip with tracing
+	for si := 0; si < len(stripYs)-1; si++ {
+		stripTop := stripYs[si]
+		stripBot := stripYs[si+1]
+		if stripBot <= stripTop {
+			continue
+		}
+
+		yDiff := stripBot - stripTop
+		fullAlpha := fixedToAlpha(yDiff)
+		t.Logf("\n--- Sub-strip %d: [%d, %d) = [%.4f, %.4f) fullAlpha=%d ---",
+			si, stripTop, stripBot, float64(stripTop)/65536.0, float64(stripBot)/65536.0, fullAlpha)
+
+		if fullAlpha == 0 {
+			continue
+		}
+
+		// Resolve edges
+		n := filler.aet.Len()
+		resolved := make([]edgeLineState, 0, n)
+		for i := 0; i < n; i++ {
+			edge := filler.aet.EdgeAt(i)
+			ls := filler.resolveEdgeLineFixed(edge, aaScale, stripTop, stripBot, fullAlpha)
+			if ls.valid {
+				resolved = append(resolved, ls)
+			}
+		}
+
+		sortEdgesByMidX(resolved)
+
+		for j, ls := range resolved {
+			midX := (int64(ls.topX) + int64(ls.botX)) / 2
+			t.Logf("  edge[%d]: topX=%d(%.4f) botX=%d(%.4f) midX=%.4f winding=%+d dy=%d fullAlpha=%d",
+				j, ls.topX, float64(ls.topX)/65536.0,
+				ls.botX, float64(ls.botX)/65536.0,
+				float64(midX)/65536.0,
+				ls.winding, ls.dy, ls.fullAlpha)
+		}
+
+		// Paired walk
+		winding := int32(0)
+		inInterval := false
+		var leftLS edgeLineState
+
+		for j := range resolved {
+			ls := resolved[j]
+			winding += int32(ls.winding)
+			prevIn := inInterval
+			inInterval = winding != 0
+
+			isLeft := inInterval && !prevIn
+			isRight := !inInterval && prevIn
+
+			if isRight {
+				t.Logf("  TRAPEZOID: left=(%.4f,%.4f) right=(%.4f,%.4f) alpha=%d",
+					float64(leftLS.topX)/65536.0, float64(leftLS.botX)/65536.0,
+					float64(ls.topX)/65536.0, float64(ls.botX)/65536.0,
+					min(leftLS.fullAlpha, ls.fullAlpha))
+			}
+			if isLeft {
+				leftLS = ls
+			}
+		}
+	}
+
+	// Now actually process it and check coverage
+	for i := range filler.coverage {
+		filler.coverage[i] = 0
+	}
+	for si := 0; si < len(stripYs)-1; si++ {
+		stripTop := stripYs[si]
+		stripBot := stripYs[si+1]
+		if stripBot <= stripTop {
+			continue
+		}
+		filler.processSubStripFixed(aaScale, stripTop, stripBot, FillRuleNonZero)
+	}
+
+	t.Logf("\n=== Final coverage at key pixels ===")
+	for _, x := range []int{33, 34, 35, 36, 64, 65, 66, 67} {
+		t.Logf("  cov[%d] = %d", x, filler.coverage[x])
+	}
+
+	// Load golden and compare
+	golden := loadGoldenPNG(t, "skia-aaa-star-aa-white.png")
+	paint := premultipliedColor()
+	for _, x := range []int{34, 65} {
+		cov := filler.coverage[x]
+		wc := golden.RGBAAt(x, 56)
+
+		// Compute what color our coverage produces
+		scale := uint32(cov) + 1
+		srcR := (uint32(paint.R) * scale) >> 8
+		srcA := (200 * scale) >> 8
+		invScale := (255 - srcA) + 1
+		gotR := uint8(srcR + (255*invScale)>>8)
+
+		t.Logf("  pixel(%d,56): cov=%d → R=%d, golden R=%d (diff=%d)",
+			x, cov, gotR, wc.R, absDiffU8(gotR, wc.R))
+	}
+}
+
+func TestAnalyticFiller_StarY68Debug(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	const aaShift = 2
+	eb := NewEdgeBuilder(aaShift)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	filler := NewAnalyticFiller(100, 100)
+	sortedBuf := eb.sortedEdgesSlice()
+	filler.edgeBuf = make([]CurveEdgeVariant, len(sortedBuf))
+	for i := range sortedBuf {
+		filler.edgeBuf[i] = sortedBuf[i].variant
+	}
+	//nolint:gosec // bounded
+	aaScale := int32(1) << aaShift
+
+	// Process up to y=68
+	for y := 0; y < 68; y++ {
+		filler.processScanlineAAA(y, aaScale, filler.edgeBuf, FillRuleNonZero,
+			func(_ int, _ *AlphaRuns) {})
+	}
+
+	// Collect strip boundaries at y=68
+	yFixed := intToSkFixed(68)
+	yFixedEnd := intToSkFixed(69)
+	stripYs := filler.collectStripBoundariesFixed(yFixed, yFixedEnd, aaScale)
+	t.Logf("Y=68 sub-strip boundaries: %v", stripYs)
+	for i, sy := range stripYs {
+		t.Logf("  stripY[%d] = %d (%.4f pixels)", i, sy, float64(sy)/65536.0)
+	}
+
+	// Process y=68 and check coverage
+	for i := range filler.coverage {
+		filler.coverage[i] = 0
+	}
+	filler.processScanlineAAA(68, aaScale, filler.edgeBuf, FillRuleNonZero,
+		func(_ int, _ *AlphaRuns) {})
+
+	t.Logf("Coverage at problem pixels:")
+	for _, x := range []int{30, 31, 32, 49, 50, 51, 68, 69, 70} {
+		t.Logf("  cov[%d] = %d", x, filler.coverage[x])
+	}
+}
+
 func TestAnalyticFiller_CoverageDiag(t *testing.T) {
 	path := &testPath{
 		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},

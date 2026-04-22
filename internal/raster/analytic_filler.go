@@ -239,6 +239,14 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 	af.stripYBuf = af.stripYBuf[:0]
 	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
 
+	// Detect crossing edges and add the intersection Y as a sub-strip boundary.
+	// When two edges cross within the pixel row, processing them in a single
+	// full-height strip produces incorrect coverage because the entering edge
+	// changes midway through the strip. Splitting at the crossing Y ensures
+	// each sub-strip uses the correct entering edge, matching Skia's
+	// check_intersection mechanism (SkScan_AAAPath.cpp:1311-1314).
+	af.addCrossingBoundaries(yTopFixed, yBotFixed, aaScale)
+
 	n := af.aet.Len()
 	for i := 0; i < n; i++ {
 		edge := af.aet.EdgeAt(i)
@@ -287,6 +295,77 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 	af.stripYBuf = deduplicateInt32s(af.stripYBuf)
 
 	return af.stripYBuf
+}
+
+// addCrossingBoundaries detects active edge pairs that cross within the pixel
+// row [yTopFixed, yBotFixed) and adds their intersection Y as sub-strip
+// boundaries.
+//
+// Two edges cross within the row when their X positions at yTop are in one
+// order but their X positions at yBot are in the opposite order. The crossing
+// Y is computed by linear interpolation of the two edges' X trajectories.
+//
+// This matches Skia's check_intersection (SkScan_AAAPath.cpp:1311-1314) which
+// detects when fX+fDX of adjacent edges would cross and forces a smaller Y step.
+func (af *AnalyticFiller) addCrossingBoundaries(yTopFixed, yBotFixed, aaScale int32) {
+	n := af.aet.Len()
+	if n < 2 {
+		return
+	}
+
+	// Collect edge X positions at top and bottom of the pixel row.
+	type edgeXPair struct {
+		topX, botX int32
+	}
+	// Use a small stack-allocated buffer for typical edge counts.
+	var stackBuf [16]edgeXPair
+	var pairs []edgeXPair
+	if n <= len(stackBuf) {
+		pairs = stackBuf[:0]
+	} else {
+		pairs = make([]edgeXPair, 0, n)
+	}
+
+	for i := 0; i < n; i++ {
+		edge := af.aet.EdgeAt(i)
+		line := edge.AsLine()
+		if line == nil {
+			continue
+		}
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		topX, botX := computeEdgeX(line, aaScale, hasPrecise, yTopFixed, yBotFixed)
+		pairs = append(pairs, edgeXPair{topX, botX})
+	}
+
+	// Check ALL edge pairs for crossing (O(n^2), n is typically <20 per scanline).
+	// Cannot limit to adjacent AET pairs because AET order at insertion time may
+	// differ from X order at the current Y.
+	for i := 0; i < len(pairs); i++ {
+		for j := i + 1; j < len(pairs); j++ {
+			a := pairs[i]
+			b := pairs[j]
+
+			// Edges cross if their relative X order reverses between top and bottom.
+			diffTop := int64(a.topX) - int64(b.topX)
+			diffBot := int64(a.botX) - int64(b.botX)
+
+			if (diffTop > 0 && diffBot < 0) || (diffTop < 0 && diffBot > 0) {
+				// Compute crossing Y by linear interpolation:
+				// At y=top: diff = diffTop, at y=bot: diff = diffBot
+				// Crossing where diff=0: y = top + (bot-top) * diffTop / (diffTop - diffBot)
+				yRange := int64(yBotFixed) - int64(yTopFixed)
+				crossY := int64(yTopFixed) + yRange*diffTop/(diffTop-diffBot)
+
+				// Clamp to strip range and snap to 1/4 pixel boundary (matching Skia's accuracy=2).
+				cy := int32(crossY)
+				const quarterPixel = skFixed1 / 4
+				cy = (cy + quarterPixel/2) & ^(quarterPixel - 1) // round to nearest 1/4 pixel
+				if cy > yTopFixed && cy < yBotFixed {
+					af.stripYBuf = append(af.stripYBuf, cy)
+				}
+			}
+		}
+	}
 }
 
 // processSubStripFixed resolves edges and blits trapezoids for a single sub-strip
@@ -383,6 +462,27 @@ func deduplicateInt32s(s []int32) []int32 {
 		}
 	}
 	return s[:n]
+}
+
+// sortEdgesByTopX sorts resolved edges by their X position at the top of the
+// strip (topX), matching Skia's AET ordering where edges are sorted by fX
+// evaluated at the current Y (SkScan_AAAPath.cpp:1490, goY(y)).
+//
+// Using topX instead of midX is critical for correct paired-edge walk at
+// self-intersection points. When two edges cross within a strip, the edge
+// that is leftmost at the top determines which edge the walk encounters
+// first, matching Skia's linked-list-sorted-by-fX behavior.
+func sortEdgesByTopX(edges []edgeLineState) {
+	// Simple insertion sort — edge count per scanline is typically small (<20)
+	for i := 1; i < len(edges); i++ {
+		key := edges[i]
+		j := i - 1
+		for j >= 0 && edges[j].topX > key.topX {
+			edges[j+1] = edges[j]
+			j--
+		}
+		edges[j+1] = key
+	}
 }
 
 // sortEdgesByMidX sorts resolved edges by their midpoint X position (SkFixed).
