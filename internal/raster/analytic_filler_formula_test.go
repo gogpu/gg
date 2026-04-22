@@ -1034,3 +1034,71 @@ func TestFormulaBoundaryValues(t *testing.T) {
 		}
 	})
 }
+
+// TestFormulaPixelDY verifies PixelDY matches Skia's fDY = abs(FDot6Div(dy, dx)).
+// Skia: SkAnalyticEdge.cpp:197-199. NOT 1/slope — different due to integer rounding.
+func TestFormulaPixelDY(t *testing.T) {
+	tests := []struct {
+		name        string
+		p0x, p0y    float32
+		p1x, p1y    float32
+		wantPixelDY int32
+	}{
+		{
+			name: "star_edge_e1_(75,87.5)_to_(10,37.5)",
+			p0x:  75.0, p0y: 87.5, p1x: 10.0, p1y: 37.5,
+			// pxDx = (x1-x0)>>10 in pixel SkFixed, pxDy = (y1-y0)>>10
+			// abs(FDot6Div(3200, 4160)) = abs(209715200/4160) = 50412
+			wantPixelDY: 50412,
+		},
+		{
+			name: "star_edge_e0_(50,7.5)_to_(75,87.5)",
+			p0x:  50.0, p0y: 7.5, p1x: 75.0, p1y: 87.5,
+			// pxDx = 1600 (25*64), pxDy = 5120 (80*64)
+			// abs(FDot6Div(5120, 1600)) = abs(335544320/1600) = 209715
+			wantPixelDY: 209715,
+		},
+		{
+			name: "vertical_edge",
+			p0x:  10.0, p0y: 5.0, p1x: 10.0, p1y: 50.0,
+			wantPixelDY: 0x7FFFFFFF, // infinity for vertical
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			edge, ok := NewLineEdge(
+				CurvePoint{X: tt.p0x, Y: tt.p0y},
+				CurvePoint{X: tt.p1x, Y: tt.p1y},
+				2, // aaShift=2
+			)
+			if !ok {
+				t.Fatal("NewLineEdge returned false")
+			}
+			if edge.PixelDY != tt.wantPixelDY {
+				t.Errorf("PixelDY = %d, want %d (diff=%d)", edge.PixelDY, tt.wantPixelDY, edge.PixelDY-tt.wantPixelDY)
+			}
+		})
+	}
+}
+
+// TestFormulaBlitAaaTrapezoidRowExact verifies blitAaaTrapezoidRow with exact
+// C++ ground truth values from full_walk.exe trace.
+func TestFormulaBlitAaaTrapezoidRowExact(t *testing.T) {
+	// C++ trace at y=39 for star left partial:
+	// blit_aaa: ul=783154 ur=917504 ll=868350 lr=917504 lDY=50412
+	af := NewAnalyticFiller(100, 100)
+	for i := range af.coverage {
+		af.coverage[i] = 0
+	}
+
+	af.blitAaaTrapezoidRow(783154, 917504, 868350, 917504, 50412, 0x7FFFFFFF, 255)
+
+	// C++ gives: pixel 11=0, pixel 12=108, pixel 13=249
+	wantCov := map[int]uint8{11: 0, 12: 108, 13: 249}
+	for px, want := range wantCov {
+		got := af.coverage[px]
+		if got != want {
+			t.Errorf("pixel %d: coverage=%d, want %d (C++ ground truth)", px, got, want)
+		}
+	}
+}
