@@ -1035,12 +1035,12 @@ func TestAnalyticFiller_TraceY39(t *testing.T) {
 }
 
 func TestAnalyticFiller_TraceBlitAaaY39(t *testing.T) {
-	// Exact values from C++ trace:
-	// ul=11.949982 ur=14.0 ll=13.249969 lr=14.0 lDY=50412 rDY=MAX fullA=255
-	ul := int32(783155) // 11.949982 * 65536
-	ur := int32(917504) // 14.0 * 65536
-	ll := int32(868349) // 13.249969 * 65536
-	lr := int32(917504) // 14.0 * 65536
+	// Exact SkFixed values from C++ full_walk trace at y=39:
+	// blit_aaa: ul=783154 ur=917504 ll=868350 lr=917504
+	ul := int32(783154)
+	ur := int32(917504)
+	ll := int32(868350)
+	lr := int32(917504)
 
 	af := NewAnalyticFiller(100, 100)
 	for i := range af.coverage {
@@ -1103,6 +1103,30 @@ func TestAnalyticFiller_TraceFxAtY39(t *testing.T) {
 				}
 			}
 			t.Logf("  C++ left edge at y=39: fX=783155 (11.949982)")
+		}
+	})
+}
+
+func TestAnalyticFiller_CountBlitY39(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	af := NewAnalyticFiller(100, 100)
+	af.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		if y == 39 {
+			// Check how many sub-strips were processed
+			yFixed := intToSkFixed(39)
+			yFixedEnd := intToSkFixed(40)
+			stripYs := af.collectStripBoundariesFixed(yFixed, yFixedEnd, 4)
+			t.Logf("y=39: %d sub-strips", len(stripYs)-1)
+			for i := 0; i < len(stripYs); i++ {
+				t.Logf("  boundary[%d]=%d (%.4f)", i, stripYs[i], float64(stripYs[i])/65536.0)
+			}
 		}
 	})
 }
