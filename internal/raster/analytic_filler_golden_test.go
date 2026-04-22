@@ -538,8 +538,8 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 	if result.MaxDiff > 1 {
 		t.Errorf("REGRESSION: float rect max diff=%d, want <= 1", result.MaxDiff)
 	}
-	if result.DiffCount > 150 {
-		t.Errorf("REGRESSION: float rect diff pixels=%d, want <= 150", result.DiffCount)
+	if result.DiffCount > 140 {
+		t.Errorf("REGRESSION: float rect diff pixels=%d, want <= 140", result.DiffCount)
 	}
 }
 
@@ -577,11 +577,16 @@ func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 	saveRendered(t, got, "golden_rendered_skia_aaa_star.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_star.png")
 
+	// Coverage is pixel-perfect (diff=0 vs Skia-exact C++ walker, see StarCoverageVsCpp).
+	// RGB diff=58 is from Skia blitter-level optimizations NOT in our rasterizer:
+	//   56px: dual compositing formula (SkBlendARGB32 vs SkAlphaMulQ, diff=1)
+	//   2px:  snapAlpha (coverage 248-255 snapped to 255, diff=2)
+	// These are compositing-layer concerns, not rasterization errors.
 	if result.MaxDiff > 2 {
 		t.Errorf("REGRESSION: star max diff=%d, want <= 2", result.MaxDiff)
 	}
-	if result.DiffCount > 100 {
-		t.Errorf("REGRESSION: star diff pixels=%d, want <= 100", result.DiffCount)
+	if result.DiffCount > 58 {
+		t.Errorf("REGRESSION: star diff pixels=%d, want <= 58", result.DiffCount)
 	}
 }
 
@@ -1300,5 +1305,11 @@ func TestAnalyticFiller_StarCoverageVsCpp(t *testing.T) {
 	}
 	if len(diffs) > 50 {
 		t.Logf("  ... and %d more", len(diffs)-50)
+	}
+
+	// Coverage must be pixel-perfect vs Skia-exact C++ walker.
+	// C++ tool uses verbatim Skia source (SkScan_AAAPath.cpp aaa_walk_edges).
+	if diffCount > 0 {
+		t.Errorf("REGRESSION: coverage diff=%d (max=%d), want diff=0 (pixel-perfect)", diffCount, maxDiff)
 	}
 }
