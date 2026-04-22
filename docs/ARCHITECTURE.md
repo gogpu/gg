@@ -67,7 +67,7 @@ import _ "github.com/gogpu/gg/gpu"  // enables GPU acceleration
 Optional extension interfaces for gogpu integration:
 
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
-- **SurfaceTargetAware** -- render directly to a surface texture view (zero-copy windowed rendering)
+- **Per-pass render target** -- `GPURenderTarget.View` (`gpucontext.TextureView`) enables GPU-direct rendering to any texture view (surface or offscreen). Follows WebGPU spec per-render-pass target pattern. ~~SurfaceTargetAware~~ (deprecated, use GPURenderTarget.View)
 
 ### Six-Tier GPU Rendering
 
@@ -710,8 +710,9 @@ Key implementation details:
   `defer canvas.Close()` or `OnClose` wiring needed.
 
 When used with gogpu, the accelerator shares the gogpu GPU device via `DeviceProviderAware`,
-and can render directly to the window surface via `SurfaceTargetAware`, eliminating the
-GPU->CPU->GPU round-trip.
+and can render directly to any texture view (surface or offscreen) via `GPURenderTarget.View`
+(`gpucontext.TextureView`), eliminating the GPU->CPU->GPU round-trip. Target is per-pass
+(WebGPU spec pattern), enabling multi-context rendering (RepaintBoundary, offscreen export).
 
 ## Recording System (v0.23.0)
 
@@ -793,7 +794,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
-| **Zero-Copy Surface** | Flutter Impeller | SurfaceTargetAware for direct window rendering |
+| **Per-Pass Render Target** | WebGPU spec, Skia GrContext | GPURenderTarget.View for per-pass target (surface or offscreen) |
 
 ## See Also
 

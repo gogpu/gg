@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **GPU render target: per-pass routing** (TASK-GG-OFFSCREEN-001) — `GPURenderTarget.View` (`gpucontext.TextureView`) enables per-render-pass target selection per WebGPU spec. Eliminates session-level `surfaceView` override that forced all rendering to surface. Enables multi-context GPU rendering (RepaintBoundary, offscreen export, multi-window).
+- **`SurfaceTargetAware` deprecated** — surface view now travels in `GPURenderTarget.View`, not as side-band session state.
+- **`Context.FlushGPUWithView()`** — new method for GPU-direct rendering to a specific texture view.
+- **Dependencies:** gpucontext v0.12.0 → v0.14.0 (TextureView type token), gputypes v0.4.0 → v0.5.0 (PrimitiveState zero value)
+
 ## [0.40.1] - 2026-04-11
 
 ### Fixed
