@@ -499,6 +499,10 @@ func TestCompositing_PolygonRGB(t *testing.T) {
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_polygon.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_polygon.png")
+
+	if result.DiffCount > 0 {
+		t.Errorf("FAIL: polygon RGB diff=%d pixels (max=%d), want diff=0", result.DiffCount, result.MaxDiff)
+	}
 }
 
 // LEVEL 2: COMPOSITING — float rect RGB image comparison.
