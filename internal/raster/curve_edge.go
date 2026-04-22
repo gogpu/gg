@@ -88,6 +88,19 @@ type LineEdge struct {
 	// When zero, falls back to LastY-based computation.
 	LowerY FDot16
 
+	// UpperX is the X position at UpperY in pixel-space SkFixed (16.16).
+	// Computed using Skia's exact setLine() conversion chain to avoid rounding
+	// errors from sub-pixel-to-pixel division. Only set for line edges created
+	// by NewLineEdge (zero for curve sub-segments).
+	// Used by computeEdgeX via Skia's goY(): X(Y) = UpperX + PixelDX*(Y-UpperY).
+	UpperX int32
+
+	// PixelDX is the slope in pixel-space SkFixed (16.16), matching Skia's fDX.
+	// Computed using Skia's exact setLine() conversion: SkFDot6Div(dx>>10, dy>>10)
+	// where dx/dy are differences of pixel-space SkFixed coordinates.
+	// Only set for line edges created by NewLineEdge (zero for curve sub-segments).
+	PixelDX int32
+
 	// Winding indicates direction: +1 for downward, -1 for upward.
 	Winding int8
 }
@@ -110,18 +123,38 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	x1 := int32(p1.X * scale)
 	y1 := int32(p1.Y * scale)
 
-	// Preserve precise Y endpoints for Skia AAA sub-strip boundaries.
-	// Apply Skia's SnapY (accuracy=2): round to nearest 1/4 pixel in 16.16 space.
-	// This matches SkAnalyticEdge.h:52 SnapY() with kDefaultAccuracy=2.
-	preciseY0 := snapY(FDot16FromFloat32(p0.Y))
-	preciseY1 := snapY(FDot16FromFloat32(p1.Y))
+	// --- Skia AAA pixel-space fields (SkAnalyticEdge::setLine exact port) ---
+	//
+	// Skia's setLine() ALWAYS uses kDefaultAccuracy=2 (multiplier=4) for
+	// pixel-space coordinates, regardless of the AA shift used for sub-pixel
+	// edge construction. This ensures consistent edge ordering with quads/cubics.
+	//
+	// Conversion chain:
+	//   x = SkFDot6ToFixed(SkScalarToFDot6(p.fX * 4)) >> 2
+	//     = (int(p.fX * 4 * 64) << 10) >> 2  =  int(p.fX * 256) << 8
+	//   y = SnapY(same formula for Y)
+	//
+	// All values are in SkFixed (16.16 pixel-space).
+	const skiaAccuracy = 2                          // kDefaultAccuracy
+	const skiaMultiplier = int32(1) << skiaAccuracy // 4
+	// SkScalarToFDot6(p.X * multiplier) = int(p.X * multiplier * 64) = int(p.X * 256)
+	skX0 := int32(p0.X * float32(skiaMultiplier) * 64.0)
+	skY0 := int32(p0.Y * float32(skiaMultiplier) * 64.0)
+	skX1 := int32(p1.X * float32(skiaMultiplier) * 64.0)
+	skY1 := int32(p1.Y * float32(skiaMultiplier) * 64.0)
+	// SkFDot6ToFixed(v) >> accuracy = (v << 10) >> 2 = v << 8
+	pxX0 := leftShift(skX0, 10-skiaAccuracy)
+	pxY0 := snapY(leftShift(skY0, 10-skiaAccuracy))
+	pxX1 := leftShift(skX1, 10-skiaAccuracy)
+	pxY1 := snapY(leftShift(skY1, 10-skiaAccuracy))
 
 	winding := int8(1)
 	if y0 > y1 {
 		// Swap to ensure y0 <= y1 (edge goes downward)
 		x0, x1 = x1, x0
 		y0, y1 = y1, y0
-		preciseY0, preciseY1 = preciseY1, preciseY0
+		pxX0, pxX1 = pxX1, pxX0
+		pxY0, pxY1 = pxY1, pxY0
 		winding = -1
 	}
 
@@ -136,6 +169,19 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	slope := FDot6Div(x1-x0, y1-y0)
 	dy := computeDY(top, y0)
 
+	// Skia pixel-space slope: SkFDot6Div(SkFixedToFDot6(pxX1-pxX0), SkFixedToFDot6(pxY1-pxY0))
+	// SkFixedToFDot6(v) = v >> 10
+	pxDx := (pxX1 - pxX0) >> 10
+	pxDy := (pxY1 - pxY0) >> 10
+	var pixelDX int32
+	if pxDy == 0 {
+		// Horizontal line in pixel space — should not happen (top != bottom),
+		// but guard anyway.
+		pixelDX = 0
+	} else {
+		pixelDX = FDot6Div(pxDx, pxDy)
+	}
+
 	return LineEdge{
 		Prev:    -1, // No link
 		Next:    -1, // No link
@@ -143,8 +189,10 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 		DX:      slope,
 		FirstY:  top,
 		LastY:   bottom - 1,
-		UpperY:  preciseY0,
-		LowerY:  preciseY1,
+		UpperY:  pxY0,
+		LowerY:  pxY1,
+		UpperX:  pxX0,
+		PixelDX: pixelDX,
 		Winding: winding,
 	}, true
 }

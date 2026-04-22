@@ -482,7 +482,14 @@ func (af *AnalyticFiller) resolveEdgeLineFixed(
 		}
 
 		topX, botX := computeEdgeX(line, aaScale, hasPrecise, clampedTop, clampedBot)
-		fDY := computeEdgeDY(line.DX)
+
+		// Use pixel-space slope for fDY when available (line edges from NewLineEdge).
+		// For curve sub-segments, fall back to the sub-pixel slope.
+		slopeForDY := line.DX
+		if hasPrecise {
+			slopeForDY = line.PixelDX
+		}
+		fDY := computeEdgeDY(slopeForDY)
 
 		return edgeLineState{
 			valid:     true,
@@ -496,26 +503,31 @@ func (af *AnalyticFiller) resolveEdgeLineFixed(
 }
 
 // computeEdgeX computes X positions at clampedTop and clampedBot for an edge.
-// Uses the Skia goY() pattern: X(Y) = upperX + slope * (Y - upperY).
-// line.X is at sub-pixel FirstY center; we project to UpperY, then to the target Y.
+// All values are in pixel-space SkFixed (16.16).
+//
+// For line edges (hasPrecise=true), this uses the pre-computed pixel-space fields
+// (UpperX, PixelDX) directly — matching Skia's goY() exactly:
+//
+//	fX = fUpperX + SkFixedMul(fDX, y - fUpperY)
+//
+// For curve sub-segments (hasPrecise=false), pixel-space fields are not available,
+// so we derive pixel-space X from the sub-pixel FDot16 fields via aaScale division.
 func computeEdgeX(line *LineEdge, aaScale int32, hasPrecise bool, clampedTop, clampedBot int32) (topX, botX int32) {
+	if hasPrecise {
+		// Skia goY() exact path: use pixel-space UpperX + PixelDX * (Y - UpperY).
+		// No sub-pixel→pixel division — zero rounding error vs Skia.
+		topX = line.UpperX + skFixedMul(line.PixelDX, clampedTop-line.UpperY)
+		botX = line.UpperX + skFixedMul(line.PixelDX, clampedBot-line.UpperY)
+		return topX, botX
+	}
+
+	// Curve sub-segment fallback: derive pixel-space X from sub-pixel fields.
 	slope := line.DX
 	refXPixel := int32(int64(line.X) / int64(aaScale))
 	refYPixel := int32((int64(line.FirstY)*int64(skFixed1) + int64(skFixedHalf)) / int64(aaScale))
 
-	var upperXPixel, upperYPixel int32
-	if hasPrecise {
-		upperYPixel = line.UpperY
-		dY := int64(upperYPixel) - int64(refYPixel)
-		correction := int32((int64(slope)*dY + int64(skFixedHalf)) >> 16)
-		upperXPixel = refXPixel + correction
-	} else {
-		upperYPixel = refYPixel
-		upperXPixel = refXPixel
-	}
-
-	topX = upperXPixel + skFixedMul(slope, clampedTop-upperYPixel)
-	botX = upperXPixel + skFixedMul(slope, clampedBot-upperYPixel)
+	topX = refXPixel + skFixedMul(slope, clampedTop-refYPixel)
+	botX = refXPixel + skFixedMul(slope, clampedBot-refYPixel)
 	return topX, botX
 }
 
