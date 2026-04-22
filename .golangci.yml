@@ -224,6 +224,17 @@ linters:
         linters:
           - revive        # var-naming: package name shadows stdlib path
 
+      # CPU rasterization CORE - Skia AAA port (1:1 translation from C++)
+      # Algorithmic complexity is inherent to edge-walk rasterization algorithms
+      - path: internal/raster/.*\.go
+        linters:
+          - gocognit     # Skia trapezoid walker and convex walker are complex algorithms
+          - gocyclo      # Same — ported Skia edge-walk algorithms
+          - cyclop        # Same — complex control flow in rasterization
+          - nestif        # Deep nesting inherent to multi-path edge walker (rect/general)
+          - funlen        # Skia port functions are inherently long (1:1 translation)
+          - maintidx      # Skia port has low maintainability index by design
+
       # Vello compute pipeline port - 1:1 translation from Rust/WGSL (v0.30.0)
       # Algorithmic complexity is inherent to GPU compute pipeline stages
       - path: internal/gpu/tilecompute/.*\.go
