@@ -115,13 +115,13 @@ type LineEdge struct {
 //
 //nolint:gosec // G115: shift is bounded [0, MaxCoeffShift], conversions are safe
 func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
-	// Convert to FDot6 with AA scaling.
+	// Convert to FDot6 with AA scaling, using rounding (not truncation).
 	// Scale = 1 << (shift + 6), e.g., 64 for no AA, 256 for 4x AA.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
-	x0 := int32(p0.X * scale)
-	y0 := int32(p0.Y * scale)
-	x1 := int32(p1.X * scale)
-	y1 := int32(p1.Y * scale)
+	x0 := int32(p0.X*scale + 0.5)
+	y0 := int32(p0.Y*scale + 0.5)
+	x1 := int32(p1.X*scale + 0.5)
+	y1 := int32(p1.Y*scale + 0.5)
 
 	// --- Skia AAA pixel-space fields (SkAnalyticEdge::setLine exact port) ---
 	//
@@ -138,10 +138,10 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	const skiaAccuracy = 2                          // kDefaultAccuracy
 	const skiaMultiplier = int32(1) << skiaAccuracy // 4
 	// SkScalarToFDot6(p.X * multiplier) = int(p.X * multiplier * 64) = int(p.X * 256)
-	skX0 := int32(p0.X * float32(skiaMultiplier) * 64.0)
-	skY0 := int32(p0.Y * float32(skiaMultiplier) * 64.0)
-	skX1 := int32(p1.X * float32(skiaMultiplier) * 64.0)
-	skY1 := int32(p1.Y * float32(skiaMultiplier) * 64.0)
+	skX0 := int32(p0.X*float32(skiaMultiplier)*64.0 + 0.5)
+	skY0 := int32(p0.Y*float32(skiaMultiplier)*64.0 + 0.5)
+	skX1 := int32(p1.X*float32(skiaMultiplier)*64.0 + 0.5)
+	skY1 := int32(p1.Y*float32(skiaMultiplier)*64.0 + 0.5)
 	// SkFDot6ToFixed(v) >> accuracy = (v << 10) >> 2 = v << 8
 	pxX0 := leftShift(skX0, 10-skiaAccuracy)
 	pxY0 := snapY(leftShift(skY0, 10-skiaAccuracy))
