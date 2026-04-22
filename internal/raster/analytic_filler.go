@@ -59,6 +59,12 @@ type AnalyticFiller struct {
 	// Sub-strips within a pixel row accumulate additively into this buffer.
 	coverage []uint8
 
+	// coverage16 is a high-precision accumulator for crossing rows.
+	// When edges cross within a pixel row, sub-strip alpha is accumulated
+	// in 16-bit (8.8 fixed-point) to avoid truncation rounding across sub-strips.
+	// Normalized to uint8 after all sub-strips are processed.
+	coverage16 []uint16
+
 	edgeIdx int
 	edgeBuf []CurveEdgeVariant
 
@@ -311,6 +317,44 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 //
 // This matches Skia's check_intersection (SkScan_AAAPath.cpp:1311-1314) which
 // detects when fX+fDX of adjacent edges would cross and forces a smaller Y step.
+func (af *AnalyticFiller) addCrossingYBoundaries(yTopFixed, yBotFixed, aaScale int32) {
+	n := af.aet.Len()
+	if n < 2 {
+		return
+	}
+	type xp struct{ topX, botX int32 }
+	var sb [16]xp
+	var ps []xp
+	if n <= len(sb) {
+		ps = sb[:0]
+	} else {
+		ps = make([]xp, 0, n)
+	}
+	for i := 0; i < n; i++ {
+		edge := af.aet.EdgeAt(i)
+		line := edge.AsLine()
+		if line == nil {
+			continue
+		}
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		topX, botX := computeEdgeX(line, aaScale, hasPrecise, yTopFixed, yBotFixed)
+		ps = append(ps, xp{topX, botX})
+	}
+	for i := 0; i < len(ps); i++ {
+		for j := i + 1; j < len(ps); j++ {
+			dt := int64(ps[i].topX) - int64(ps[j].topX)
+			db := int64(ps[i].botX) - int64(ps[j].botX)
+			if (dt > 0 && db < 0) || (dt < 0 && db > 0) {
+				yRange := int64(yBotFixed) - int64(yTopFixed)
+				crossY := int32(int64(yTopFixed) + yRange*dt/(dt-db))
+				if crossY > yTopFixed && crossY < yBotFixed {
+					af.stripYBuf = append(af.stripYBuf, crossY)
+				}
+			}
+		}
+	}
+}
+
 func (af *AnalyticFiller) hasEdgeCrossing(yTopFixed, yBotFixed, aaScale int32) bool {
 	n := af.aet.Len()
 	if n < 2 {
