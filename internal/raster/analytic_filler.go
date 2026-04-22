@@ -80,6 +80,10 @@ type AnalyticFiller struct {
 	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
 	stripYBuf []int32
 
+	// deferredEdges holds edges whose pixel-space UpperY is within the current row
+	// but should be inserted mid-row between sub-strips (matching Skia's insert_new_edges).
+	deferredEdges []deferredEdgeEntry
+
 	// nextNextY tracks the next fractional Y boundary, persisting across pixel rows.
 	// Matches Skia's aaa_walk_edges global nextNextY variable.
 	// Updated from edge fLowerY/fUpperY endpoints and check_intersection results.
@@ -175,6 +179,7 @@ func (af *AnalyticFiller) Fill(
 	}
 
 	af.nextNextY = 0x7FFFFFFF // SK_MaxS32
+	af.deferredEdges = af.deferredEdges[:0]
 
 	for y := yMin; y < yMax; y++ {
 		af.processScanlineAAA(y, aaScale, af.edgeBuf, fillRule, callback)
@@ -266,9 +271,9 @@ func (af *AnalyticFiller) processScanlineAAA(
 		if upperY >= yFixedEnd {
 			break
 		}
-		// Edge's pixel-space UpperY is within this pixel row — insert it.
-		af.aet.InsertWithIndex(*edge, idx)
-		af.initSingleEdgeState(idx, aaScale, yFixed)
+		// Defer insertion — will be inserted between sub-strips when Y >= UpperY.
+		// Matches Skia's insert_new_edges timing (not at row start).
+		af.deferredEdges = append(af.deferredEdges, deferredEdgeEntry{idx, upperY})
 		if line.LowerY != 0 {
 			af.updateNextNextY(line.LowerY, yFixed)
 		}
@@ -299,6 +304,8 @@ func (af *AnalyticFiller) processScanlineAAA(
 	}
 
 	// Process each sub-strip using persistent incremental edge stepping.
+	// Insert deferred edges between sub-strips when Y reaches their UpperY,
+	// matching Skia's insert_new_edges (line 1600) timing.
 	for si := 0; si < len(stripYs)-1; si++ {
 		stripTop := stripYs[si]
 		stripBot := stripYs[si+1]
@@ -306,13 +313,39 @@ func (af *AnalyticFiller) processScanlineAAA(
 			continue
 		}
 
-		af.processSubStripIncremental(stripTop, stripBot, fillRule)
+		// Insert deferred edges whose UpperY <= stripTop
+		for i := 0; i < len(af.deferredEdges); {
+			d := af.deferredEdges[i]
+			if d.upperY <= stripTop {
+				af.aet.InsertWithIndex(allEdges[d.idx], d.idx)
+				af.initSingleEdgeState(d.idx, aaScale, yFixed)
+				af.edgeIdx = d.idx + 1
+				// Remove from deferred
+				af.deferredEdges = append(af.deferredEdges[:i], af.deferredEdges[i+1:]...)
+				// Rebuild AET mapping
+				nn := af.aet.Len()
+				if cap(af.aetToState) < nn {
+					af.aetToState = make([]int, nn)
+				}
+				af.aetToState = af.aetToState[:nn]
+				for j := 0; j < nn; j++ {
+					af.aetToState[j] = af.aet.EdgeSrcIdx(j)
+				}
+			} else {
+				i++
+			}
+		}
 
-		// After processing, check for edge crossing at stripBot.
-		// If edges would cross after one DX step, set nextNextY = stripBot + 1/4 pixel.
-		// This matches Skia's check_intersection (line 1566) called after each edge's goY.
-		af.checkIntersectionForNextNextY(stripBot)
+		af.processSubStripIncremental(stripTop, stripBot, fillRule)
 	}
+
+	// Insert any remaining deferred edges
+	for _, d := range af.deferredEdges {
+		af.aet.InsertWithIndex(allEdges[d.idx], d.idx)
+		af.initSingleEdgeState(d.idx, aaScale, yFixed)
+		af.edgeIdx = d.idx + 1
+	}
+	af.deferredEdges = af.deferredEdges[:0]
 
 	// WindingCallback compatibility: synthesize winding from coverage
 	if af.WindingCallback != nil {
@@ -1616,6 +1649,11 @@ func (af *AnalyticFiller) checkIntersectionForNextNextY(nextY int32) {
 			}
 		}
 	}
+}
+
+type deferredEdgeEntry struct {
+	idx    int
+	upperY int32
 }
 
 // updateNextNextY matches Skia's update_next_next_y (SkScan_AAAPath.cpp:1307).
