@@ -307,6 +307,11 @@ func (af *AnalyticFiller) processScanlineAAA(
 		}
 
 		af.processSubStripIncremental(stripTop, stripBot, fillRule)
+
+		// After processing, check for edge crossing at stripBot.
+		// If edges would cross after one DX step, set nextNextY = stripBot + 1/4 pixel.
+		// This matches Skia's check_intersection (line 1566) called after each edge's goY.
+		af.checkIntersectionForNextNextY(stripBot)
 	}
 
 	// WindingCallback compatibility: synthesize winding from coverage
@@ -1545,6 +1550,48 @@ func fixedToAlpha(f int32) uint8 {
 		return 0
 	}
 	return uint8(v) //nolint:gosec // clamped above
+}
+
+// checkIntersectionForNextNextY checks if adjacent edges in the AET would cross
+// after one DX step at the given Y position. If so, sets nextNextY = y + 1/4 pixel.
+// Matches Skia's check_intersection (SkScan_AAAPath.cpp:1311-1314) and
+// check_intersection_fwd (1317-1320).
+func (af *AnalyticFiller) checkIntersectionForNextNextY(nextY int32) {
+	quarterPixel := int32(skFixed1 >> 2) // kDefaultAccuracy=2
+	for i := 0; i < len(af.aetToState); i++ {
+		srcIdx := af.aetToState[i]
+		if srcIdx < 0 || srcIdx >= len(af.edgeStates) {
+			continue
+		}
+		st := &af.edgeStates[srcIdx]
+		if !st.valid || st.fLowerY <= nextY {
+			continue
+		}
+		// check_intersection: compare with previous edge
+		if i > 0 {
+			prevIdx := af.aetToState[i-1]
+			if prevIdx >= 0 && prevIdx < len(af.edgeStates) {
+				prev := &af.edgeStates[prevIdx]
+				if prev.valid && prev.fLowerY > nextY {
+					if prev.fX+prev.fDX > st.fX+st.fDX {
+						af.updateNextNextY(nextY+quarterPixel, nextY)
+					}
+				}
+			}
+		}
+		// check_intersection_fwd: compare with next edge
+		if i+1 < len(af.aetToState) {
+			nextIdx := af.aetToState[i+1]
+			if nextIdx >= 0 && nextIdx < len(af.edgeStates) {
+				next := &af.edgeStates[nextIdx]
+				if next.valid && next.fLowerY > nextY {
+					if st.fX+st.fDX > next.fX+next.fDX {
+						af.updateNextNextY(nextY+quarterPixel, nextY)
+					}
+				}
+			}
+		}
+	}
 }
 
 // updateNextNextY matches Skia's update_next_next_y (SkScan_AAAPath.cpp:1307).

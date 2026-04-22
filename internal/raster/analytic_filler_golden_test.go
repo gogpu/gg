@@ -530,16 +530,9 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 	saveRendered(t, got, "golden_rendered_skia_aaa_float_rect.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_float_rect.png")
 
-	// Golden was generated via Skia Fiddle drawPath, which dispatches rects to
-	// aaa_walk_convex_edges with fixed_to_alpha (=(255*f+32768)>>16). Our walker
-	// always uses blit_trapezoid_row with trapezoid_to_alpha (=area>>8). These
-	// differ by 1 alpha for ~25% of area values (Skia source lines 535-575).
-	// Max diff=1 is expected; diff=0 would require rect-specific code path.
-	if result.MaxDiff > 1 {
-		t.Errorf("REGRESSION: float rect max diff=%d, want <= 1", result.MaxDiff)
-	}
-	if result.DiffCount > 140 {
-		t.Errorf("REGRESSION: float rect diff pixels=%d, want <= 140", result.DiffCount)
+	// Golden generated from C++ Skia-exact tool (verbatim Skia walker + same compositing).
+	if result.DiffCount > 0 {
+		t.Errorf("REGRESSION: float rect diff=%d pixels (max=%d), want diff=0", result.DiffCount, result.MaxDiff)
 	}
 }
 
@@ -577,16 +570,10 @@ func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 	saveRendered(t, got, "golden_rendered_skia_aaa_star.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_star.png")
 
-	// Coverage is pixel-perfect (diff=0 vs Skia-exact C++ walker, see StarCoverageVsCpp).
-	// RGB diff=58 is from Skia blitter-level optimizations NOT in our rasterizer:
-	//   56px: dual compositing formula (SkBlendARGB32 vs SkAlphaMulQ, diff=1)
-	//   2px:  snapAlpha (coverage 248-255 snapped to 255, diff=2)
-	// These are compositing-layer concerns, not rasterization errors.
-	if result.MaxDiff > 2 {
-		t.Errorf("REGRESSION: star max diff=%d, want <= 2", result.MaxDiff)
-	}
-	if result.DiffCount > 58 {
-		t.Errorf("REGRESSION: star diff pixels=%d, want <= 58", result.DiffCount)
+	// Golden generated from C++ Skia-exact tool (verbatim Skia walker + same compositing).
+	// Coverage and compositing both verified: must be pixel-perfect.
+	if result.DiffCount > 0 {
+		t.Errorf("REGRESSION: star diff=%d pixels (max=%d), want diff=0", result.DiffCount, result.MaxDiff)
 	}
 }
 
