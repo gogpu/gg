@@ -1026,11 +1026,13 @@ func partialTriangleToAlpha(a, b int32) uint8 {
 }
 
 // getPartialAlpha8 scales an alpha by a fullAlpha factor.
-// Port of Skia's get_partial_alpha(SkAlpha, SkAlpha).
+// Exact port of Skia's get_partial_alpha(SkAlpha, SkAlpha) (SkScan_AAAPath.cpp:565-567):
+//
+//	return (alpha * fullAlpha) >> 8;
+//
+// Uses truncation (NOT rounding). This is the overload for two SkAlpha arguments.
+// The other overload (SkAlpha, SkFixed) uses rounding — see fixedToAlpha.
 func getPartialAlpha8(alpha, fullAlpha uint8) uint8 {
-	if fullAlpha == 255 {
-		return alpha
-	}
 	return uint8((uint16(alpha) * uint16(fullAlpha)) >> 8) //nolint:gosec // product fits in uint16
 }
 
@@ -1122,7 +1124,19 @@ func approximateIntersection(l1, r1, l2, r2 int32) int32 {
 // --- Fixed-point helper functions ---
 
 // fixedToAlpha converts a SkFixed height (16.16) to an alpha value [0, 255].
-// Port of Skia's fixed_to_alpha: get_partial_alpha(0xFF, f) = SkFixedRoundToInt(255 * f).
+// Exact port of Skia's fixed_to_alpha (SkScan_AAAPath.cpp:572-575):
+//
+//	get_partial_alpha(0xFF, f) = SkFixedRoundToInt(255 * f)
+//	                           = (255 * f + SK_FixedHalf) >> 16
+//
+// Uses ROUNDING (adds SK_FixedHalf = 32768 before shift). This is the overload
+// for (SkAlpha, SkFixed) — contrast with getPartialAlpha8 which uses truncation.
+//
+// Key values:
+//
+//	fixedToAlpha(16384) = 64   (1/4 pixel sub-strip, 4*64=256 → clamped to 255)
+//	fixedToAlpha(32768) = 128  (1/2 pixel)
+//	fixedToAlpha(65536) = 255  (full pixel)
 func fixedToAlpha(f int32) uint8 {
 	if f <= 0 {
 		return 0
@@ -1130,7 +1144,6 @@ func fixedToAlpha(f int32) uint8 {
 	if f >= skFixed1 {
 		return 255
 	}
-	// SkFixedRoundToInt(255 * f) = (255 * f + SK_FixedHalf) >> 16
 	v := (int64(255)*int64(f) + int64(skFixedHalf)) >> 16
 	if v > 255 {
 		return 255
