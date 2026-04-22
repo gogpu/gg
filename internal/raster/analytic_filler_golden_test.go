@@ -1082,3 +1082,27 @@ func TestAnalyticFiller_TraceFullY39(t *testing.T) {
 	t.Logf("Full filler pixel 13: cov=%d (want 249)", y39cov[13])
 	// Direct call gave 108. Full filler might differ because of edge X accumulation.
 }
+
+func TestAnalyticFiller_TraceFxAtY39(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	af := NewAnalyticFiller(100, 100)
+	af.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		if y == 39 {
+			t.Logf("y=39 coverage[12]=%d (want 108)", af.coverage[12])
+			for i, st := range af.edgeStates {
+				if st.valid && st.winding != 0 {
+					t.Logf("  edgeState[%d]: fX=%d (%.6f) fDX=%d w=%+d",
+						i, st.fX, float64(st.fX)/65536.0, st.fDX, st.winding)
+				}
+			}
+			t.Logf("  C++ left edge at y=39: fX=783155 (11.949982)")
+		}
+	})
+}
