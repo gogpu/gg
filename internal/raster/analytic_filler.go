@@ -80,6 +80,12 @@ type AnalyticFiller struct {
 	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
 	stripYBuf []int32
 
+	// nextNextY tracks the next fractional Y boundary, persisting across pixel rows.
+	// Matches Skia's aaa_walk_edges global nextNextY variable.
+	// Updated from edge fLowerY/fUpperY endpoints and check_intersection results.
+	// Used to split sub-strips at the same boundaries as Skia.
+	nextNextY int32
+
 	// WindingCallback, if set, is called after edge accumulation with (y, winding[])
 	// before applyFillRule. Used by winding residual tests to verify contour closure.
 	// For compatibility, we synthesize a float32 winding buffer from coverage.
@@ -168,6 +174,8 @@ func (af *AnalyticFiller) Fill(
 		af.edgeStates[i] = edgeYState{}
 	}
 
+	af.nextNextY = 0x7FFFFFFF // SK_MaxS32
+
 	for y := yMin; y < yMax; y++ {
 		af.processScanlineAAA(y, aaScale, af.edgeBuf, fillRule, callback)
 	}
@@ -229,6 +237,11 @@ func (af *AnalyticFiller) processScanlineAAA(
 		}
 		af.aet.InsertWithIndex(edge, af.edgeIdx)
 		af.initSingleEdgeState(af.edgeIdx, aaScale, yFixed)
+		// Update nextNextY from edge's pixel-space LowerY
+		line := edge.AsLine()
+		if line != nil && (line.UpperY != 0 || line.LowerY != 0) {
+			af.updateNextNextY(line.LowerY, yFixed)
+		}
 		af.edgeIdx++
 	}
 
@@ -256,7 +269,19 @@ func (af *AnalyticFiller) processScanlineAAA(
 		// Edge's pixel-space UpperY is within this pixel row — insert it.
 		af.aet.InsertWithIndex(*edge, idx)
 		af.initSingleEdgeState(idx, aaScale, yFixed)
+		if line.LowerY != 0 {
+			af.updateNextNextY(line.LowerY, yFixed)
+		}
 		af.edgeIdx = idx + 1
+	}
+
+	// Update nextNextY from next pending edge's UpperY (Skia line 1427)
+	if af.edgeIdx < len(allEdges) {
+		edge := &allEdges[af.edgeIdx]
+		line := edge.AsLine()
+		if line != nil && (line.UpperY != 0 || line.LowerY != 0) {
+			af.updateNextNextY(line.UpperY, yFixed)
+		}
 	}
 
 	// Collect fractional Y boundaries from active edges within this pixel row.
@@ -407,6 +432,9 @@ func (af *AnalyticFiller) processSubStripIncremental(
 		if st.fUpperY >= stripBotFixed || st.fLowerY <= stripTopFixed {
 			continue
 		}
+
+		// Update nextNextY from edge endpoint (Skia line 1556)
+		af.updateNextNextY(st.fLowerY, stripBotFixed)
 
 		// Clamp to edge segment boundaries.
 		clampedTop := stripTopFixed
@@ -561,6 +589,11 @@ func computeYShift(yDiff int32) int {
 func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaScale int32) []int32 {
 	af.stripYBuf = af.stripYBuf[:0]
 	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
+
+	// Include persistent nextNextY from previous pixel rows (Skia global variable).
+	if af.nextNextY > yTopFixed && af.nextNextY < yBotFixed {
+		af.stripYBuf = append(af.stripYBuf, af.nextNextY)
+	}
 
 	// Skia's check_intersection pattern: iteratively check for crossing edges.
 	// Start with full row. If crossing detected, add 1/4 pixel boundary and
@@ -1512,6 +1545,14 @@ func fixedToAlpha(f int32) uint8 {
 		return 0
 	}
 	return uint8(v) //nolint:gosec // clamped above
+}
+
+// updateNextNextY matches Skia's update_next_next_y (SkScan_AAAPath.cpp:1307).
+// Sets af.nextNextY = y if y > nextY and y < current nextNextY.
+func (af *AnalyticFiller) updateNextNextY(y, nextY int32) {
+	if y > nextY && y < af.nextNextY {
+		af.nextNextY = y
+	}
 }
 
 func intToSkFixed(n int32) int32 {
