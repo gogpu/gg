@@ -1102,3 +1102,211 @@ func TestFormulaBlitAaaTrapezoidRowExact(t *testing.T) {
 		}
 	}
 }
+
+// TestFormulaEdgeFxStepping verifies persistent edge fX stepping matches
+// from-origin computation for multiple Y positions.
+func TestFormulaEdgeFxStepping(t *testing.T) {
+	edge, ok := NewLineEdge(
+		CurvePoint{X: 75.0, Y: 87.5},
+		CurvePoint{X: 10.0, Y: 37.5},
+		2,
+	)
+	if !ok {
+		t.Fatal("NewLineEdge failed")
+	}
+	// Edge: UpperX=655360(10.0), UpperY=2457600(37.5), PixelDX=85196
+	// Verify stepping from UpperY to various Y positions
+	tests := []struct {
+		y    int32 // pixel Y
+		desc string
+	}{
+		{38, "one row after entry"},
+		{39, "two rows after entry"},
+		{50, "interior"},
+		{80, "near bottom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			yFixed := intToSkFixed(tt.y)
+			// From-origin: UpperX + SkFixedMul(PixelDX, y - UpperY)
+			fromOrigin := edge.UpperX + skFixedMul(edge.PixelDX, yFixed-edge.UpperY)
+			// Stepped: accumulate fDX from UpperY
+			stepped := edge.UpperX
+			stepY := edge.UpperY
+			// First partial step to next integer Y
+			firstIntY := (edge.UpperY + skFixed1) & ^(skFixed1 - 1) // ceil to int
+			if firstIntY <= yFixed {
+				diff := firstIntY - stepY
+				yShift := computeYShift(diff)
+				if yShift >= 0 {
+					stepped += edge.PixelDX >> uint(yShift)
+				}
+				stepY = firstIntY
+			}
+			// Full pixel steps
+			for stepY < yFixed {
+				stepped += edge.PixelDX
+				stepY += skFixed1
+			}
+			diff := stepped - fromOrigin
+			if diff < -1 || diff > 1 {
+				t.Errorf("y=%d: stepped=%d fromOrigin=%d diff=%d (want |diff|<=1)",
+					tt.y, stepped, fromOrigin, diff)
+			}
+			t.Logf("y=%d: stepped=%d fromOrigin=%d diff=%d", tt.y, stepped, fromOrigin, diff)
+		})
+	}
+}
+
+// TestFormulaNewLineEdgePixelFields verifies NewLineEdge computes all
+// pixel-space fields (UpperX, UpperY, LowerY, PixelDX, PixelDY) correctly.
+func TestFormulaNewLineEdgePixelFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		p0, p1 CurvePoint
+		wantUX int32 // UpperX
+		wantUY int32 // UpperY (after SnapY)
+		wantDX int32 // PixelDX
+		wantDY int32 // PixelDY
+		wantW  int8  // Winding
+	}{
+		{
+			name: "star_edge_50_7.5_to_75_87.5",
+			p0:   CurvePoint{X: 50.0, Y: 7.5}, p1: CurvePoint{X: 75.0, Y: 87.5},
+			wantUX: 3276800, // 50.0 * 65536
+			wantUY: 491520,  // 7.5 * 65536 (SnapY preserves 0.5)
+			wantDX: 20480,   // 25/80 in SkFixed
+			wantDY: 209715,  // abs(FDot6Div(5120, 1600))
+			wantW:  1,       // downward
+		},
+		{
+			name: "horizontal_10_50_to_90_50",
+			p0:   CurvePoint{X: 10.0, Y: 50.0}, p1: CurvePoint{X: 90.0, Y: 50.0},
+			// Horizontal edge → should be filtered (ok=false)
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			edge, ok := NewLineEdge(tt.p0, tt.p1, 2)
+			if tt.name == "horizontal_10_50_to_90_50" {
+				if ok {
+					t.Error("horizontal edge should be filtered (ok=false)")
+				}
+				return
+			}
+			if !ok {
+				t.Fatal("NewLineEdge returned false")
+			}
+			if edge.UpperX != tt.wantUX {
+				t.Errorf("UpperX=%d want %d", edge.UpperX, tt.wantUX)
+			}
+			if edge.UpperY != tt.wantUY {
+				t.Errorf("UpperY=%d want %d", edge.UpperY, tt.wantUY)
+			}
+			if edge.PixelDX != tt.wantDX {
+				t.Errorf("PixelDX=%d want %d", edge.PixelDX, tt.wantDX)
+			}
+			if edge.PixelDY != tt.wantDY {
+				t.Errorf("PixelDY=%d want %d (diff=%d)", edge.PixelDY, tt.wantDY, edge.PixelDY-tt.wantDY)
+			}
+			if edge.Winding != tt.wantW {
+				t.Errorf("Winding=%d want %d", edge.Winding, tt.wantW)
+			}
+		})
+	}
+}
+
+// TestFormulaTrapezoidToAlphaScaled verifies the single-pass scaled formula
+// matches the two-step trapezoidToAlpha+getPartialAlpha8 for fullAlpha=255,
+// and uses proper truncation for fullAlpha<255.
+func TestFormulaTrapezoidToAlphaScaled(t *testing.T) {
+	tests := []struct {
+		name      string
+		l1, l2    int32
+		fullAlpha uint8
+		want      uint8
+	}{
+		{"full_pixel_full_alpha", skFixed1, skFixed1, 255, 255},
+		{"half_pixel_full_alpha", skFixed1 / 2, skFixed1 / 2, 255, 128},
+		{"full_pixel_quarter_alpha", skFixed1, skFixed1, 64, 63}, // (64*65536)>>16=64 but getPartialAlpha8(255,64)=(255*64)>>8=63
+		{"half_pixel_quarter_alpha", skFixed1 / 2, skFixed1 / 2, 64, 32},
+		{"zero_coverage", 0, 0, 255, 0},
+		{"triangle_full_alpha", 0, skFixed1, 255, 128}, // area=32768, fullAlpha=255: (255*32768+32768)>>16=128
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trapezoidToAlphaScaled(tt.l1, tt.l2, tt.fullAlpha)
+			if got != tt.want {
+				t.Errorf("trapezoidToAlphaScaled(%d, %d, %d) = %d, want %d",
+					tt.l1, tt.l2, tt.fullAlpha, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFormulaHasEdgeCrossing verifies crossing detection for star at y=56.
+func TestFormulaHasEdgeCrossing(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	af := NewAnalyticFiller(100, 100)
+	sorted := eb.sortedEdgesSlice()
+	af.edgeBuf = make([]CurveEdgeVariant, len(sorted))
+	for i := range sorted {
+		af.edgeBuf[i] = sorted[i].variant
+	}
+
+	// Insert all edges into AET
+	af.aet.Reset()
+	for i := range af.edgeBuf {
+		af.aet.Insert(af.edgeBuf[i])
+	}
+
+	// y=50: no crossing (edges well separated)
+	y50 := intToSkFixed(50)
+	y51 := intToSkFixed(51)
+	if af.hasEdgeCrossing(y50, y51, 4) {
+		t.Error("y=50: hasEdgeCrossing=true, want false (edges well separated)")
+	}
+
+	// y=56: crossing (e1/e4 and e0/e3 converge)
+	y56 := intToSkFixed(56)
+	y57 := intToSkFixed(57)
+	if !af.hasEdgeCrossing(y56, y57, 4) {
+		t.Error("y=56: hasEdgeCrossing=false, want true (star vertex crossing)")
+	}
+}
+
+// TestFormulaCompositeOnWhite verifies Skia's exact SkAlphaMulQ compositing.
+func TestFormulaCompositeOnWhite(t *testing.T) {
+	tests := []struct {
+		cov                 uint32
+		wantR, wantG, wantB uint8
+	}{
+		{0, 255, 255, 255},   // no coverage → white
+		{255, 94, 155, 173},  // full coverage → paint color on white
+		{128, 174, 205, 214}, // half coverage
+		{108, 186, 212, 220}, // pixel(12,39) coverage
+	}
+	paint := premultipliedColor() // R=39, G=100, B=118, A=200
+	for _, tt := range tests {
+		scale := tt.cov + 1
+		srcR := (uint32(paint.R) * scale) >> 8
+		srcG := (uint32(paint.G) * scale) >> 8
+		srcB := (uint32(paint.B) * scale) >> 8
+		srcA := (uint32(paint.A) * scale) >> 8
+		invScale := (255 - srcA) + 1
+		r := uint8(srcR + (255*invScale)>>8)
+		g := uint8(srcG + (255*invScale)>>8)
+		b := uint8(srcB + (255*invScale)>>8)
+		if r != tt.wantR || g != tt.wantG || b != tt.wantB {
+			t.Errorf("cov=%d: got=(%d,%d,%d) want=(%d,%d,%d)",
+				tt.cov, r, g, b, tt.wantR, tt.wantG, tt.wantB)
+		}
+	}
+}
