@@ -696,7 +696,7 @@ func TestAnalyticFiller_StarY56Debug(t *testing.T) {
 			}
 		}
 
-		sortEdgesByMidX(resolved)
+		sortEdgesByTopX(resolved)
 
 		for j, ls := range resolved {
 			midX := (int64(ls.topX) + int64(ls.botX)) / 2

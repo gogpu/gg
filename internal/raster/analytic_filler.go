@@ -350,19 +350,19 @@ func (af *AnalyticFiller) addCrossingBoundaries(yTopFixed, yBotFixed, aaScale in
 			diffBot := int64(a.botX) - int64(b.botX)
 
 			if (diffTop > 0 && diffBot < 0) || (diffTop < 0 && diffBot > 0) {
-				// Compute crossing Y by linear interpolation:
-				// At y=top: diff = diffTop, at y=bot: diff = diffBot
-				// Crossing where diff=0: y = top + (bot-top) * diffTop / (diffTop - diffBot)
-				yRange := int64(yBotFixed) - int64(yTopFixed)
-				crossY := int64(yTopFixed) + yRange*diffTop/(diffTop-diffBot)
-
-				// Clamp to strip range and snap to 1/4 pixel boundary (matching Skia's accuracy=2).
-				cy := int32(crossY)
-				const quarterPixel = skFixed1 / 4
-				cy = (cy + quarterPixel/2) & ^(quarterPixel - 1) // round to nearest 1/4 pixel
-				if cy > yTopFixed && cy < yBotFixed {
-					af.stripYBuf = append(af.stripYBuf, cy)
+				// Add the full sub-pixel grid for this pixel row. When edges cross,
+				// we need fine-grained Y stepping (like Skia's check_intersection
+				// which forces 1/4 pixel steps). Adding all sub-pixel boundaries
+				// ensures each sub-strip has consistent edge ordering across the
+				// crossing point. This is equivalent to Skia processing each
+				// sub-pixel row independently.
+				if aaScale > 1 {
+					subStep := skFixed1 / aaScale
+					for subY := yTopFixed + subStep; subY < yBotFixed; subY += subStep {
+						af.stripYBuf = append(af.stripYBuf, subY)
+					}
 				}
+				return // all sub-pixel boundaries added, no need to check more pairs
 			}
 		}
 	}
@@ -371,6 +371,12 @@ func (af *AnalyticFiller) addCrossingBoundaries(yTopFixed, yBotFixed, aaScale in
 // processSubStripFixed resolves edges and blits trapezoids for a single sub-strip
 // within a pixel row. Coverage is added to the existing coverage buffer.
 // All Y parameters are in SkFixed (16.16) — no float32 conversion.
+//
+// Implements Skia's edges_too_close optimization (SkScan_AAAPath.cpp:1380-1397):
+// when the right edge of a trapezoid is within 1 pixel of the next edge, the
+// winding-to-zero transition is suppressed, merging adjacent trapezoids. This
+// prevents double-subtraction of partial coverage at shared pixels where edges
+// cross within a sub-strip (e.g., star vertex intersections at y=68).
 func (af *AnalyticFiller) processSubStripFixed(
 	aaScale int32, stripTopFixed, stripBotFixed int32,
 	fillRule FillRule,
@@ -397,9 +403,9 @@ func (af *AnalyticFiller) processSubStripFixed(
 		}
 	}
 
-	sortEdgesByMidX(af.resolvedEdges)
+	sortEdgesByTopX(af.resolvedEdges)
 
-	// Paired-edge walk: Skia AAA pattern.
+	// Paired-edge walk: Skia AAA pattern (SkScan_AAAPath.cpp:1490-1530).
 	winding := int32(0)
 	inInterval := false
 	var leftEdgeState edgeLineState
@@ -465,37 +471,40 @@ func deduplicateInt32s(s []int32) []int32 {
 }
 
 // sortEdgesByTopX sorts resolved edges by their X position at the top of the
-// strip (topX), matching Skia's AET ordering where edges are sorted by fX
-// evaluated at the current Y (SkScan_AAAPath.cpp:1490, goY(y)).
+// sub-strip (topX), matching Skia's linked-list order sorted by fX.
 //
-// Using topX instead of midX is critical for correct paired-edge walk at
-// self-intersection points. When two edges cross within a strip, the edge
-// that is leftmost at the top determines which edge the walk encounters
-// first, matching Skia's linked-list-sorted-by-fX behavior.
+// Skia maintains edges in a linked list sorted by fX (the current X position).
+// At the start of each sub-strip iteration, edges are in fX order (the X at the
+// current Y). Using topX (not midX) ensures our sort matches Skia's edge order.
+//
+// This matters for self-intersecting paths where edges cross within a sub-strip.
+// With midX sort, edges that are close together can be reordered relative to Skia's
+// fX sort, producing different winding transitions and different trapezoids.
+// With topX sort, the winding walk produces the same trapezoids as Skia.
+//
+// Secondary sort by DX (slope) matches Skia's compare_edges for stability.
 func sortEdgesByTopX(edges []edgeLineState) {
-	// Simple insertion sort — edge count per scanline is typically small (<20)
+	// Simple insertion sort — edge count per scanline is typically small (<20).
+	// Primary: topX (Skia's fX). Secondary: slope direction via (botX - topX),
+	// matching Skia's compare_edges which uses fDX as tiebreaker.
 	for i := 1; i < len(edges); i++ {
 		key := edges[i]
+		keyX := key.topX
+		keySlope := key.botX - key.topX // proxy for fDX direction
 		j := i - 1
-		for j >= 0 && edges[j].topX > key.topX {
-			edges[j+1] = edges[j]
-			j--
-		}
-		edges[j+1] = key
-	}
-}
-
-// sortEdgesByMidX sorts resolved edges by their midpoint X position (SkFixed).
-func sortEdgesByMidX(edges []edgeLineState) {
-	// Simple insertion sort — edge count per scanline is typically small (<20)
-	for i := 1; i < len(edges); i++ {
-		key := edges[i]
-		// Midpoint in SkFixed — use int64 to avoid overflow in addition.
-		keyX := int64(key.topX) + int64(key.botX)
-		j := i - 1
-		for j >= 0 && int64(edges[j].topX)+int64(edges[j].botX) > keyX {
-			edges[j+1] = edges[j]
-			j--
+		for j >= 0 {
+			ejX := edges[j].topX
+			if ejX > keyX {
+				edges[j+1] = edges[j]
+				j--
+				continue
+			}
+			if ejX == keyX && (edges[j].botX-edges[j].topX) > keySlope {
+				edges[j+1] = edges[j]
+				j--
+				continue
+			}
+			break
 		}
 		edges[j+1] = key
 	}
@@ -758,6 +767,13 @@ func (af *AnalyticFiller) blitTrapezoidRow(
 }
 
 // blitLeftPartial handles the left edge's partial-coverage pixels.
+//
+// Port of Skia's blit_trapezoid_row left partial (SkScan_AAAPath.cpp:847-883).
+// In the 2-pixel case, a1 and a2 are added DIRECTLY without scaling by fullAlpha,
+// because a2 = fullAlpha - partial_triangle_to_alpha(second, lDY) already
+// incorporates fullAlpha. Skia's blit_two_alphas adds a1/a2 directly to the
+// mask or additive blitter runs. Only the 1-pixel case uses get_partial_alpha
+// because trapezoid_to_alpha returns a value in [0,255] independent of fullAlpha.
 func (af *AnalyticFiller) blitLeftPartial(ul, ll, joinLeft, lDY int32, fullAlpha uint8) {
 	if ul >= joinLeft {
 		return
@@ -767,18 +783,25 @@ func (af *AnalyticFiller) blitLeftPartial(ul, ll, joinLeft, lDY int32, fullAlpha
 		alpha := trapezoidToAlpha(joinLeft-ul, joinLeft-ll)
 		af.safeAddAlpha(skFixedFloorToInt(ul), getPartialAlpha8(alpha, fullAlpha))
 	case 2:
+		// Skia blit_trapezoid_row 2-pixel case (SkScan_AAAPath.cpp:858-870):
+		// a1 = partial_triangle_to_alpha(first, lDY)  -- small triangle at pixel edge
+		// a2 = fullAlpha - partial_triangle_to_alpha(second, lDY)  -- rest of strip
+		// blit_two_alphas adds a1/a2 DIRECTLY (no fullAlpha scaling).
 		first := joinLeft - skFixed1 - ul
 		second := ll - ul - first
 		a1 := partialTriangleToAlpha(first, lDY)
 		a2 := saturatingSub8(fullAlpha, partialTriangleToAlpha(second, lDY))
-		af.safeAddAlpha(skFixedFloorToInt(ul), getPartialAlpha8(a1, fullAlpha))
-		af.safeAddAlpha(skFixedFloorToInt(ul)+1, getPartialAlpha8(a2, fullAlpha))
+		af.safeAddAlpha(skFixedFloorToInt(ul), a1)
+		af.safeAddAlpha(skFixedFloorToInt(ul)+1, a2)
 	default:
 		af.blitAaaTrapezoidRow(ul, joinLeft, ll, joinLeft, lDY, 0x7FFFFFFF, fullAlpha)
 	}
 }
 
 // blitRightPartial handles the right edge's partial-coverage pixels.
+//
+// Port of Skia's blit_trapezoid_row right partial (SkScan_AAAPath.cpp:896-932).
+// Same as blitLeftPartial: 2-pixel case adds a1/a2 directly, 1-pixel case scales.
 func (af *AnalyticFiller) blitRightPartial(ur, lr, joinRite, rDY int32, fullAlpha uint8) {
 	if lr <= joinRite {
 		return
@@ -788,12 +811,16 @@ func (af *AnalyticFiller) blitRightPartial(ur, lr, joinRite, rDY int32, fullAlph
 		alpha := trapezoidToAlpha(ur-joinRite, lr-joinRite)
 		af.safeAddAlpha(skFixedFloorToInt(joinRite), getPartialAlpha8(alpha, fullAlpha))
 	case 2:
+		// Skia blit_trapezoid_row right 2-pixel case (SkScan_AAAPath.cpp:907-919):
+		// a1 = fullAlpha - partial_triangle_to_alpha(first, rDY)
+		// a2 = partial_triangle_to_alpha(second, rDY)
+		// blit_two_alphas adds a1/a2 DIRECTLY.
 		first := joinRite + skFixed1 - ur
 		second := lr - ur - first
 		a1 := saturatingSub8(fullAlpha, partialTriangleToAlpha(first, rDY))
 		a2 := partialTriangleToAlpha(second, rDY)
-		af.safeAddAlpha(skFixedFloorToInt(joinRite), getPartialAlpha8(a1, fullAlpha))
-		af.safeAddAlpha(skFixedFloorToInt(joinRite)+1, getPartialAlpha8(a2, fullAlpha))
+		af.safeAddAlpha(skFixedFloorToInt(joinRite), a1)
+		af.safeAddAlpha(skFixedFloorToInt(joinRite)+1, a2)
 	default:
 		af.blitAaaTrapezoidRow(joinRite, ur, joinRite, lr, 0x7FFFFFFF, rDY, fullAlpha)
 	}
