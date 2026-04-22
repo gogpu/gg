@@ -973,3 +973,20 @@ func TestAnalyticFiller_TinySkiaPolygonGoldenSamples(t *testing.T) {
 	logCompareResult(t, "polygon samples", result)
 	t.Logf("  note: this test is diagnostic — differences indicate BUG-RAST-011")
 }
+
+func TestAnalyticFiller_StarPixel12_39(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+	buf := make([]uint8, 100*100)
+	FillToBuffer(eb, 100, 100, FillRuleNonZero, buf)
+	cov := buf[39*100+12]
+	t.Logf("pixel(12,39): coverage=%d (golden=108)", cov)
+	if cov != 108 {
+		t.Logf("DIFF: our=%d golden=108 diff=%d", cov, int(cov)-108)
+	}
+}
