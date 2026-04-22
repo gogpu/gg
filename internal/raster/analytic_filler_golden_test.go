@@ -1364,3 +1364,50 @@ func TestAnalyticFiller_RectCoverageVsCpp(t *testing.T) {
 		t.Errorf("REGRESSION: rect coverage diff=%d (max=%d), want diff=0", diffCount, maxDiff)
 	}
 }
+
+// TestAnalyticFiller_PolygonCoverageVsCpp compares polygon coverage byte-for-byte
+// against C++ Skia-exact tool output. Polygon uses aaShift=0 (no AA).
+func TestAnalyticFiller_PolygonCoverageVsCpp(t *testing.T) {
+	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "polygon_coverage_skia_exact.bin")
+	cppData, err := os.ReadFile(cppFile)
+	if err != nil {
+		t.Skipf("C++ polygon coverage not found: %v (run skia_exact.exe first)", err)
+	}
+	if len(cppData) != 10000 {
+		t.Fatalf("unexpected C++ coverage size: %d, want 10000", len(cppData))
+	}
+
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo},
+		points: []float32{75.160671, 88.756136, 24.797274, 88.734053, 9.255130, 40.828792, 50.012955, 11.243795, 90.744819, 40.864522},
+	}
+	eb := NewEdgeBuilder(0) // aaShift=0, no AA
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+	goBuf := make([]uint8, 100*100)
+	FillToBuffer(eb, 100, 100, FillRuleNonZero, goBuf)
+
+	diffCount := 0
+	maxDiff := 0
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 100; x++ {
+			g := int(goBuf[y*100+x])
+			c := int(cppData[y*100+x])
+			d := g - c
+			if d < 0 {
+				d = -d
+			}
+			if d > 0 {
+				diffCount++
+				if d > maxDiff {
+					maxDiff = d
+				}
+				if diffCount <= 10 {
+					t.Logf("  (%2d,%2d): go=%3d cpp=%3d diff=%+d", x, y, g, c, g-c)
+				}
+			}
+		}
+	}
+
+	t.Logf("Polygon coverage comparison Go vs C++: %d diff pixels, max diff=%d", diffCount, maxDiff)
+}
