@@ -397,15 +397,6 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 		"hasSurfaceView", surfaceView != nil,
 	)
 
-	// Pass the surface view via GPURenderTarget.View so the render session
-	// uses it as the per-pass resolve target. This replaces the old
-	// session-level SetSurfaceTarget approach, enabling multiple Contexts
-	// to render to different targets without interfering.
-	//
-	// We still call SetAcceleratorSurfaceTarget for backward compatibility
-	// with the session-level path (e.g., EnsureTextures surface mode).
-	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
-
 	// Flush GPU shapes directly to the surface view (no readback).
 	// FlushGPUWithView passes the view through GPURenderTarget.View,
 	// which takes priority over session-level surfaceView in the
@@ -538,8 +529,8 @@ func (c *Canvas) Close() error {
 		c.tracked = false
 	}
 
-	// Clear surface target so GPU accelerator releases MSAA/stencil textures.
-	gg.SetAcceleratorSurfaceTarget(nil, 0, 0)
+	// Note: no need to clear surface target — per-pass View routing handles
+	// target selection. Session-level surfaceView is no longer set.
 
 	// Destroy textures (current and any deferred old texture).
 	destroyTexture(c.oldTexture)

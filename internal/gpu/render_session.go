@@ -275,8 +275,10 @@ func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.Te
 			return v
 		}
 	}
-	// Fall back to session-level surfaceView for backward compat.
-	return s.surfaceView
+	// No View → readback path. The caller is an offscreen context or
+	// a context that wants CPU pixel access. Per WebGPU spec, the render
+	// target is determined by what the caller passes, not by session state.
+	return nil
 }
 
 // extractTextureView type-asserts a gpucontext.TextureView to
