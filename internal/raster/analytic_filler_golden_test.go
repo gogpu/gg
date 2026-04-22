@@ -615,6 +615,8 @@ func TestAnalyticFiller_StarY56Debug(t *testing.T) {
 		filler.edgeBuf[i] = sortedBuf[i].variant
 	}
 	filler.edgeIdx = 0
+	// Initialize persistent edge states (required by processScanlineAAA).
+	filler.edgeStates = make([]edgeYState, len(filler.edgeBuf))
 
 	//nolint:gosec // aaShift bounded
 	aaScale := int32(1) << aaShift
@@ -790,6 +792,8 @@ func TestAnalyticFiller_StarY68Debug(t *testing.T) {
 	for i := range sortedBuf {
 		filler.edgeBuf[i] = sortedBuf[i].variant
 	}
+	// Initialize persistent edge states (required by processScanlineAAA).
+	filler.edgeStates = make([]edgeYState, len(filler.edgeBuf))
 	//nolint:gosec // bounded
 	aaScale := int32(1) << aaShift
 

@@ -40,6 +40,11 @@ type aetEntry struct {
 	// nextY is the Y coordinate where this edge needs to be re-evaluated.
 	// For curve edges, this is when the current line segment ends.
 	nextY int32
+
+	// srcIdx is the index of this edge in the source edgeBuf array.
+	// Used by AnalyticFiller to maintain persistent per-edge X state
+	// across pixel rows (matching Skia's incremental fX accumulation).
+	srcIdx int
 }
 
 // NewCurveAwareAET creates a new curve-aware Active Edge Table.
@@ -57,14 +62,22 @@ func (aet *CurveAwareAET) Reset() {
 // Insert adds an edge to the AET.
 // The edge's current line segment is used for initial positioning.
 func (aet *CurveAwareAET) Insert(e CurveEdgeVariant) {
+	aet.InsertWithIndex(e, -1)
+}
+
+// InsertWithIndex adds an edge to the AET with its source edgeBuf index.
+// The srcIdx is used by AnalyticFiller to maintain persistent per-edge X state
+// across pixel rows (matching Skia's incremental fX accumulation).
+func (aet *CurveAwareAET) InsertWithIndex(e CurveEdgeVariant, srcIdx int) {
 	line := e.AsLine()
 	if line == nil {
 		return
 	}
 
 	entry := aetEntry{
-		edge:  e,
-		nextY: line.LastY + 1,
+		edge:   e,
+		nextY:  line.LastY + 1,
+		srcIdx: srcIdx,
 	}
 
 	aet.edges = append(aet.edges, entry)
@@ -222,6 +235,12 @@ func (aet *CurveAwareAET) Edges() []CurveEdgeVariant {
 // Panics if i is out of bounds.
 func (aet *CurveAwareAET) EdgeAt(i int) *CurveEdgeVariant {
 	return &aet.edges[i].edge
+}
+
+// EdgeSrcIdx returns the source edgeBuf index of the edge at AET index i.
+// Returns -1 if the edge was inserted without a source index.
+func (aet *CurveAwareAET) EdgeSrcIdx(i int) int {
+	return aet.edges[i].srcIdx
 }
 
 // ForEach calls fn for each edge in the AET.
