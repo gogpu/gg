@@ -531,16 +531,27 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 	af.stripYBuf = af.stripYBuf[:0]
 	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
 
-	// Detect crossing edges — if any edges cross X order within this row,
-	// split into 4 sub-strips (1/4 pixel each, matching Skia accuracy=2).
-	// Without crossing, use single full strip (fullAlpha=255) like Skia.
-	if af.hasEdgeCrossing(yTopFixed, yBotFixed, aaScale) {
-		af.stripYBuf = af.stripYBuf[:0]
+	// Skia's check_intersection pattern: iteratively check for crossing edges.
+	// Start with full row. If crossing detected, add 1/4 pixel boundary and
+	// re-check the remainder. This produces adaptive sub-strips matching Skia's
+	// aaa_walk_edges loop where check_intersection sets nextNextY = y + 1/4 pixel
+	// only when adjacent edges would cross after one DX step.
+	{
 		quarterPixel := skFixed1 / 4
-		for y := yTopFixed; y < yBotFixed; y += quarterPixel {
-			af.stripYBuf = append(af.stripYBuf, y)
+		y := yTopFixed
+		for y < yBotFixed {
+			nextY := yBotFixed
+			if af.hasEdgeCrossing(y, nextY, aaScale) {
+				nextY = y + quarterPixel
+				if nextY > yBotFixed {
+					nextY = yBotFixed
+				}
+			}
+			if nextY > y && nextY < yBotFixed {
+				af.stripYBuf = append(af.stripYBuf, nextY)
+			}
+			y = nextY
 		}
-		af.stripYBuf = append(af.stripYBuf, yBotFixed)
 	}
 
 	n := af.aet.Len()

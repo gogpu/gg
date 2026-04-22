@@ -590,6 +590,16 @@ func TestAnalyticFiller_StarCoverageDiag(t *testing.T) {
 	t.Logf("Star interior (50,30): cov=%d (want 255)", buf[30*100+50])
 	t.Logf("Star interior (50,50): cov=%d (want 255)", buf[50*100+50])
 	t.Logf("Star interior (40,40): cov=%d (want 255)", buf[40*100+40])
+
+	// Crossing vertex pixels — these are where diff=1/2 remains
+	// C++ ground truth: pixel 34 at y=56 with 4 sub-strips = 128, golden = 129
+	t.Logf("Star vertex (34,56): cov=%d (C++ 4-sub=128, golden=129)", buf[56*100+34])
+	t.Logf("Star vertex (65,56): cov=%d (C++ 4-sub=128, golden=129)", buf[56*100+65])
+	t.Logf("Star vertex (31,68): cov=%d (golden wants ~252)", buf[68*100+31])
+	t.Logf("Star vertex (68,68): cov=%d (golden wants ~252)", buf[68*100+68])
+	// Non-crossing edge pixels
+	t.Logf("Star edge (49,7): cov=%d", buf[7*100+49])
+	t.Logf("Star edge (10,37): cov=%d (golden wants specific value)", buf[37*100+10])
 	t.Logf("Star edge (49,7): cov=%d", buf[7*100+49])
 	t.Logf("Star edge (49,8): cov=%d", buf[8*100+49])
 }
