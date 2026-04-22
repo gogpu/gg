@@ -237,16 +237,19 @@ func (af *AnalyticFiller) processScanlineAAA(
 //   - aaScale: AA subdivision factor (1, 2, or 4)
 func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaScale int32) []int32 {
 	af.stripYBuf = af.stripYBuf[:0]
+	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
 
-	// Always split into 4 sub-strips per pixel row (1/4 pixel each).
-	// This matches Skia's accuracy=2 Y stepping which processes edges at
-	// 1/4 pixel granularity. Without this, self-intersecting paths (star)
-	// get wrong coverage because edges change X order within the pixel row.
-	quarterPixel := skFixed1 / 4 // 16384
-	for y := yTopFixed; y < yBotFixed; y += quarterPixel {
-		af.stripYBuf = append(af.stripYBuf, y)
+	// Detect crossing edges — if any edges cross X order within this row,
+	// split into 4 sub-strips (1/4 pixel each, matching Skia accuracy=2).
+	// Without crossing, use single full strip (fullAlpha=255) like Skia.
+	if af.hasEdgeCrossing(yTopFixed, yBotFixed, aaScale) {
+		af.stripYBuf = af.stripYBuf[:0]
+		quarterPixel := skFixed1 / 4
+		for y := yTopFixed; y < yBotFixed; y += quarterPixel {
+			af.stripYBuf = append(af.stripYBuf, y)
+		}
+		af.stripYBuf = append(af.stripYBuf, yBotFixed)
 	}
-	af.stripYBuf = append(af.stripYBuf, yBotFixed)
 
 	n := af.aet.Len()
 	for i := 0; i < n; i++ {
@@ -308,6 +311,41 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 //
 // This matches Skia's check_intersection (SkScan_AAAPath.cpp:1311-1314) which
 // detects when fX+fDX of adjacent edges would cross and forces a smaller Y step.
+func (af *AnalyticFiller) hasEdgeCrossing(yTopFixed, yBotFixed, aaScale int32) bool {
+	n := af.aet.Len()
+	if n < 2 {
+		return false
+	}
+	type xp struct{ topX, botX int32 }
+	var sb [16]xp
+	var ps []xp
+	if n <= len(sb) {
+		ps = sb[:0]
+	} else {
+		ps = make([]xp, 0, n)
+	}
+	for i := 0; i < n; i++ {
+		edge := af.aet.EdgeAt(i)
+		line := edge.AsLine()
+		if line == nil {
+			continue
+		}
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		topX, botX := computeEdgeX(line, aaScale, hasPrecise, yTopFixed, yBotFixed)
+		ps = append(ps, xp{topX, botX})
+	}
+	for i := 0; i < len(ps); i++ {
+		for j := i + 1; j < len(ps); j++ {
+			dt := int64(ps[i].topX) - int64(ps[j].topX)
+			db := int64(ps[i].botX) - int64(ps[j].botX)
+			if (dt > 0 && db < 0) || (dt < 0 && db > 0) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (af *AnalyticFiller) addCrossingBoundaries(yTopFixed, yBotFixed, aaScale int32) {
 	n := af.aet.Len()
 	if n < 2 {
