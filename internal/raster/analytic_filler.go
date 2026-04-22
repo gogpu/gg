@@ -670,6 +670,30 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 	sortInt32s(af.stripYBuf)
 	af.stripYBuf = deduplicateInt32s(af.stripYBuf)
 
+	// Skia's yShift subdivision: if a sub-strip's height has bit 14 set (quarter
+	// pixel component), Skia splits it by setting nextY = y + SK_Fixed1>>2.
+	// This matches SkScan_AAAPath.cpp:1422-1424:
+	//   if ((nextY - y) & (SK_Fixed1 >> 2)) { yShift=2; nextY = y + (SK_Fixed1 >> 2); }
+	// Without this, strips of height 0.75 (bits 14+15) are processed as one strip
+	// with fullAlpha=191 instead of being split into 0.25+0.5 giving 64+128=192.
+	for {
+		added := false
+		for i := 0; i < len(af.stripYBuf)-1; i++ {
+			yDiff := af.stripYBuf[i+1] - af.stripYBuf[i]
+			if yDiff > 0 && (yDiff&(skFixed1>>2)) != 0 && yDiff != (skFixed1>>2) {
+				mid := af.stripYBuf[i] + (skFixed1 >> 2)
+				af.stripYBuf = append(af.stripYBuf, mid)
+				added = true
+				break
+			}
+		}
+		if !added {
+			break
+		}
+		sortInt32s(af.stripYBuf)
+		af.stripYBuf = deduplicateInt32s(af.stripYBuf)
+	}
+
 	return af.stripYBuf
 }
 
