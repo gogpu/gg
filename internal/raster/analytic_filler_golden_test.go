@@ -1241,7 +1241,7 @@ func TestAnalyticFiller_StarBlitY9(t *testing.T) {
 // TestAnalyticFiller_StarCoverageVsCpp compares our coverage buffer byte-for-byte
 // against C++ full_walk.exe output (Skia AAA ground truth).
 func TestAnalyticFiller_StarCoverageVsCpp(t *testing.T) {
-	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "star_coverage_100x100.bin")
+	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "star_coverage_skia_exact.bin")
 	cppData, err := os.ReadFile(cppFile)
 	if err != nil {
 		t.Skipf("C++ coverage not found: %v (run full_walk.exe first)", err)
