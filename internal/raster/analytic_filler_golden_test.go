@@ -467,9 +467,11 @@ func TestAnalyticFiller_TinySkiaStarAAGolden(t *testing.T) {
 // (fiddle.skia.org), which is the target algorithm we ported.
 
 // TestAnalyticFiller_SkiaAAAPolygonGolden compares against Skia AAA output
-// for the polygon test case (no AA, Winding fill).
-// Uses white background to eliminate PNG premultiply round-trip precision loss.
-func TestAnalyticFiller_SkiaAAAPolygonGolden(t *testing.T) {
+// LEVEL 2: COMPOSITING — RGB image comparison (coverage + compositing combined).
+// Primary rasterizer validation is in Level 1 coverage tests (CoverageVsCpp).
+//
+// Polygon compositing test (no AA, Winding fill, white background).
+func TestCompositing_PolygonRGB(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
 			MoveTo,
@@ -499,10 +501,8 @@ func TestAnalyticFiller_SkiaAAAPolygonGolden(t *testing.T) {
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_polygon.png")
 }
 
-// TestAnalyticFiller_SkiaAAAFloatRectGolden compares against Skia AAA output
-// for the float-coordinate rectangle with AA.
-// Uses white background to eliminate PNG premultiply round-trip precision loss.
-func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
+// LEVEL 2: COMPOSITING — float rect RGB image comparison.
+func TestCompositing_FloatRectRGB(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
 			MoveTo,
@@ -536,10 +536,8 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 	}
 }
 
-// TestAnalyticFiller_SkiaAAAStarGolden compares against Skia AAA output
-// for the star with AA. NOTE: Skia golden uses Winding fill (not EvenOdd).
-// Uses white background to eliminate PNG premultiply round-trip precision loss.
-func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
+// LEVEL 2: COMPOSITING — star RGB image comparison.
+func TestCompositing_StarRGB(t *testing.T) {
 	path := &testPath{
 		verbs: []PathVerb{
 			MoveTo,
@@ -1230,9 +1228,13 @@ func TestAnalyticFiller_StarBlitY9(t *testing.T) {
 	}
 }
 
-// TestAnalyticFiller_StarCoverageVsCpp compares our coverage buffer byte-for-byte
-// against C++ full_walk.exe output (Skia AAA ground truth).
-func TestAnalyticFiller_StarCoverageVsCpp(t *testing.T) {
+// LEVEL 1: RASTERIZER — coverage buffer comparison vs C++ Skia-exact.
+// These are the PRIMARY validation tests. Coverage is the rasterizer output.
+// C++ tool uses verbatim Skia source (SkScan_AAAPath.cpp aaa_walk_edges).
+// Must be diff=0 (pixel-perfect).
+
+// TestCoverage_Star compares star coverage byte-for-byte vs C++ Skia-exact.
+func TestCoverage_Star(t *testing.T) {
 	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "star_coverage_skia_exact.bin")
 	cppData, err := os.ReadFile(cppFile)
 	if err != nil {
@@ -1301,9 +1303,8 @@ func TestAnalyticFiller_StarCoverageVsCpp(t *testing.T) {
 	}
 }
 
-// TestAnalyticFiller_RectCoverageVsCpp compares float rect coverage byte-for-byte
-// against C++ Skia-exact tool output.
-func TestAnalyticFiller_RectCoverageVsCpp(t *testing.T) {
+// TestCoverage_FloatRect compares float rect coverage byte-for-byte vs C++ Skia-exact.
+func TestCoverage_FloatRect(t *testing.T) {
 	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "rect_coverage_skia_exact.bin")
 	cppData, err := os.ReadFile(cppFile)
 	if err != nil {
@@ -1352,9 +1353,8 @@ func TestAnalyticFiller_RectCoverageVsCpp(t *testing.T) {
 	}
 }
 
-// TestAnalyticFiller_PolygonCoverageVsCpp compares polygon coverage byte-for-byte
-// against C++ Skia-exact tool output. Polygon uses aaShift=0 (no AA).
-func TestAnalyticFiller_PolygonCoverageVsCpp(t *testing.T) {
+// TestCoverage_Polygon compares polygon coverage byte-for-byte vs C++ Skia-exact.
+func TestCoverage_Polygon(t *testing.T) {
 	cppFile := filepath.Join(projectRoot(), "tmp", "skia_coverage", "polygon_coverage_skia_exact.bin")
 	cppData, err := os.ReadFile(cppFile)
 	if err != nil {
@@ -1399,21 +1399,17 @@ func TestAnalyticFiller_PolygonCoverageVsCpp(t *testing.T) {
 	t.Logf("Polygon coverage comparison Go vs C++: %d diff pixels, max diff=%d", diffCount, maxDiff)
 
 	if diffCount > 0 {
-		// Group by Y for analysis
-		byY := map[int]int{}
 		for y := 0; y < 100; y++ {
 			cnt := 0
 			for x := 0; x < 100; x++ {
-				g := int(goBuf[y*100+x])
-				c := int(cppData[y*100+x])
-				if g != c {
+				if int(goBuf[y*100+x]) != int(cppData[y*100+x]) {
 					cnt++
 				}
 			}
 			if cnt > 0 {
-				byY[y] = cnt
 				t.Logf("  y=%d: %d diff pixels", y, cnt)
 			}
 		}
+		t.Errorf("REGRESSION: polygon coverage diff=%d (max=%d), want diff=0 (pixel-perfect)", diffCount, maxDiff)
 	}
 }
