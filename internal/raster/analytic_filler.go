@@ -232,6 +232,33 @@ func (af *AnalyticFiller) processScanlineAAA(
 		af.edgeIdx++
 	}
 
+	// Second pass: insert edges whose pixel-space UpperY falls within this
+	// pixel row but whose sub-pixel FirstY is in the next row. This happens
+	// when aaShift < kDefaultAccuracy (e.g., aaShift=0): SnapY rounds to 1/4
+	// pixel boundary but FDot6Round rounds to full pixel, so UpperY=40.75
+	// maps to FirstY=41. Skia's aaa_walk_edges inserts by fUpperY (pixel-space),
+	// not by FirstY. Without this, sub-strips for newly-starting edges are lost.
+	for idx := af.edgeIdx; idx < len(allEdges); idx++ {
+		edge := &allEdges[idx]
+		line := edge.AsLine()
+		if line == nil {
+			break
+		}
+		var upperY int32
+		if line.UpperY != 0 || line.LowerY != 0 {
+			upperY = line.UpperY
+		} else {
+			break
+		}
+		if upperY >= yFixedEnd {
+			break
+		}
+		// Edge's pixel-space UpperY is within this pixel row — insert it.
+		af.aet.InsertWithIndex(*edge, idx)
+		af.initSingleEdgeState(idx, aaScale, yFixed)
+		af.edgeIdx = idx + 1
+	}
+
 	// Collect fractional Y boundaries from active edges within this pixel row.
 	stripYs := af.collectStripBoundariesFixed(yFixed, yFixedEnd, aaScale)
 
