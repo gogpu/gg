@@ -529,6 +529,10 @@ func TestAnalyticFiller_SkiaAAAFloatRectGolden(t *testing.T) {
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_float_rect.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_float_rect.png")
+
+	if result.DiffCount > 0 {
+		t.Errorf("REGRESSION: float rect diff=%d pixels (max=%d), want diff=0 (pixel-perfect)", result.DiffCount, result.MaxDiff)
+	}
 }
 
 // TestAnalyticFiller_SkiaAAAStarGolden compares against Skia AAA output
