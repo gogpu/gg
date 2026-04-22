@@ -990,3 +990,95 @@ func TestAnalyticFiller_StarPixel12_39(t *testing.T) {
 		t.Logf("DIFF: our=%d golden=108 diff=%d", cov, int(cov)-108)
 	}
 }
+
+func TestAnalyticFiller_TraceY39(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	// Get edges and compute X positions at y=39
+	sorted := eb.sortedEdgesSlice()
+	aaScale := int32(4)
+	yFixed := int32(39) << 16 // y=39 in SkFixed
+	yFixedEnd := int32(40) << 16
+
+	t.Logf("Edges active at y=39:")
+	for i, se := range sorted {
+		e := se.variant
+		line := e.AsLine()
+		if line == nil {
+			continue
+		}
+		topY := e.TopY()
+		botY := e.BottomY()
+		ySubTop := int32(39) * aaScale
+		ySubBot := int32(40) * aaScale
+		if topY > ySubBot || botY < ySubTop {
+			continue
+		}
+
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		if hasPrecise {
+			topX, botX := computeEdgeX(line, aaScale, hasPrecise, yFixed, yFixedEnd)
+			t.Logf("  edge[%d]: topX=%.6f botX=%.6f UpperX=%d PixelDX=%d UpperY=%.4f w=%+d",
+				i, float64(topX)/65536.0, float64(botX)/65536.0,
+				line.UpperX, line.PixelDX, float64(line.UpperY)/65536.0, line.Winding)
+		}
+	}
+
+	// Compare with C++: ul=11.949982 ll=13.249969
+	t.Logf("C++ reference: ul=11.949982 ll=13.249969")
+}
+
+func TestAnalyticFiller_TraceBlitAaaY39(t *testing.T) {
+	// Exact values from C++ trace:
+	// ul=11.949982 ur=14.0 ll=13.249969 lr=14.0 lDY=50412 rDY=MAX fullA=255
+	ul := int32(783155) // 11.949982 * 65536
+	ur := int32(917504) // 14.0 * 65536
+	ll := int32(868349) // 13.249969 * 65536
+	lr := int32(917504) // 14.0 * 65536
+
+	af := NewAnalyticFiller(100, 100)
+	for i := range af.coverage {
+		af.coverage[i] = 0
+	}
+
+	af.blitAaaTrapezoidRow(ul, ur, ll, lr, 50412, 0x7FFFFFFF, 255)
+
+	t.Logf("pixel 11: alpha=%d (C++=0)", af.coverage[11])
+	t.Logf("pixel 12: alpha=%d (C++=108)", af.coverage[12])
+	t.Logf("pixel 13: alpha=%d (C++=249)", af.coverage[13])
+
+	if af.coverage[12] != 108 {
+		t.Errorf("pixel 12: got=%d want=108 (C++ reference)", af.coverage[12])
+	}
+}
+
+func TestAnalyticFiller_TraceFullY39(t *testing.T) {
+	path := &testPath{
+		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{50.0, 7.5, 75.0, 87.5, 10.0, 37.5, 90.0, 37.5, 25.0, 87.5},
+	}
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	// Run filler and capture coverage at y=39
+	af := NewAnalyticFiller(100, 100)
+	var y39cov [100]uint8
+	af.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
+		if y == 39 {
+			for x := 0; x < 100; x++ {
+				y39cov[x] = af.coverage[x]
+			}
+		}
+	})
+
+	t.Logf("Full filler pixel 12: cov=%d (want 108)", y39cov[12])
+	t.Logf("Full filler pixel 13: cov=%d (want 249)", y39cov[13])
+	// Direct call gave 108. Full filler might differ because of edge X accumulation.
+}
