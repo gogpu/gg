@@ -1289,12 +1289,10 @@ func trapezoidToAlphaScaled(l1, l2 int32, fullAlpha uint8) uint8 {
 	area := (int64(l1) + int64(l2)) / 2 // SkFixed area (16.16)
 
 	if fullAlpha == 255 {
-		// Single-pass: (255 * area + rounding) >> 16.
-		// This matches both:
-		// - aaa_walk_edges: trapezoid_to_alpha(l1,l2) written directly = area >> 8
-		// - aaa_walk_convex_edges: fixed_to_alpha(area) = (255*area+32768)>>16
-		// The two formulas agree for all valid area values [0, SK_Fixed1].
-		v := (255*area + int64(skFixedHalf)) >> 16
+		// Skia's trapezoid_to_alpha: (l1+l2)/2 >> 8 (direct shift).
+		// NOT equivalent to (255*area+32768)>>16 which rounds differently
+		// for values like 40960 (Skia=160, rounded=159).
+		v := area >> 8
 		if v > 255 {
 			return 255
 		}
