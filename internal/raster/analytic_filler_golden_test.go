@@ -1410,4 +1410,23 @@ func TestAnalyticFiller_PolygonCoverageVsCpp(t *testing.T) {
 	}
 
 	t.Logf("Polygon coverage comparison Go vs C++: %d diff pixels, max diff=%d", diffCount, maxDiff)
+
+	if diffCount > 0 {
+		// Group by Y for analysis
+		byY := map[int]int{}
+		for y := 0; y < 100; y++ {
+			cnt := 0
+			for x := 0; x < 100; x++ {
+				g := int(goBuf[y*100+x])
+				c := int(cppData[y*100+x])
+				if g != c {
+					cnt++
+				}
+			}
+			if cnt > 0 {
+				byY[y] = cnt
+				t.Logf("  y=%d: %d diff pixels", y, cnt)
+			}
+		}
+	}
 }
