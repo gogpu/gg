@@ -1088,6 +1088,33 @@ func (c *Context) FlushGPU() error {
 	return a.Flush(t)
 }
 
+// FlushGPUWithView flushes pending GPU operations, resolving directly to the
+// given texture view instead of reading back to CPU. The view is passed
+// through GPURenderTarget.View so the render session uses it as the per-pass
+// resolve target, enabling multiple Contexts to render to different views
+// without cross-contamination.
+//
+// This is the per-pass render target path for ggcanvas.RenderDirect.
+// When view is nil, behaves identically to FlushGPU (CPU readback).
+func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	t := c.gpuRenderTarget()
+	if view != nil {
+		t.View = view
+		t.ViewWidth = width
+		t.ViewHeight = height
+	}
+	Logger().Debug("FlushGPUWithView",
+		"target_w", t.Width, "target_h", t.Height,
+		"view", view != nil,
+		"viewW", width, "viewH", height,
+	)
+	return a.Flush(t)
+}
+
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
 func (c *Context) gpuRenderTarget() GPURenderTarget {
 	return GPURenderTarget{

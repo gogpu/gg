@@ -305,7 +305,7 @@ func TestSDFAccelerator_Interfaces(t *testing.T) {
 	var _ gg.GPUAccelerator = a
 
 	// Extension interfaces.
-	var _ gg.SurfaceTargetAware = a
+	var _ gg.SurfaceTargetAware = a //nolint:staticcheck // backward compat, SetSurfaceTarget still supported
 	var _ gg.GPUTextAccelerator = a
 	var _ gg.PipelineModeAware = a
 	var _ gg.ComputePipelineAware = a

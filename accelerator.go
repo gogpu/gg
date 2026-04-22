@@ -41,9 +41,28 @@ const (
 )
 
 // GPURenderTarget provides pixel buffer access for GPU output.
-// The Data slice must be in premultiplied RGBA format, 4 bytes per pixel,
-// laid out row by row with the given Stride.
+//
+// Two mutually exclusive modes:
+//
+// GPU-direct mode: when View is non-nil, the render pass resolves directly
+// to this texture view. Data/Stride are ignored and no CPU readback occurs.
+// ViewWidth and ViewHeight specify the view dimensions in device pixels.
+//
+// CPU readback mode: when View is nil, rendering goes to an internal resolve
+// texture and pixels are copied back into Data. Width, Height, and Stride
+// describe the destination pixel buffer layout.
+//
+// The Data slice (when used) must be in premultiplied RGBA format, 4 bytes
+// per pixel, laid out row by row with the given Stride.
 type GPURenderTarget struct {
+	// GPU-direct path: resolve directly to this view.
+	// When non-nil, Data/Stride are ignored -- no CPU readback.
+	// Type-assert to *wgpu.TextureView in internal/gpu consumers.
+	View       gpucontext.TextureView
+	ViewWidth  uint32
+	ViewHeight uint32
+
+	// CPU readback path.
 	Data          []uint8
 	Width, Height int
 	Stride        int // bytes per row
@@ -112,10 +131,12 @@ type DeviceProviderAware interface {
 }
 
 // SurfaceTargetAware is an optional interface for accelerators that support
-// direct surface rendering. When SetSurfaceTarget is called with a non-nil
-// view, the accelerator renders directly to the surface texture instead of
-// reading back pixels to CPU. This eliminates the GPU->CPU->GPU round-trip
-// for windowed rendering (ggcanvas + gogpu).
+// direct surface rendering.
+//
+// Deprecated: use GPURenderTarget.View instead. New code should pass the
+// texture view via GPURenderTarget.View on each Flush call. This interface
+// is retained for backward compatibility with existing ggcanvas code paths
+// and is translated internally to GPURenderTarget.View.
 //
 // Call SetSurfaceTarget with nil to return to offscreen (readback) mode.
 // The caller retains ownership of the surface view.

@@ -334,12 +334,12 @@ func (c *Canvas) Flush() (any, error) {
 }
 
 // RenderDirect renders canvas content directly to the given surface view,
-// bypassing the GPU→CPU→GPU readback. This is the zero-copy rendering path
+// bypassing the GPU->CPU->GPU readback. This is the zero-copy rendering path
 // for use with gogpu's surface texture view.
 //
 // When the GPU accelerator supports direct surface rendering, shapes are
 // rendered directly to the provided surface view via MSAA resolve. No
-// staging buffers, no ReadBuffer, no texture upload — pure GPU-to-GPU.
+// staging buffers, no ReadBuffer, no texture upload -- pure GPU-to-GPU.
 //
 // If the accelerator doesn't support surface rendering, or if no GPU
 // accelerator is registered, this method falls back to the readback path
@@ -371,20 +371,27 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 		"hasSurfaceView", surfaceView != nil,
 	)
 
-	// Configure GPU accelerator for direct surface rendering.
-	// The surface target stays set between frames to avoid destroying
-	// and recreating MSAA/stencil textures on every frame. The target
-	// is only cleared on Close() or when switching to offscreen mode.
+	// Pass the surface view via GPURenderTarget.View so the render session
+	// uses it as the per-pass resolve target. This replaces the old
+	// session-level SetSurfaceTarget approach, enabling multiple Contexts
+	// to render to different targets without interfering.
+	//
+	// We still call SetAcceleratorSurfaceTarget for backward compatibility
+	// with the session-level path (e.g., EnsureTextures surface mode).
 	gg.SetAcceleratorSurfaceTarget(surfaceView, width, height)
 
 	// Flush GPU shapes directly to the surface view (no readback).
-	// NOTE: BeginAcceleratorFrame is NOT called here — it must be called
+	// FlushGPUWithView passes the view through GPURenderTarget.View,
+	// which takes priority over session-level surfaceView in the
+	// render session's routing logic.
+	//
+	// NOTE: BeginAcceleratorFrame is NOT called here -- it must be called
 	// BEFORE canvas.Draw(), not after. If Draw triggers a mid-frame CPU
 	// fallback (bitmap text, gradient fill), flushGPUAccelerator submits
 	// GPU commands with LoadOpClear. Calling BeginFrame here would reset
 	// frameRendered=false, causing the final FlushGPU to wipe that content
 	// with a second LoadOpClear. See RENDER-DIRECT-003.
-	err := c.ctx.FlushGPU()
+	err := c.ctx.FlushGPUWithView(surfaceView, width, height)
 
 	c.dirty = false
 	return err

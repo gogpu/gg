@@ -161,10 +161,17 @@ type GPURenderSession struct {
 	// previously drawn content. This handles mid-frame flushes caused by
 	// CPU fallback operations (e.g., DrawImage between GPU draws).
 	//
-	// Reset by BeginFrame() at the start of each frame.
+	// Reset by BeginFrame() at the start of each frame, or when the
+	// active view changes (different Context targets different view).
 	// Only relevant in surface mode — offscreen mode composites via
 	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
 	frameRendered bool
+
+	// lastView tracks the most recent per-pass view used for rendering.
+	// When the view changes between Flush calls (e.g., two gg.Context
+	// instances rendering to different targets), frameRendered is reset
+	// so the new view gets a LoadOpClear on its first render pass.
+	lastView *wgpu.TextureView
 
 	// scissorRect holds the current scissor rect in device pixels.
 	// When non-nil, all draw commands are clipped to this rectangle.
@@ -253,6 +260,67 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 // Porter-Duff "over", so LoadOpClear is always safe there.
 func (s *GPURenderSession) BeginFrame() {
 	s.frameRendered = false
+	s.lastView = nil
+}
+
+// resolveActiveView returns the per-pass texture view to use for surface
+// rendering. The per-pass target.View takes priority over the session-level
+// surfaceView (which is retained for backward compatibility with callers
+// that still use SetSurfaceTarget).
+//
+// Returns nil when rendering should use the CPU readback path.
+func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.TextureView {
+	if target.View != nil {
+		if v := extractTextureView(target.View); v != nil {
+			return v
+		}
+	}
+	// Fall back to session-level surfaceView for backward compat.
+	return s.surfaceView
+}
+
+// extractTextureView type-asserts a gpucontext.TextureView to
+// *wgpu.TextureView, trying the direct assertion first and then the
+// HalTextureView() accessor pattern used by gogpu wrappers.
+func extractTextureView(view any) *wgpu.TextureView {
+	if halView, ok := view.(*wgpu.TextureView); ok && halView != nil {
+		return halView
+	}
+	type halTextureViewAccessor interface {
+		HalTextureView() *wgpu.TextureView
+	}
+	if hva, ok := view.(halTextureViewAccessor); ok {
+		return hva.HalTextureView()
+	}
+	return nil
+}
+
+// effectiveDimensions returns the width and height to use for MSAA textures
+// and viewport. When rendering to a view, uses the view dimensions; otherwise
+// uses the CPU readback target dimensions.
+func (s *GPURenderSession) effectiveDimensions(target gg.GPURenderTarget, activeView *wgpu.TextureView) (uint32, uint32) {
+	if activeView != nil {
+		// Per-pass view dimensions from target take priority.
+		if target.View != nil && target.ViewWidth > 0 && target.ViewHeight > 0 {
+			return target.ViewWidth, target.ViewHeight
+		}
+		// Fall back to session-level surface dimensions (backward compat).
+		if s.surfaceWidth > 0 && s.surfaceHeight > 0 {
+			return s.surfaceWidth, s.surfaceHeight
+		}
+	}
+	return uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
+}
+
+// ensureTexturesForView creates or ensures MSAA/stencil textures sized for
+// the active render target. In surface/view mode only MSAA and stencil are
+// created (the view itself is the resolve target). In offscreen mode a
+// resolve texture is also created for CPU readback.
+func (s *GPURenderSession) ensureTexturesForView(activeView *wgpu.TextureView, w, h uint32) error {
+	if activeView != nil {
+		return s.textures.ensureSurfaceTextures(s.device, w, h, "session")
+	}
+	return s.textures.ensureTextures(s.device, w, h, "session")
 }
 
 // SetScissorRect sets the scissor rect for subsequent GPU draw commands.
@@ -322,25 +390,23 @@ func (s *GPURenderSession) RenderFrame(
 		return nil
 	}
 
+	// Determine render target view: per-pass target.View takes priority
+	// over session-level surfaceView (backward compat).
+	activeView := s.resolveActiveView(target)
+
 	slogger().Debug("RenderFrame",
 		"sdf", len(sdfShapes), "convex", len(convexCommands),
 		"stencil", len(stencilPaths), "text", len(textBatches),
 		"glyphMask", len(glyphMaskBatches),
-		"surface", s.surfaceView != nil)
+		"surface", activeView != nil)
 
-	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
-	// In surface mode, use surface dimensions for MSAA textures and viewport.
-	// The target (gg pixmap) may differ from the surface; the MSAA resolve
-	// target must match the surface view dimensions.
-	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
-		w, h = s.surfaceWidth, s.surfaceHeight
-	}
+	w, h := s.effectiveDimensions(target, activeView)
 	slogger().Debug("RenderFrame dimensions",
 		"target_w", target.Width, "target_h", target.Height,
 		"effective_w", w, "effective_h", h,
-		"surface", s.surfaceView != nil,
+		"surface", activeView != nil,
 	)
-	if err := s.EnsureTextures(w, h); err != nil {
+	if err := s.ensureTexturesForView(activeView, w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
 
@@ -387,8 +453,8 @@ func (s *GPURenderSession) RenderFrame(
 		return err
 	}
 
-	if s.surfaceView != nil {
-		return s.encodeSubmitSurface(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes)
+	if activeView != nil {
+		return s.encodeSubmitSurface(activeView, w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes)
 	}
 	return s.encodeSubmitReadback(w, h, sdfResources, sdfShapes, convexRes, stencilResources, stencilPaths, textRes, glyphMaskRes, target)
 }
@@ -428,11 +494,12 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		return nil
 	}
 
-	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // dimensions always fit uint32
-	if s.surfaceView != nil && s.surfaceWidth > 0 && s.surfaceHeight > 0 {
-		w, h = s.surfaceWidth, s.surfaceHeight
-	}
-	if err := s.EnsureTextures(w, h); err != nil {
+	// Determine render target view: per-pass target.View takes priority
+	// over session-level surfaceView (backward compat).
+	activeView := s.resolveActiveView(target)
+
+	w, h := s.effectiveDimensions(target, activeView)
+	if err := s.ensureTexturesForView(activeView, w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
 	// Clip bind layout must be created BEFORE pipelines, because pipeline
@@ -578,8 +645,8 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 	}
 
-	if s.surfaceView != nil {
-		return s.encodeSubmitSurfaceGrouped(w, h, grpRes)
+	if activeView != nil {
+		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes)
 	}
 	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target)
 }
@@ -623,6 +690,7 @@ func (s *GPURenderSession) Destroy() {
 	s.surfaceView = nil
 	s.surfaceWidth = 0
 	s.surfaceHeight = 0
+	s.lastView = nil
 	// Do not destroy pipelines -- they are owned by the caller.
 }
 
@@ -1784,14 +1852,15 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	return nil
 }
 
-// encodeSubmitSurface encodes the unified render pass with the surface view
+// encodeSubmitSurface encodes the unified render pass with the given view
 // as the resolve target, then submits without readback. The MSAA color
-// attachment resolves directly to the caller-provided surface texture view.
+// attachment resolves directly to the provided texture view.
 //
 // This is the zero-copy path for windowed rendering: no staging buffer, no
 // CopyTextureToBuffer, no ReadBuffer, no fence wait (presentation handles
 // synchronization).
 func (s *GPURenderSession) encodeSubmitSurface(
+	view *wgpu.TextureView,
 	w, h uint32,
 	sdfRes *sdfFrameResources,
 	sdfShapes []SDFRenderShape,
@@ -1807,6 +1876,15 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// Per-view frame tracking: when the view changes between flushes
+	// (e.g., two gg.Context instances rendering to different targets),
+	// reset frameRendered so the new view gets LoadOpClear on its first
+	// pass. This prevents shapes from one Context leaking into another.
+	if view != s.lastView {
+		s.frameRendered = false
+		s.lastView = view
+	}
+
 	// Surface render pass LoadOp: first pass clears, subsequent passes
 	// preserve existing content. This handles mid-frame flushes caused by
 	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
@@ -1824,7 +1902,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		Label: "session_surface_pass",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
-			ResolveTarget: s.surfaceView,
+			ResolveTarget: view,
 			LoadOp:        colorLoadOp,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
@@ -2100,9 +2178,10 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 }
 
 // encodeSubmitSurfaceGrouped encodes a single render pass with per-group
-// scissor state changes, resolving directly to the surface view. No readback
+// scissor state changes, resolving directly to the given view. No readback
 // occurs. This is the grouped version of encodeSubmitSurface.
 func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
+	view *wgpu.TextureView,
 	w, h uint32,
 	grpRes []groupResources,
 ) error {
@@ -2112,6 +2191,12 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// Per-view frame tracking (same as encodeSubmitSurface).
+	if view != s.lastView {
+		s.frameRendered = false
+		s.lastView = view
+	}
+
 	// Surface render pass LoadOp: first pass clears, subsequent passes
 	// preserve existing content. This handles mid-frame flushes caused by
 	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
@@ -2128,7 +2213,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		Label: "session_surface_pass",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:          s.textures.msaaView,
-			ResolveTarget: s.surfaceView,
+			ResolveTarget: view,
 			LoadOp:        colorLoadOp,
 			StoreOp:       gputypes.StoreOpStore,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},

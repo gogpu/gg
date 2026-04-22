@@ -99,7 +99,7 @@ type SDFAccelerator struct {
 }
 
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
-var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil)
+var _ gg.SurfaceTargetAware = (*SDFAccelerator)(nil) //nolint:staticcheck // backward compat, SetSurfaceTarget still supported
 var _ gg.DirectRenderCapable = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.GPUGlyphMaskAccelerator = (*SDFAccelerator)(nil)
@@ -1180,6 +1180,11 @@ func (a *SDFAccelerator) queueShape(target gg.GPURenderTarget, shape gg.Detected
 }
 
 func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
+	// GPU-direct mode: compare View identity.
+	if a.View != nil || b.View != nil {
+		return a.View == b.View
+	}
+	// CPU readback mode: compare data buffer identity.
 	return a.Width == b.Width && a.Height == b.Height &&
 		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
 }
