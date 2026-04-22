@@ -96,10 +96,13 @@ type LineEdge struct {
 	UpperX int32
 
 	// PixelDX is the slope in pixel-space SkFixed (16.16), matching Skia's fDX.
-	// Computed using Skia's exact setLine() conversion: SkFDot6Div(dx>>10, dy>>10)
-	// where dx/dy are differences of pixel-space SkFixed coordinates.
-	// Only set for line edges created by NewLineEdge (zero for curve sub-segments).
 	PixelDX int32
+
+	// PixelDY is Skia's fDY = abs(1/slope) for partialTriangleToAlpha.
+	// Computed as abs(FDot6Div(dy_fdot6, dx_fdot6)) from ORIGINAL pixel-space
+	// edge coordinates, matching SkAnalyticEdge::setLine line 197-199.
+	// NOT derived from PixelDX (1/slope ≠ FDot6Div(dy,dx) due to integer rounding).
+	PixelDY int32
 
 	// Winding indicates direction: +1 for downward, -1 for upward.
 	Winding int8
@@ -182,9 +185,30 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 		pixelDX = FDot6Div(pxDx, pxDy)
 	}
 
+	// Skia's fDY = abs(1/slope) for partialTriangleToAlpha.
+	// Computed as abs(FDot6Div(dy, dx)) from pixel-space FDot6 (NOT 1/slope).
+	// Matches SkAnalyticEdge.cpp:197-199.
+	var pixelDY int32
+	if pxDx == 0 || pixelDX == 0 {
+		pixelDY = 0x7FFFFFFF
+	} else {
+		absDx := pxDx
+		if absDx < 0 {
+			absDx = -absDx
+		}
+		absDy := pxDy
+		if absDy < 0 {
+			absDy = -absDy
+		}
+		pixelDY = FDot6Div(absDy, absDx)
+		if pixelDY < 0 {
+			pixelDY = 0x7FFFFFFF
+		}
+	}
+
 	return LineEdge{
-		Prev:    -1, // No link
-		Next:    -1, // No link
+		Prev:    -1,
+		Next:    -1,
 		X:       FDot6ToFDot16(x0 + FDot16Mul(slope, dy)),
 		DX:      slope,
 		FirstY:  top,
@@ -193,6 +217,7 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 		LowerY:  pxY1,
 		UpperX:  pxX0,
 		PixelDX: pixelDX,
+		PixelDY: pixelDY,
 		Winding: winding,
 	}, true
 }

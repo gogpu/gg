@@ -301,7 +301,11 @@ func (af *AnalyticFiller) initSingleEdgeState(edgeBufIdx int, aaScale int32, yRo
 		st.fUpperY = line.UpperY
 		st.fLowerY = line.LowerY
 		st.fDX = line.PixelDX
-		st.fDY = computeEdgeDY(line.PixelDX)
+		if line.PixelDY != 0 {
+			st.fDY = line.PixelDY
+		} else {
+			st.fDY = computeEdgeDY(line.PixelDX)
+		}
 
 		// Initialize fX at the edge's entry Y.
 		// If edge starts at or before the row, compute at row start.
