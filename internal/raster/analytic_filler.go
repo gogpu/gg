@@ -237,15 +237,16 @@ func (af *AnalyticFiller) processScanlineAAA(
 //   - aaScale: AA subdivision factor (1, 2, or 4)
 func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaScale int32) []int32 {
 	af.stripYBuf = af.stripYBuf[:0]
-	af.stripYBuf = append(af.stripYBuf, yTopFixed, yBotFixed)
 
-	// Detect crossing edges and add the intersection Y as a sub-strip boundary.
-	// When two edges cross within the pixel row, processing them in a single
-	// full-height strip produces incorrect coverage because the entering edge
-	// changes midway through the strip. Splitting at the crossing Y ensures
-	// each sub-strip uses the correct entering edge, matching Skia's
-	// check_intersection mechanism (SkScan_AAAPath.cpp:1311-1314).
-	af.addCrossingBoundaries(yTopFixed, yBotFixed, aaScale)
+	// Always split into 4 sub-strips per pixel row (1/4 pixel each).
+	// This matches Skia's accuracy=2 Y stepping which processes edges at
+	// 1/4 pixel granularity. Without this, self-intersecting paths (star)
+	// get wrong coverage because edges change X order within the pixel row.
+	quarterPixel := skFixed1 / 4 // 16384
+	for y := yTopFixed; y < yBotFixed; y += quarterPixel {
+		af.stripYBuf = append(af.stripYBuf, y)
+	}
+	af.stripYBuf = append(af.stripYBuf, yBotFixed)
 
 	n := af.aet.Len()
 	for i := 0; i < n; i++ {
