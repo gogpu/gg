@@ -568,6 +568,13 @@ func TestAnalyticFiller_SkiaAAAStarGolden(t *testing.T) {
 
 	saveRendered(t, got, "golden_rendered_skia_aaa_star.png")
 	saveDiffMap(t, result.DiffMap, "golden_diff_skia_aaa_star.png")
+
+	if result.MaxDiff > 2 {
+		t.Errorf("REGRESSION: star max diff=%d, want <= 2", result.MaxDiff)
+	}
+	if result.DiffCount > 100 {
+		t.Errorf("REGRESSION: star diff pixels=%d, want <= 100", result.DiffCount)
+	}
 }
 
 func TestAnalyticFiller_StarCoverageDiag(t *testing.T) {
