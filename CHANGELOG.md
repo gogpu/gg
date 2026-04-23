@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-04-23
+
 ### Added
 
 - **Per-context GPU accelerator** (ARCH-GG-001, ADR-013) — split SDFAccelerator
