@@ -470,25 +470,26 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 	path := NewPath()
 	hasContour := false
 
-	for glyph := range c.face.Glyphs(s) {
+	shaped := text.Shape(s, c.face)
+	for _, sg := range shaped {
 		cacheKey := text.OutlineCacheKey{
 			FontID:  fontID,
-			GID:     glyph.GID,
+			GID:     sg.GID,
 			Size:    sizeKey,
 			Hinting: text.HintingNone,
 		}
 		outline := cache.GetOrCreate(cacheKey, func() *text.GlyphOutline {
-			o, err := extractor.ExtractOutline(parsed, glyph.GID, fontSize)
+			o, err := extractor.ExtractOutline(parsed, sg.GID, fontSize)
 			if err != nil || o == nil || o.IsEmpty() {
 				return nil
 			}
 			return o
 		})
 		if outline == nil {
-			continue // space/missing glyph — advance handled by Glyphs iterator
+			continue
 		}
 
-		gx := x + glyph.X
+		gx := x + sg.X
 
 		for _, seg := range outline.Segments {
 			// sfnt.LoadGlyph returns Y-down coordinates (screen convention):

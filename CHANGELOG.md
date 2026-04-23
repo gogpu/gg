@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-04-23
+
+### Fixed
+
+- **Text outline kerning** (BUG-TEXT-002, BUG-SCENE-TEXT-001) — `drawStringAsOutlines()` now
+  uses `text.Shape()` for glyph positioning instead of `face.Glyphs()`. Kerning pairs (Te, AV, Wo)
+  work correctly in TextModeVector, rotated, and scaled text.
+
+- **Scene text artifact dots** (BUG-SCENE-TEXT-002) — `outlineToPath()` now skips degenerate
+  contours (consecutive MoveTo without drawing ops) that produced stray dots on T/2 glyphs.
+
+### Changed
+
+- **Dependencies:** wgpu v0.25.3 → v0.25.4, naga v0.17.4 → v0.17.5
+
 ## [0.41.1] - 2026-04-23
 
 ### Fixed

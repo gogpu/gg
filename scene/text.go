@@ -374,9 +374,17 @@ func (r *TextRenderer) outlineToPath(outline *text.GlyphOutline, x, y float32, c
 	}
 
 	segments := outline.Segments
-	for _, seg := range segments {
+	for i, seg := range segments {
 		switch seg.Op {
 		case text.OutlineOpMoveTo:
+			// Skip degenerate contours: MoveTo followed by another MoveTo
+			// or at end of segments produces a dot artifact.
+			if i+1 < len(segments) && segments[i+1].Op == text.OutlineOpMoveTo {
+				continue
+			}
+			if i+1 >= len(segments) {
+				continue
+			}
 			px := x + seg.Points[0].X
 			py := y + seg.Points[0].Y*yMul
 			path.MoveTo(px, py)
