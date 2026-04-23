@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Skia AAA pixel-perfect coverage** — three root causes fixed to achieve diff=0
+  vs Skia's `aaa_walk_edges` walker (Chrome/Android/Flutter rasterizer):
+  1. `trapezoid_to_alpha`: use `area>>8` (Skia source line 535), not `(255*area+32768)>>16`
+  2. yShift bit-flag subdivision: 0.75 pixel (bits 14+15) split into 0.25+0.5 sub-strips (line 1466)
+  3. Deferred edge insertion: edges inserted between sub-strips at UpperY, not at row start (line 1600)
+  Verified via C++ tool built from verbatim Skia source code. Coverage diff=0 for star,
+  float rect, and polygon (including near-horizontal edges, BUG-RAST-011).
+
+- **Near-horizontal edge coverage bleed** (BUG-RAST-011, [#235](https://github.com/gogpu/gg/issues/235)) —
+  edges with pixel-space UpperY mid-row were not inserted into AET until the next
+  pixel row. Fix: insert by pixel-space UpperY + deferred mid-row insertion.
+  Polygon coverage: 133 diff → 0 diff.
+
+### Added
+
+- **Convex fast path** (RAST-012) — port of Skia's `aaa_walk_convex_edges`
+  (SkScan_AAAPath.cpp:1038-1305). Optimized walker for convex shapes (rect, circle,
+  triangle, regular polygons):
+  - Paired left/right edges (no AET, no winding walk)
+  - kSnapDigit X snapping (1/16 pixel, reduces tiny triangles)
+  - Smooth jump (skip fractional Y for smooth edges)
+  - Rect fast path (vertical edges, direct blitAntiRect)
+  - Zero allocations, 1.6x faster than general walker on benchmarks
+
+- **Two-level test architecture** — Level 1 coverage tests (byte-for-byte vs C++
+  Skia-exact, strict diff=0) and Level 2 compositing tests (RGB image comparison).
+  22 new tests including 9 regression guards with exact pixel values from C++ ground truth.
+
 - **Scene TagImage rendering** (BUG-SCENE-006) — `scene.Renderer` now renders
   images added via `scene.DrawImage()`. Previously the renderer skipped `TagImage`
   commands with a stub, producing invisible output. Implementation uses inverse

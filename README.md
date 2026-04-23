@@ -104,7 +104,8 @@ The CPU rasterizer automatically selects the optimal algorithm per-path:
 
 | Algorithm | Tiles | Best For |
 |-----------|-------|----------|
-| **AnalyticFiller** (scanline) | — | Simple paths, small shapes (< 32px) |
+| **AnalyticFiller** (Skia AAA) | — | Simple paths, small shapes (< 32px). Pixel-perfect with Skia Chrome/Android. |
+| **AnalyticFiller Convex** | — | Convex shapes (rect, circle, triangle). 1.6x faster, kSnapDigit X snapping. |
 | **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads |
 | **TileCompute** | 16×16 | Extreme complexity (10K+ segments) |
 
@@ -198,7 +199,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 
 | Component | Location | Description |
 |-----------|----------|-------------|
-| **CPU Raster** | `internal/raster/` | Scanline analytic AA (hybrid: Vello coverage + Skia/tiny-skia edge infrastructure) |
+| **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
 | **GPU Accelerator** | `internal/gpu` | Six-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask) |
 | **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
