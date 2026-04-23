@@ -5,6 +5,7 @@ package ggcanvas
 
 import (
 	"errors"
+	"image"
 	"testing"
 
 	"github.com/gogpu/gpucontext"
@@ -45,14 +46,21 @@ func (m *mockProvider) Queue() gpucontext.Queue               { return m.queue }
 func (m *mockProvider) Adapter() gpucontext.Adapter           { return m.adapter }
 func (m *mockProvider) SurfaceFormat() gputypes.TextureFormat { return m.format }
 
+// regionUpdate records the parameters of a single UpdateRegion call.
+type regionUpdate struct {
+	x, y, w, h int
+	data       []byte
+}
+
 // mockTexture implements the texture interfaces for testing.
-// Implements gpucontext.Texture interface.
+// Implements gpucontext.Texture, gpucontext.TextureUpdater, and gpucontext.TextureRegionUpdater.
 type mockTexture struct {
-	width     int
-	height    int
-	data      []byte
-	destroyed bool
-	updated   int
+	width         int
+	height        int
+	data          []byte
+	destroyed     bool
+	updated       int
+	regionUpdates []regionUpdate
 }
 
 func (m *mockTexture) Width() int  { return m.width }
@@ -65,12 +73,22 @@ func (m *mockTexture) UpdateData(data []byte) error {
 	return nil
 }
 
+func (m *mockTexture) UpdateRegion(x, y, w, h int, data []byte) error {
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	m.regionUpdates = append(m.regionUpdates, regionUpdate{x: x, y: y, w: w, h: h, data: dataCopy})
+	return nil
+}
+
 func (m *mockTexture) Destroy() {
 	m.destroyed = true
 }
 
-// Compile-time check: mockTexture must implement TextureUpdater.
-var _ gpucontext.TextureUpdater = (*mockTexture)(nil)
+// Compile-time checks.
+var (
+	_ gpucontext.TextureUpdater       = (*mockTexture)(nil)
+	_ gpucontext.TextureRegionUpdater = (*mockTexture)(nil)
+)
 
 // mockRenderer implements gpucontext.TextureCreator for testing.
 type mockRenderer struct {
@@ -561,5 +579,298 @@ func TestTextureUpdateOnDirty(t *testing.T) {
 	tex := renderer.textures[0]
 	if tex.updated != 1 {
 		t.Errorf("Texture updated %d times, want 1", tex.updated)
+	}
+}
+
+// TestMarkDirtyRegion tests dirty region accumulation.
+func TestMarkDirtyRegion(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	// Clear initial dirty state.
+	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
+
+	// Single region.
+	r1 := image.Rect(10, 20, 30, 40)
+	c.MarkDirtyRegion(r1)
+	if !c.IsDirty() {
+		t.Error("IsDirty() = false after MarkDirtyRegion")
+	}
+	if c.dirtyRect != r1 {
+		t.Errorf("dirtyRect = %v, want %v", c.dirtyRect, r1)
+	}
+
+	// Second region — should be union.
+	r2 := image.Rect(50, 60, 70, 80)
+	c.MarkDirtyRegion(r2)
+	want := r1.Union(r2)
+	if c.dirtyRect != want {
+		t.Errorf("dirtyRect after union = %v, want %v", c.dirtyRect, want)
+	}
+
+	// Empty region should be no-op.
+	before := c.dirtyRect
+	c.MarkDirtyRegion(image.Rectangle{})
+	if c.dirtyRect != before {
+		t.Errorf("empty region changed dirtyRect: %v != %v", c.dirtyRect, before)
+	}
+}
+
+// TestMarkDirtyClearsDirtyRect verifies that MarkDirty (full invalidation)
+// resets the dirty rect so Flush falls back to full upload.
+func TestMarkDirtyClearsDirtyRect(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
+
+	c.MarkDirtyRegion(image.Rect(10, 10, 20, 20))
+	if c.dirtyRect.Empty() {
+		t.Error("dirtyRect should be non-empty after MarkDirtyRegion")
+	}
+
+	c.MarkDirty()
+	if !c.dirtyRect.Empty() {
+		t.Errorf("dirtyRect should be empty after MarkDirty, got %v", c.dirtyRect)
+	}
+}
+
+// TestFlushPartialUpload verifies that Flush uses UpdateRegion when a dirty
+// rect is set and the texture supports it.
+func TestFlushPartialUpload(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render: creates texture via full upload.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	if len(renderer.textures) != 1 {
+		t.Fatalf("Expected 1 texture, got %d", len(renderer.textures))
+	}
+	tex := renderer.textures[0]
+
+	// Mark a small dirty region and flush.
+	c.MarkDirtyRegion(image.Rect(5, 5, 15, 15))
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	// Should have used UpdateRegion, not UpdateData.
+	if tex.updated != 0 {
+		t.Errorf("UpdateData called %d times, want 0 (should use UpdateRegion)", tex.updated)
+	}
+	if len(tex.regionUpdates) != 1 {
+		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
+	}
+
+	ru := tex.regionUpdates[0]
+	if ru.x != 5 || ru.y != 5 || ru.w != 10 || ru.h != 10 {
+		t.Errorf("UpdateRegion params = (%d,%d,%d,%d), want (5,5,10,10)",
+			ru.x, ru.y, ru.w, ru.h)
+	}
+
+	// Data should be 10*10*4 = 400 bytes (densely packed RGBA).
+	wantBytes := 10 * 10 * 4
+	if len(ru.data) != wantBytes {
+		t.Errorf("UpdateRegion data len = %d, want %d", len(ru.data), wantBytes)
+	}
+
+	// dirtyRect should be reset after flush.
+	if !c.dirtyRect.Empty() {
+		t.Errorf("dirtyRect should be empty after Flush, got %v", c.dirtyRect)
+	}
+}
+
+// TestFlushFullUploadWhenNoDirtyRect verifies that MarkDirty() (without region)
+// causes a full upload even when the texture supports region updates.
+func TestFlushFullUploadWhenNoDirtyRect(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	tex := renderer.textures[0]
+
+	// MarkDirty (no region) → should do full upload.
+	c.MarkDirty()
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	if tex.updated != 1 {
+		t.Errorf("UpdateData called %d times, want 1", tex.updated)
+	}
+	if len(tex.regionUpdates) != 0 {
+		t.Errorf("UpdateRegion called %d times, want 0", len(tex.regionUpdates))
+	}
+}
+
+// TestFlushFullUploadWhenRegionCoversEntirePixmap verifies that a dirty rect
+// covering the entire pixmap falls back to full upload (no wasted copy).
+func TestFlushFullUploadWhenRegionCoversEntirePixmap(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	tex := renderer.textures[0]
+
+	// Dirty rect == full pixmap → should use UpdateData (cheaper, no row copy).
+	c.MarkDirtyRegion(image.Rect(0, 0, c.ctx.PixelWidth(), c.ctx.PixelHeight()))
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	if tex.updated != 1 {
+		t.Errorf("UpdateData called %d times, want 1 (full pixmap region)", tex.updated)
+	}
+	if len(tex.regionUpdates) != 0 {
+		t.Errorf("UpdateRegion called %d times, want 0 (full pixmap → full upload)", len(tex.regionUpdates))
+	}
+}
+
+// TestFlushClampsDirtyRectToPixmap verifies that a dirty rect extending
+// beyond the pixmap is clamped to the actual pixmap dimensions.
+func TestFlushClampsDirtyRectToPixmap(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	tex := renderer.textures[0]
+
+	// Dirty rect extends beyond pixmap → should be clamped.
+	c.MarkDirtyRegion(image.Rect(40, 40, 200, 200))
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	if len(tex.regionUpdates) != 1 {
+		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
+	}
+
+	ru := tex.regionUpdates[0]
+	pw := c.ctx.PixelWidth()
+	ph := c.ctx.PixelHeight()
+	wantW := pw - 40
+	wantH := ph - 40
+	if ru.x != 40 || ru.y != 40 || ru.w != wantW || ru.h != wantH {
+		t.Errorf("Clamped region = (%d,%d,%d,%d), want (40,40,%d,%d)",
+			ru.x, ru.y, ru.w, ru.h, wantW, wantH)
+	}
+}
+
+// TestExtractRegion verifies the pixel extraction helper.
+func TestExtractRegion(t *testing.T) {
+	const w, h = 4, 4
+	const bpp = 4
+
+	// Create a 4x4 pixmap with sequential pixel values.
+	data := make([]byte, w*h*bpp)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			off := (y*w + x) * bpp
+			v := byte(y*w + x)
+			data[off+0] = v
+			data[off+1] = v
+			data[off+2] = v
+			data[off+3] = 255
+		}
+	}
+
+	tests := []struct {
+		name string
+		r    image.Rectangle
+		want []byte
+	}{
+		{
+			name: "top-left 2x2",
+			r:    image.Rect(0, 0, 2, 2),
+			want: []byte{
+				0, 0, 0, 255, 1, 1, 1, 255, // row 0: px(0,0), px(1,0)
+				4, 4, 4, 255, 5, 5, 5, 255, // row 1: px(0,1), px(1,1)
+			},
+		},
+		{
+			name: "center 2x2",
+			r:    image.Rect(1, 1, 3, 3),
+			want: []byte{
+				5, 5, 5, 255, 6, 6, 6, 255, // row 1: px(1,1), px(2,1)
+				9, 9, 9, 255, 10, 10, 10, 255, // row 2: px(1,2), px(2,2)
+			},
+		},
+		{
+			name: "single pixel",
+			r:    image.Rect(3, 3, 4, 4),
+			want: []byte{15, 15, 15, 255},
+		},
+		{
+			name: "full row",
+			r:    image.Rect(0, 2, 4, 3),
+			want: []byte{
+				8, 8, 8, 255, 9, 9, 9, 255, 10, 10, 10, 255, 11, 11, 11, 255,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Canvas{}
+			got := c.extractRegion(data, w, tt.r)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(extractRegion) = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("byte[%d] = %d, want %d", i, got[i], tt.want[i])
+					break
+				}
+			}
+		})
 	}
 }

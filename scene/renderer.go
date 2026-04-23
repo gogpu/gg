@@ -295,9 +295,10 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 	// Mark all tiles dirty for full render
 	r.dirty.MarkAll()
 
-	// Get the flattened encoding
+	// Get the flattened encoding and image registry
 	startEncode := time.Now()
 	enc := scene.Encoding()
+	images := scene.Images()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -313,7 +314,7 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 
 	// Render tiles in parallel with context
 	startRaster := time.Now()
-	if err := r.renderTilesWithContext(ctx, tiles, enc, target); err != nil {
+	if err := r.renderTilesWithContext(ctx, tiles, enc, target, images); err != nil {
 		return err
 	}
 	rasterTime := time.Since(startRaster)
@@ -379,9 +380,10 @@ func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap
 		dirtyRegion = r.dirty
 	}
 
-	// Get the flattened encoding
+	// Get the flattened encoding and image registry
 	startEncode := time.Now()
 	enc := scene.Encoding()
+	images := scene.Images()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -409,7 +411,7 @@ func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap
 
 	// Render dirty tiles in parallel with context
 	startRaster := time.Now()
-	if err := r.renderTilesWithContext(ctx, tiles, enc, target); err != nil {
+	if err := r.renderTilesWithContext(ctx, tiles, enc, target, images); err != nil {
 		return err
 	}
 	rasterTime := time.Since(startRaster)
@@ -436,7 +438,7 @@ func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap
 
 // renderTilesWithContext renders the scene encoding to the specified tiles in parallel
 // with cancellation support.
-func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel.Tile, enc *Encoding, target *gg.Pixmap) error {
+func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel.Tile, enc *Encoding, target *gg.Pixmap, images []*Image) error {
 	if len(tiles) == 0 || enc == nil || enc.IsEmpty() {
 		return nil
 	}
@@ -463,7 +465,7 @@ func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel
 			default:
 			}
 		}
-		r.renderTile(tiles[i], enc, target)
+		r.renderTile(tiles[i], enc, target, images)
 	})
 
 	// Check if context was canceled during execution
@@ -476,7 +478,7 @@ func (r *Renderer) renderTilesWithContext(ctx context.Context, tiles []*parallel
 }
 
 // renderTile renders the scene encoding to a single tile.
-func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap) {
+func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap, images []*Image) {
 	if tile == nil || enc == nil {
 		return
 	}
@@ -507,7 +509,7 @@ func (r *Renderer) renderTile(tile *parallel.Tile, enc *Encoding, _ *gg.Pixmap) 
 	dec := r.pool.getDecoder(enc)
 
 	// Render commands using gg.SoftwareRenderer
-	r.executeEncodingOnTile(dec, tile, pm, sr)
+	r.executeEncodingOnTile(dec, tile, pm, sr, images)
 
 	// Copy rendered pixmap data into the tile buffer.
 	// Pixmap stores premultiplied RGBA, same as tile.Data.
@@ -534,7 +536,7 @@ type tileClipState struct {
 // rasterization to gg.SoftwareRenderer for analytic anti-aliased output.
 //
 //nolint:gocyclo,cyclop,gocognit,funlen // Command interpreter with multiple cases is inherently complex
-func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
+func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer, images []*Image) {
 	// Reusable scene.Path for the decode loop — reset per TagBeginPath instead of allocating.
 	currentPath := r.pool.getScenePath()
 	defer r.pool.putScenePath(currentPath)
@@ -685,8 +687,13 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			}
 
 		case TagImage:
-			// Image rendering - skip for now
-			_, _ = dec.Image()
+			imageIndex, imgTransform := dec.Image()
+			if int(imageIndex) < len(images) {
+				img := images[imageIndex]
+				if img != nil && len(img.Data) >= img.Width*img.Height*4 {
+					blitImageToTile(img, imgTransform, tileX, tileY, activePM)
+				}
+			}
 
 		case TagBrush:
 			// Brush definition - skip for now
@@ -879,6 +886,117 @@ func clampByte(v float32) byte {
 		return 255
 	}
 	return byte(v + 0.5)
+}
+
+// blitImageToTile composites a scene image onto a tile pixmap using the given
+// affine transform. The transform maps image-space coordinates to canvas-space.
+// For each destination pixel in the tile, the inverse transform computes the
+// corresponding source pixel in the image. This supports translation, scale,
+// and rotation in a single codepath (standard inverse-mapping approach used
+// by Cairo and Skia).
+//
+// Image.Data is treated as straight-alpha RGBA; the pixmap uses premultiplied
+// alpha. Source pixels are premultiplied during compositing.
+//
+//nolint:gosec // G115: Integer conversions are bounded by image/tile dimensions
+func blitImageToTile(img *Image, transform Affine, tileX, tileY int, pm *gg.Pixmap) {
+	tileW := pm.Width()
+	tileH := pm.Height()
+	pmData := pm.Data()
+	stride := tileW * 4
+
+	imgW := img.Width
+	imgH := img.Height
+	imgData := img.Data
+	imgStride := imgW * 4
+
+	// Compute inverse transform: canvas-space -> image-space.
+	// For affine [A B C; D E F; 0 0 1], det = A*E - B*D.
+	det := transform.A*transform.E - transform.B*transform.D
+	if det == 0 {
+		return // Degenerate transform
+	}
+	invDet := 1.0 / det
+	inv := Affine{
+		A: transform.E * invDet,
+		B: -transform.B * invDet,
+		C: (transform.B*transform.F - transform.E*transform.C) * invDet,
+		D: -transform.D * invDet,
+		E: transform.A * invDet,
+		F: (transform.D*transform.C - transform.A*transform.F) * invDet,
+	}
+
+	// Compute the image bounding box in canvas space to limit iteration.
+	corners := [4][2]float32{
+		{0, 0},
+		{float32(imgW), 0},
+		{float32(imgW), float32(imgH)},
+		{0, float32(imgH)},
+	}
+	bboxMinX, bboxMinY := corners[0][0], corners[0][1]
+	bboxMaxX, bboxMaxY := bboxMinX, bboxMinY
+	for _, c := range corners {
+		cx, cy := transform.TransformPoint(c[0], c[1])
+		bboxMinX = min32(bboxMinX, cx)
+		bboxMinY = min32(bboxMinY, cy)
+		bboxMaxX = max32(bboxMaxX, cx)
+		bboxMaxY = max32(bboxMaxY, cy)
+	}
+
+	// Clip to tile bounds (tile-local coordinates).
+	startX := max(int(bboxMinX)-tileX, 0)
+	startY := max(int(bboxMinY)-tileY, 0)
+	endX := min(int(bboxMaxX)-tileX+1, tileW)
+	endY := min(int(bboxMaxY)-tileY+1, tileH)
+
+	for py := startY; py < endY; py++ {
+		canvasY := float32(py+tileY) + 0.5
+		rowOff := py * stride
+		for px := startX; px < endX; px++ {
+			canvasX := float32(px+tileX) + 0.5
+
+			// Map canvas pixel center back to image space.
+			srcX, srcY := inv.TransformPoint(canvasX, canvasY)
+			ix := int(srcX)
+			iy := int(srcY)
+			if ix < 0 || iy < 0 || ix >= imgW || iy >= imgH {
+				continue
+			}
+
+			srcOff := iy*imgStride + ix*4
+			sa := imgData[srcOff+3]
+			if sa == 0 {
+				continue
+			}
+
+			dstOff := rowOff + px*4
+			if dstOff+3 >= len(pmData) {
+				continue
+			}
+
+			// Source is straight alpha — premultiply for compositing.
+			if sa == 255 {
+				// Fully opaque: overwrite (premultiplied == straight when A=255).
+				pmData[dstOff] = imgData[srcOff]
+				pmData[dstOff+1] = imgData[srcOff+1]
+				pmData[dstOff+2] = imgData[srcOff+2]
+				pmData[dstOff+3] = 255
+			} else {
+				// Premultiply source: pR = R * A / 255
+				srcA := uint32(sa)
+				pR := uint8((uint32(imgData[srcOff])*srcA + 127) / 255)
+				pG := uint8((uint32(imgData[srcOff+1])*srcA + 127) / 255)
+				pB := uint8((uint32(imgData[srcOff+2])*srcA + 127) / 255)
+
+				// Source-over: dst' = src + dst * (1 - srcAlpha)
+				invAlpha := 255 - srcA
+				pmData[dstOff] = pR + uint8((uint32(pmData[dstOff])*invAlpha+127)/255)
+				pmData[dstOff+1] = pG + uint8((uint32(pmData[dstOff+1])*invAlpha+127)/255)
+				pmData[dstOff+2] = pB + uint8((uint32(pmData[dstOff+2])*invAlpha+127)/255)
+				pmData[dstOff+3] = sa + uint8((uint32(pmData[dstOff+3])*invAlpha+127)/255)
+			}
+		}
+	}
 }
 
 // convertPathInto converts a scene.Path (float32, canvas space) into an existing

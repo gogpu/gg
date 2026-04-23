@@ -154,7 +154,8 @@ Five algorithms are available, each optimal for different scenarios:
 
 | Algorithm | Type | Tiles | Origin | Optimal For | Location |
 |-----------|------|-------|--------|-------------|----------|
-| **AnalyticFiller** | CPU | — (scanline) | Coverage: Vello fine.rs; Edges: tiny-skia/Skia | Simple paths, small shapes | `internal/raster/` |
+| **AnalyticFiller** | CPU | — (scanline) | Skia AAA (pixel-perfect port of Chrome/Android rasterizer) | General paths, small shapes | `internal/raster/` |
+| **AnalyticFiller Convex** | CPU | — (scanline) | Skia AAA convex fast path (1.6x faster) | Convex shapes (rect, circle, triangle) | `internal/raster/` |
 | **SparseStrips** | CPU | 4×4 | Vello sparse_strips | Complex paths, CPU/SIMD workloads | `internal/gpu/sparse_strips*.go`, `fine.go`, `coarse.go` |
 | **TileCompute** | CPU | 16×16 | Vello 9-stage compute (CPU port) | Extreme complexity (10K+ segments) | `internal/gpu/tilecompute/` |
 | **SDFAccelerator** | CPU+GPU | — (per-pixel) | Original (gg) | Geometric shapes (circles, rrects) | `sdf_accelerator.go`, `internal/gpu/sdf_gpu.go` |

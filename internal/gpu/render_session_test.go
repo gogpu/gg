@@ -522,11 +522,15 @@ func TestRenderSessionSurfaceMode(t *testing.T) {
 	}
 
 	// Render a frame with SDF shapes in surface mode.
+	// Pass the view through GPURenderTarget.View (per-pass routing).
 	target := gg.GPURenderTarget{
-		Width:  800,
-		Height: 600,
-		Data:   make([]uint8, 800*600*4),
-		Stride: 800 * 4,
+		View:       view,
+		ViewWidth:  800,
+		ViewHeight: 600,
+		Width:      800,
+		Height:     600,
+		Data:       make([]uint8, 800*600*4),
+		Stride:     800 * 4,
 	}
 	shapes := []SDFRenderShape{
 		{
