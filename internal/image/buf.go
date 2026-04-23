@@ -7,6 +7,7 @@ package image
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 // Common errors for image operations.
@@ -35,12 +36,18 @@ var (
 //
 // Thread safety: ImageBuf is safe for concurrent read access. Write operations
 // (Set*, Clear, InvalidatePremulCache) require external synchronization.
+// nextImageBufGenID is a process-global monotonic counter for ImageBuf identity.
+// Follows the Skia SkPixelRef::getGenerationID() pattern (ADR-014).
+var nextImageBufGenID atomic.Uint64
+
+// ImageBuf is a memory-efficient image buffer with support for multiple pixel formats.
 type ImageBuf struct {
 	data   []byte
 	width  int
 	height int
 	stride int
 	format Format
+	genID  uint64 // Unique generation ID for GPU texture cache keying
 
 	// Lazy premultiplication cache
 	premulMu    sync.RWMutex
@@ -63,6 +70,7 @@ func NewImageBuf(width, height int, format Format) (*ImageBuf, error) {
 
 	return &ImageBuf{
 		data:   data,
+		genID:  nextImageBufGenID.Add(1),
 		width:  width,
 		height: height,
 		stride: stride,
@@ -89,6 +97,7 @@ func NewImageBufWithStride(width, height int, format Format, stride int) (*Image
 
 	return &ImageBuf{
 		data:   data,
+		genID:  nextImageBufGenID.Add(1),
 		width:  width,
 		height: height,
 		stride: stride,
@@ -119,6 +128,7 @@ func FromRaw(data []byte, width, height int, format Format, stride int) (*ImageB
 
 	return &ImageBuf{
 		data:   data[:requiredSize],
+		genID:  nextImageBufGenID.Add(1),
 		width:  width,
 		height: height,
 		stride: stride,
@@ -133,6 +143,7 @@ func (b *ImageBuf) Clone() *ImageBuf {
 
 	return &ImageBuf{
 		data:   newData,
+		genID:  nextImageBufGenID.Add(1),
 		width:  b.width,
 		height: b.height,
 		stride: b.stride,
@@ -154,6 +165,12 @@ func (b *ImageBuf) Height() int {
 // Stride returns the number of bytes per row (including padding).
 func (b *ImageBuf) Stride() int {
 	return b.stride
+}
+
+// GenerationID returns the unique identifier for this image buffer's content.
+// Used by GPU texture cache to avoid stale texture reuse (ADR-014).
+func (b *ImageBuf) GenerationID() uint64 {
+	return b.genID
 }
 
 // Format returns the pixel format.
@@ -416,6 +433,7 @@ func (b *ImageBuf) SubImage(x, y, width, height int) *ImageBuf {
 
 	return &ImageBuf{
 		data:   b.data[offset:endOffset],
+		genID:  nextImageBufGenID.Add(1),
 		width:  width,
 		height: height,
 		stride: b.stride, // Keep original stride for proper row access

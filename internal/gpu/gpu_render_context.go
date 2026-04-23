@@ -162,12 +162,13 @@ func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch
 
 // QueueImageDraw accumulates an image draw command for Tier 3 dispatch.
 // Parameters are kept primitive to avoid import cycles (gg root -> internal/gpu).
-func (rc *GPURenderContext) QueueImageDraw(target gg.GPURenderTarget, pixelData []byte, imgWidth, imgHeight, imgStride int,
+func (rc *GPURenderContext) QueueImageDraw(target gg.GPURenderTarget, pixelData []byte, genID uint64, imgWidth, imgHeight, imgStride int,
 	dstX, dstY, dstW, dstH, opacity float32, viewportW, viewportH uint32,
 	u0, v0, u1, v1 float32,
 ) {
 	cmd := ImageDrawCommand{
 		PixelData:      pixelData,
+		GenerationID:   genID,
 		ImgWidth:       imgWidth,
 		ImgHeight:      imgHeight,
 		ImgStride:      imgStride,

@@ -39,10 +39,11 @@ const imageUniformSize = 80
 // session. All coordinates are in device pixels (post-CTM).
 type ImageDrawCommand struct {
 	// Image pixel data (premultiplied RGBA, row-major).
-	PixelData []byte
-	ImgWidth  int
-	ImgHeight int
-	ImgStride int
+	PixelData    []byte
+	GenerationID uint64 // Pixmap.GenerationID() — GPU cache key (ADR-014)
+	ImgWidth     int
+	ImgHeight    int
+	ImgStride    int
 
 	// Destination quad in device pixels (4 corners: TL, TR, BL, BR).
 	DstX, DstY     float32 // top-left position
