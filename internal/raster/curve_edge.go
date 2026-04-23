@@ -72,11 +72,37 @@ type LineEdge struct {
 	// DX is the slope: change in X per scanline (in FDot16).
 	DX FDot16
 
-	// FirstY is the first scanline this edge covers.
+	// FirstY is the first scanline this edge covers (integer sub-pixel row, for AET).
 	FirstY int32
 
-	// LastY is the last scanline this edge covers (inclusive).
+	// LastY is the last scanline this edge covers (inclusive, integer sub-pixel row, for AET).
 	LastY int32
+
+	// UpperY is the precise upper Y endpoint in FDot16 (16.16 fixed-point).
+	// Used by AnalyticFiller for sub-strip boundary computation (Skia AAA precision).
+	// When zero, falls back to FirstY-based computation.
+	UpperY FDot16
+
+	// LowerY is the precise lower Y endpoint in FDot16 (16.16 fixed-point).
+	// Used by AnalyticFiller for sub-strip boundary computation (Skia AAA precision).
+	// When zero, falls back to LastY-based computation.
+	LowerY FDot16
+
+	// UpperX is the X position at UpperY in pixel-space SkFixed (16.16).
+	// Computed using Skia's exact setLine() conversion chain to avoid rounding
+	// errors from sub-pixel-to-pixel division. Only set for line edges created
+	// by NewLineEdge (zero for curve sub-segments).
+	// Used by computeEdgeX via Skia's goY(): X(Y) = UpperX + PixelDX*(Y-UpperY).
+	UpperX int32
+
+	// PixelDX is the slope in pixel-space SkFixed (16.16), matching Skia's fDX.
+	PixelDX int32
+
+	// PixelDY is Skia's fDY = abs(1/slope) for partialTriangleToAlpha.
+	// Computed as abs(FDot6Div(dy_fdot6, dx_fdot6)) from ORIGINAL pixel-space
+	// edge coordinates, matching SkAnalyticEdge::setLine line 197-199.
+	// NOT derived from PixelDX (1/slope ≠ FDot6Div(dy,dx) due to integer rounding).
+	PixelDY int32
 
 	// Winding indicates direction: +1 for downward, -1 for upward.
 	Winding int8
@@ -92,7 +118,7 @@ type LineEdge struct {
 //
 //nolint:gosec // G115: shift is bounded [0, MaxCoeffShift], conversions are safe
 func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
-	// Convert to FDot6 with AA scaling.
+	// Convert to FDot6 with AA scaling (truncation, matching Skia's SkScalarToFDot6).
 	// Scale = 1 << (shift + 6), e.g., 64 for no AA, 256 for 4x AA.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
 	x0 := int32(p0.X * scale)
@@ -100,11 +126,38 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	x1 := int32(p1.X * scale)
 	y1 := int32(p1.Y * scale)
 
+	// --- Skia AAA pixel-space fields (SkAnalyticEdge::setLine exact port) ---
+	//
+	// Skia's setLine() ALWAYS uses kDefaultAccuracy=2 (multiplier=4) for
+	// pixel-space coordinates, regardless of the AA shift used for sub-pixel
+	// edge construction. This ensures consistent edge ordering with quads/cubics.
+	//
+	// Conversion chain:
+	//   x = SkFDot6ToFixed(SkScalarToFDot6(p.fX * 4)) >> 2
+	//     = (int(p.fX * 4 * 64) << 10) >> 2  =  int(p.fX * 256) << 8
+	//   y = SnapY(same formula for Y)
+	//
+	// All values are in SkFixed (16.16 pixel-space).
+	const skiaAccuracy = 2                          // kDefaultAccuracy
+	const skiaMultiplier = int32(1) << skiaAccuracy // 4
+	// SkScalarToFDot6(p.X * multiplier) = int(p.X * multiplier * 64) = int(p.X * 256)
+	skX0 := int32(p0.X * float32(skiaMultiplier) * 64.0)
+	skY0 := int32(p0.Y * float32(skiaMultiplier) * 64.0)
+	skX1 := int32(p1.X * float32(skiaMultiplier) * 64.0)
+	skY1 := int32(p1.Y * float32(skiaMultiplier) * 64.0)
+	// SkFDot6ToFixed(v) >> accuracy = (v << 10) >> 2 = v << 8
+	pxX0 := leftShift(skX0, 10-skiaAccuracy)
+	pxY0 := snapY(leftShift(skY0, 10-skiaAccuracy))
+	pxX1 := leftShift(skX1, 10-skiaAccuracy)
+	pxY1 := snapY(leftShift(skY1, 10-skiaAccuracy))
+
 	winding := int8(1)
 	if y0 > y1 {
 		// Swap to ensure y0 <= y1 (edge goes downward)
 		x0, x1 = x1, x0
 		y0, y1 = y1, y0
+		pxX0, pxX1 = pxX1, pxX0
+		pxY0, pxY1 = pxY1, pxY0
 		winding = -1
 	}
 
@@ -119,15 +172,63 @@ func NewLineEdge(p0, p1 CurvePoint, shift int) (LineEdge, bool) {
 	slope := FDot6Div(x1-x0, y1-y0)
 	dy := computeDY(top, y0)
 
+	// Skia pixel-space slope: SkFDot6Div(SkFixedToFDot6(pxX1-pxX0), SkFixedToFDot6(pxY1-pxY0))
+	// SkFixedToFDot6(v) = v >> 10
+	pxDx := (pxX1 - pxX0) >> 10
+	pxDy := (pxY1 - pxY0) >> 10
+	var pixelDX int32
+	if pxDy == 0 {
+		// Horizontal line in pixel space — should not happen (top != bottom),
+		// but guard anyway.
+		pixelDX = 0
+	} else {
+		pixelDX = FDot6Div(pxDx, pxDy)
+	}
+
+	// Skia's fDY = abs(1/slope) for partialTriangleToAlpha.
+	// Computed as abs(FDot6Div(dy, dx)) from pixel-space FDot6 (NOT 1/slope).
+	// Matches SkAnalyticEdge.cpp:197-199.
+	var pixelDY int32
+	if pxDx == 0 || pixelDX == 0 {
+		pixelDY = 0x7FFFFFFF
+	} else {
+		absDx := pxDx
+		if absDx < 0 {
+			absDx = -absDx
+		}
+		absDy := pxDy
+		if absDy < 0 {
+			absDy = -absDy
+		}
+		pixelDY = FDot6Div(absDy, absDx)
+		if pixelDY < 0 {
+			pixelDY = 0x7FFFFFFF
+		}
+	}
+
 	return LineEdge{
-		Prev:    -1, // No link
-		Next:    -1, // No link
+		Prev:    -1,
+		Next:    -1,
 		X:       FDot6ToFDot16(x0 + FDot16Mul(slope, dy)),
 		DX:      slope,
 		FirstY:  top,
 		LastY:   bottom - 1,
+		UpperY:  pxY0,
+		LowerY:  pxY1,
+		UpperX:  pxX0,
+		PixelDX: pixelDX,
+		PixelDY: pixelDY,
 		Winding: winding,
 	}, true
+}
+
+// snapY applies Skia's SnapY rounding (SkAnalyticEdge.h:52) with accuracy=2.
+// Rounds FDot16 Y to nearest 1/4 pixel boundary.
+func snapY(y FDot16) FDot16 {
+	const accuracy = 2
+	const half = int32(1) << (16 - accuracy - 1)
+	const mask = ^(int32(1)<<(16-accuracy) - 1)
+	return (y + half) & mask
 }
 
 // IsVertical returns true if the edge has zero slope.
@@ -138,6 +239,11 @@ func (e *LineEdge) IsVertical() bool {
 // update updates the line edge for a new line segment.
 // Called by QuadraticEdge and CubicEdge during stepping.
 // Returns true if a valid segment was produced.
+//
+// Note: UpperY/LowerY are NOT set here because the y0/y1 values from curve
+// forward differencing are in the FDot6-scaled coordinate system (not pixel-
+// space FDot16). Only NewLineEdge sets precise pixel-space UpperY/LowerY.
+// Curve segments are already subdivided finely, so FDot6-rounded Y is adequate.
 func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
 	// Convert from FDot16 to FDot6 (shift right by 10)
 	y0 >>= (FDot16Shift - FDot6Shift)
@@ -161,6 +267,9 @@ func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
 	e.DX = slope
 	e.FirstY = top
 	e.LastY = bottom - 1
+	// Clear precise Y — curve segments use FDot6 system, not pixel-space FDot16.
+	e.UpperY = 0
+	e.LowerY = 0
 
 	return true
 }

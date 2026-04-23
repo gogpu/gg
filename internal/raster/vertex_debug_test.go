@@ -151,20 +151,20 @@ func TestEdgePosition_NoDrift(t *testing.T) {
 	}
 }
 
-// TestCoverageToRuns_MergedRunAlpha verifies that merged runs in coverageToRuns
+// TestCoverageToRuns_MergedRunAlpha verifies that merged runs in coverageToRunsFromBuffer
 // preserve the actual alpha value (not maxValue=255).
 func TestCoverageToRuns_MergedRunAlpha(t *testing.T) {
 	af := NewAnalyticFiller(10, 1)
 
-	// Simulate a scanline where pixels 3,4,5 all have 50% coverage
+	// Simulate a scanline where pixels 3,4,5 all have 50% coverage (127/255)
 	for i := range af.coverage {
 		af.coverage[i] = 0
 	}
-	af.coverage[3] = 0.5
-	af.coverage[4] = 0.5 // same as pixel 3 — will be merged into a run
-	af.coverage[5] = 0.5
+	af.coverage[3] = 127
+	af.coverage[4] = 127 // same as pixel 3 — will be merged into a run
+	af.coverage[5] = 127
 
-	af.coverageToRuns()
+	af.coverageToRunsFromBuffer()
 
 	// All three pixels should have alpha=127 (50%), not 255
 	for x := 3; x <= 5; x++ {
@@ -172,7 +172,7 @@ func TestCoverageToRuns_MergedRunAlpha(t *testing.T) {
 		if alpha > 200 {
 			t.Errorf("pixel %d: alpha=%d, expected ~127 (50%%). Bug: merged run used maxValue=255", x, alpha)
 		}
-		expected := uint8(127) // 0.5 * 255
+		expected := uint8(127) // 50% coverage
 		diff := int(alpha) - int(expected)
 		if diff < 0 {
 			diff = -diff
