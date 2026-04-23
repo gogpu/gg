@@ -101,6 +101,11 @@ func (c *Context) DrawString(s string, x, y float64) {
 // in the vertex shader, enabling correct scaling, rotation, and skew of text.
 // Returns true if GPU text rendering was successful (queued for batch render).
 func (c *Context) tryGPUText(s string, x, y float64) bool {
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.DrawText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+	}
 	a := Accelerator()
 	if a == nil {
 		return false
@@ -112,10 +117,7 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	if !ok {
 		return false
 	}
-	col := FromColor(c.currentColor())
-	target := c.gpuRenderTarget()
-	err := ta.DrawText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale)
-	return err == nil
+	return ta.DrawText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
 }
 
 // glyphMaskMaxSize is the maximum font size (in device pixels) for which
@@ -128,6 +130,11 @@ const glyphMaskMaxSize = 48.0
 // R8 alpha atlas, then drawn as textured quads by the GPU.
 // Returns true if text was successfully queued for glyph mask rendering.
 func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.DrawGlyphMaskText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+	}
 	a := Accelerator()
 	if a == nil {
 		return false
@@ -136,10 +143,7 @@ func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
 	if !ok {
 		return false
 	}
-	col := FromColor(c.currentColor())
-	target := c.gpuRenderTarget()
-	err := gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale)
-	return err == nil
+	return gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
 }
 
 // selectTextStrategy returns the effective text rendering strategy.

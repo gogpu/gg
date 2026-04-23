@@ -1136,6 +1136,8 @@ type gpuContextOps interface {
 	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
 	FillPath(target GPURenderTarget, path *Path, paint *Paint) error
 	StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
+	DrawText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+	DrawGlyphMaskText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 	Flush(target GPURenderTarget) error
 	SetClipRect(x, y, w, h uint32)
 	ClearClipRect()
