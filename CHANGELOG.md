@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-04-23
+
+### Fixed
+
+- **GPU ImageCache stale texture** (BUG-GPU-IMAGECACHE-001, ADR-014) — replaced pointer-based
+  cache key (`&data[0]`) with monotonic `Pixmap.GenerationID()` (process-global `atomic.Uint64`).
+  Prevents stale GPU texture reuse when Go GC reuses freed memory addresses. Follows Skia's
+  `SkPixelRef::getGenerationID()` pattern, validated by 4 enterprise frameworks.
+  - `Pixmap`: new `GenerationID()`, `NotifyPixelsChanged()` methods
+  - `ImageBuf`: new `GenerationID()` method
+  - `ImageCache`: keyed by `uint64` genID, `unsafe` import removed
+
+- **GPU DrawImage ignores clip** (BUG-GPU-DRAWIMAGE-CLIP-001) — `tryGPUDrawImage()` was missing
+  `setGPUClipRect()` call. Textured quads from DrawImage now respect scissor/clip boundaries
+  (ScrollView, ClipRect). One-line fix matching all other GPU operations.
+
+### Changed
+
+- **Dependencies:** wgpu v0.25.2 → v0.25.3
+
 ## [0.41.0] - 2026-04-23
 
 ### Added
