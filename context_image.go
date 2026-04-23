@@ -172,6 +172,13 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 		dstHeight = float64(srcH)
 	}
 
+	// Try GPU textured quad path first (Tier 3).
+	// This avoids the SetFillPattern→Fill() path which triggers mid-frame
+	// CPU flushes when GPU is active (the ImagePattern fallback problem).
+	if c.tryGPUDrawImage(img, opts, srcX, srcY, srcW, srcH, dstWidth, dstHeight) {
+		return
+	}
+
 	// Compute scale factors for the image pattern.
 	// The pattern maps source pixels to destination pixels.
 	scaleX := dstWidth / float64(srcW)
@@ -219,6 +226,65 @@ func (c *Context) DrawImageEx(img *ImageBuf, opts DrawImageOptions) {
 	_ = c.Fill()
 
 	c.Pop()
+}
+
+// tryGPUDrawImage attempts to render the image via GPU Tier 3 (textured quad).
+// Returns true if the image was queued for GPU rendering, false if the caller
+// should fall back to the CPU SetFillPattern→Fill() path.
+func (c *Context) tryGPUDrawImage(img *ImageBuf, opts DrawImageOptions, srcX, srcY, srcW, srcH int, dstWidth, dstHeight float64) bool {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return false
+	}
+
+	// Compute the destination quad corners in device pixels.
+	// The CTM transforms user-space (opts.X, opts.Y) + (dstWidth, dstHeight)
+	// into device-space coordinates.
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(opts.X, opts.Y))
+	br := ctm.TransformPoint(Pt(opts.X+dstWidth, opts.Y+dstHeight))
+
+	// For rotated/skewed transforms the quad is not axis-aligned.
+	// Tier 3 currently supports only axis-aligned quads. Check if the
+	// transform is translation+scale only (no rotation/skew).
+	tr := ctm.TransformPoint(Pt(opts.X+dstWidth, opts.Y))
+	if !isAxisAligned(tl, tr, br) {
+		return false
+	}
+
+	target := c.gpuRenderTarget()
+	vpW := uint32(target.Width)  //nolint:gosec // viewport fits uint32
+	vpH := uint32(target.Height) //nolint:gosec // viewport fits uint32
+
+	// Compute source UV rectangle (normalized 0..1 within the image).
+	imgW, imgH := img.Bounds()
+	u0 := float32(srcX) / float32(imgW)
+	v0 := float32(srcY) / float32(imgH)
+	u1 := float32(srcX+srcW) / float32(imgW)
+	v1 := float32(srcY+srcH) / float32(imgH)
+
+	// Get premultiplied pixel data for GPU upload.
+	pixelData := img.PremultipliedData()
+	if len(pixelData) == 0 {
+		return false
+	}
+
+	rc.QueueImageDraw(target, pixelData, imgW, imgH, img.Stride(),
+		float32(tl.X), float32(tl.Y), float32(br.X-tl.X), float32(br.Y-tl.Y),
+		float32(opts.Opacity), vpW, vpH, u0, v0, u1, v1)
+	return true
+}
+
+// isAxisAligned checks whether the transform produces an axis-aligned quad.
+// For an axis-aligned quad, the top-right corner must have the same Y as
+// the top-left, meaning the top edge is horizontal.
+func isAxisAligned(tl, tr, br Point) bool {
+	const epsilon = 0.01
+	dy := tr.Y - tl.Y
+	dx := br.X - tr.X
+	// Top edge horizontal: tr.Y == tl.Y
+	// Right edge vertical: br.X == tr.X
+	return dy*dy < epsilon*epsilon && dx*dx < epsilon*epsilon
 }
 
 // CreateImagePattern creates an image pattern from a rectangular region of an image.

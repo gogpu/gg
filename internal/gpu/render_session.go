@@ -29,6 +29,7 @@ type ScissorGroup struct {
 	SDFShapes        []SDFRenderShape
 	ConvexCommands   []ConvexDrawCommand
 	StencilPaths     []StencilPathCommand
+	ImageCommands    []ImageDrawCommand
 	TextBatches      []TextBatch
 	GlyphMaskBatches []GlyphMaskBatch
 }
@@ -104,6 +105,8 @@ type GPURenderSession struct {
 	sdfPipeline     *SDFRenderPipeline
 	convexRenderer  *ConvexRenderer
 	stencilRenderer *StencilRenderer
+	imagePipeline   *TexturedQuadPipeline
+	imageCache      *ImageCache
 	textPipeline    *MSDFTextPipeline
 
 	// Surface rendering mode fields. When surfaceView is non-nil, the session
@@ -122,6 +125,13 @@ type GPURenderSession struct {
 	convexVertBufCap uint64
 	convexUniformBuf *wgpu.Buffer
 	convexBindGroup  *wgpu.BindGroup
+
+	// Tier 3: Image textured quad persistent buffers.
+	imageVertBuf    *wgpu.Buffer
+	imageVertBufCap uint64
+	// Per-draw uniform buffers and bind groups (pool, grows as needed).
+	imageUniformBufs []*wgpu.Buffer
+	imageBindGroups  []*wgpu.BindGroup
 
 	// Tier 4: MSDF text persistent buffers.
 	textVertBuf    *wgpu.Buffer
@@ -484,6 +494,7 @@ type groupResources struct {
 	convexRes     *convexFrameResources
 	stencilRes    []*stencilCoverBuffers
 	stencilPaths  []StencilPathCommand
+	imageRes      *imageFrameResources
 	textRes       *textFrameResources
 	glyphMaskRes  *glyphMaskFrameResources
 }
@@ -495,7 +506,7 @@ type groupResources struct {
 //
 // For frames with no scissor changes (single group with nil rect), this
 // behaves identically to the original RenderFrame.
-func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error { //nolint:gocognit,gocyclo,cyclop,funlen // sequential resource setup + group dispatch
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
 	if len(groups) == 0 {
 		return nil
 	}
@@ -504,7 +515,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	totalItems := 0
 	for i := range groups {
 		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
-			len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
+			len(groups[i].ImageCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
 	}
 	if totalItems == 0 {
 		return nil
@@ -537,6 +548,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	var allSDF []SDFRenderShape
 	var allConvex []ConvexDrawCommand
 	var allStencil []StencilPathCommand
+	var allImage []ImageDrawCommand
 	var allText []TextBatch
 	var allGlyph []GlyphMaskBatch
 
@@ -544,6 +556,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		sdfStart, sdfCount         int
 		convexStart, convexCount   int
 		stencilStart, stencilCount int
+		imageStart, imageCount     int
 		textStart, textCount       int
 		glyphStart, glyphCount     int
 	}
@@ -555,12 +568,14 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 			sdfStart: len(allSDF), sdfCount: len(g.SDFShapes),
 			convexStart: len(allConvex), convexCount: len(g.ConvexCommands),
 			stencilStart: len(allStencil), stencilCount: len(g.StencilPaths),
+			imageStart: len(allImage), imageCount: len(g.ImageCommands),
 			textStart: len(allText), textCount: len(g.TextBatches),
 			glyphStart: len(allGlyph), glyphCount: len(g.GlyphMaskBatches),
 		}
 		allSDF = append(allSDF, g.SDFShapes...)
 		allConvex = append(allConvex, g.ConvexCommands...)
 		allStencil = append(allStencil, g.StencilPaths...)
+		allImage = append(allImage, g.ImageCommands...)
 		allText = append(allText, g.TextBatches...)
 		allGlyph = append(allGlyph, g.GlyphMaskBatches...)
 	}
@@ -591,6 +606,15 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 			return fmt.Errorf("build stencil resources: %w", err)
 		}
 		combinedStencilRes = res
+	}
+
+	var combinedImageRes *imageFrameResources
+	if len(allImage) > 0 {
+		res, err := s.buildImageResources(allImage, w, h)
+		if err != nil {
+			return fmt.Errorf("build image resources: %w", err)
+		}
+		combinedImageRes = res
 	}
 
 	var combinedTextRes *textFrameResources
@@ -646,6 +670,12 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		// Stencil: per-path independent buffers, slice the combined array.
 		if o.stencilCount > 0 && len(combinedStencilRes) > 0 {
 			grpRes[i].stencilRes = combinedStencilRes[o.stencilStart : o.stencilStart+o.stencilCount]
+		}
+
+		// Image (Tier 3): per-draw independent bind groups, slice drawCalls.
+		if o.imageCount > 0 && combinedImageRes != nil {
+			grpRes[i].imageRes = s.sliceImageResources(
+				combinedImageRes, o.imageStart, o.imageCount)
 		}
 
 		// Text (MSDF): shared vertex/index buffers, slice drawCalls.
@@ -742,6 +772,33 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		s.convexVertBuf.Release()
 		s.convexVertBuf = nil
 		s.convexVertBufCap = 0
+	}
+	// Tier 3: Image per-draw pools.
+	for i, bg := range s.imageBindGroups {
+		if bg != nil {
+			bg.Release()
+			s.imageBindGroups[i] = nil
+		}
+	}
+	s.imageBindGroups = nil
+	for _, buf := range s.imageUniformBufs {
+		if buf != nil {
+			buf.Release()
+		}
+	}
+	s.imageUniformBufs = nil
+	if s.imageVertBuf != nil {
+		s.imageVertBuf.Release()
+		s.imageVertBuf = nil
+		s.imageVertBufCap = 0
+	}
+	if s.imageCache != nil {
+		s.imageCache.Destroy()
+		s.imageCache = nil
+	}
+	if s.imagePipeline != nil {
+		s.imagePipeline.Destroy()
+		s.imagePipeline = nil
 	}
 	// Tier 4: Text per-batch pools.
 	for i, bg := range s.textBindGroups {
@@ -878,6 +935,18 @@ func (s *GPURenderSession) ensurePipelines() error {
 		if err := s.stencilRenderer.createPipelines(); err != nil {
 			return fmt.Errorf("stencil pipelines: %w", err)
 		}
+	}
+
+	// Image pipeline (Tier 3) — lazily created alongside other pipelines.
+	if s.imagePipeline == nil {
+		s.imagePipeline = NewTexturedQuadPipeline(s.device, s.queue)
+	}
+	s.imagePipeline.SetClipBindLayout(s.clipBindLayout)
+	if err := s.imagePipeline.ensurePipelineWithStencil(); err != nil {
+		return fmt.Errorf("image pipeline: %w", err)
+	}
+	if s.imageCache == nil {
+		s.imageCache = NewImageCache(s.device, s.queue)
 	}
 
 	return nil
@@ -1442,6 +1511,127 @@ func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (
 		return nil, fmt.Errorf("build glyph mask resources: %w", err)
 	}
 	return res, nil
+}
+
+// buildImageResources creates GPU resources for all image draw commands in the
+// current frame. Each command gets its own uniform buffer + bind group (with
+// texture and sampler), but all share a single vertex buffer.
+func (s *GPURenderSession) buildImageResources(cmds []ImageDrawCommand, w, h uint32) (*imageFrameResources, error) {
+	if len(cmds) == 0 {
+		return nil, nil //nolint:nilnil // no images
+	}
+
+	// Build combined vertex data (6 verts per quad).
+	totalVertBytes := len(cmds) * 6 * imageVertexStride //nolint:mnd // 6 verts per quad
+	var allVertData []byte
+	for i := range cmds {
+		allVertData = append(allVertData, buildImageVertices(&cmds[i])...)
+	}
+
+	// Ensure persistent vertex buffer is large enough.
+	needed := uint64(totalVertBytes) //nolint:gosec // bounded by command count
+	if s.imageVertBuf == nil || s.imageVertBufCap < needed {
+		if s.imageVertBuf != nil {
+			s.imageVertBuf.Release()
+		}
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: "image_vert_buf",
+			Size:  needed,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create image vertex buffer: %w", err)
+		}
+		s.imageVertBuf = buf
+		s.imageVertBufCap = needed
+	}
+	if err := s.queue.WriteBuffer(s.imageVertBuf, 0, allVertData); err != nil {
+		return nil, fmt.Errorf("upload image vertices: %w", err)
+	}
+
+	// Grow the uniform buffer and bind group pools as needed.
+	for len(s.imageUniformBufs) < len(cmds) {
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: fmt.Sprintf("image_uniform_%d", len(s.imageUniformBufs)),
+			Size:  imageUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create image uniform buffer: %w", err)
+		}
+		s.imageUniformBufs = append(s.imageUniformBufs, buf)
+	}
+
+	// Release stale bind groups from previous frame.
+	for i := range s.imageBindGroups {
+		if s.imageBindGroups[i] != nil {
+			s.imageBindGroups[i].Release()
+			s.imageBindGroups[i] = nil
+		}
+	}
+
+	drawCalls := make([]imageDrawCall, 0, len(cmds))
+	for i := range cmds {
+		cmd := &cmds[i]
+
+		// Upload uniform data.
+		uniformData := makeImageUniform(w, h, cmd.Opacity)
+		if err := s.queue.WriteBuffer(s.imageUniformBufs[i], 0, uniformData); err != nil {
+			return nil, fmt.Errorf("upload image uniform %d: %w", i, err)
+		}
+
+		// Get or upload image texture.
+		texView, err := s.imageCache.GetOrUpload(cmd)
+		if err != nil {
+			slogger().Warn("image cache upload failed, skipping", "err", err)
+			continue
+		}
+
+		// Create bind group: uniform + texture + sampler.
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+			Label:  fmt.Sprintf("image_bind_%d", i),
+			Layout: s.imagePipeline.uniformLayout,
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: s.imageUniformBufs[i], Offset: 0, Size: imageUniformSize},
+				{Binding: 1, TextureView: texView},
+				{Binding: 2, Sampler: s.imagePipeline.sampler},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create image bind group %d: %w", i, err)
+		}
+
+		// Grow the bind group pool if needed.
+		for len(s.imageBindGroups) <= i {
+			s.imageBindGroups = append(s.imageBindGroups, nil)
+		}
+		s.imageBindGroups[i] = bg
+
+		drawCalls = append(drawCalls, imageDrawCall{
+			bindGroup:   bg,
+			firstVertex: uint32(i * 6), //nolint:gosec // bounded by command count, 6 verts per quad
+		})
+	}
+
+	return &imageFrameResources{
+		vertBuf:   s.imageVertBuf,
+		drawCalls: drawCalls,
+	}, nil
+}
+
+// sliceImageResources creates an imageFrameResources referencing a sub-range of
+// the combined drawCalls. One drawCall per ImageDrawCommand.
+func (s *GPURenderSession) sliceImageResources(
+	combined *imageFrameResources,
+	cmdStart, cmdCount int,
+) *imageFrameResources {
+	if cmdCount == 0 || combined == nil || cmdStart+cmdCount > len(combined.drawCalls) {
+		return nil
+	}
+	return &imageFrameResources{
+		vertBuf:   combined.vertBuf,
+		drawCalls: combined.drawCalls[cmdStart : cmdStart+cmdCount],
+	}
 }
 
 // ensureGlyphMaskPipeline creates the glyph mask pipeline on demand. Called
@@ -2023,6 +2213,11 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 	// Tier 2b: Stencil-then-cover paths.
 	for i, bufs := range gr.stencilRes {
 		s.stencilRenderer.RecordPath(rp, bufs, gr.stencilPaths[i].FillRule, clipBG)
+	}
+
+	// Tier 3: Textured quad images.
+	if gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0 {
+		s.imagePipeline.RecordDraws(rp, gr.imageRes, clipBG)
 	}
 
 	// Tier 4: MSDF text (rendered after shapes).

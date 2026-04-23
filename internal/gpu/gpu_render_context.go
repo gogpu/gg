@@ -32,10 +32,11 @@ type GPURenderContext struct {
 	pendingShapes           []SDFRenderShape
 	pendingConvexCommands   []ConvexDrawCommand
 	pendingStencilPaths     []StencilPathCommand
+	pendingImageCommands    []ImageDrawCommand
 	pendingTextBatches      []TextBatch
 	pendingGlyphMaskBatches []GlyphMaskBatch
-	pendingTarget    gg.GPURenderTarget
-	hasPendingTarget bool
+	pendingTarget           gg.GPURenderTarget
+	hasPendingTarget        bool
 
 	// Per-context clip state.
 	clipRect        *[4]uint32
@@ -56,8 +57,8 @@ type GPURenderContext struct {
 // PendingCount returns the total number of pending commands (for testing).
 func (rc *GPURenderContext) PendingCount() int {
 	return len(rc.pendingShapes) + len(rc.pendingConvexCommands) +
-		len(rc.pendingStencilPaths) + len(rc.pendingTextBatches) +
-		len(rc.pendingGlyphMaskBatches)
+		len(rc.pendingStencilPaths) + len(rc.pendingImageCommands) +
+		len(rc.pendingTextBatches) + len(rc.pendingGlyphMaskBatches)
 }
 
 // SetPipelineMode sets the pipeline mode for this context's operations.
@@ -155,6 +156,42 @@ func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch
 		_ = rc.Flush(rc.pendingTarget)
 	}
 	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+}
+
+// QueueImageDraw accumulates an image draw command for Tier 3 dispatch.
+// Parameters are kept primitive to avoid import cycles (gg root -> internal/gpu).
+func (rc *GPURenderContext) QueueImageDraw(target gg.GPURenderTarget, pixelData []byte, imgWidth, imgHeight, imgStride int,
+	dstX, dstY, dstW, dstH, opacity float32, viewportW, viewportH uint32,
+	u0, v0, u1, v1 float32,
+) {
+	cmd := ImageDrawCommand{
+		PixelData:      pixelData,
+		ImgWidth:       imgWidth,
+		ImgHeight:      imgHeight,
+		ImgStride:      imgStride,
+		DstX:           dstX,
+		DstY:           dstY,
+		DstW:           dstW,
+		DstH:           dstH,
+		Opacity:        opacity,
+		ViewportWidth:  viewportW,
+		ViewportHeight: viewportH,
+		U0:             u0,
+		V0:             v0,
+		U1:             u1,
+		V1:             v1,
+	}
+	rc.queueImageCmd(target, cmd)
+}
+
+// queueImageCmd accumulates an image draw command for Tier 3 dispatch.
+func (rc *GPURenderContext) queueImageCmd(target gg.GPURenderTarget, cmd ImageDrawCommand) {
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		_ = rc.Flush(rc.pendingTarget)
+	}
+	rc.pendingImageCommands = append(rc.pendingImageCommands, cmd)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
@@ -429,6 +466,10 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 			ownedGroups[i].StencilPaths = make([]StencilPathCommand, len(g.StencilPaths))
 			copy(ownedGroups[i].StencilPaths, g.StencilPaths)
 		}
+		if len(g.ImageCommands) > 0 {
+			ownedGroups[i].ImageCommands = make([]ImageDrawCommand, len(g.ImageCommands))
+			copy(ownedGroups[i].ImageCommands, g.ImageCommands)
+		}
 		if len(g.TextBatches) > 0 {
 			ownedGroups[i].TextBatches = make([]TextBatch, len(g.TextBatches))
 			copy(ownedGroups[i].TextBatches, g.TextBatches)
@@ -443,6 +484,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	rc.pendingShapes = rc.pendingShapes[:0]
 	rc.pendingConvexCommands = rc.pendingConvexCommands[:0]
 	rc.pendingStencilPaths = rc.pendingStencilPaths[:0]
+	rc.pendingImageCommands = rc.pendingImageCommands[:0]
 	rc.pendingTextBatches = rc.pendingTextBatches[:0]
 	rc.pendingGlyphMaskBatches = rc.pendingGlyphMaskBatches[:0]
 	rc.scissorSegments = rc.scissorSegments[:0]
@@ -488,7 +530,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 		total := 0
 		for i := range ownedGroups {
 			total += len(ownedGroups[i].SDFShapes) + len(ownedGroups[i].ConvexCommands) + len(ownedGroups[i].StencilPaths) +
-				len(ownedGroups[i].TextBatches) + len(ownedGroups[i].GlyphMaskBatches)
+				len(ownedGroups[i].ImageCommands) + len(ownedGroups[i].TextBatches) + len(ownedGroups[i].GlyphMaskBatches)
 		}
 		slogger().Warn("render session error",
 			"groups", len(ownedGroups), "totalItems", total, "err", err)
@@ -540,6 +582,7 @@ func (rc *GPURenderContext) Close() {
 	rc.pendingShapes = nil
 	rc.pendingConvexCommands = nil
 	rc.pendingStencilPaths = nil
+	rc.pendingImageCommands = nil
 	rc.pendingTextBatches = nil
 	rc.pendingGlyphMaskBatches = nil
 	rc.hasPendingTarget = false
@@ -555,6 +598,7 @@ func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
 		sdfCount:     len(rc.pendingShapes),
 		convexCount:  len(rc.pendingConvexCommands),
 		stencilCount: len(rc.pendingStencilPaths),
+		imageCount:   len(rc.pendingImageCommands),
 		textCount:    len(rc.pendingTextBatches),
 		glyphCount:   len(rc.pendingGlyphMaskBatches),
 	}
@@ -577,6 +621,7 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 			SDFShapes:        rc.pendingShapes,
 			ConvexCommands:   rc.pendingConvexCommands,
 			StencilPaths:     rc.pendingStencilPaths,
+			ImageCommands:    rc.pendingImageCommands,
 			TextBatches:      rc.pendingTextBatches,
 			GlyphMaskBatches: rc.pendingGlyphMaskBatches,
 		}}
@@ -586,37 +631,40 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 
 	firstSeg := rc.scissorSegments[0]
 	if firstSeg.sdfCount > 0 || firstSeg.convexCount > 0 || firstSeg.stencilCount > 0 ||
-		firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
+		firstSeg.imageCount > 0 || firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
 		groups = append(groups, ScissorGroup{
 			Rect:             nil,
 			SDFShapes:        rc.pendingShapes[:firstSeg.sdfCount],
 			ConvexCommands:   rc.pendingConvexCommands[:firstSeg.convexCount],
 			StencilPaths:     rc.pendingStencilPaths[:firstSeg.stencilCount],
+			ImageCommands:    rc.pendingImageCommands[:firstSeg.imageCount],
 			TextBatches:      rc.pendingTextBatches[:firstSeg.textCount],
 			GlyphMaskBatches: rc.pendingGlyphMaskBatches[:firstSeg.glyphCount],
 		})
 	}
 
 	for i, seg := range rc.scissorSegments {
-		var endSDF, endConvex, endStencil, endText, endGlyph int
+		var endSDF, endConvex, endStencil, endImage, endText, endGlyph int
 		if i+1 < len(rc.scissorSegments) {
 			next := rc.scissorSegments[i+1]
 			endSDF = next.sdfCount
 			endConvex = next.convexCount
 			endStencil = next.stencilCount
+			endImage = next.imageCount
 			endText = next.textCount
 			endGlyph = next.glyphCount
 		} else {
 			endSDF = len(rc.pendingShapes)
 			endConvex = len(rc.pendingConvexCommands)
 			endStencil = len(rc.pendingStencilPaths)
+			endImage = len(rc.pendingImageCommands)
 			endText = len(rc.pendingTextBatches)
 			endGlyph = len(rc.pendingGlyphMaskBatches)
 		}
 
 		if seg.sdfCount == endSDF && seg.convexCount == endConvex &&
-			seg.stencilCount == endStencil && seg.textCount == endText &&
-			seg.glyphCount == endGlyph {
+			seg.stencilCount == endStencil && seg.imageCount == endImage &&
+			seg.textCount == endText && seg.glyphCount == endGlyph {
 			continue
 		}
 
@@ -636,6 +684,7 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 			SDFShapes:        rc.pendingShapes[seg.sdfCount:endSDF],
 			ConvexCommands:   rc.pendingConvexCommands[seg.convexCount:endConvex],
 			StencilPaths:     rc.pendingStencilPaths[seg.stencilCount:endStencil],
+			ImageCommands:    rc.pendingImageCommands[seg.imageCount:endImage],
 			TextBatches:      rc.pendingTextBatches[seg.textCount:endText],
 			GlyphMaskBatches: rc.pendingGlyphMaskBatches[seg.glyphCount:endGlyph],
 		})
