@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-context GPU accelerator** (ARCH-GG-001, ADR-013) — split SDFAccelerator
+  singleton into GPUShared (global) + GPURenderContext (per gg.Context). Follows
+  the Skia GrContext + OpsTask pattern validated by 4 enterprise frameworks
+  (Skia, Vello, Qt Quick, Flutter Impeller). Each gg.Context now has its own
+  pending command queue, clip state, and frame tracking — no cross-context
+  contamination. Enables offscreen GPU rendering for ui RepaintBoundary and
+  gogpu multi-window (ADR-010).
+  - `GPUShared`: device, queue, pipelines, text/glyph atlas engines (shared)
+  - `GPURenderContext`: pending shapes/text/stencil, scissor timeline, LoadOp tracking (per-context)
+  - `TexturePool`: Flutter RenderTargetCache pattern, configurable budget (default 128MB)
+  - `GPUSceneRenderer`: scene.Renderer GPU path for retained-mode rendering
+  - Zero-alloc hot path: QueueShape 26ns/0allocs, ScissorSegment 13ns/0allocs
+  - `SurfaceTargetAware` and `SetAcceleratorSurfaceTarget` removed (View in GPURenderTarget)
+  - Zero public API breaks (RegisterAccelerator, Accelerator() unchanged)
+
+- **GPU textured quad pipeline** (Tier 3, TASK-GG-GPU-DRAWIMAGE-001) — GPU-accelerated
+  DrawImage rendering. Eliminates mid-frame CPU flushes that corrupted GPU-direct
+  surface rendering when compositing cached RepaintBoundary images.
+  - WGSL shader: vertex ortho projection + fragment texture sampling with opacity
+  - ImageCache: LRU 64-entry, identity-keyed by pixel data pointer
+  - Axis-aligned transforms only (rotation/skew falls back to CPU)
+  - Unblocks ui RepaintBoundary GPU compositing (zero mid-frame readback)
+
 ### Fixed
 
 - **Skia AAA pixel-perfect coverage** — three root causes fixed to achieve diff=0

@@ -287,3 +287,126 @@ func TestRegression_CoverageMonotonicity(t *testing.T) {
 		prev = cov
 	}
 }
+
+// TestRegression_NearHorizontalEdgeBleed reproduces BUG-RAST-011 (#235):
+// near-horizontal edges from stroke expansion cause coverage to bleed
+// far beyond the shape boundary.
+//
+// A thin near-horizontal parallelogram (typical stroke of a horizontal line)
+// should have coverage only within ~2px of the shape. Coverage 10+ pixels
+// away indicates slope blowup.
+func TestRegression_NearHorizontalEdgeBleed(t *testing.T) {
+	// Near-horizontal parallelogram simulating a 1px stroke of a line
+	// from (10, 50) to (90, 50.3) — dy=0.3 over 80px, dx/dy ≈ 267.
+	// Stroke offset ±0.5px perpendicular creates:
+	//   top:    (10, 49.5) → (90, 49.8)   dy=0.3
+	//   right:  (90, 49.8) → (90, 50.8)   dy=1.0
+	//   bottom: (90, 50.8) → (10, 50.5)   dy=-0.3
+	//   left:   (10, 50.5) → (10, 49.5)   dy=-1.0
+	path := &testPath{
+		verbs: []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{
+			10.0, 49.5,
+			90.0, 49.8,
+			90.0, 50.8,
+			10.0, 50.5,
+		},
+	}
+
+	eb := NewEdgeBuilder(2) // 4x AA
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	const w, h = 100, 100
+	buf := make([]uint8, w*h)
+	FillToBuffer(eb, w, h, FillRuleNonZero, buf)
+
+	// The parallelogram spans y=49.5 to y=50.8, so coverage should be
+	// confined to rows 49-51 (with AA fringe).
+	// Rows far away (y ≤ 45, y ≥ 55) MUST have zero coverage.
+	for y := 0; y <= 45; y++ {
+		for x := 0; x < w; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("bleed above shape: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+				return
+			}
+		}
+	}
+	for y := 55; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("bleed below shape: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+				return
+			}
+		}
+	}
+
+	// Within the shape (x=30..70, y=50): should have non-zero coverage
+	hasInterior := false
+	for x := 30; x <= 70; x++ {
+		if buf[50*w+x] > 0 {
+			hasInterior = true
+			break
+		}
+	}
+	if !hasInterior {
+		t.Error("no interior coverage found at y=50 — shape not rendered at all")
+	}
+
+	// Check horizontal bleed: coverage outside x=8..92 should be zero
+	// for rows 49-51 (the shape rows).
+	for y := 49; y <= 51; y++ {
+		for x := 0; x < 8; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("horizontal bleed left: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+			}
+		}
+		for x := 93; x < w; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("horizontal bleed right: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+			}
+		}
+	}
+}
+
+// TestRegression_SteepNearHorizontalBleed tests an even more extreme case:
+// dy=0.1 over 80px (slope ratio 800:1). This is the GIS coastline scenario.
+func TestRegression_SteepNearHorizontalBleed(t *testing.T) {
+	// Extreme near-horizontal: dy=0.1 over 80px
+	path := &testPath{
+		verbs: []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},
+		points: []float32{
+			10.0, 49.95,
+			90.0, 50.05,
+			90.0, 51.05,
+			10.0, 50.95,
+		},
+	}
+
+	eb := NewEdgeBuilder(2)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(path, IdentityTransform{})
+
+	const w, h = 100, 100
+	buf := make([]uint8, w*h)
+	FillToBuffer(eb, w, h, FillRuleNonZero, buf)
+
+	// Coverage must be confined to rows 49-52 at most.
+	// Rows y ≤ 45 and y ≥ 55 MUST have zero coverage.
+	for y := 0; y <= 45; y++ {
+		for x := 0; x < w; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("extreme bleed above: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+				return
+			}
+		}
+	}
+	for y := 55; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if buf[y*w+x] != 0 {
+				t.Errorf("extreme bleed below: pixel (%d,%d) coverage=%d, want 0", x, y, buf[y*w+x])
+				return
+			}
+		}
+	}
+}

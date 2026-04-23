@@ -414,7 +414,11 @@ gg/
 │   │
 │   ├── gpu/                # GPU rendering pipeline (six-tier) + tile rasterizers
 │   │   ├── backend.go      # GPU backend implementation
-│   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL, ForceSDFAware)
+│   │   ├── gpu_shared.go    # GPUShared (global: device, pipelines, engines, TexturePool)
+│   │   ├── gpu_render_context.go # GPURenderContext (per gg.Context: pending ops, clip, frame)
+│   │   ├── gpu_types.go    # Shared types (scissorSegment, extractConvexPolygon)
+│   │   ├── texture_pool.go # TexturePool (Flutter RenderTargetCache pattern)
+│   │   ├── sdf_gpu.go      # SDFAccelerator wrapper (delegates to GPUShared + GPURenderContext)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
 │   │   ├── adaptive_filler.go    # AdaptiveFiller (auto 4×4 vs 16×16 tiles)
 │   │   ├── sparse_strips_filler.go  # SparseStripsFiller (4×4 tiles, CoverageFiller)
@@ -423,6 +427,8 @@ gg/
 │   │   ├── convexity.go    # Convexity detection algorithm
 │   │   ├── stencil_renderer.go # Stencil+Cover renderer (Tier 2b)
 │   │   ├── stencil_pipeline.go # Stencil render pipeline setup
+│   │   ├── image_pipeline.go  # TexturedQuadPipeline (Tier 3: GPU DrawImage)
+│   │   ├── image_cache.go     # ImageCache (LRU 64-entry, identity-keyed)
 │   │   ├── render_session.go   # GPURenderSession (unified render pass)
 │   │   ├── gpu_textures.go # MSAA + stencil + resolve texture management
 │   │   ├── tessellate.go   # Fan tessellation for paths
@@ -472,6 +478,7 @@ gg/
 │   │       ├── convex.wgsl        # Convex polygon fill (Tier 2a)
 │   │       ├── stencil_fill.wgsl  # Stencil fill pass (Tier 2b)
 │   │       ├── cover.wgsl         # Cover pass (Tier 2b)
+│   │       ├── textured_quad.wgsl # Textured quad (Tier 3: DrawImage)
 │   │       ├── fine.wgsl          # Fine rasterization
 │   │       ├── coarse.wgsl        # Coarse rasterization
 │   │       ├── flatten.wgsl       # Path flattening
