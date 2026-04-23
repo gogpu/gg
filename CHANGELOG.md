@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SurfaceTargetAware` and `SetAcceleratorSurfaceTarget` removed (View in GPURenderTarget)
   - Zero public API breaks (RegisterAccelerator, Accelerator() unchanged)
 
+- **GPU textured quad pipeline** (Tier 3, TASK-GG-GPU-DRAWIMAGE-001) — GPU-accelerated
+  DrawImage rendering. Eliminates mid-frame CPU flushes that corrupted GPU-direct
+  surface rendering when compositing cached RepaintBoundary images.
+  - WGSL shader: vertex ortho projection + fragment texture sampling with opacity
+  - ImageCache: LRU 64-entry, identity-keyed by pixel data pointer
+  - Axis-aligned transforms only (rotation/skew falls back to CPU)
+  - Unblocks ui RepaintBoundary GPU compositing (zero mid-frame readback)
+
 ### Fixed
 
 - **Skia AAA pixel-perfect coverage** — three root causes fixed to achieve diff=0

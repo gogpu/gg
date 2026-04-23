@@ -427,6 +427,8 @@ gg/
 │   │   ├── convexity.go    # Convexity detection algorithm
 │   │   ├── stencil_renderer.go # Stencil+Cover renderer (Tier 2b)
 │   │   ├── stencil_pipeline.go # Stencil render pipeline setup
+│   │   ├── image_pipeline.go  # TexturedQuadPipeline (Tier 3: GPU DrawImage)
+│   │   ├── image_cache.go     # ImageCache (LRU 64-entry, identity-keyed)
 │   │   ├── render_session.go   # GPURenderSession (unified render pass)
 │   │   ├── gpu_textures.go # MSAA + stencil + resolve texture management
 │   │   ├── tessellate.go   # Fan tessellation for paths
@@ -476,6 +478,7 @@ gg/
 │   │       ├── convex.wgsl        # Convex polygon fill (Tier 2a)
 │   │       ├── stencil_fill.wgsl  # Stencil fill pass (Tier 2b)
 │   │       ├── cover.wgsl         # Cover pass (Tier 2b)
+│   │       ├── textured_quad.wgsl # Textured quad (Tier 3: DrawImage)
 │   │       ├── fine.wgsl          # Fine rasterization
 │   │       ├── coarse.wgsl        # Coarse rasterization
 │   │       ├── flatten.wgsl       # Path flattening

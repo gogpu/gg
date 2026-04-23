@@ -1,3 +1,5 @@
+//go:build !nogpu
+
 // Example: Scene rendering with GPU acceleration
 //
 // Demonstrates the GPU auto-select path in scene.Renderer.

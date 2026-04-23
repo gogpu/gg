@@ -27,7 +27,7 @@
 
 <p align="center">
   <video src="https://github.com/user-attachments/assets/34243cff-5434-411c-a17c-3e52a80f1d57" width="100%" autoplay loop muted playsinline>
-    Six-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline, glyph mask cache
+    Seven-Tier GPU Rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute pipeline, glyph mask cache
   </video>
   <br>
   <sub>Six-tier GPU rendering: SDF shapes, convex polygons, stencil+cover paths, MSDF text, Vello compute, and glyph mask cache.
@@ -124,16 +124,17 @@ dc.SetRasterizerMode(gg.RasterizerSparseStrips)
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with
-a six-tier rendering pipeline:
+a seven-tier rendering pipeline:
 
 | Tier | Method | Best For |
 |------|--------|----------|
-| **SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
-| **Convex** | Direct vertex emission | Convex polygons, single draw call |
-| **Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
-| **MSDF Text** | Multi-channel Signed Distance Field | Dynamic/animated text, resolution-independent |
-| **Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
-| **Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤48px, pixel-perfect quality |
+| **1. SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
+| **2a. Convex** | Direct vertex emission | Convex polygons, single draw call |
+| **2b. Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
+| **3. Textured Quad** | GPU image sampling | DrawImage compositing, RepaintBoundary cache |
+| **4. MSDF Text** | Multi-channel Signed Distance Field | Dynamic/animated text, resolution-independent |
+| **5. Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
+| **6. Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤48px, pixel-perfect quality |
 
 Tiers 1–4, 6 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
 via `PipelineMode` (Auto/RenderPass/Compute). Text auto-selection routes horizontal
@@ -201,7 +202,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 |-----------|----------|-------------|
 | **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
-| **GPU Accelerator** | `internal/gpu` | Six-tier GPU pipeline (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask) |
+| **GPU Accelerator** | `internal/gpu` | Seven-tier GPU pipeline (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask) |
 | **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
 | **Tiles Only** | `raster/` | Opt-in via `import _ "github.com/gogpu/gg/raster"` (CPU-only tiles) |
 | **Software** | Root `gg` package | Default CPU renderer with smart algorithm selection |
