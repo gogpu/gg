@@ -255,7 +255,9 @@ func (c *Context) Close() error {
 // (render pass vs compute).
 func (c *Context) SetPipelineMode(mode PipelineMode) {
 	c.pipelineMode = mode
-	if a := Accelerator(); a != nil {
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.SetPipelineMode(mode)
+	} else if a := Accelerator(); a != nil {
 		if pma, ok := a.(PipelineModeAware); ok {
 			pma.SetPipelineMode(mode)
 		}
@@ -1092,16 +1094,14 @@ func (c *Context) ResizeTarget() *Pixmap {
 // Call this before reading pixel data (e.g., SavePNG, Image) when using a
 // batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
 func (c *Context) FlushGPU() error {
-	a := Accelerator()
-	if a == nil {
-		return nil
-	}
 	t := c.gpuRenderTarget()
-	Logger().Debug("FlushGPU",
-		"target_w", t.Width, "target_h", t.Height,
-		"stride", t.Stride,
-	)
-	return a.Flush(t)
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.Flush(t)
+	}
+	if a := Accelerator(); a != nil {
+		return a.Flush(t)
+	}
+	return nil
 }
 
 // FlushGPUWithView flushes pending GPU operations, resolving directly to the
@@ -1113,22 +1113,38 @@ func (c *Context) FlushGPU() error {
 // This is the per-pass render target path for ggcanvas.RenderDirect.
 // When view is nil, behaves identically to FlushGPU (CPU readback).
 func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
-	a := Accelerator()
-	if a == nil {
-		return nil
-	}
 	t := c.gpuRenderTarget()
 	if view != nil {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height
 	}
-	Logger().Debug("FlushGPUWithView",
-		"target_w", t.Width, "target_h", t.Height,
-		"view", view != nil,
-		"viewW", width, "viewH", height,
-	)
-	return a.Flush(t)
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.Flush(t)
+	}
+	if a := Accelerator(); a != nil {
+		return a.Flush(t)
+	}
+	return nil
+}
+
+// gpuContextOps is the per-context GPU rendering interface.
+// GPURenderContext (internal/gpu) implements this, allowing context.go
+// to route draw calls through the per-context queue without importing internal/gpu.
+type gpuContextOps interface {
+	FillShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+	StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error
+	FillPath(target GPURenderTarget, path *Path, paint *Paint) error
+	StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
+	Flush(target GPURenderTarget) error
+	SetClipRect(x, y, w, h uint32)
+	ClearClipRect()
+	SetClipRRect(x, y, w, h, radius float32)
+	ClearClipRRect()
+	BeginFrame()
+	SetPipelineMode(mode PipelineMode)
+	PendingCount() int
+	Close()
 }
 
 // GPURenderContext returns the per-context GPU render context, lazily created.
@@ -1136,17 +1152,34 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 // per-context rendering. The returned value should be type-asserted to
 // *gpu.GPURenderContext in internal/gpu consumers.
 func (c *Context) GPURenderContext() any {
+	c.ensureGPUCtx()
+	return c.gpuCtx
+}
+
+// ensureGPUCtx lazily creates the per-context GPU render context.
+func (c *Context) ensureGPUCtx() {
 	if c.gpuCtx != nil {
-		return c.gpuCtx
+		return
 	}
 	a := Accelerator()
 	if a == nil {
-		return nil
+		return
 	}
 	if p, ok := a.(GPURenderContextProvider); ok {
 		c.gpuCtx = p.NewGPURenderContext()
 	}
-	return c.gpuCtx
+}
+
+// gpuCtxOps returns the per-context GPU ops interface, or nil if unavailable.
+func (c *Context) gpuCtxOps() gpuContextOps {
+	c.ensureGPUCtx()
+	if c.gpuCtx == nil {
+		return nil
+	}
+	if ops, ok := c.gpuCtx.(gpuContextOps); ok {
+		return ops
+	}
+	return nil
 }
 
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
@@ -1161,28 +1194,30 @@ func (c *Context) gpuRenderTarget() GPURenderTarget {
 
 // flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
 func (c *Context) flushGPUAccelerator() {
-	a := Accelerator()
-	if a == nil {
+	if rc := c.gpuCtxOps(); rc != nil {
+		_ = rc.Flush(c.gpuRenderTarget())
 		return
 	}
-	_ = a.Flush(c.gpuRenderTarget())
+	if a := Accelerator(); a != nil {
+		_ = a.Flush(c.gpuRenderTarget())
+	}
 }
 
 // tryGPUFill attempts to fill the current path using the GPU accelerator.
 // When a mask is active and the accelerator implements MaskAware, the mask
 // is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUFill() error {
+	cleanup, err := c.setupGPUMask()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if rc := c.gpuCtxOps(); rc != nil {
+		return c.tryGPUOpRC(rc.FillShape, rc.FillPath)
+	}
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
-	}
-	if c.mask != nil {
-		if ma, ok := a.(MaskAware); ok {
-			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
-			defer ma.ClearMaskTexture()
-		} else {
-			return ErrFallbackToCPU
-		}
 	}
 	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
@@ -1191,19 +1226,54 @@ func (c *Context) tryGPUFill() error {
 // When a mask is active and the accelerator implements MaskAware, the mask
 // is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUStroke() error {
+	cleanup, err := c.setupGPUMask()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if rc := c.gpuCtxOps(); rc != nil {
+		return c.tryGPUOpRC(rc.StrokeShape, rc.StrokePath)
+	}
 	a := Accelerator()
 	if a == nil {
 		return ErrFallbackToCPU
 	}
-	if c.mask != nil {
-		if ma, ok := a.(MaskAware); ok {
-			ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
-			defer ma.ClearMaskTexture()
-		} else {
-			return ErrFallbackToCPU
+	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
+}
+
+// setupGPUMask uploads the active alpha mask to the GPU accelerator.
+// Returns a cleanup function to clear the mask (must be deferred by caller).
+func (c *Context) setupGPUMask() (func(), error) {
+	if c.mask == nil {
+		return func() {}, nil
+	}
+	a := Accelerator()
+	if a == nil {
+		return func() {}, nil
+	}
+	ma, ok := a.(MaskAware)
+	if !ok {
+		return nil, ErrFallbackToCPU
+	}
+	ma.SetMaskTexture(c.mask.Data(), c.mask.Width(), c.mask.Height())
+	return ma.ClearMaskTexture, nil
+}
+
+// tryGPUOpRC routes GPU operations through the per-context GPURenderContext.
+func (c *Context) tryGPUOpRC(
+	shapeFn func(GPURenderTarget, DetectedShape, *Paint) error,
+	pathFn func(GPURenderTarget, *Path, *Paint) error,
+) error {
+	target := c.gpuRenderTarget()
+
+	shape := DetectShape(c.path)
+	if accel := sdfAccelForShape(shape.Kind); accel != 0 {
+		if err := shapeFn(target, shape, c.paint); err == nil {
+			return nil
 		}
 	}
-	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
+
+	return pathFn(target, c.path, c.paint)
 }
 
 // tryGPUOp attempts GPU rendering using shape-specific SDF first, then general path.
@@ -1384,37 +1454,52 @@ func (c *Context) setGPUClipRect() func() {
 	if !c.isClipActive() {
 		return func() {}
 	}
-	a := Accelerator()
-	if a == nil {
-		return func() {}
-	}
-
 	rectOnly := c.clipStack.IsRectOnly()
 	rrectOnly := c.clipStack.IsRRectOnly()
 
-	// Path clips are not GPU-accelerated (need mask texture or stencil).
 	if !rectOnly && !rrectOnly {
 		return func() {}
 	}
 
-	ca, ok := a.(ClipAware)
-	if !ok {
-		return func() {}
-	}
-
 	bounds := c.clipStack.Bounds()
-	// Convert float64 clip bounds to uint32 device pixel scissor rect.
-	// floor(x,y) for top-left, ceil(right,bottom) for full pixel coverage.
 	x0 := uint32(math.Floor(bounds.X))
 	y0 := uint32(math.Floor(bounds.Y))
 	x1 := uint32(math.Ceil(bounds.X + bounds.W))
 	y1 := uint32(math.Ceil(bounds.Y + bounds.H))
 	if x1 <= x0 || y1 <= y0 {
-		return func() {} // Zero-area clip — nothing to render
+		return func() {}
+	}
+
+	// Per-context path (GPURenderContext available)
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.SetClipRect(x0, y0, x1-x0, y1-y0)
+		if !rectOnly {
+			rrBounds, radius, hasRRect := c.clipStack.RRectBounds()
+			if hasRRect {
+				rc.SetClipRRect(
+					float32(rrBounds.X), float32(rrBounds.Y),
+					float32(rrBounds.W), float32(rrBounds.H),
+					float32(radius),
+				)
+				return func() {
+					rc.ClearClipRect()
+					rc.ClearClipRRect()
+				}
+			}
+		}
+		return func() { rc.ClearClipRect() }
+	}
+
+	// Fallback: global accelerator (backward compat for mock accelerators)
+	a := Accelerator()
+	if a == nil {
+		return func() {}
+	}
+	ca, ok := a.(ClipAware)
+	if !ok {
+		return func() {}
 	}
 	ca.SetClipRect(x0, y0, x1-x0, y1-y0)
-
-	// If there's an RRect clip, also set the analytic SDF clip.
 	if !rectOnly {
 		if rca, ok2 := a.(RRectClipAware); ok2 {
 			rrBounds, radius, hasRRect := c.clipStack.RRectBounds()
@@ -1431,7 +1516,6 @@ func (c *Context) setGPUClipRect() func() {
 			}
 		}
 	}
-
 	return func() { ca.ClearClipRect() }
 }
 
