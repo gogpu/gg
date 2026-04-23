@@ -2,7 +2,23 @@
 
 package gpu
 
-import "github.com/gogpu/gg"
+import (
+	"github.com/gogpu/gg"
+	"github.com/gogpu/gpucontext"
+)
+
+// GPUTextureDrawCommand represents a GPU-to-GPU texture compositing command.
+// Unlike ImageDrawCommand (CPU pixel upload), this draws a pre-existing GPU
+// texture view directly — zero CPU readback, zero re-upload.
+// Follows the Skia GrSurfaceProxyView direct-bind pattern.
+type GPUTextureDrawCommand struct {
+	View           gpucontext.TextureView // type-safe, asserted to *wgpu.TextureView internally
+	DstX, DstY     float32
+	DstW, DstH     float32
+	Opacity        float32
+	ViewportWidth  uint32
+	ViewportHeight uint32
+}
 
 // scissorSegment records a scissor state change along with the cumulative
 // pending counts at the time of the change. Used to slice pending arrays
@@ -16,6 +32,7 @@ type scissorSegment struct {
 	convexCount  int        // len(pendingConvexCommands) at time of change
 	stencilCount int        // len(pendingStencilPaths) at time of change
 	imageCount   int        // len(pendingImageCommands) at time of change
+	gpuTexCount  int        // len(pendingGPUTextureCommands) at time of change
 	textCount    int        // len(pendingTextBatches) at time of change
 	glyphCount   int        // len(pendingGlyphMaskBatches) at time of change
 }

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-04-24
+
+### Added
+
+- **GPU-to-GPU texture compositing** (`DrawGPUTexture`, Tier 3b) — composite pre-existing
+  GPU texture views as textured quads without CPU readback. Follows Skia's
+  `GrSurfaceProxyView` direct-bind pattern. Uses `gpucontext.TextureView` (type-safe,
+  not `any`). Separate `GPUTextureDrawCommand` struct (Go-idiomatic single responsibility).
+  Same pipeline/shader as CPU images — zero new GPU objects.
+
+- **Offscreen GPU texture API** (`CreateOffscreenTexture`) — allocate GPU textures for
+  offscreen rendering. Returns `(gpucontext.TextureView, release func())`. Texture usable
+  with both `FlushGPUWithView` (render into) and `DrawGPUTexture` (composite from).
+  Completes Flutter-pattern GPU layer caching for ui RepaintBoundary.
+
+- **Shared text atlas across GPU contexts** — atlas GPU textures moved from per-session
+  to GPUShared (Skia GrAtlasManager pattern). Offscreen contexts see atlas without
+  re-upload. Fixes invisible text in offscreen GPU rendering.
+
+### Fixed
+
+- **MinBindingSize validation** (BUG-GPU-MINBINDING-001) — all 7 bind group layouts now
+  specify correct MinBindingSize (was 0, rejected by wgpu VAL-006 validation). Fixes
+  "encoder in Error state" → black screen.
+
+- **Bullet-proof encoder lifecycle** (BUG-GG-ENCODER-LIFECYCLE-001) — `defer
+  encoder.DiscardEncoding()` on all 4 encode paths. Encoder never leaks state regardless
+  of error. Submit errors properly free command buffers. Panic-safe.
+
+- **No silently swallowed errors** — all `_ = rp.End()` (4), `_ = rc.Flush()` (6), and
+  `_ = s.device.WaitIdle()` (1) replaced with proper error logging.
+
+### Changed
+
+- **Dependencies:** wgpu v0.25.4 → v0.25.7, gogpu v0.27.3 → v0.28.3, naga v0.17.4 → v0.17.5
+
 ## [0.41.2] - 2026-04-23
 
 ### Fixed

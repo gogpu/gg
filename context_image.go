@@ -4,6 +4,7 @@ import (
 	"image"
 
 	intImage "github.com/gogpu/gg/internal/image"
+	"github.com/gogpu/gpucontext"
 )
 
 // ImageBuf is a public alias for internal ImageBuf.
@@ -555,4 +556,53 @@ func NewImageBuf(width, height int, format ImageFormat) (*ImageBuf, error) {
 // ImageBufFromImage creates an ImageBuf from a standard image.Image.
 func ImageBufFromImage(img image.Image) *ImageBuf {
 	return intImage.FromStdImage(img)
+}
+
+// DrawGPUTexture composites an existing GPU texture view as a textured quad
+// at (x, y) with the given dimensions. No CPU readback or upload — pure
+// GPU-to-GPU compositing. The view must be from the same device (e.g.,
+// FlushGPUWithView output). CTM and scissor clip are applied.
+//
+// This is the Skia GrSurfaceProxyView direct-bind pattern for cached
+// offscreen rendering (RepaintBoundary, layer compositing).
+func (c *Context) DrawGPUTexture(view gpucontext.TextureView, x, y float64, width, height int) {
+	rc := c.gpuCtxOps()
+	if rc == nil || view == nil {
+		return
+	}
+	defer c.setGPUClipRect()()
+
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(x, y))
+	br := ctm.TransformPoint(Pt(x+float64(width), y+float64(height)))
+
+	target := c.gpuRenderTarget()
+	vpW := uint32(target.Width)  //nolint:gosec // viewport fits uint32
+	vpH := uint32(target.Height) //nolint:gosec // viewport fits uint32
+
+	rc.QueueGPUTextureDraw(target, view,
+		float32(tl.X), float32(tl.Y), float32(br.X-tl.X), float32(br.Y-tl.Y),
+		1.0, vpW, vpH)
+}
+
+// CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
+// The texture can be rendered to via FlushGPUWithView and composited via
+// DrawGPUTexture. Returns (nil, nil) if GPU is not available.
+//
+// The returned TextureView is valid until release() is called.
+// Call release() to return the texture resources to the GPU.
+//
+// Usage flags: RenderAttachment | CopySrc | TextureBinding.
+func (c *Context) CreateOffscreenTexture(width, height int) (gpucontext.TextureView, func()) {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return nil, nil
+	}
+	type offscreenCreator interface {
+		CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func())
+	}
+	if oc, ok := rc.(offscreenCreator); ok {
+		return oc.CreateOffscreenTexture(width, height)
+	}
+	return nil, nil
 }

@@ -40,6 +40,11 @@ type GPUShared struct {
 	textEngine      *GPUTextEngine   // MSDF atlas (Tier 4)
 	glyphMaskEngine *GlyphMaskEngine // R8 alpha atlas (Tier 6)
 
+	// Shared atlas GPU textures (owned by GPUShared, NOT per-session).
+	// All contexts reference these — prevents stale atlas in offscreen sessions.
+	sharedAtlasTex  *wgpu.Texture
+	sharedAtlasView *wgpu.TextureView
+
 	// Compute pipeline.
 	velloAccel *VelloAccelerator
 
@@ -202,6 +207,14 @@ func (s *GPUShared) Close() {
 	defer s.mu.Unlock()
 
 	s.textEngine = nil
+	if s.sharedAtlasView != nil {
+		s.sharedAtlasView.Release()
+		s.sharedAtlasView = nil
+	}
+	if s.sharedAtlasTex != nil {
+		s.sharedAtlasTex.Release()
+		s.sharedAtlasTex = nil
+	}
 	if s.glyphMaskEngine != nil && s.device != nil {
 		s.glyphMaskEngine.Destroy(s.device)
 		s.glyphMaskEngine = nil

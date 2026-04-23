@@ -150,7 +150,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: textUniformSize},
 			},
 			{
 				Binding:    1,

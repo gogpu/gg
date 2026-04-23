@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/stroke"
 	"github.com/gogpu/gg/text"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -29,14 +30,15 @@ type GPURenderContext struct {
 	session *GPURenderSession
 
 	// Per-context pending command queues.
-	pendingShapes           []SDFRenderShape
-	pendingConvexCommands   []ConvexDrawCommand
-	pendingStencilPaths     []StencilPathCommand
-	pendingImageCommands    []ImageDrawCommand
-	pendingTextBatches      []TextBatch
-	pendingGlyphMaskBatches []GlyphMaskBatch
-	pendingTarget           gg.GPURenderTarget
-	hasPendingTarget        bool
+	pendingShapes             []SDFRenderShape
+	pendingConvexCommands     []ConvexDrawCommand
+	pendingStencilPaths       []StencilPathCommand
+	pendingImageCommands      []ImageDrawCommand
+	pendingGPUTextureCommands []GPUTextureDrawCommand
+	pendingTextBatches        []TextBatch
+	pendingGlyphMaskBatches   []GlyphMaskBatch
+	pendingTarget             gg.GPURenderTarget
+	hasPendingTarget          bool
 
 	// Per-context clip state.
 	clipRect        *[4]uint32
@@ -57,7 +59,7 @@ type GPURenderContext struct {
 // PendingCount returns the total number of pending commands (for testing).
 func (rc *GPURenderContext) PendingCount() int {
 	return len(rc.pendingShapes) + len(rc.pendingConvexCommands) +
-		len(rc.pendingStencilPaths) + len(rc.pendingImageCommands) +
+		len(rc.pendingStencilPaths) + len(rc.pendingImageCommands) + len(rc.pendingGPUTextureCommands) +
 		len(rc.pendingTextBatches) + len(rc.pendingGlyphMaskBatches)
 }
 
@@ -133,7 +135,9 @@ func (rc *GPURenderContext) QueueShape(target gg.GPURenderTarget, shape gg.Detec
 // QueueConvex accumulates a convex polygon for batch dispatch.
 func (rc *GPURenderContext) QueueConvex(target gg.GPURenderTarget, cmd ConvexDrawCommand) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		_ = rc.Flush(rc.pendingTarget)
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
 	}
 	rc.pendingConvexCommands = append(rc.pendingConvexCommands, cmd)
 	rc.pendingTarget = target
@@ -143,7 +147,9 @@ func (rc *GPURenderContext) QueueConvex(target gg.GPURenderTarget, cmd ConvexDra
 // QueueStencil accumulates a stencil path for batch dispatch.
 func (rc *GPURenderContext) QueueStencil(target gg.GPURenderTarget, cmd StencilPathCommand) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		_ = rc.Flush(rc.pendingTarget)
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
 	}
 	rc.pendingStencilPaths = append(rc.pendingStencilPaths, cmd)
 	rc.pendingTarget = target
@@ -153,7 +159,9 @@ func (rc *GPURenderContext) QueueStencil(target gg.GPURenderTarget, cmd StencilP
 // QueueText accumulates an MSDF text batch for dispatch.
 func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		_ = rc.Flush(rc.pendingTarget)
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
 	}
 	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
 	rc.pendingTarget = target
@@ -190,9 +198,29 @@ func (rc *GPURenderContext) QueueImageDraw(target gg.GPURenderTarget, pixelData 
 // queueImageCmd accumulates an image draw command for Tier 3 dispatch.
 func (rc *GPURenderContext) queueImageCmd(target gg.GPURenderTarget, cmd ImageDrawCommand) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		_ = rc.Flush(rc.pendingTarget)
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
 	}
 	rc.pendingImageCommands = append(rc.pendingImageCommands, cmd)
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+}
+
+// QueueGPUTextureDraw queues a GPU-to-GPU texture compositing command.
+// The texture view is sampled directly — zero CPU readback, zero upload.
+func (rc *GPURenderContext) QueueGPUTextureDraw(target gg.GPURenderTarget, view gpucontext.TextureView,
+	dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32,
+) {
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
+	}
+	rc.pendingGPUTextureCommands = append(rc.pendingGPUTextureCommands, GPUTextureDrawCommand{
+		View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
+		Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+	})
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
@@ -200,7 +228,9 @@ func (rc *GPURenderContext) queueImageCmd(target gg.GPURenderTarget, cmd ImageDr
 // QueueGlyphMask accumulates a glyph mask batch for dispatch.
 func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch GlyphMaskBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		_ = rc.Flush(rc.pendingTarget)
+		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
+			slogger().Warn("auto-flush failed", "err", fErr)
+		}
 	}
 	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)
 	rc.pendingTarget = target
@@ -486,6 +516,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	rc.pendingConvexCommands = rc.pendingConvexCommands[:0]
 	rc.pendingStencilPaths = rc.pendingStencilPaths[:0]
 	rc.pendingImageCommands = rc.pendingImageCommands[:0]
+	rc.pendingGPUTextureCommands = rc.pendingGPUTextureCommands[:0]
 	rc.pendingTextBatches = rc.pendingTextBatches[:0]
 	rc.pendingGlyphMaskBatches = rc.pendingGlyphMaskBatches[:0]
 	rc.scissorSegments = rc.scissorSegments[:0]
@@ -524,6 +555,12 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 				ownedGroups[i].GlyphMaskBatches = nil
 			}
 		}
+	}
+
+	// Propagate shared atlas texture to this session (may differ from session's own).
+	// This ensures offscreen sessions see the atlas even if they didn't sync it.
+	if rc.shared.sharedAtlasView != nil {
+		rc.session.SetTextAtlasRef(rc.shared.sharedAtlasTex, rc.shared.sharedAtlasView)
 	}
 
 	err := rc.session.RenderFrameGrouped(target, ownedGroups)
@@ -570,6 +607,50 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 	return mode
 }
 
+// CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
+// The texture has usage flags suitable for both FlushGPUWithView (render to)
+// and DrawGPUTexture (sample from). Returns view + release function.
+func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
+	if rc.shared == nil || !rc.shared.gpuReady {
+		return nil, nil
+	}
+	device := rc.shared.Device()
+	if device == nil {
+		return nil, nil
+	}
+
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "offscreen_cache",
+		Size:          wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1}, //nolint:gosec // bounded
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		return nil, nil
+	}
+
+	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
+		Label:         "offscreen_cache_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
+	})
+	if err != nil {
+		tex.Release()
+		return nil, nil
+	}
+
+	release := func() {
+		view.Release()
+		tex.Release()
+	}
+	return view, release
+}
+
 // Close releases this context's GPU resources. Shared resources are NOT
 // released — they are owned by GPUShared.
 func (rc *GPURenderContext) Close() {
@@ -584,6 +665,7 @@ func (rc *GPURenderContext) Close() {
 	rc.pendingConvexCommands = nil
 	rc.pendingStencilPaths = nil
 	rc.pendingImageCommands = nil
+	rc.pendingGPUTextureCommands = nil
 	rc.pendingTextBatches = nil
 	rc.pendingGlyphMaskBatches = nil
 	rc.hasPendingTarget = false
@@ -600,6 +682,7 @@ func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
 		convexCount:  len(rc.pendingConvexCommands),
 		stencilCount: len(rc.pendingStencilPaths),
 		imageCount:   len(rc.pendingImageCommands),
+		gpuTexCount:  len(rc.pendingGPUTextureCommands),
 		textCount:    len(rc.pendingTextBatches),
 		glyphCount:   len(rc.pendingGlyphMaskBatches),
 	}
@@ -618,13 +701,14 @@ func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
 func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 	if len(rc.scissorSegments) == 0 {
 		return []ScissorGroup{{
-			Rect:             nil,
-			SDFShapes:        rc.pendingShapes,
-			ConvexCommands:   rc.pendingConvexCommands,
-			StencilPaths:     rc.pendingStencilPaths,
-			ImageCommands:    rc.pendingImageCommands,
-			TextBatches:      rc.pendingTextBatches,
-			GlyphMaskBatches: rc.pendingGlyphMaskBatches,
+			Rect:               nil,
+			SDFShapes:          rc.pendingShapes,
+			ConvexCommands:     rc.pendingConvexCommands,
+			StencilPaths:       rc.pendingStencilPaths,
+			ImageCommands:      rc.pendingImageCommands,
+			GPUTextureCommands: rc.pendingGPUTextureCommands,
+			TextBatches:        rc.pendingTextBatches,
+			GlyphMaskBatches:   rc.pendingGlyphMaskBatches,
 		}}
 	}
 
@@ -632,26 +716,28 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 
 	firstSeg := rc.scissorSegments[0]
 	if firstSeg.sdfCount > 0 || firstSeg.convexCount > 0 || firstSeg.stencilCount > 0 ||
-		firstSeg.imageCount > 0 || firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
+		firstSeg.imageCount > 0 || firstSeg.gpuTexCount > 0 || firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
 		groups = append(groups, ScissorGroup{
-			Rect:             nil,
-			SDFShapes:        rc.pendingShapes[:firstSeg.sdfCount],
-			ConvexCommands:   rc.pendingConvexCommands[:firstSeg.convexCount],
-			StencilPaths:     rc.pendingStencilPaths[:firstSeg.stencilCount],
-			ImageCommands:    rc.pendingImageCommands[:firstSeg.imageCount],
-			TextBatches:      rc.pendingTextBatches[:firstSeg.textCount],
-			GlyphMaskBatches: rc.pendingGlyphMaskBatches[:firstSeg.glyphCount],
+			Rect:               nil,
+			SDFShapes:          rc.pendingShapes[:firstSeg.sdfCount],
+			ConvexCommands:     rc.pendingConvexCommands[:firstSeg.convexCount],
+			StencilPaths:       rc.pendingStencilPaths[:firstSeg.stencilCount],
+			ImageCommands:      rc.pendingImageCommands[:firstSeg.imageCount],
+			GPUTextureCommands: rc.pendingGPUTextureCommands[:firstSeg.gpuTexCount],
+			TextBatches:        rc.pendingTextBatches[:firstSeg.textCount],
+			GlyphMaskBatches:   rc.pendingGlyphMaskBatches[:firstSeg.glyphCount],
 		})
 	}
 
 	for i, seg := range rc.scissorSegments {
-		var endSDF, endConvex, endStencil, endImage, endText, endGlyph int
+		var endSDF, endConvex, endStencil, endImage, endGPUTex, endText, endGlyph int
 		if i+1 < len(rc.scissorSegments) {
 			next := rc.scissorSegments[i+1]
 			endSDF = next.sdfCount
 			endConvex = next.convexCount
 			endStencil = next.stencilCount
 			endImage = next.imageCount
+			endGPUTex = next.gpuTexCount
 			endText = next.textCount
 			endGlyph = next.glyphCount
 		} else {
@@ -659,13 +745,14 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 			endConvex = len(rc.pendingConvexCommands)
 			endStencil = len(rc.pendingStencilPaths)
 			endImage = len(rc.pendingImageCommands)
+			endGPUTex = len(rc.pendingGPUTextureCommands)
 			endText = len(rc.pendingTextBatches)
 			endGlyph = len(rc.pendingGlyphMaskBatches)
 		}
 
 		if seg.sdfCount == endSDF && seg.convexCount == endConvex &&
 			seg.stencilCount == endStencil && seg.imageCount == endImage &&
-			seg.textCount == endText && seg.glyphCount == endGlyph {
+			seg.gpuTexCount == endGPUTex && seg.textCount == endText && seg.glyphCount == endGlyph {
 			continue
 		}
 
@@ -680,14 +767,15 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 			groupClip = &c
 		}
 		groups = append(groups, ScissorGroup{
-			Rect:             groupRect,
-			ClipRRect:        groupClip,
-			SDFShapes:        rc.pendingShapes[seg.sdfCount:endSDF],
-			ConvexCommands:   rc.pendingConvexCommands[seg.convexCount:endConvex],
-			StencilPaths:     rc.pendingStencilPaths[seg.stencilCount:endStencil],
-			ImageCommands:    rc.pendingImageCommands[seg.imageCount:endImage],
-			TextBatches:      rc.pendingTextBatches[seg.textCount:endText],
-			GlyphMaskBatches: rc.pendingGlyphMaskBatches[seg.glyphCount:endGlyph],
+			Rect:               groupRect,
+			ClipRRect:          groupClip,
+			SDFShapes:          rc.pendingShapes[seg.sdfCount:endSDF],
+			ConvexCommands:     rc.pendingConvexCommands[seg.convexCount:endConvex],
+			StencilPaths:       rc.pendingStencilPaths[seg.stencilCount:endStencil],
+			ImageCommands:      rc.pendingImageCommands[seg.imageCount:endImage],
+			GPUTextureCommands: rc.pendingGPUTextureCommands[seg.gpuTexCount:endGPUTex],
+			TextBatches:        rc.pendingTextBatches[seg.textCount:endText],
+			GlyphMaskBatches:   rc.pendingGlyphMaskBatches[seg.glyphCount:endGlyph],
 		})
 	}
 
@@ -749,7 +837,15 @@ func (rc *GPURenderContext) syncTextAtlases() error {
 			return fmt.Errorf("upload atlas texture %d: %w", idx, err)
 		}
 
-		rc.session.SetTextAtlas(tex, view)
+		// Store atlas in GPUShared (shared across all contexts).
+		if s.sharedAtlasView != nil {
+			s.sharedAtlasView.Release()
+		}
+		if s.sharedAtlasTex != nil {
+			s.sharedAtlasTex.Release()
+		}
+		s.sharedAtlasTex = tex
+		s.sharedAtlasView = view
 		s.textEngine.MarkClean(idx)
 	}
 	return nil

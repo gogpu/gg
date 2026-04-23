@@ -26,12 +26,13 @@ type ScissorGroup struct {
 	ClipRRect *ClipParams
 
 	// Per-tier draw command subsets for this scissor state.
-	SDFShapes        []SDFRenderShape
-	ConvexCommands   []ConvexDrawCommand
-	StencilPaths     []StencilPathCommand
-	ImageCommands    []ImageDrawCommand
-	TextBatches      []TextBatch
-	GlyphMaskBatches []GlyphMaskBatch
+	SDFShapes          []SDFRenderShape
+	ConvexCommands     []ConvexDrawCommand
+	StencilPaths       []StencilPathCommand
+	ImageCommands      []ImageDrawCommand
+	GPUTextureCommands []GPUTextureDrawCommand
+	TextBatches        []TextBatch
+	GlyphMaskBatches   []GlyphMaskBatch
 }
 
 // StencilPathCommand holds a path and paint for stencil-then-cover rendering
@@ -495,6 +496,7 @@ type groupResources struct {
 	stencilRes    []*stencilCoverBuffers
 	stencilPaths  []StencilPathCommand
 	imageRes      *imageFrameResources
+	gpuTexRes     *imageFrameResources // GPU-to-GPU texture compositing (same pipeline)
 	textRes       *textFrameResources
 	glyphMaskRes  *glyphMaskFrameResources
 }
@@ -549,6 +551,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	var allConvex []ConvexDrawCommand
 	var allStencil []StencilPathCommand
 	var allImage []ImageDrawCommand
+	var allGPUTex []GPUTextureDrawCommand
 	var allText []TextBatch
 	var allGlyph []GlyphMaskBatch
 
@@ -557,6 +560,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		convexStart, convexCount   int
 		stencilStart, stencilCount int
 		imageStart, imageCount     int
+		gpuTexStart, gpuTexCount   int
 		textStart, textCount       int
 		glyphStart, glyphCount     int
 	}
@@ -569,6 +573,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 			convexStart: len(allConvex), convexCount: len(g.ConvexCommands),
 			stencilStart: len(allStencil), stencilCount: len(g.StencilPaths),
 			imageStart: len(allImage), imageCount: len(g.ImageCommands),
+			gpuTexStart: len(allGPUTex), gpuTexCount: len(g.GPUTextureCommands),
 			textStart: len(allText), textCount: len(g.TextBatches),
 			glyphStart: len(allGlyph), glyphCount: len(g.GlyphMaskBatches),
 		}
@@ -576,6 +581,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		allConvex = append(allConvex, g.ConvexCommands...)
 		allStencil = append(allStencil, g.StencilPaths...)
 		allImage = append(allImage, g.ImageCommands...)
+		allGPUTex = append(allGPUTex, g.GPUTextureCommands...)
 		allText = append(allText, g.TextBatches...)
 		allGlyph = append(allGlyph, g.GlyphMaskBatches...)
 	}
@@ -615,6 +621,15 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 			return fmt.Errorf("build image resources: %w", err)
 		}
 		combinedImageRes = res
+	}
+
+	var combinedGPUTexRes *imageFrameResources
+	if len(allGPUTex) > 0 {
+		res, err := s.buildGPUTextureResources(allGPUTex, w, h)
+		if err != nil {
+			return fmt.Errorf("build gpu texture resources: %w", err)
+		}
+		combinedGPUTexRes = res
 	}
 
 	var combinedTextRes *textFrameResources
@@ -676,6 +691,12 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		if o.imageCount > 0 && combinedImageRes != nil {
 			grpRes[i].imageRes = s.sliceImageResources(
 				combinedImageRes, o.imageStart, o.imageCount)
+		}
+
+		// GPU Texture (Tier 3b): per-draw independent bind groups.
+		if o.gpuTexCount > 0 && combinedGPUTexRes != nil {
+			grpRes[i].gpuTexRes = s.sliceImageResources(
+				combinedGPUTexRes, o.gpuTexStart, o.gpuTexCount)
 		}
 
 		// Text (MSDF): shared vertex/index buffers, slice drawCalls.
@@ -743,7 +764,9 @@ func (s *GPURenderSession) Destroy() {
 // drainQueue waits for all prior GPU submissions to complete.
 // Since the GPU queue is FIFO, WaitIdle guarantees all prior submissions are done.
 func (s *GPURenderSession) drainQueue() {
-	_ = s.device.WaitIdle()
+	if err := s.device.WaitIdle(); err != nil {
+		slogger().Warn("WaitIdle failed during queue drain", "err", err)
+	}
 }
 
 func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen,gocognit // sequential resource cleanup across 6 tiers
@@ -824,14 +847,10 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		s.textVertBuf = nil
 		s.textVertBufCap = 0
 	}
-	if s.textAtlasView != nil {
-		s.textAtlasView.Release()
-		s.textAtlasView = nil
-	}
-	if s.textAtlasTex != nil {
-		s.textAtlasTex.Release()
-		s.textAtlasTex = nil
-	}
+	// Atlas textures are owned by GPUShared (shared across sessions).
+	// Just clear refs, don't Release.
+	s.textAtlasView = nil
+	s.textAtlasTex = nil
 	// Tier 6: Glyph mask text per-batch pools.
 	for i, bg := range s.glyphMaskBindGroups {
 		if bg != nil {
@@ -966,7 +985,7 @@ func (s *GPURenderSession) ensureClipBindLayout() error {
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageFragment,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: clipParamsSize},
 			},
 		},
 	})
@@ -1454,15 +1473,23 @@ func (s *GPURenderSession) invalidateTextBindGroups() {
 // Call this after uploading atlas data to the GPU (e.g., from
 // TextRenderer.SyncAtlases). The atlas view is used in the text bind group.
 func (s *GPURenderSession) SetTextAtlas(tex *wgpu.Texture, view *wgpu.TextureView) {
-	if s.textAtlasView != nil {
-		s.textAtlasView.Release()
-	}
-	if s.textAtlasTex != nil {
-		s.textAtlasTex.Release()
-	}
+	// Atlas textures now owned by GPUShared — don't Release old refs here.
 	s.textAtlasTex = tex
 	s.textAtlasView = view
-	// Invalidate all bind groups -- they reference the old texture view.
+	s.invalidateTextBindGroups()
+}
+
+// SetTextAtlasRef sets the atlas texture view as a non-owning reference.
+// Unlike SetTextAtlas, this does NOT take ownership — the texture is owned
+// by GPUShared and shared across all sessions.
+func (s *GPURenderSession) SetTextAtlasRef(tex *wgpu.Texture, view *wgpu.TextureView) {
+	if s.textAtlasView == view {
+		return // already set
+	}
+	// Don't release old — it may be owned by GPUShared too.
+	// Only release if this session created its own (non-shared) atlas.
+	s.textAtlasTex = tex
+	s.textAtlasView = view
 	s.invalidateTextBindGroups()
 }
 
@@ -1615,6 +1642,91 @@ func (s *GPURenderSession) buildImageResources(cmds []ImageDrawCommand, w, h uin
 
 	return &imageFrameResources{
 		vertBuf:   s.imageVertBuf,
+		drawCalls: drawCalls,
+	}, nil
+}
+
+// buildGPUTextureResources builds render resources for GPU-to-GPU texture compositing.
+// Same pipeline as CPU images, but texture view comes directly — no ImageCache upload.
+func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand, w, h uint32) (*imageFrameResources, error) {
+	if len(cmds) == 0 {
+		return nil, nil //nolint:nilnil // no GPU texture commands
+	}
+	if err := s.ensurePipelines(); err != nil {
+		return nil, fmt.Errorf("ensure pipelines: %w", err)
+	}
+
+	totalVertBytes := len(cmds) * 6 * imageVertexStride //nolint:mnd // 6 verts per quad
+	var allVertData []byte
+	for i := range cmds {
+		cmd := &cmds[i]
+		imgCmd := ImageDrawCommand{
+			DstX: cmd.DstX, DstY: cmd.DstY, DstW: cmd.DstW, DstH: cmd.DstH,
+			Opacity: cmd.Opacity, ViewportWidth: cmd.ViewportWidth, ViewportHeight: cmd.ViewportHeight,
+			U0: 0, V0: 0, U1: 1, V1: 1,
+		}
+		allVertData = append(allVertData, buildImageVertices(&imgCmd)...)
+		_ = i
+	}
+
+	needed := uint64(totalVertBytes) //nolint:gosec // bounded
+	vertBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "gpu_tex_vert_buf",
+		Size:  needed,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create gpu texture vertex buffer: %w", err)
+	}
+	if err := s.queue.WriteBuffer(vertBuf, 0, allVertData); err != nil {
+		vertBuf.Release()
+		return nil, fmt.Errorf("upload gpu texture vertices: %w", err)
+	}
+
+	drawCalls := make([]imageDrawCall, 0, len(cmds))
+	for i := range cmds {
+		cmd := &cmds[i]
+		texView, ok := cmd.View.(*wgpu.TextureView)
+		if !ok || texView == nil {
+			continue
+		}
+
+		uniformBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: fmt.Sprintf("gpu_tex_uniform_%d", i),
+			Size:  imageUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			continue
+		}
+		uniformData := makeImageUniform(w, h, cmd.Opacity)
+		if err := s.queue.WriteBuffer(uniformBuf, 0, uniformData); err != nil {
+			uniformBuf.Release()
+			continue
+		}
+
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+			Label:  fmt.Sprintf("gpu_tex_bind_%d", i),
+			Layout: s.imagePipeline.uniformLayout,
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: uniformBuf, Offset: 0, Size: imageUniformSize},
+				{Binding: 1, TextureView: texView},
+				{Binding: 2, Sampler: s.imagePipeline.sampler},
+			},
+		})
+		if err != nil {
+			uniformBuf.Release()
+			continue
+		}
+
+		drawCalls = append(drawCalls, imageDrawCall{
+			bindGroup:   bg,
+			firstVertex: uint32(i * 6), //nolint:gosec // bounded
+		})
+	}
+
+	return &imageFrameResources{
+		vertBuf:   vertBuf,
 		drawCalls: drawCalls,
 	}, nil
 }
@@ -1890,6 +2002,16 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// BUG-GG-ENCODER-LIFECYCLE-001: defer-based safety net ensures the encoder
+	// is always finalized even if a panic or unexpected error path is hit.
+	// DiscardEncoding is idempotent (no-op if already released by Finish).
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
 	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_unified_pass",
@@ -1948,7 +2070,9 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes, clipBG)
 	}
 
-	_ = rp.End()
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("render pass End failed", "err", endErr)
+	}
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
@@ -1962,6 +2086,10 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		},
 	}})
 
+	// Mark encoder as consumed before handing to copySubmitAndReadback,
+	// which calls Finish() internally.
+	encoderConsumed = true
+
 	// Encode copy and submit, then read back pixels to the target.
 	return s.copySubmitAndReadback(encoder, w, h, target)
 }
@@ -1973,6 +2101,16 @@ func (s *GPURenderSession) encodeSubmitReadback(
 func (s *GPURenderSession) copySubmitAndReadback(
 	encoder *wgpu.CommandEncoder, w, h uint32, target gg.GPURenderTarget,
 ) error {
+	// BUG-GG-ENCODER-LIFECYCLE-001: this method takes ownership of encoder.
+	// Defer ensures DiscardEncoding on any error or panic before Finish.
+	// DiscardEncoding is idempotent (no-op if already released by Finish).
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
 	// Copy resolve texture to staging buffer for CPU readback.
 	// WebGPU (and DX12) requires BytesPerRow aligned to 256 bytes.
 	bytesPerRow := w * 4
@@ -1986,7 +2124,6 @@ func (s *GPURenderSession) copySubmitAndReadback(
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
 	})
 	if err != nil {
-		encoder.DiscardEncoding()
 		return fmt.Errorf("create staging buffer: %w", err)
 	}
 	defer stagingBuf.Release()
@@ -2013,7 +2150,7 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
-	// cmdBuf freed after fence wait
+	encoderConsumed = true
 
 	// Submit (auto-polls pending maps at tail).
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
@@ -2082,6 +2219,16 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// BUG-GG-ENCODER-LIFECYCLE-001: defer-based safety net ensures the encoder
+	// is always finalized even if a panic or unexpected error path is hit.
+	// DiscardEncoding is idempotent (no-op if already released by Finish).
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
 	// Per-view frame tracking: when the view changes between flushes
 	// (e.g., two gg.Context instances rendering to different targets),
 	// reset frameRendered so the new view gets LoadOpClear on its first
@@ -2160,13 +2307,16 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		s.glyphMaskPipeline.RecordDraws(rp, glyphMaskRes, clipBG)
 	}
 
-	_ = rp.End()
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("render pass End failed", "err", endErr)
+	}
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
 	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
+	encoderConsumed = true
 
 	// Free the previous frame's command buffer. By now VSync has
 	// guaranteed the GPU finished with it.
@@ -2177,6 +2327,9 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
 	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
+		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
+		// submitted. Without this, the Vulkan command pool entry leaks.
+		s.device.FreeCommandBuffer(cmdBuf)
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
@@ -2215,9 +2368,14 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 		s.stencilRenderer.RecordPath(rp, bufs, gr.stencilPaths[i].FillRule, clipBG)
 	}
 
-	// Tier 3: Textured quad images.
+	// Tier 3: Textured quad images (CPU-uploaded).
 	if gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0 {
 		s.imagePipeline.RecordDraws(rp, gr.imageRes, clipBG)
+	}
+
+	// Tier 3b: GPU texture compositing (pre-existing GPU texture, zero upload).
+	if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+		s.imagePipeline.RecordDraws(rp, gr.gpuTexRes, clipBG)
 	}
 
 	// Tier 4: MSDF text (rendered after shapes).
@@ -2338,6 +2496,16 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// BUG-GG-ENCODER-LIFECYCLE-001: defer-based safety net ensures the encoder
+	// is always finalized even if a panic or unexpected error path is hit.
+	// DiscardEncoding is idempotent (no-op if already released by Finish).
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
 	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_unified_pass",
@@ -2371,7 +2539,9 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
-	_ = rp.End()
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("render pass End failed", "err", endErr)
+	}
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in
 	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
@@ -2383,6 +2553,10 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 			NewUsage: gputypes.TextureUsageCopySrc,
 		},
 	}})
+
+	// Mark encoder as consumed before handing to copySubmitAndReadback,
+	// which calls Finish() internally.
+	encoderConsumed = true
 
 	// Encode copy and submit, then read back pixels to the target.
 	return s.copySubmitAndReadback(encoder, w, h, target)
@@ -2402,6 +2576,16 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	if err != nil {
 		return fmt.Errorf("create command encoder: %w", err)
 	}
+	// BUG-GG-ENCODER-LIFECYCLE-001: defer-based safety net ensures the encoder
+	// is always finalized even if a panic or unexpected error path is hit.
+	// DiscardEncoding is idempotent (no-op if already released by Finish).
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
 	// Per-view frame tracking (same as encodeSubmitSurface).
 	if view != s.lastView {
 		s.frameRendered = false
@@ -2452,13 +2636,16 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		s.recordGroupDraws(rp, &grpRes[i])
 	}
 
-	_ = rp.End()
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("render pass End failed", "err", endErr)
+	}
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
 	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
 	}
+	encoderConsumed = true
 
 	// Free the previous frame's command buffer. By now VSync has
 	// guaranteed the GPU finished with it.
@@ -2469,6 +2656,9 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
 	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
+		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
+		// submitted. Without this, the Vulkan command pool entry leaks.
+		s.device.FreeCommandBuffer(cmdBuf)
 		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}

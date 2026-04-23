@@ -19,11 +19,13 @@
 
 ---
 
-## Current State: v0.41.0
+## Current State: v0.42.0
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
-- **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + MSDF Text + Compute + Glyph Mask)
+- **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
+- **GPU-to-GPU texture compositing** — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern, zero readback)
+- **Bullet-proof encoder lifecycle** — defer-based safety, no silently swallowed errors
 - **Per-context GPU accelerator** (ADR-013) — Skia GrContext pattern, multi-context isolation
 - **Skia AAA pixel-perfect rasterizer** — trapezoid decomposition, diff=0 vs C++ Skia
 - **GPU DrawImage** — Tier 3 textured quad, zero mid-frame CPU flush
@@ -163,7 +165,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.41.0** | 2026-04 | Per-context GPU (ADR-013), Tier 3 textured quad, Skia AAA pixel-perfect, scene GPU |
+| **v0.42.0** | 2026-04 | GPU texture compositing (DrawGPUTexture + CreateOffscreenTexture), Flutter pattern |
+| v0.41.0–2 | 2026-04 | Per-context GPU (ADR-013), Tier 3 textured quad, Skia AAA, ImageCache genID, text kerning |
 | v0.40.1 | 2026-04 | Adreno fix (#252), Vello compute clip, Buffer.Map, deps update |
 | v0.40.0 | 2026-04 | Alpha mask API — per-shape, per-layer, luminance, GPU |
 | v0.39.0–4 | 2026-04 | Path SOA (ADR-010), zero-alloc rasterizer, MSDF Retina fix |
