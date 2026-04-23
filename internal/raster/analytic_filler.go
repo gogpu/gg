@@ -80,6 +80,9 @@ type AnalyticFiller struct {
 	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
 	stripYBuf []int32
 
+	// convexEdgeBuf is a reusable buffer for convex walker edge state.
+	convexEdgeBuf []convexEdge
+
 	// deferredEdges holds edges whose pixel-space UpperY is within the current row
 	// but should be inserted mid-row between sub-strips (matching Skia's insert_new_edges).
 	deferredEdges []deferredEdgeEntry
@@ -1919,8 +1922,11 @@ func (af *AnalyticFiller) FillConvex(
 		return // need at least left and right edge
 	}
 
-	// Convert to convexEdge array.
-	cEdges := make([]convexEdge, 0, len(sorted))
+	// Convert to convexEdge array (reuse buffer to avoid allocation).
+	if cap(af.convexEdgeBuf) < len(sorted) {
+		af.convexEdgeBuf = make([]convexEdge, 0, len(sorted))
+	}
+	cEdges := af.convexEdgeBuf[:0]
 	for i := range sorted {
 		line := sorted[i].variant.AsLine()
 		if line == nil {

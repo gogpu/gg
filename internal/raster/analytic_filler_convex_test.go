@@ -504,6 +504,7 @@ func TestFillConvex_TriangleMonotonicity(t *testing.T) {
 // --- Benchmarks ---
 
 // BenchmarkFillConvex_Rect benchmarks the convex walker on an axis-aligned rect.
+// Filler is reused across iterations (matching production usage).
 func BenchmarkFillConvex_Rect(b *testing.B) {
 	path := &testPath{
 		verbs:  []PathVerb{MoveTo, LineTo, LineTo, LineTo, Close},
@@ -513,23 +514,16 @@ func BenchmarkFillConvex_Rect(b *testing.B) {
 	eb.SetFlattenCurves(true)
 	eb.BuildFromPath(path, IdentityTransform{})
 	buf := make([]uint8, 100*100)
+	filler := NewAnalyticFiller(100, 100)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := range buf {
-			buf[j] = 0
-		}
-		filler := NewAnalyticFiller(100, 100)
 		filler.FillConvex(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 			offset := y * 100
 			if offset+100 > len(buf) {
 				return
 			}
-			row := buf[offset : offset+100]
-			for k := range row {
-				row[k] = 0
-			}
-			runs.CopyTo(row)
+			runs.CopyTo(buf[offset : offset+100])
 		})
 	}
 }
@@ -545,22 +539,16 @@ func BenchmarkFill_Rect(b *testing.B) {
 	eb.BuildFromPath(path, IdentityTransform{})
 	buf := make([]uint8, 100*100)
 
+	filler := NewAnalyticFiller(100, 100)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := range buf {
-			buf[j] = 0
-		}
-		filler := NewAnalyticFiller(100, 100)
 		filler.Fill(eb, FillRuleNonZero, func(y int, runs *AlphaRuns) {
 			offset := y * 100
 			if offset+100 > len(buf) {
 				return
 			}
-			row := buf[offset : offset+100]
-			for k := range row {
-				row[k] = 0
-			}
-			runs.CopyTo(row)
+			runs.CopyTo(buf[offset : offset+100])
 		})
 	}
 }
