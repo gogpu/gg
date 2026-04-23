@@ -11,6 +11,7 @@ import (
 
 	"github.com/gogpu/gg/internal/clip"
 	"github.com/gogpu/gg/text"
+	"github.com/gogpu/gpucontext"
 )
 
 // Context is the main drawing context.
@@ -1153,6 +1154,8 @@ type gpuContextOps interface {
 	QueueImageDraw(target GPURenderTarget, pixelData []byte, genID uint64, imgWidth, imgHeight, imgStride int,
 		dstX, dstY, dstW, dstH, opacity float32, viewportW, viewportH uint32,
 		u0, v0, u1, v1 float32)
+	QueueGPUTextureDraw(target GPURenderTarget, view gpucontext.TextureView,
+		dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32)
 	Flush(target GPURenderTarget) error
 	SetClipRect(x, y, w, h uint32)
 	ClearClipRect()

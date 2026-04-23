@@ -213,7 +213,7 @@ func (cr *ConvexRenderer) createPipeline() error {
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: sdfRenderUniformSize},
 			},
 		},
 	})

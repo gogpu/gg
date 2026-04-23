@@ -131,7 +131,7 @@ a seven-tier rendering pipeline:
 | **1. SDF** | Signed Distance Field | Circles, ellipses, rectangles, rounded rects |
 | **2a. Convex** | Direct vertex emission | Convex polygons, single draw call |
 | **2b. Stencil+Cover** | Fan tessellation + stencil buffer | Arbitrary complex paths, EvenOdd/NonZero fill |
-| **3. Textured Quad** | GPU image sampling | DrawImage compositing, RepaintBoundary cache |
+| **3. Textured Quad** | GPU image sampling | DrawImage, DrawGPUTexture (zero-readback compositing) |
 | **4. MSDF Text** | Multi-channel Signed Distance Field | Dynamic/animated text, resolution-independent |
 | **5. Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
 | **6. Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤48px, pixel-perfect quality |

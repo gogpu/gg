@@ -203,7 +203,7 @@ func (p *TexturedQuadPipeline) ensureBase() error {
 			{
 				Binding:    0,
 				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform},
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: imageUniformSize},
 			},
 			{
 				Binding:    1,

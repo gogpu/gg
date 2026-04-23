@@ -955,6 +955,148 @@ func TestEnsurePipelines_StencilClipRecreation(t *testing.T) {
 	}
 }
 
+// TestRenderSession_EncoderLifecycleRecovery verifies that the GPU encoder
+// lifecycle is bullet-proof: rapid consecutive renders never leak encoder state,
+// and the session automatically recovers between frames.
+// This is the regression test for BUG-GG-ENCODER-LIFECYCLE-001.
+func TestRenderSession_EncoderLifecycleRecovery(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	target := gg.GPURenderTarget{
+		Width:  128,
+		Height: 128,
+		Data:   make([]uint8, 128*128*4),
+		Stride: 128 * 4,
+	}
+
+	shapes := []SDFRenderShape{
+		{
+			Kind: 0, CenterX: 64, CenterY: 64,
+			Param1: 30, Param2: 30,
+			ColorR: 1, ColorG: 0, ColorB: 0, ColorA: 1,
+		},
+	}
+
+	// Phase 1: Rapid consecutive renders (readback path).
+	// Each call creates, uses, and finalizes an encoder. No state should leak
+	// between calls. With the defer-based safety net, even if something goes
+	// wrong internally, the encoder is always cleaned up.
+	for i := 0; i < 10; i++ {
+		if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+			t.Fatalf("readback frame %d failed: %v", i, err)
+		}
+	}
+
+	// Phase 2: Grouped path — rapid consecutive renders.
+	groups := []ScissorGroup{{
+		SDFShapes: shapes,
+	}}
+	for i := 0; i < 10; i++ {
+		if err := s.RenderFrameGrouped(target, groups); err != nil {
+			t.Fatalf("grouped readback frame %d failed: %v", i, err)
+		}
+	}
+
+	// Phase 3: Mixed — alternate between non-grouped and grouped.
+	// This exercises encoder lifecycle across different code paths
+	// within the same session.
+	for i := 0; i < 5; i++ {
+		if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+			t.Fatalf("mixed non-grouped frame %d failed: %v", i, err)
+		}
+		if err := s.RenderFrameGrouped(target, groups); err != nil {
+			t.Fatalf("mixed grouped frame %d failed: %v", i, err)
+		}
+	}
+
+	// Phase 4: Resize between frames — forces texture recreation which is
+	// a common failure point when encoder state leaks.
+	smallTarget := gg.GPURenderTarget{
+		Width:  64,
+		Height: 64,
+		Data:   make([]uint8, 64*64*4),
+		Stride: 64 * 4,
+	}
+	if err := s.RenderFrame(smallTarget, shapes, nil, nil, nil); err != nil {
+		t.Fatalf("post-resize render failed: %v", err)
+	}
+	// Render at original size again.
+	if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+		t.Fatalf("restore-size render failed: %v", err)
+	}
+}
+
+// TestRenderSession_EncoderLifecycleSurface verifies encoder lifecycle on the
+// surface (zero-copy) path where the encoder produces a command buffer that
+// is kept alive for deferred free. Rapid consecutive surface renders must
+// not leak command buffers.
+func TestRenderSession_EncoderLifecycleSurface(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	// Create a texture to use as the surface view.
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "test_surface",
+		Size:          wgpu.Extent3D{Width: 128, Height: 128, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
+	})
+	if err != nil {
+		t.Fatalf("CreateTexture failed: %v", err)
+	}
+	defer tex.Release()
+
+	view, err := device.CreateTextureView(tex, nil)
+	if err != nil {
+		t.Fatalf("CreateTextureView failed: %v", err)
+	}
+	defer view.Release()
+
+	s.SetSurfaceTarget(view, 128, 128)
+
+	target := gg.GPURenderTarget{
+		Width:  128,
+		Height: 128,
+		Data:   make([]uint8, 128*128*4),
+		Stride: 128 * 4,
+	}
+
+	shapes := []SDFRenderShape{
+		{
+			Kind: 0, CenterX: 64, CenterY: 64,
+			Param1: 30, Param2: 30,
+			ColorR: 0, ColorG: 1, ColorB: 0, ColorA: 1,
+		},
+	}
+
+	// Rapid consecutive surface renders. Each call produces a command buffer
+	// via encoder.Finish(), submits it, and stores prevCmdBuf. The defer
+	// safety net ensures no leaked encoder even if submit fails.
+	for i := 0; i < 10; i++ {
+		if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+			t.Fatalf("surface frame %d failed: %v", i, err)
+		}
+	}
+
+	// Grouped surface path.
+	groups := []ScissorGroup{{SDFShapes: shapes}}
+	for i := 0; i < 10; i++ {
+		if err := s.RenderFrameGrouped(target, groups); err != nil {
+			t.Fatalf("grouped surface frame %d failed: %v", i, err)
+		}
+	}
+}
+
 // TestRenderSessionEnsurePipelines_FullFlow verifies the complete session
 // pipeline creation flow: ensureClipBindLayout + ensurePipelines creates
 // all pipelines with clip layout from the start.
