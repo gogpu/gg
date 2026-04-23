@@ -263,6 +263,20 @@ func (s *GPURenderSession) BeginFrame() {
 	s.lastView = nil
 }
 
+// SetFrameState sets the per-context frame tracking state before a render pass.
+// GPURenderContext transfers its frameRendered/lastView into the session so the
+// session can compute the correct LoadOp (Clear vs Load) for this context.
+func (s *GPURenderSession) SetFrameState(frameRendered bool, lastView *wgpu.TextureView) {
+	s.frameRendered = frameRendered
+	s.lastView = lastView
+}
+
+// FrameState returns the current frame tracking state after a render pass.
+// GPURenderContext reads this back to maintain per-context LoadOp tracking.
+func (s *GPURenderSession) FrameState() (frameRendered bool, lastView *wgpu.TextureView) {
+	return s.frameRendered, s.lastView
+}
+
 // resolveActiveView returns the per-pass texture view to use for surface
 // rendering. The per-pass target.View takes priority over the session-level
 // surfaceView (which is retained for backward compatibility with callers

@@ -130,18 +130,19 @@ type DeviceProviderAware interface {
 	SetDeviceProvider(provider gpucontext.DeviceProvider) error
 }
 
-// SurfaceTargetAware is an optional interface for accelerators that support
-// direct surface rendering.
+// GPURenderContextProvider is an optional interface for accelerators that
+// support per-context GPU rendering. When the accelerator implements this
+// interface, each gg.Context lazily creates its own GPURenderContext for
+// isolated pending command queues, clip state, and frame tracking.
 //
-// Deprecated: use GPURenderTarget.View instead. New code should pass the
-// texture view via GPURenderTarget.View on each Flush call. This interface
-// is retained for backward compatibility with existing ggcanvas code paths
-// and is translated internally to GPURenderTarget.View.
-//
-// Call SetSurfaceTarget with nil to return to offscreen (readback) mode.
-// The caller retains ownership of the surface view.
-type SurfaceTargetAware interface {
-	SetSurfaceTarget(view any, width, height uint32)
+// This follows the Skia GrContext pattern: shared device/pipelines/atlas,
+// per-context pending ops. Without this, all contexts share one default
+// render context (backward compatible, single-context behavior).
+type GPURenderContextProvider interface {
+	// NewGPURenderContext creates a new per-context GPU render context.
+	// The returned value should be stored on the gg.Context and closed
+	// when the Context is closed.
+	NewGPURenderContext() any
 }
 
 // FrameAware is an optional interface for accelerators that need per-frame
@@ -293,13 +294,6 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 	return nil
 }
 
-// SetAcceleratorSurfaceTarget configures the registered accelerator for
-// direct surface rendering. When view is non-nil, the accelerator renders
-// directly to the surface texture view, eliminating GPU->CPU readback.
-// Call with nil view to return to offscreen mode.
-//
-// If no accelerator is registered or it doesn't support surface rendering,
-// this is a no-op. The view parameter should be a hal.TextureView.
 // AcceleratorCanRenderDirect returns true if the registered GPU accelerator
 // is initialized and capable of rendering directly to a surface target.
 // Returns false if no accelerator is registered, GPU init failed (e.g.,
@@ -325,16 +319,6 @@ func AcceleratorCanRenderDirect() bool {
 // shaders should not run on CPU — the accelerator stays uninitialized.
 type DirectRenderCapable interface {
 	CanRenderDirect() bool
-}
-
-func SetAcceleratorSurfaceTarget(view any, width, height uint32) {
-	a := Accelerator()
-	if a == nil {
-		return
-	}
-	if sta, ok := a.(SurfaceTargetAware); ok {
-		sta.SetSurfaceTarget(view, width, height)
-	}
 }
 
 // BeginAcceleratorFrame signals the start of a new rendering frame.

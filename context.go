@@ -60,6 +60,11 @@ type Context struct {
 	outlineExtractor *text.OutlineExtractor // lazy: for transform-aware text (Strategy B)
 	glyphCache       *text.GlyphCache       // lazy: cached glyph outlines for drawStringAsOutlines
 
+	// Per-context GPU render context (isolated pending commands, clips, frame tracking).
+	// Lazily created when GPURenderContextProvider is available.
+	// Type: *gpu.GPURenderContext (stored as any to avoid circular import).
+	gpuCtx any
+
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
 }
@@ -218,6 +223,17 @@ func (c *Context) Close() error {
 
 	// Flush pending GPU operations so queued shapes are not lost.
 	c.flushGPUAccelerator()
+
+	// Close per-context GPU render context if it was created.
+	if c.gpuCtx != nil {
+		type gpuCtxCloser interface {
+			Close()
+		}
+		if closer, ok := c.gpuCtx.(gpuCtxCloser); ok {
+			closer.Close()
+		}
+		c.gpuCtx = nil
+	}
 
 	// Clear path to release memory
 	c.ClearPath()
@@ -1113,6 +1129,24 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 		"viewW", width, "viewH", height,
 	)
 	return a.Flush(t)
+}
+
+// GPURenderContext returns the per-context GPU render context, lazily created.
+// Returns nil if no GPU accelerator is registered or it does not support
+// per-context rendering. The returned value should be type-asserted to
+// *gpu.GPURenderContext in internal/gpu consumers.
+func (c *Context) GPURenderContext() any {
+	if c.gpuCtx != nil {
+		return c.gpuCtx
+	}
+	a := Accelerator()
+	if a == nil {
+		return nil
+	}
+	if p, ok := a.(GPURenderContextProvider); ok {
+		c.gpuCtx = p.NewGPURenderContext()
+	}
+	return c.gpuCtx
 }
 
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.

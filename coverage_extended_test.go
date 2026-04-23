@@ -158,7 +158,9 @@ func TestSetAcceleratorDeviceProvider(t *testing.T) {
 	SetAcceleratorDeviceProvider(nil)
 }
 
-func TestSetAcceleratorSurfaceTarget(t *testing.T) {
-	// With no accelerator registered, should not panic
-	SetAcceleratorSurfaceTarget(nil, 0, 0)
+func TestAcceleratorCanRenderDirect(t *testing.T) {
+	// With no accelerator registered, should return false
+	if AcceleratorCanRenderDirect() {
+		t.Error("expected false with no accelerator")
+	}
 }
