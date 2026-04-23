@@ -247,7 +247,12 @@ func (rc *GPURenderContext) DrawText(target gg.GPURenderTarget, face any, s stri
 	rc.sceneStats.TextCount++
 
 	if !rc.shared.gpuReady {
-		return gg.ErrFallbackToCPU
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
 	}
 
 	rc.shared.mu.Lock()
@@ -257,6 +262,7 @@ func (rc *GPURenderContext) DrawText(target gg.GPURenderTarget, face any, s stri
 
 	batch, err := engine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
 	if err != nil {
+		slogger().Debug("DrawText: LayoutText failed", "err", err, "text", s)
 		return gg.ErrFallbackToCPU
 	}
 	if len(batch.Quads) == 0 {
@@ -277,7 +283,12 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 	rc.sceneStats.TextCount++
 
 	if !rc.shared.gpuReady {
-		return gg.ErrFallbackToCPU
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
 	}
 
 	rc.shared.mu.Lock()
@@ -287,6 +298,7 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 
 	batch, err := engine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
 	if err != nil {
+		slogger().Debug("DrawGlyphMaskText: LayoutText failed", "err", err, "text", s, "w", target.Width, "h", target.Height)
 		return gg.ErrFallbackToCPU
 	}
 	if len(batch.Quads) == 0 {
@@ -563,6 +575,17 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 		rc.session.SetTextAtlasRef(rc.shared.sharedAtlasTex, rc.shared.sharedAtlasView)
 	}
 
+	// Propagate glyph mask atlas page views for offscreen sessions.
+	// Same pattern as MSDF atlas — engine is shared, views must reach each session.
+	if len(allGlyphMaskBatches) > 0 && glyphEng != nil {
+		for i, batch := range allGlyphMaskBatches {
+			view := glyphEng.PageTextureView(batch.AtlasPageIndex)
+			if view != nil {
+				rc.session.SetGlyphMaskAtlasView(i, view, batch.IsLCD)
+			}
+		}
+	}
+
 	err := rc.session.RenderFrameGrouped(target, ownedGroups)
 	if err != nil {
 		total := 0
@@ -611,8 +634,16 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 // The texture has usage flags suitable for both FlushGPUWithView (render to)
 // and DrawGPUTexture (sample from). Returns view + release function.
 func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
-	if rc.shared == nil || !rc.shared.gpuReady {
+	if rc.shared == nil {
 		return nil, nil
+	}
+	if !rc.shared.gpuReady {
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return nil, nil
+		}
 	}
 	device := rc.shared.Device()
 	if device == nil {

@@ -1946,7 +1946,12 @@ func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int, uniformSize uint64) 
 // the LCD uniform layout (96 bytes with atlas_size) for per-channel alpha
 // compositing. Otherwise, the grayscale layout (80 bytes) is used.
 func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu.TextureView, isLCD bool) {
-	if s.glyphMaskPipeline == nil || atlasView == nil {
+	if s.glyphMaskPipeline == nil {
+		slogger().Warn("SetGlyphMaskAtlasView: pipeline not initialized", "batchIndex", batchIndex)
+		return
+	}
+	if atlasView == nil {
+		slogger().Warn("SetGlyphMaskAtlasView: nil atlas view", "batchIndex", batchIndex)
 		return
 	}
 	s.ensureGlyphMaskBatchPools(batchIndex+1, glyphMaskLCDUniformSize)
