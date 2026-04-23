@@ -237,6 +237,8 @@ func (c *Context) tryGPUDrawImage(img *ImageBuf, opts DrawImageOptions, srcX, sr
 		return false
 	}
 
+	defer c.setGPUClipRect()()
+
 	// Compute the destination quad corners in device pixels.
 	// The CTM transforms user-space (opts.X, opts.Y) + (dstWidth, dstHeight)
 	// into device-space coordinates.
