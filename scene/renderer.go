@@ -262,6 +262,23 @@ func NewRenderer(width, height int, opts ...RendererOption) *Renderer {
 	return r
 }
 
+// renderGPU renders the scene through the GPU accelerator via GPUSceneRenderer.
+// Creates a temporary gg.Context backed by the target pixmap, renders the scene
+// through it (GPU shapes → FlushGPU → readback to pixmap), returns nil on success.
+func (r *Renderer) renderGPU(target *gg.Pixmap, scene *Scene) error {
+	dc := gg.NewContextForPixmap(target)
+	if dc == nil {
+		return gg.ErrFallbackToCPU
+	}
+	defer func() { _ = dc.Close() }()
+
+	gpuR := NewGPUSceneRenderer(dc)
+	if err := gpuR.RenderScene(scene); err != nil {
+		return err
+	}
+	return dc.FlushGPU()
+}
+
 // Render renders the entire scene to the target pixmap.
 // This processes all tiles regardless of dirty state.
 //
@@ -285,6 +302,15 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	// GPU fast path: if a GPU accelerator is registered, render through
+	// GPUSceneRenderer which decodes scene commands into gg.Context GPU calls.
+	// The gg.Context handles GPU→CPU fallback automatically per-shape.
+	if gg.Accelerator() != nil {
+		if err := r.renderGPU(target, scene); err == nil {
+			return nil
+		}
 	}
 
 	startTotal := time.Now()

@@ -87,6 +87,18 @@ var _ io.Closer = (*Context)(nil)
 // When WithDeviceScale is used, the internal pixmap is allocated at physical
 // resolution (width*scale x height*scale) while Width/Height return the
 // logical dimensions. All drawing operations use logical coordinates.
+// NewContextForPixmap creates a Context backed by an existing Pixmap.
+// The Context renders directly into the provided pixmap without allocating
+// a new one. Used by scene.Renderer for GPU-accelerated scene rendering.
+func NewContextForPixmap(pm *Pixmap) *Context {
+	if pm == nil {
+		return nil
+	}
+	return NewContext(pm.Width(), pm.Height(), func(o *contextOptions) {
+		o.pixmap = pm
+	})
+}
+
 func NewContext(width, height int, opts ...ContextOption) *Context {
 	// Apply options
 	options := defaultOptions()
