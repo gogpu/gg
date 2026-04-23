@@ -269,7 +269,7 @@ func (c *Context) tryGPUDrawImage(img *ImageBuf, opts DrawImageOptions, srcX, sr
 		return false
 	}
 
-	rc.QueueImageDraw(target, pixelData, imgW, imgH, img.Stride(),
+	rc.QueueImageDraw(target, pixelData, img.GenerationID(), imgW, imgH, img.Stride(),
 		float32(tl.X), float32(tl.Y), float32(br.X-tl.X), float32(br.Y-tl.Y),
 		float32(opts.Opacity), vpW, vpH, u0, v0, u1, v1)
 	return true

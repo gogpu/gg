@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"sync/atomic"
 )
 
 // Compile-time interface checks.
@@ -15,6 +16,10 @@ var (
 	_ image.Image = (*Pixmap)(nil)
 	_ draw.Image  = (*Pixmap)(nil)
 )
+
+// nextPixmapGenID is a process-global monotonic counter for Pixmap identity.
+// Follows the Skia SkPixelRef::getGenerationID() pattern (ADR-014).
+var nextPixmapGenID atomic.Uint64
 
 // Pixmap represents a rectangular pixel buffer.
 // It implements both image.Image (read-only) and draw.Image (read-write)
@@ -24,6 +29,7 @@ type Pixmap struct {
 	width  int
 	height int
 	data   []uint8 // Premultiplied RGBA format, 4 bytes per pixel
+	genID  uint64  // Unique generation ID for GPU texture cache keying
 }
 
 // NewPixmap creates a new pixmap with the given dimensions.
@@ -32,7 +38,23 @@ func NewPixmap(width, height int) *Pixmap {
 		width:  width,
 		height: height,
 		data:   make([]uint8, width*height*4),
+		genID:  nextPixmapGenID.Add(1),
 	}
+}
+
+// GenerationID returns the unique identifier for this pixmap's current content.
+// Used by GPU texture cache to avoid stale texture reuse (ADR-014).
+// The ID changes when NotifyPixelsChanged() is called.
+func (p *Pixmap) GenerationID() uint64 {
+	return p.genID
+}
+
+// NotifyPixelsChanged assigns a new generation ID, invalidating any cached
+// GPU textures. Call after modifying pixel data directly (e.g., bulk writes).
+// Individual SetPixel/Clear calls do NOT auto-notify — call explicitly after
+// batch mutations. Follows Skia's SkPixelRef::notifyPixelsChanged() pattern.
+func (p *Pixmap) NotifyPixelsChanged() {
+	p.genID = nextPixmapGenID.Add(1)
 }
 
 // Width returns the width of the pixmap.

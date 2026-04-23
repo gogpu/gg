@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"fmt"
-	"unsafe"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -20,28 +19,28 @@ type imageCacheEntry struct {
 	view    *wgpu.TextureView
 	width   int
 	height  int
-	gen     uint64 // generation counter for LRU tracking
+	gen     uint64 // LRU generation counter
 }
 
 // ImageCache manages GPU textures for image patterns. Images are uploaded
-// on first use and reused on subsequent frames. The cache is keyed by the
-// pixel data slice pointer (identity-based: same underlying array = same entry).
-//
-// LRU eviction removes the oldest entry when the cache exceeds its budget.
-// The cache is NOT thread-safe — it is accessed only from the render path
-// which is serialized per GPURenderContext.
+// on first use and reused on subsequent frames. The cache is keyed by
+// Pixmap.GenerationID() — a monotonic counter that guarantees unique identity
+// even when Go's GC reuses memory addresses (ADR-014).
 //
 // This follows the enterprise pattern:
-//   - Skia: GrTextureProxy cache (keyed by UniqueID)
-//   - Vello: image atlas (uploaded once, referenced by scene commands)
-//   - Qt Quick: QSGTexture cache (per-window, LRU evicted)
+//   - Skia: GrResourceCache keyed by SkPixelRef::getGenerationID()
+//   - Vello: image_cache keyed by peniko::Blob::id() (AtomicU64)
+//   - femtovg: SlotMap with generational index
+//
+// The cache is NOT thread-safe — accessed only from the render path
+// which is serialized per GPURenderContext.
 type ImageCache struct {
 	device *wgpu.Device
 	queue  *wgpu.Queue
 
-	entries map[uintptr]*imageCacheEntry // keyed by pixel data pointer
+	entries map[uint64]*imageCacheEntry // keyed by Pixmap.GenerationID()
 	budget  int
-	gen     uint64 // global generation counter
+	gen     uint64 // global LRU generation counter
 }
 
 // NewImageCache creates a new image texture cache with the given device and queue.
@@ -49,32 +48,39 @@ func NewImageCache(device *wgpu.Device, queue *wgpu.Queue) *ImageCache {
 	return &ImageCache{
 		device:  device,
 		queue:   queue,
-		entries: make(map[uintptr]*imageCacheEntry),
+		entries: make(map[uint64]*imageCacheEntry),
 		budget:  defaultImageCacheBudget,
 	}
 }
 
 // GetOrUpload returns the cached GPU texture view for the given image data,
-// uploading it if not already cached. The pixel data must be premultiplied RGBA.
-// Returns the texture view for use in bind groups.
+// uploading it if not already cached. The cache key is ImageDrawCommand.GenerationID
+// (from Pixmap.GenerationID()), not a pointer.
 func (c *ImageCache) GetOrUpload(cmd *ImageDrawCommand) (*wgpu.TextureView, error) {
 	if len(cmd.PixelData) == 0 {
 		return nil, fmt.Errorf("empty pixel data")
 	}
 
-	key := pixelDataKey(cmd.PixelData)
+	key := cmd.GenerationID
+	if key == 0 {
+		// No generation ID — upload without caching (temporary data).
+		entry, err := c.uploadImage(cmd)
+		if err != nil {
+			return nil, err
+		}
+		return entry.view, nil
+	}
+
 	if entry, ok := c.entries[key]; ok {
 		c.gen++
 		entry.gen = c.gen
 		return entry.view, nil
 	}
 
-	// Evict if over budget.
 	if len(c.entries) >= c.budget {
 		c.evictOldest()
 	}
 
-	// Upload new texture.
 	entry, err := c.uploadImage(cmd)
 	if err != nil {
 		return nil, err
@@ -129,8 +135,6 @@ func (c *ImageCache) uploadImage(cmd *ImageDrawCommand) (*imageCacheEntry, error
 		return nil, fmt.Errorf("create image texture view: %w", err)
 	}
 
-	// Upload pixel data. The source may have stride != w*4.
-	// Repack to tight rows if needed.
 	bytesPerRow := uint32(w * 4) //nolint:gosec // image width fits uint32
 	var pixelData []byte
 	stride := cmd.ImgStride
@@ -173,7 +177,7 @@ func (c *ImageCache) uploadImage(cmd *ImageDrawCommand) (*imageCacheEntry, error
 
 // evictOldest removes the least recently used cache entry.
 func (c *ImageCache) evictOldest() {
-	var oldestKey uintptr
+	var oldestKey uint64
 	oldestGen := ^uint64(0)
 	for key, entry := range c.entries {
 		if entry.gen < oldestGen {
@@ -186,14 +190,4 @@ func (c *ImageCache) evictOldest() {
 		entry.texture.Release()
 		delete(c.entries, oldestKey)
 	}
-}
-
-// pixelDataKey returns a cache key based on the pixel data slice's underlying
-// array pointer. Two slices backed by the same array produce the same key.
-// This is identity-based: the same ImageBuf's Data() returns the same pointer.
-func pixelDataKey(data []byte) uintptr {
-	if len(data) == 0 {
-		return 0
-	}
-	return uintptr(unsafe.Pointer(&data[0]))
 }
