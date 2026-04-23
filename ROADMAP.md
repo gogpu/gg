@@ -19,16 +19,20 @@
 
 ---
 
-## Current State: v0.40.1
+## Current State: v0.41.0
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
-- **Six-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + MSDF Text + Compute + Glyph Mask)
+- **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + MSDF Text + Compute + Glyph Mask)
+- **Per-context GPU accelerator** (ADR-013) — Skia GrContext pattern, multi-context isolation
+- **Skia AAA pixel-perfect rasterizer** — trapezoid decomposition, diff=0 vs C++ Skia
+- **GPU DrawImage** — Tier 3 textured quad, zero mid-frame CPU flush
+- **Scene GPU auto-select** — GPU rendering for retained-mode scenes
 - **Smart multi-engine rasterizer** — 5 algorithms with per-path auto-selection
-- **Zero-alloc rasterizer** — FillRect/FillCircle: 0 allocs/op (Skia-level)
+- **Zero-alloc hot path** — QueueShape 26ns/0allocs, ScissorSegment 13ns/0allocs
+- **TexturePool** — Flutter RenderTargetCache pattern, per-frame lifecycle
 - **Path SOA representation** — `[]PathVerb` + `[]float64` (ADR-010, enterprise standard)
 - **Vello compute clip pipeline** — BeginClip/EndClip with packed blend stack (ADR-012)
-- **Adreno-compatible compute shaders** — workgroup_size(4,16) × PIXELS_PER_THREAD=4 (ADR-011)
 - **Alpha mask API** — per-shape, per-layer, luminance masks, GPU interface
 - Vello 9-stage compute pipeline for full-scene GPU rasterization
 - GPU MSDF text + Glyph mask dual-strategy text rendering
@@ -37,7 +41,6 @@
 - **GPU scissor rect clip** — hardware scissor for rectangular clips (GPU-CLIP-001)
 - **Separated deviceMatrix/userMatrix** — Cairo/Skia/Blend2D pattern for correct HiDPI
 - **SVG renderer** (`gg/svg` package) — parse + render SVG XML for JB-quality icons
-- **SVG path parser** — `ParseSVGPath()` for SVG `d` attribute
 - Recording System for vector export (PDF, SVG)
 - Font hinting, ClearType LCD subpixel rendering
 - Premultiplied alpha, 29 blend modes, structured logging
@@ -46,12 +49,21 @@
 
 ## Upcoming
 
-### v0.41.0 — Planned
+### v0.42.0 — Planned
 - [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
 - [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
-- [ ] Game input system (EPIC-INPUT) — gamepad/joystick support
+
+### v0.41.0 ✅ Released
+- [x] Per-context GPU accelerator (ARCH-GG-001, ADR-013) — Skia GrContext pattern
+- [x] GPU textured quad pipeline (Tier 3) — DrawImage GPU rendering
+- [x] Skia AAA pixel-perfect rasterizer — coverage diff=0 vs C++ Skia
+- [x] Convex fast path (RAST-012) — 1.6x faster, zero allocs
+- [x] Scene GPU auto-select — GPU rendering for retained-mode scenes
+- [x] TexturePool — Flutter RenderTargetCache pattern
+- [x] Per-pass View routing (PR #255) — WebGPU spec alignment
+- [x] BUG-RAST-011 shadow fix (#235) — near-horizontal edge bleed eliminated
 
 ### v0.40.0–v0.40.1 ✅ Released
 - [x] Alpha mask API — per-shape, per-layer, luminance, GPU interface (v0.40.0)
@@ -140,8 +152,8 @@
       SoftwareRenderer                GPUAccelerator
       (always available)              (opt-in via gpu/)
               │                             │
-    internal/raster              internal/gpu (six-tier)
-                                 ├── Tiers 1-4 (render pass)
+    internal/raster              internal/gpu (seven-tier)
+                                 ├── Tiers 1-4, 6 (render pass)
                                  └── Tier 5 (compute pipeline)
 ```
 
@@ -151,7 +163,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.40.1** | 2026-04 | Adreno fix (#252), Vello compute clip, Buffer.Map, deps update |
+| **v0.41.0** | 2026-04 | Per-context GPU (ADR-013), Tier 3 textured quad, Skia AAA pixel-perfect, scene GPU |
+| v0.40.1 | 2026-04 | Adreno fix (#252), Vello compute clip, Buffer.Map, deps update |
 | v0.40.0 | 2026-04 | Alpha mask API — per-shape, per-layer, luminance, GPU |
 | v0.39.0–4 | 2026-04 | Path SOA (ADR-010), zero-alloc rasterizer, MSDF Retina fix |
 | v0.38.0–2 | 2026-03 | SVG renderer, Clear() fix (#227), DrawImage rotation (#224) |

@@ -38,7 +38,7 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, six-tier GPU acceleration (SDF, Convex, Stencil+Cover, MSDF Text, Compute, Glyph Mask), Vello analytic AA, GPU scissor rect clipping, CPU fallback |
+| **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks (per-shape, per-layer, luminance, post-process) |
@@ -193,7 +193,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
     internal/raster              ┌──────────┼──────────┐
                                  │          │          │
                            Render Pass   MSDF Text   Compute
-                          (Tiers 1-3)   (Tier 4)   (Tier 5)
+                         (Tiers 1-4,6)  (Tier 4)   (Tier 5)
 ```
 
 ### Rendering Structure
