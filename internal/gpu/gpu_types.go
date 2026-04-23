@@ -8,13 +8,15 @@ import "github.com/gogpu/gg"
 // pending counts at the time of the change. Used to slice pending arrays
 // into per-scissor groups during Flush().
 type scissorSegment struct {
-	rect         *[4]uint32  // nil = full framebuffer
-	clipRRect    *ClipParams // nil = no RRect clip
-	sdfCount     int         // len(pendingShapes) at time of change
-	convexCount  int         // len(pendingConvexCommands) at time of change
-	stencilCount int         // len(pendingStencilPaths) at time of change
-	textCount    int         // len(pendingTextBatches) at time of change
-	glyphCount   int         // len(pendingGlyphMaskBatches) at time of change
+	rect         [4]uint32  // scissor rect (valid when hasRect=true)
+	hasRect      bool       // false = full framebuffer
+	clipRRect    ClipParams // RRect clip (valid when hasClipRRect=true)
+	hasClipRRect bool       // false = no RRect clip
+	sdfCount     int        // len(pendingShapes) at time of change
+	convexCount  int        // len(pendingConvexCommands) at time of change
+	stencilCount int        // len(pendingStencilPaths) at time of change
+	textCount    int        // len(pendingTextBatches) at time of change
+	glyphCount   int        // len(pendingGlyphMaskBatches) at time of change
 }
 
 // extractConvexPolygon checks if a path is a single closed contour made entirely

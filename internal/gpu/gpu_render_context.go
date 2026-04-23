@@ -34,7 +34,8 @@ type GPURenderContext struct {
 	pendingStencilPaths     []StencilPathCommand
 	pendingTextBatches      []TextBatch
 	pendingGlyphMaskBatches []GlyphMaskBatch
-	pendingTarget           *gg.GPURenderTarget
+	pendingTarget    gg.GPURenderTarget
+	hasPendingTarget bool
 
 	// Per-context clip state.
 	clipRect        *[4]uint32
@@ -111,8 +112,8 @@ func (rc *GPURenderContext) SceneStats() gg.SceneStats {
 // QueueShape accumulates an SDF shape for batch dispatch.
 func (rc *GPURenderContext) QueueShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
 	// If target changed, flush previous batch first.
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		if err := rc.Flush(*rc.pendingTarget); err != nil {
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if err := rc.Flush(rc.pendingTarget); err != nil {
 			return err
 		}
 	}
@@ -123,49 +124,49 @@ func (rc *GPURenderContext) QueueShape(target gg.GPURenderTarget, shape gg.Detec
 	}
 	rc.pendingShapes = append(rc.pendingShapes, rs)
 
-	targetCopy := target
-	rc.pendingTarget = &targetCopy
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 	return nil
 }
 
 // QueueConvex accumulates a convex polygon for batch dispatch.
 func (rc *GPURenderContext) QueueConvex(target gg.GPURenderTarget, cmd ConvexDrawCommand) {
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		_ = rc.Flush(*rc.pendingTarget)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		_ = rc.Flush(rc.pendingTarget)
 	}
 	rc.pendingConvexCommands = append(rc.pendingConvexCommands, cmd)
-	targetCopy := target
-	rc.pendingTarget = &targetCopy
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 }
 
 // QueueStencil accumulates a stencil path for batch dispatch.
 func (rc *GPURenderContext) QueueStencil(target gg.GPURenderTarget, cmd StencilPathCommand) {
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		_ = rc.Flush(*rc.pendingTarget)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		_ = rc.Flush(rc.pendingTarget)
 	}
 	rc.pendingStencilPaths = append(rc.pendingStencilPaths, cmd)
-	targetCopy := target
-	rc.pendingTarget = &targetCopy
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 }
 
 // QueueText accumulates an MSDF text batch for dispatch.
 func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch) {
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		_ = rc.Flush(*rc.pendingTarget)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		_ = rc.Flush(rc.pendingTarget)
 	}
 	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
-	targetCopy := target
-	rc.pendingTarget = &targetCopy
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 }
 
 // QueueGlyphMask accumulates a glyph mask batch for dispatch.
 func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch GlyphMaskBatch) {
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		_ = rc.Flush(*rc.pendingTarget)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		_ = rc.Flush(rc.pendingTarget)
 	}
 	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)
-	targetCopy := target
-	rc.pendingTarget = &targetCopy
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 }
 
 // DrawText shapes and queues text for MSDF rendering (Tier 4).
@@ -248,8 +249,8 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 	}
 
 	// If target changed, flush previous batch first.
-	if rc.pendingTarget != nil && !sameTarget(rc.pendingTarget, &target) {
-		if err := rc.Flush(*rc.pendingTarget); err != nil {
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if err := rc.Flush(rc.pendingTarget); err != nil {
 			return err
 		}
 	}
@@ -445,7 +446,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	rc.pendingTextBatches = rc.pendingTextBatches[:0]
 	rc.pendingGlyphMaskBatches = rc.pendingGlyphMaskBatches[:0]
 	rc.scissorSegments = rc.scissorSegments[:0]
-	rc.pendingTarget = nil
+	rc.hasPendingTarget = false
 	rc.sceneStats = gg.SceneStats{}
 
 	// Collect all text and glyph mask batches for atlas sync.
@@ -541,7 +542,7 @@ func (rc *GPURenderContext) Close() {
 	rc.pendingStencilPaths = nil
 	rc.pendingTextBatches = nil
 	rc.pendingGlyphMaskBatches = nil
-	rc.pendingTarget = nil
+	rc.hasPendingTarget = false
 	rc.clipRect = nil
 	rc.clipRRect = nil
 	rc.scissorSegments = nil
@@ -550,25 +551,22 @@ func (rc *GPURenderContext) Close() {
 
 // recordScissorSegment records a scissor state change in the timeline.
 func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
-	var copied *[4]uint32
-	if rect != nil {
-		c := *rect
-		copied = &c
-	}
-	var copiedRRect *ClipParams
-	if rc.clipRRect != nil {
-		c := *rc.clipRRect
-		copiedRRect = &c
-	}
-	rc.scissorSegments = append(rc.scissorSegments, scissorSegment{
-		rect:         copied,
-		clipRRect:    copiedRRect,
+	seg := scissorSegment{
 		sdfCount:     len(rc.pendingShapes),
 		convexCount:  len(rc.pendingConvexCommands),
 		stencilCount: len(rc.pendingStencilPaths),
 		textCount:    len(rc.pendingTextBatches),
 		glyphCount:   len(rc.pendingGlyphMaskBatches),
-	})
+	}
+	if rect != nil {
+		seg.rect = *rect
+		seg.hasRect = true
+	}
+	if rc.clipRRect != nil {
+		seg.clipRRect = *rc.clipRRect
+		seg.hasClipRRect = true
+	}
+	rc.scissorSegments = append(rc.scissorSegments, seg)
 }
 
 // buildScissorGroups builds scissor groups from the pending commands and timeline.
@@ -622,9 +620,19 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 			continue
 		}
 
+		var groupRect *[4]uint32
+		if seg.hasRect {
+			r := seg.rect
+			groupRect = &r
+		}
+		var groupClip *ClipParams
+		if seg.hasClipRRect {
+			c := seg.clipRRect
+			groupClip = &c
+		}
 		groups = append(groups, ScissorGroup{
-			Rect:             seg.rect,
-			ClipRRect:        seg.clipRRect,
+			Rect:             groupRect,
+			ClipRRect:        groupClip,
 			SDFShapes:        rc.pendingShapes[seg.sdfCount:endSDF],
 			ConvexCommands:   rc.pendingConvexCommands[seg.convexCount:endConvex],
 			StencilPaths:     rc.pendingStencilPaths[seg.stencilCount:endStencil],
