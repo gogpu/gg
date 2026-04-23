@@ -414,7 +414,11 @@ gg/
 │   │
 │   ├── gpu/                # GPU rendering pipeline (six-tier) + tile rasterizers
 │   │   ├── backend.go      # GPU backend implementation
-│   │   ├── sdf_gpu.go      # SDFAccelerator (GPU-based, wgpu HAL, ForceSDFAware)
+│   │   ├── gpu_shared.go    # GPUShared (global: device, pipelines, engines, TexturePool)
+│   │   ├── gpu_render_context.go # GPURenderContext (per gg.Context: pending ops, clip, frame)
+│   │   ├── gpu_types.go    # Shared types (scissorSegment, extractConvexPolygon)
+│   │   ├── texture_pool.go # TexturePool (Flutter RenderTargetCache pattern)
+│   │   ├── sdf_gpu.go      # SDFAccelerator wrapper (delegates to GPUShared + GPURenderContext)
 │   │   ├── sdf_render.go   # SDF render pipeline (Tier 1)
 │   │   ├── adaptive_filler.go    # AdaptiveFiller (auto 4×4 vs 16×16 tiles)
 │   │   ├── sparse_strips_filler.go  # SparseStripsFiller (4×4 tiles, CoverageFiller)
