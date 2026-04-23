@@ -477,3 +477,141 @@ func TestPaint_Clone_WithStroke(t *testing.T) {
 		t.Error("modifying clone affected original")
 	}
 }
+
+// TestStroke_NearHorizontalBleed is the integration test for BUG-RAST-011 (#235).
+// When stroking a near-horizontal line, the red stroke color should NOT bleed
+// more than 2px beyond the stroke boundary.
+func TestStroke_NearHorizontalBleed(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer dc.Close()
+
+	// White background
+	dc.SetRGBA(1, 1, 1, 1)
+	dc.Clear()
+
+	// Draw a near-horizontal line with red stroke
+	dc.SetRGB(1, 0, 0) // Red
+	dc.SetLineWidth(1)
+	dc.MoveTo(10, 50)
+	dc.LineTo(90, 50.3) // dy=0.3 over 80px — near-horizontal
+	dc.Stroke()
+
+	// The 1px stroke should be confined to ~y=49..51.
+	// Check that rows far from the stroke (y <= 45, y >= 55) are pure white.
+	for y := 0; y <= 45; y++ {
+		for x := 10; x < 90; x++ {
+			c := dc.pixmap.GetPixel(x, y)
+			if c.R > 0.01 && c.G < 0.01 {
+				t.Errorf("stroke bleed above at (%d,%d): R=%.3f — red leaked %d rows above stroke",
+					x, y, c.R, 50-y)
+				return
+			}
+		}
+	}
+	for y := 55; y < 100; y++ {
+		for x := 10; x < 90; x++ {
+			c := dc.pixmap.GetPixel(x, y)
+			if c.R > 0.01 && c.G < 0.01 {
+				t.Errorf("stroke bleed below at (%d,%d): R=%.3f — red leaked %d rows below stroke",
+					x, y, c.R, y-50)
+				return
+			}
+		}
+	}
+
+	// Verify stroke actually rendered (y=50 should have red pixels)
+	hasStroke := false
+	for x := 20; x < 80; x++ {
+		c := dc.pixmap.GetPixel(x, 50)
+		if c.R > 0.3 {
+			hasStroke = true
+			break
+		}
+	}
+	if !hasStroke {
+		t.Error("stroke not visible at y=50 — nothing rendered")
+	}
+}
+
+// TestStroke_FillThenStrokeBleed reproduces the exact GIS demo pattern:
+// blue FillPreserve + red Stroke on a near-horizontal polygon edge.
+// This is the pattern from user's issue #235.
+func TestStroke_FillThenStrokeBleed(t *testing.T) {
+	dc := NewContext(200, 100)
+	defer dc.Close()
+
+	dc.SetRGBA(1, 1, 1, 1)
+	dc.Clear()
+
+	// Draw a polygon with near-horizontal top edge (like GIS coastline)
+	dc.NewSubPath()
+	dc.MoveTo(10, 50)
+	dc.LineTo(190, 50.3) // near-horizontal top edge
+	dc.LineTo(190, 90)
+	dc.LineTo(10, 90)
+	dc.ClosePath()
+
+	// Blue fill
+	dc.SetRGBA(0, 0, 1, 1)
+	dc.FillPreserve()
+
+	// Red stroke width=1
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.SetLineWidth(1)
+	dc.Stroke()
+
+	// The red stroke along the near-horizontal top edge should NOT bleed
+	// above y=45. The stroke is at y≈50, so 5px margin is generous.
+	bleedCount := 0
+	for y := 0; y <= 45; y++ {
+		for x := 15; x < 185; x++ {
+			c := dc.pixmap.GetPixel(x, y)
+			if c.R > 0.02 || c.B > 0.02 {
+				bleedCount++
+				if bleedCount == 1 {
+					t.Errorf("fill+stroke bleed above at (%d,%d): R=%.3f B=%.3f",
+						x, y, c.R, c.B)
+				}
+			}
+		}
+	}
+	if bleedCount > 0 {
+		t.Errorf("total bleed pixels above: %d", bleedCount)
+	}
+}
+
+// TestStroke_ExtremeNearHorizontalBleed tests the GIS scenario:
+// stroking a very-nearly-horizontal line (dy=0.05 over 80px).
+func TestStroke_ExtremeNearHorizontalBleed(t *testing.T) {
+	dc := NewContext(100, 100)
+	defer dc.Close()
+
+	dc.SetRGBA(1, 1, 1, 1)
+	dc.Clear()
+
+	dc.SetRGB(1, 0, 0)
+	dc.SetLineWidth(1)
+	dc.MoveTo(10, 50)
+	dc.LineTo(90, 50.05) // dy=0.05 over 80px — extremely near-horizontal
+	dc.Stroke()
+
+	// Check no bleed beyond 5px from the stroke center
+	for y := 0; y <= 44; y++ {
+		for x := 10; x < 90; x++ {
+			c := dc.pixmap.GetPixel(x, y)
+			if c.R > 0.01 && c.G < 0.01 {
+				t.Errorf("extreme bleed above at (%d,%d): R=%.3f", x, y, c.R)
+				return
+			}
+		}
+	}
+	for y := 56; y < 100; y++ {
+		for x := 10; x < 90; x++ {
+			c := dc.pixmap.GetPixel(x, y)
+			if c.R > 0.01 && c.G < 0.01 {
+				t.Errorf("extreme bleed below at (%d,%d): R=%.3f", x, y, c.R)
+				return
+			}
+		}
+	}
+}
