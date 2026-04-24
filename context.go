@@ -1156,6 +1156,8 @@ type gpuContextOps interface {
 		u0, v0, u1, v1 float32)
 	QueueGPUTextureDraw(target GPURenderTarget, view gpucontext.TextureView,
 		dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32)
+	QueueBaseLayer(target GPURenderTarget, view gpucontext.TextureView,
+		dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32)
 	Flush(target GPURenderTarget) error
 	SetClipRect(x, y, w, h uint32)
 	ClearClipRect()

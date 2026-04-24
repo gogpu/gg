@@ -585,6 +585,33 @@ func (c *Context) DrawGPUTexture(view gpucontext.TextureView, x, y float64, widt
 		1.0, vpW, vpH)
 }
 
+// DrawGPUTextureBase composites a GPU texture view as the compositor base layer.
+// The base layer is drawn BEFORE all GPU tiers (SDF, convex, stencil, text) in
+// the render pass, making it the background for zero-readback rendering.
+//
+// Use this to composite a CPU pixmap texture as the background, with GPU shapes
+// rendered on top in the same render pass. Last call per frame wins.
+//
+// See ADR-015 (Compositor Base Layer), Flutter OffsetLayer pattern.
+func (c *Context) DrawGPUTextureBase(view gpucontext.TextureView, x, y float64, width, height int) {
+	rc := c.gpuCtxOps()
+	if rc == nil || view == nil {
+		return
+	}
+
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(x, y))
+	br := ctm.TransformPoint(Pt(x+float64(width), y+float64(height)))
+
+	target := c.gpuRenderTarget()
+	vpW := uint32(target.Width)  //nolint:gosec // viewport fits uint32
+	vpH := uint32(target.Height) //nolint:gosec // viewport fits uint32
+
+	rc.QueueBaseLayer(target, view,
+		float32(tl.X), float32(tl.Y), float32(br.X-tl.X), float32(br.Y-tl.Y),
+		1.0, vpW, vpH)
+}
+
 // CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
 // The texture can be rendered to via FlushGPUWithView and composited via
 // DrawGPUTexture. Returns (nil, nil) if GPU is not available.

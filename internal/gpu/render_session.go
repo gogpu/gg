@@ -508,8 +508,8 @@ type groupResources struct {
 //
 // For frames with no scissor changes (single group with nil rect), this
 // behaves identically to the original RenderFrame.
-func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
-	if len(groups) == 0 {
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup, baseLayer *GPUTextureDrawCommand) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
+	if len(groups) == 0 && baseLayer == nil {
 		return nil
 	}
 
@@ -712,10 +712,20 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 	}
 
-	if activeView != nil {
-		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes)
+	var baseLayerRes *imageFrameResources
+	if baseLayer != nil {
+		res, err := s.buildGPUTextureResources([]GPUTextureDrawCommand{*baseLayer}, w, h)
+		if err != nil {
+			slogger().Warn("base layer resource build failed", "err", err)
+		} else {
+			baseLayerRes = res
+		}
 	}
-	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target)
+
+	if activeView != nil {
+		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
+	}
+	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -2494,6 +2504,7 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	w, h uint32,
 	grpRes []groupResources,
 	target gg.GPURenderTarget,
+	baseLayerRes *imageFrameResources,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_encoder",
@@ -2538,6 +2549,12 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
+	// Base layer: pixmap textured quad drawn FIRST, before all tiers (ADR-015).
+	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
+		rp.SetScissorRect(0, 0, w, h)
+		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
+	}
+
 	// Render each group with its scissor rect applied.
 	for i := range grpRes {
 		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
@@ -2574,6 +2591,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	view *wgpu.TextureView,
 	w, h uint32,
 	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
 ) error {
 	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_surface_encoder",
@@ -2634,6 +2652,12 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		return fmt.Errorf("begin render pass: %w", rpErr)
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	// Base layer: pixmap textured quad drawn FIRST, before all tiers (ADR-015).
+	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
+		rp.SetScissorRect(0, 0, w, h)
+		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
+	}
 
 	// Render each group with its scissor rect applied.
 	for i := range grpRes {

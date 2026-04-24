@@ -996,7 +996,7 @@ func TestRenderSession_EncoderLifecycleRecovery(t *testing.T) {
 		SDFShapes: shapes,
 	}}
 	for i := 0; i < 10; i++ {
-		if err := s.RenderFrameGrouped(target, groups); err != nil {
+		if err := s.RenderFrameGrouped(target, groups, nil); err != nil {
 			t.Fatalf("grouped readback frame %d failed: %v", i, err)
 		}
 	}
@@ -1008,7 +1008,7 @@ func TestRenderSession_EncoderLifecycleRecovery(t *testing.T) {
 		if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
 			t.Fatalf("mixed non-grouped frame %d failed: %v", i, err)
 		}
-		if err := s.RenderFrameGrouped(target, groups); err != nil {
+		if err := s.RenderFrameGrouped(target, groups, nil); err != nil {
 			t.Fatalf("mixed grouped frame %d failed: %v", i, err)
 		}
 	}
@@ -1091,7 +1091,7 @@ func TestRenderSession_EncoderLifecycleSurface(t *testing.T) {
 	// Grouped surface path.
 	groups := []ScissorGroup{{SDFShapes: shapes}}
 	for i := 0; i < 10; i++ {
-		if err := s.RenderFrameGrouped(target, groups); err != nil {
+		if err := s.RenderFrameGrouped(target, groups, nil); err != nil {
 			t.Fatalf("grouped surface frame %d failed: %v", i, err)
 		}
 	}

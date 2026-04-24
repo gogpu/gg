@@ -9,10 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`DrawGPUTextureBase()`** — compositor base layer: textured quad drawn BEFORE all GPU
+  tiers in the render pass (ADR-015). Enables zero-readback rendering where CPU pixmap is
+  the background and GPU shapes (SDF, text) render on top in a single pass. Flutter
+  OffsetLayer pattern. Stencil/depth available across all tiers including base layer.
+
 - **`FlushPixmap()`** in ggcanvas — uploads CPU pixmap to GPU texture without calling
   `FlushGPU()`. Pending GPU shapes remain queued for zero-readback rendering via
   `FlushGPUWithView()`. Enables ui ADR-006 Phase 1 (GPU <5% for spinner @60fps).
   Existing `Flush()` refactored to delegate to `FlushPixmap()` after `FlushGPU()`.
+
+### Fixed
+
+- **Compute mode test assumptions** — `TestSDFAccelerator_ComputeMode_DelegatesToVello`
+  and `TestSDFAccelerator_FillShape_ComputeMode` incorrectly assumed `CanCompute()=false`
+  when `NewRenderContext()` initializes the GPU (including Vello dispatcher). Fixed to
+  verify commands are queued regardless of compute availability.
 
 ## [0.42.1] - 2026-04-24
 

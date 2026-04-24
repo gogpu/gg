@@ -37,6 +37,7 @@ type GPURenderContext struct {
 	pendingGPUTextureCommands []GPUTextureDrawCommand
 	pendingTextBatches        []TextBatch
 	pendingGlyphMaskBatches   []GlyphMaskBatch
+	baseLayer                 *GPUTextureDrawCommand
 	pendingTarget             gg.GPURenderTarget
 	hasPendingTarget          bool
 
@@ -58,9 +59,13 @@ type GPURenderContext struct {
 
 // PendingCount returns the total number of pending commands (for testing).
 func (rc *GPURenderContext) PendingCount() int {
-	return len(rc.pendingShapes) + len(rc.pendingConvexCommands) +
+	n := len(rc.pendingShapes) + len(rc.pendingConvexCommands) +
 		len(rc.pendingStencilPaths) + len(rc.pendingImageCommands) + len(rc.pendingGPUTextureCommands) +
 		len(rc.pendingTextBatches) + len(rc.pendingGlyphMaskBatches)
+	if rc.baseLayer != nil {
+		n++
+	}
+	return n
 }
 
 // SetPipelineMode sets the pipeline mode for this context's operations.
@@ -203,6 +208,20 @@ func (rc *GPURenderContext) queueImageCmd(target gg.GPURenderTarget, cmd ImageDr
 		}
 	}
 	rc.pendingImageCommands = append(rc.pendingImageCommands, cmd)
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+}
+
+// QueueBaseLayer sets the compositor base layer — a textured quad drawn BEFORE
+// all tiers in the render pass. Last call wins. Used for CPU pixmap compositing
+// in zero-readback rendering (ADR-015, Flutter OffsetLayer pattern).
+func (rc *GPURenderContext) QueueBaseLayer(target gg.GPURenderTarget, view gpucontext.TextureView,
+	dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32,
+) {
+	rc.baseLayer = &GPUTextureDrawCommand{
+		View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
+		Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+	}
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
@@ -590,7 +609,10 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 		}
 	}
 
-	err := rc.session.RenderFrameGrouped(target, ownedGroups)
+	baseLayer := rc.baseLayer
+	rc.baseLayer = nil
+
+	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer)
 	if err != nil {
 		total := 0
 		for i := range ownedGroups {
@@ -701,6 +723,7 @@ func (rc *GPURenderContext) Close() {
 	rc.pendingStencilPaths = nil
 	rc.pendingImageCommands = nil
 	rc.pendingGPUTextureCommands = nil
+	rc.baseLayer = nil
 	rc.pendingTextBatches = nil
 	rc.pendingGlyphMaskBatches = nil
 	rc.hasPendingTarget = false
