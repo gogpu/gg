@@ -72,6 +72,15 @@ func NewGPUShared() *GPUShared {
 // this shared resource holder. Each gg.Context should have its own
 // GPURenderContext for isolated pending command queues and frame tracking.
 func (s *GPUShared) NewRenderContext() *GPURenderContext {
+	// Ensure GPU is initialized before creating per-context state.
+	// Without this, standalone GPU (no DeviceProvider) stays uninitialized
+	// until first Flush, causing DrawText/FillShape to fall back to CPU.
+	s.mu.Lock()
+	if err := s.ensureGPU(); err != nil {
+		slogger().Warn("GPU init failed in NewRenderContext", "err", err)
+	}
+	s.mu.Unlock()
+
 	return &GPURenderContext{
 		shared: s,
 	}
