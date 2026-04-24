@@ -513,6 +513,10 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 			ownedGroups[i].ImageCommands = make([]ImageDrawCommand, len(g.ImageCommands))
 			copy(ownedGroups[i].ImageCommands, g.ImageCommands)
 		}
+		if len(g.GPUTextureCommands) > 0 {
+			ownedGroups[i].GPUTextureCommands = make([]GPUTextureDrawCommand, len(g.GPUTextureCommands))
+			copy(ownedGroups[i].GPUTextureCommands, g.GPUTextureCommands)
+		}
 		if len(g.TextBatches) > 0 {
 			ownedGroups[i].TextBatches = make([]TextBatch, len(g.TextBatches))
 			copy(ownedGroups[i].TextBatches, g.TextBatches)

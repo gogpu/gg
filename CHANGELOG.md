@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DrawGPUTexture invisible** (BUG-GPU-TEXTURE-DEEPCOPY-001) — `GPUTextureCommands` were
+  not deep-copied in `Flush()` scissor group snapshot. After clearing pending state, the
+  owned groups referenced zeroed slice data — GPU texture quads silently dropped every frame.
+
+- **GPU text fallback in offscreen contexts** — `ensureGPU()` was only called in `Flush()`,
+  but `DrawText`/`FillShape` checked `gpuReady` before Flush → `ErrFallbackToCPU` → CPU
+  bitmap text. Fix: lazy GPU init in `NewRenderContext()` + defense-in-depth in draw methods.
+  Glyph mask atlas now propagated to offscreen sessions.
+
 ## [0.42.0] - 2026-04-24
 
 ### Added
