@@ -305,6 +305,10 @@ func (c *Canvas) Resize(width, height int) error {
 // Flush uploads the canvas content to GPU texture if dirty.
 // Returns the texture for manual drawing if needed.
 //
+// This first calls FlushGPU() to render any pending GPU-accelerated shapes
+// (SDF, stencil, text) back into the CPU pixmap, then uploads the pixmap
+// to a GPU texture. For zero-readback rendering, use FlushPixmap() instead.
+//
 // The texture is created lazily on first Flush().
 // Subsequent calls only upload data if dirty flag is set.
 //
@@ -314,34 +318,39 @@ func (c *Canvas) Flush() (any, error) {
 		return nil, ErrCanvasClosed
 	}
 
-	// If size changed, defer old texture destruction until after GPU is idle.
-	// The old texture may still be referenced by in-flight GPU command buffers.
-	// Destroying it now would free descriptor heap entries that the GPU is reading,
-	// causing it to sample zeros (transparent). Instead, keep it alive and destroy
-	// it in RenderToEx after WriteTexture (which calls waitForGPU internally).
+	// Flush pending GPU shapes to pixel buffer before reading pixel data.
+	// Errors are logged but not fatal — CPU fallback may have already rendered.
+	if err := c.ctx.FlushGPU(); err != nil {
+		gg.Logger().Warn("FlushGPU error", "err", err)
+	}
+
+	return c.FlushPixmap()
+}
+
+// FlushPixmap uploads the CPU pixmap to GPU texture without flushing GPU shapes.
+// Unlike Flush(), this does NOT call FlushGPU() — pending GPU-accelerated shapes
+// remain queued in GPURenderContext for the caller to flush separately (e.g., via
+// FlushGPUWithView for zero-readback rendering to a surface view).
+//
+// Use this when GPU shapes should render directly to the display surface
+// instead of being read back into the CPU pixmap. See ADR-006.
+func (c *Canvas) FlushPixmap() (any, error) {
+	if c.closed {
+		return nil, ErrCanvasClosed
+	}
+
 	if c.sizeChanged {
 		c.deferTextureDestruction()
 		c.sizeChanged = false
 	}
 
-	// Skip if not dirty
 	if !c.dirty && c.texture != nil {
 		return c.texture, nil
 	}
 
-	// Flush pending GPU shapes to pixel buffer before reading pixel data.
-	// Errors are logged but not fatal — CPU fallback may have already rendered.
-	if err := c.ctx.FlushGPU(); err != nil {
-		// FlushGPU can fail if GPU accelerator has issues (e.g., compute dispatch failure).
-		// This is non-fatal: CPU-rendered content is still in the pixmap.
-		gg.Logger().Warn("FlushGPU error", "err", err)
-	}
-
-	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()
 	data := pixmap.Data()
 
-	// Create texture if needed (lazy initialization)
 	if c.texture == nil {
 		c.texture = c.createTexture(data)
 		c.dirty = false
@@ -349,7 +358,6 @@ func (c *Canvas) Flush() (any, error) {
 		return c.texture, nil
 	}
 
-	// Update existing texture — prefer partial upload when possible.
 	if err := c.uploadTexture(pixmap, data); err != nil {
 		return nil, err
 	}

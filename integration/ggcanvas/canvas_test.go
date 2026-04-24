@@ -805,6 +805,150 @@ func TestFlushClampsDirtyRectToPixmap(t *testing.T) {
 	}
 }
 
+// TestFlushPixmap tests the pixmap-only flush (no GPU readback).
+func TestFlushPixmap(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	tex, err := c.FlushPixmap()
+	if err != nil {
+		t.Errorf("FlushPixmap() error = %v", err)
+	}
+	if tex == nil {
+		t.Error("FlushPixmap() returned nil texture")
+	}
+
+	if _, ok := tex.(*pendingTexture); !ok {
+		t.Error("First FlushPixmap should return pending texture")
+	}
+
+	if c.IsDirty() {
+		t.Error("IsDirty() after FlushPixmap = true, want false")
+	}
+
+	tex2, err := c.FlushPixmap()
+	if err != nil {
+		t.Errorf("Second FlushPixmap() error = %v", err)
+	}
+	if tex2 != tex {
+		t.Error("Second FlushPixmap should return same texture when not dirty")
+	}
+}
+
+// TestFlushPixmapOnClosedCanvas verifies FlushPixmap fails on closed canvas.
+func TestFlushPixmapOnClosedCanvas(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_ = c.Close()
+
+	_, err = c.FlushPixmap()
+	if !errors.Is(err, ErrCanvasClosed) {
+		t.Errorf("FlushPixmap() on closed canvas error = %v, want %v", err, ErrCanvasClosed)
+	}
+}
+
+// TestFlushAndFlushPixmapConsistency verifies Flush and FlushPixmap produce
+// identical textures when no GPU shapes are pending (regression test).
+func TestFlushAndFlushPixmapConsistency(t *testing.T) {
+	provider := newMockProvider()
+
+	c1, err := New(provider, 80, 60)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c1.Close()
+
+	c2, err := New(provider, 80, 60)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c2.Close()
+
+	ctx1 := c1.Context()
+	ctx1.SetRGB(1, 0, 0)
+	ctx1.DrawRectangle(10, 10, 30, 20)
+	ctx1.Fill()
+
+	ctx2 := c2.Context()
+	ctx2.SetRGB(1, 0, 0)
+	ctx2.DrawRectangle(10, 10, 30, 20)
+	ctx2.Fill()
+
+	tex1, err := c1.Flush()
+	if err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+
+	tex2, err := c2.FlushPixmap()
+	if err != nil {
+		t.Fatalf("FlushPixmap() error = %v", err)
+	}
+
+	pt1, ok1 := tex1.(*pendingTexture)
+	pt2, ok2 := tex2.(*pendingTexture)
+	if !ok1 || !ok2 {
+		t.Fatal("Both should return pendingTexture")
+	}
+
+	if pt1.width != pt2.width || pt1.height != pt2.height {
+		t.Errorf("Texture dimensions differ: %dx%d vs %dx%d",
+			pt1.width, pt1.height, pt2.width, pt2.height)
+	}
+	if len(pt1.data) != len(pt2.data) {
+		t.Fatalf("Texture data length differs: %d vs %d", len(pt1.data), len(pt2.data))
+	}
+	for i := range pt1.data {
+		if pt1.data[i] != pt2.data[i] {
+			t.Errorf("Texture data differs at byte %d: %d vs %d", i, pt1.data[i], pt2.data[i])
+			break
+		}
+	}
+}
+
+// TestFlushPixmapPartialUpload verifies FlushPixmap respects dirty regions.
+func TestFlushPixmapPartialUpload(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	tex := renderer.textures[0]
+
+	c.MarkDirtyRegion(image.Rect(5, 5, 15, 15))
+
+	_, err = c.FlushPixmap()
+	if err != nil {
+		t.Fatalf("FlushPixmap() error = %v", err)
+	}
+
+	if tex.updated != 0 {
+		t.Errorf("UpdateData called %d times, want 0 (should use UpdateRegion)", tex.updated)
+	}
+	if len(tex.regionUpdates) != 1 {
+		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
+	}
+	ru := tex.regionUpdates[0]
+	if ru.x != 5 || ru.y != 5 || ru.w != 10 || ru.h != 10 {
+		t.Errorf("UpdateRegion params = (%d,%d,%d,%d), want (5,5,10,10)",
+			ru.x, ru.y, ru.w, ru.h)
+	}
+}
+
 // TestExtractRegion verifies the pixel extraction helper.
 func TestExtractRegion(t *testing.T) {
 	const w, h = 4, 4

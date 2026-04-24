@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`FlushPixmap()`** in ggcanvas — uploads CPU pixmap to GPU texture without calling
+  `FlushGPU()`. Pending GPU shapes remain queued for zero-readback rendering via
+  `FlushGPUWithView()`. Enables ui ADR-006 Phase 1 (GPU <5% for spinner @60fps).
+  Existing `Flush()` refactored to delegate to `FlushPixmap()` after `FlushGPU()`.
+
 ## [0.42.1] - 2026-04-24
 
 ### Fixed
