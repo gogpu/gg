@@ -1106,6 +1106,19 @@ func (c *Context) ResizeTarget() *Pixmap {
 // FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
 // Call this before reading pixel data (e.g., SavePNG, Image) when using a
 // batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+// BeginGPUFrame resets per-context GPU frame state so the next render pass
+// uses LoadOpClear. Call this on persistent contexts before re-rendering
+// to the same view — without it, frameRendered=true from the previous frame
+// causes LoadOpLoad, preserving stale content.
+//
+// Not needed for one-shot contexts (NewContext + Close per frame).
+// Not needed when the view changes between frames (auto-reset on view change).
+func (c *Context) BeginGPUFrame() {
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.BeginFrame()
+	}
+}
+
 func (c *Context) FlushGPU() error {
 	t := c.gpuRenderTarget()
 	if rc := c.gpuCtxOps(); rc != nil {

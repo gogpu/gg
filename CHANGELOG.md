@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`BeginGPUFrame()`** on Context — resets per-context GPU frame state for persistent contexts.
+  Required when reusing a Context across frames with the same view (RepaintBoundary pattern).
+  Without this, `frameRendered=true` from previous frame causes `LoadOpLoad` instead of
+  `LoadOpClear`, preserving stale content.
+
 - **`DrawGPUTextureBase()`** — compositor base layer: textured quad drawn BEFORE all GPU
   tiers in the render pass (ADR-015). Enables zero-readback rendering where CPU pixmap is
   the background and GPU shapes (SDF, text) render on top in a single pass. Flutter
