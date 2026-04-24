@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-04-24
+
 ### Fixed
 
 - **DrawGPUTexture invisible** (BUG-GPU-TEXTURE-DEEPCOPY-001) — `GPUTextureCommands` were
