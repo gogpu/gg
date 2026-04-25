@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) —
+  `SetSharedEncoder()` on Context enables multiple render sessions to record
+  render passes into one shared command encoder. One `Finish + Submit` per frame,
+  zero Vulkan semaphore conflicts. `encodeToEncoder()` + `encodeBlitToEncoder()`
+  in render session. Backward compatible: nil encoder = existing per-context submit.
+
+### Changed
+
+- **Dependencies:** wgpu v0.26.2 → v0.26.3
+
 ## [0.43.0] - 2026-04-25
 
 ### Added

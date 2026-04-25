@@ -509,7 +509,7 @@ type groupResources struct {
 //
 // For frames with no scissor changes (single group with nil rect), this
 // behaves identically to the original RenderFrame.
-func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup, baseLayer *GPUTextureDrawCommand) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup, baseLayer *GPUTextureDrawCommand, sharedEncoder *wgpu.CommandEncoder) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
 	if len(groups) == 0 && baseLayer == nil {
 		return nil
 	}
@@ -723,13 +723,24 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 	}
 
-	if activeView != nil {
-		if s.isBlitOnly(grpRes, baseLayerRes) {
-			return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
-		}
-		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
+	if activeView == nil {
+		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 	}
-	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
+
+	blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
+
+	// ADR-017: shared encoder → record render pass without submit.
+	if sharedEncoder != nil {
+		if blitOnly {
+			return s.encodeBlitToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+		}
+		return s.encodeToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes)
+	}
+
+	if blitOnly {
+		return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+	}
+	return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -2815,6 +2826,131 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	// Mark that at least one render pass has been submitted this frame.
 	s.frameRendered = true
 
+	return nil
+}
+
+// encodeToEncoder records a surface render pass into an external command encoder
+// WITHOUT creating the encoder or submitting. The caller is responsible for
+// encoder.Finish() + queue.Submit(). Used for single-command-buffer frames
+// where multiple contexts share one encoder (ADR-017, Flutter Impeller pattern).
+func (s *GPURenderSession) encodeToEncoder(
+	encoder *wgpu.CommandEncoder,
+	view *wgpu.TextureView,
+	w, h uint32,
+	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
+) error {
+	if view != s.lastView {
+		s.frameRendered = false
+		s.lastView = view
+	}
+
+	colorLoadOp := gputypes.LoadOpClear
+	stencilLoadOp := gputypes.LoadOpClear
+	depthLoadOp := gputypes.LoadOpClear
+	if s.frameRendered {
+		colorLoadOp = gputypes.LoadOpLoad
+		stencilLoadOp = gputypes.LoadOpLoad
+		depthLoadOp = gputypes.LoadOpLoad
+	}
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_shared_surface_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:          s.textures.msaaView,
+			ResolveTarget: view,
+			LoadOp:        colorLoadOp,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       depthLoadOp,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     stencilLoadOp,
+			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilClearValue: 0,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("begin shared render pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
+		rp.SetScissorRect(0, 0, w, h)
+		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
+	}
+
+	for i := range grpRes {
+		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
+		s.recordGroupDraws(rp, &grpRes[i])
+	}
+
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("shared render pass End failed", "err", endErr)
+	}
+
+	s.frameRendered = true
+	return nil
+}
+
+// encodeBlitToEncoder records a non-MSAA blit pass into an external encoder.
+// Same as encodeBlitOnlyPass but without encoder creation or submit.
+func (s *GPURenderSession) encodeBlitToEncoder(
+	encoder *wgpu.CommandEncoder,
+	view *wgpu.TextureView,
+	w, h uint32,
+	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
+	damageRect image.Rectangle,
+) error {
+	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
+		return fmt.Errorf("ensure blit pipeline: %w", err)
+	}
+
+	loadOp := gputypes.LoadOpClear
+	if !damageRect.Empty() && s.frameRendered {
+		loadOp = gputypes.LoadOpLoad
+	}
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_shared_blit_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       view,
+			LoadOp:     loadOp,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("begin shared blit pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	if !damageRect.Empty() {
+		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
+		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
+		dw := uint32(damageRect.Dx())           //nolint:gosec // positive
+		dh := uint32(damageRect.Dy())           //nolint:gosec // positive
+		rp.SetScissorRect(dx, dy, dw, dh)
+	}
+
+	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+
+	for i := range grpRes {
+		gr := &grpRes[i]
+		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+		}
+	}
+
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("shared blit pass End failed", "err", endErr)
+	}
+
+	s.frameRendered = true
 	return nil
 }
 

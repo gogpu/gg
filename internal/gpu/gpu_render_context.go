@@ -55,6 +55,11 @@ type GPURenderContext struct {
 	// Per-context scene stats (for Auto pipeline mode).
 	sceneStats   gg.SceneStats
 	pipelineMode gg.PipelineMode
+
+	// Shared command encoder for single-command-buffer frames (ADR-017).
+	// When set, Flush records render passes into this encoder instead of
+	// creating its own + submitting. The caller owns Finish + Submit.
+	sharedEncoder *wgpu.CommandEncoder
 }
 
 // PendingCount returns the total number of pending commands (for testing).
@@ -110,6 +115,23 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.clipRect = nil
 	rc.frameRendered = false
 	rc.lastView = nil
+}
+
+// SetSharedEncoder sets a shared command encoder for single-command-buffer
+// frames (ADR-017). When set, Flush() records render passes into this encoder
+// instead of creating its own and submitting. The caller is responsible for
+// encoder.Finish() + queue.Submit() after all contexts have flushed.
+// Pass nil to restore normal per-context submit behavior.
+// Accepts any (type-asserted to *wgpu.CommandEncoder) to support duck-typed
+// public API in gg.Context without wgpu import at root level.
+func (rc *GPURenderContext) SetSharedEncoder(encoder any) {
+	if encoder == nil {
+		rc.sharedEncoder = nil
+		return
+	}
+	if enc, ok := encoder.(*wgpu.CommandEncoder); ok {
+		rc.sharedEncoder = enc
+	}
 }
 
 // SceneStats returns the accumulated scene statistics for this context.
@@ -612,7 +634,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	baseLayer := rc.baseLayer
 	rc.baseLayer = nil
 
-	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer)
+	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer, rc.sharedEncoder)
 	if err != nil {
 		total := 0
 		for i := range ownedGroups {

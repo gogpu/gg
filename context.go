@@ -1137,6 +1137,25 @@ func (c *Context) ResizeTarget() *Pixmap {
 // FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
 // Call this before reading pixel data (e.g., SavePNG, Image) when using a
 // batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+// SetSharedEncoder sets a shared command encoder for single-command-buffer
+// frames (ADR-017, Flutter Impeller pattern). When set, FlushGPU/FlushGPUWithView
+// record render passes into this encoder instead of creating their own and
+// submitting. The caller is responsible for encoder.Finish() + queue.Submit().
+//
+// Pass nil to restore normal per-context submit behavior.
+// The encoder parameter is typed as any to avoid importing wgpu at root level.
+// Internally type-asserted to *wgpu.CommandEncoder.
+func (c *Context) SetSharedEncoder(encoder any) {
+	if rc := c.gpuCtxOps(); rc != nil {
+		type encoderSetter interface {
+			SetSharedEncoder(encoder any)
+		}
+		if es, ok := rc.(encoderSetter); ok {
+			es.SetSharedEncoder(encoder)
+		}
+	}
+}
+
 // BeginGPUFrame resets per-context GPU frame state so the next render pass
 // uses LoadOpClear. Call this on persistent contexts before re-rendering
 // to the same view — without it, frameRendered=true from the previous frame
