@@ -1137,6 +1137,61 @@ func (c *Context) ResizeTarget() *Pixmap {
 // FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
 // Call this before reading pixel data (e.g., SavePNG, Image) when using a
 // batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+// SetSharedEncoder sets a shared command encoder for single-command-buffer
+// frames (ADR-017, Flutter Impeller pattern). When set, FlushGPU/FlushGPUWithView
+// record render passes into this encoder instead of creating their own and
+// submitting. The caller is responsible for encoder.Finish() + queue.Submit().
+//
+// Pass a zero-value CommandEncoder (IsNil() == true) to restore normal
+// per-context submit behavior.
+func (c *Context) SetSharedEncoder(encoder gpucontext.CommandEncoder) {
+	if rc := c.gpuCtxOps(); rc != nil {
+		type encoderSetter interface {
+			SetSharedEncoder(encoder gpucontext.CommandEncoder)
+		}
+		if es, ok := rc.(encoderSetter); ok {
+			es.SetSharedEncoder(encoder)
+		}
+	}
+}
+
+// CreateSharedEncoder creates a command encoder for single-command-buffer
+// frames (ADR-017). Multiple gg.Contexts record render passes into this
+// encoder via SetSharedEncoder. Call SubmitSharedEncoder after all contexts
+// have flushed to submit in one GPU call.
+// Returns a zero-value CommandEncoder (IsNil() == true) if GPU is not available.
+func (c *Context) CreateSharedEncoder() gpucontext.CommandEncoder {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return gpucontext.CommandEncoder{}
+	}
+	type encoderCreator interface {
+		CreateEncoder() gpucontext.CommandEncoder
+	}
+	if ec, ok := rc.(encoderCreator); ok {
+		return ec.CreateEncoder()
+	}
+	return gpucontext.CommandEncoder{}
+}
+
+// SubmitSharedEncoder finishes the shared encoder and submits the resulting
+// command buffer to the GPU. Call after all contexts have flushed their
+// render passes into the encoder. Returns the command buffer submission
+// index for fence tracking, or error.
+func (c *Context) SubmitSharedEncoder(encoder gpucontext.CommandEncoder) error {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return nil
+	}
+	type encoderSubmitter interface {
+		SubmitEncoder(encoder gpucontext.CommandEncoder) error
+	}
+	if es, ok := rc.(encoderSubmitter); ok {
+		return es.SubmitEncoder(encoder)
+	}
+	return nil
+}
+
 // BeginGPUFrame resets per-context GPU frame state so the next render pass
 // uses LoadOpClear. Call this on persistent contexts before re-rendering
 // to the same view — without it, frameRendered=true from the previous frame
@@ -1169,15 +1224,16 @@ func (c *Context) FlushGPU() error {
 // without cross-contamination.
 //
 // This is the per-pass render target path for ggcanvas.RenderDirect.
-// When view is nil, behaves identically to FlushGPU (CPU readback).
-func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
+// When view is nil/zero, behaves identically to FlushGPU (CPU readback).
+func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height uint32) error {
 	t := c.gpuRenderTarget()
-	if view != nil {
+	if !view.IsNil() {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height
 	}
-	if rc := c.gpuCtxOps(); rc != nil {
+	rc := c.gpuCtxOps()
+	if rc != nil {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
@@ -1195,9 +1251,9 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 //
 // This enables sub-region compositing: a 48×48 spinner updates only 9KB
 // instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
-func (c *Context) FlushGPUWithViewDamage(view any, width, height uint32, damageRect image.Rectangle) error {
+func (c *Context) FlushGPUWithViewDamage(view gpucontext.TextureView, width, height uint32, damageRect image.Rectangle) error {
 	t := c.gpuRenderTarget()
-	if view != nil {
+	if !view.IsNil() {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height

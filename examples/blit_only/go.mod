@@ -1,6 +1,6 @@
-module github.com/gogpu/gg/examples/lcd_text
+module github.com/gogpu/gg/examples/blit_only
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/gogpu/gg v0.43.0

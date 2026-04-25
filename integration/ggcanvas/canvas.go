@@ -218,7 +218,7 @@ func (c *Canvas) DeviceScale() float64 {
 // Uses Go structural typing — no gogpu import required.
 func (c *Canvas) PixmapTextureView() gpucontext.TextureView {
 	if c.texture == nil {
-		return nil
+		return gpucontext.TextureView{}
 	}
 	type viewProvider interface {
 		TextureView() gpucontext.TextureView
@@ -226,7 +226,7 @@ func (c *Canvas) PixmapTextureView() gpucontext.TextureView {
 	if vp, ok := c.texture.(viewProvider); ok {
 		return vp.TextureView()
 	}
-	return nil
+	return gpucontext.TextureView{}
 }
 
 // SetDeviceScale changes the device scale factor on the canvas.
@@ -405,21 +405,22 @@ func (c *Canvas) FlushPixmap() (any, error) {
 // accelerator is registered, this method falls back to the readback path
 // via Flush().
 //
-// The surfaceView parameter must be a hal.TextureView obtained from
-// gogpu.Context.SurfaceView(). Pass nil to use the readback path.
+// The surfaceView is a type-safe opaque handle obtained from
+// dc.RenderTarget().SurfaceView(). Pass a zero-value (IsNil() == true)
+// to use the readback path.
 //
 // Example:
 //
 //	app.OnDraw(func(dc *gogpu.Context) {
 //	    canvas.Draw(func(cc *gg.Context) { ... })
 //	    w, h := dc.SurfaceSize()
-//	    canvas.RenderDirect(dc.SurfaceView(), w, h)
+//	    canvas.RenderDirect(dc.RenderTarget().SurfaceView(), w, h)
 //	})
-func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
+func (c *Canvas) RenderDirect(surfaceView gpucontext.TextureView, width, height uint32) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
-	if surfaceView == nil {
+	if surfaceView.IsNil() {
 		return nil
 	}
 	if !c.dirty {
@@ -428,7 +429,7 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 
 	gg.Logger().Debug("ggcanvas.RenderDirect",
 		"width", width, "height", height,
-		"hasSurfaceView", surfaceView != nil,
+		"hasSurfaceView", !surfaceView.IsNil(),
 	)
 
 	// Flush GPU shapes directly to the surface view (no readback).
@@ -453,7 +454,7 @@ func (c *Canvas) RenderDirect(surfaceView any, width, height uint32) error {
 // Implement this on your application context. *gogpu.Context satisfies this
 // via the gogpu.RenderTarget() adapter.
 type RenderTarget interface {
-	SurfaceView() any
+	SurfaceView() gpucontext.TextureView
 	SurfaceSize() (uint32, uint32)
 	PresentTexture(tex any) error
 }
@@ -484,7 +485,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	// adapters (llvmpipe, SwiftShader) the accelerator stays uninitialized
 	// and RenderDirect would silently succeed without rendering anything.
 	sv := dc.SurfaceView()
-	if sv != nil && gg.AcceleratorCanRenderDirect() {
+	if !sv.IsNil() && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
 		if err := c.RenderDirect(sv, sw, sh); err == nil {
 			return nil

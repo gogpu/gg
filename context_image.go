@@ -567,7 +567,7 @@ func ImageBufFromImage(img image.Image) *ImageBuf {
 // offscreen rendering (RepaintBoundary, layer compositing).
 func (c *Context) DrawGPUTexture(view gpucontext.TextureView, x, y float64, width, height int) {
 	rc := c.gpuCtxOps()
-	if rc == nil || view == nil {
+	if rc == nil || view.IsNil() {
 		return
 	}
 	defer c.setGPUClipRect()()
@@ -595,7 +595,7 @@ func (c *Context) DrawGPUTexture(view gpucontext.TextureView, x, y float64, widt
 // See ADR-015 (Compositor Base Layer), Flutter OffsetLayer pattern.
 func (c *Context) DrawGPUTextureBase(view gpucontext.TextureView, x, y float64, width, height int) {
 	rc := c.gpuCtxOps()
-	if rc == nil || view == nil {
+	if rc == nil || view.IsNil() {
 		return
 	}
 
@@ -623,7 +623,7 @@ func (c *Context) DrawGPUTextureBase(view gpucontext.TextureView, x, y float64, 
 func (c *Context) CreateOffscreenTexture(width, height int) (gpucontext.TextureView, func()) {
 	rc := c.gpuCtxOps()
 	if rc == nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 	type offscreenCreator interface {
 		CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func())
@@ -631,5 +631,5 @@ func (c *Context) CreateOffscreenTexture(width, height int) (gpucontext.TextureV
 	if oc, ok := rc.(offscreenCreator); ok {
 		return oc.CreateOffscreenTexture(width, height)
 	}
-	return nil, nil
+	return gpucontext.TextureView{}, nil
 }

@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/stroke"
@@ -55,6 +56,11 @@ type GPURenderContext struct {
 	// Per-context scene stats (for Auto pipeline mode).
 	sceneStats   gg.SceneStats
 	pipelineMode gg.PipelineMode
+
+	// Shared command encoder for single-command-buffer frames (ADR-017).
+	// When set, Flush records render passes into this encoder instead of
+	// creating its own + submitting. The caller owns Finish + Submit.
+	sharedEncoder *wgpu.CommandEncoder
 }
 
 // PendingCount returns the total number of pending commands (for testing).
@@ -110,6 +116,56 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.clipRect = nil
 	rc.frameRendered = false
 	rc.lastView = nil
+}
+
+// SetSharedEncoder sets a shared command encoder for single-command-buffer
+// frames (ADR-017). When set, Flush() records render passes into this encoder
+// instead of creating its own and submitting. The caller is responsible for
+// encoder.Finish() + queue.Submit() after all contexts have flushed.
+// Pass a zero-value CommandEncoder (IsNil() == true) to restore normal
+// per-context submit behavior.
+func (rc *GPURenderContext) SetSharedEncoder(encoder gpucontext.CommandEncoder) {
+	if encoder.IsNil() {
+		rc.sharedEncoder = nil
+		return
+	}
+	rc.sharedEncoder = (*wgpu.CommandEncoder)(encoder.Pointer())
+}
+
+// CreateEncoder creates a new command encoder for shared use across contexts.
+// Returns a zero-value CommandEncoder (IsNil() == true) if the session is not
+// initialized or encoder creation fails.
+func (rc *GPURenderContext) CreateEncoder() gpucontext.CommandEncoder {
+	if rc.session == nil {
+		return gpucontext.CommandEncoder{}
+	}
+	enc, err := rc.session.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+		Label: "shared_frame_encoder",
+	})
+	if err != nil {
+		return gpucontext.CommandEncoder{}
+	}
+	return gpucontext.NewCommandEncoder(unsafe.Pointer(enc)) //nolint:gosec // Go spec Rule 1 (ADR-018)
+}
+
+// SubmitEncoder finishes the shared encoder and submits the command buffer.
+func (rc *GPURenderContext) SubmitEncoder(encoder gpucontext.CommandEncoder) error {
+	if rc.session == nil {
+		return fmt.Errorf("GPU session not initialized")
+	}
+	if encoder.IsNil() {
+		return fmt.Errorf("nil command encoder")
+	}
+	enc := (*wgpu.CommandEncoder)(encoder.Pointer())
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		return fmt.Errorf("finish shared encoder: %w", err)
+	}
+	if _, err := rc.session.queue.Submit(cmdBuf); err != nil {
+		rc.session.device.FreeCommandBuffer(cmdBuf)
+		return fmt.Errorf("submit shared encoder: %w", err)
+	}
+	return nil
 }
 
 // SceneStats returns the accumulated scene statistics for this context.
@@ -472,8 +528,8 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 
 // Flush dispatches all pending commands for this context via the render session.
 func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cyclop,gocognit,gocyclo,funlen // sequential resource setup + group dispatch
-	if rc.PendingCount() == 0 {
-		// Still flush Vello if it has pending paths.
+	pending := rc.PendingCount()
+	if pending == 0 {
 		return rc.flushVello(target)
 	}
 
@@ -612,7 +668,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	baseLayer := rc.baseLayer
 	rc.baseLayer = nil
 
-	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer)
+	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer, rc.sharedEncoder)
 	if err != nil {
 		total := 0
 		for i := range ownedGroups {
@@ -661,19 +717,19 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 // and DrawGPUTexture (sample from). Returns view + release function.
 func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
 	if rc.shared == nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 	if !rc.shared.gpuReady {
 		rc.shared.mu.Lock()
 		err := rc.shared.ensureGPU()
 		rc.shared.mu.Unlock()
 		if err != nil || !rc.shared.gpuReady {
-			return nil, nil
+			return gpucontext.TextureView{}, nil
 		}
 	}
 	device := rc.shared.Device()
 	if device == nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
@@ -686,7 +742,7 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageTextureBinding,
 	})
 	if err != nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
@@ -698,14 +754,14 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 	})
 	if err != nil {
 		tex.Release()
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	release := func() {
 		view.Release()
 		tex.Release()
 	}
-	return view, release
+	return gpucontext.NewTextureView(unsafe.Pointer(view)), release //nolint:gosec // Go spec Rule 1 (ADR-018)
 }
 
 // Close releases this context's GPU resources. Shared resources are NOT

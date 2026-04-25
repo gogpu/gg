@@ -1028,12 +1028,12 @@ func TestPixmapTextureView_BeforeFlush(t *testing.T) {
 	}
 	defer c.Close()
 
-	if v := c.PixmapTextureView(); v != nil {
-		t.Error("PixmapTextureView() before flush should be nil")
+	if v := c.PixmapTextureView(); !v.IsNil() {
+		t.Error("PixmapTextureView() before flush should be nil (IsNil)")
 	}
 }
 
-// TestPixmapTextureView_PendingTexture returns nil for pendingTexture
+// TestPixmapTextureView_PendingTexture returns zero-value for pendingTexture
 // (not yet promoted to real GPU texture).
 func TestPixmapTextureView_PendingTexture(t *testing.T) {
 	provider := newMockProvider()
@@ -1045,9 +1045,9 @@ func TestPixmapTextureView_PendingTexture(t *testing.T) {
 
 	_, _ = c.FlushPixmap()
 
-	// pendingTexture does not implement viewProvider → nil
-	if v := c.PixmapTextureView(); v != nil {
-		t.Error("PixmapTextureView() on pendingTexture should be nil")
+	// pendingTexture does not implement viewProvider → zero-value
+	if v := c.PixmapTextureView(); !v.IsNil() {
+		t.Error("PixmapTextureView() on pendingTexture should be nil (IsNil)")
 	}
 }
 
@@ -1068,11 +1068,11 @@ func TestPixmapTextureView_PromotedTexture(t *testing.T) {
 		t.Fatalf("RenderTo() error = %v", err)
 	}
 
-	// mockTexture does not implement TextureView() → nil.
+	// mockTexture does not implement TextureView() → zero-value.
 	// In production, *gogpu.Texture implements TextureView() → non-nil.
 	v := c.PixmapTextureView()
-	if v != nil {
-		t.Error("mockTexture does not implement viewProvider, expected nil")
+	if !v.IsNil() {
+		t.Error("mockTexture does not implement viewProvider, expected IsNil")
 	}
 }
 
@@ -1085,7 +1085,7 @@ func TestPixmapTextureView_ClosedCanvas(t *testing.T) {
 	}
 	_ = c.Close()
 
-	if v := c.PixmapTextureView(); v != nil {
-		t.Error("PixmapTextureView() on closed canvas should be nil")
+	if v := c.PixmapTextureView(); !v.IsNil() {
+		t.Error("PixmapTextureView() on closed canvas should be nil (IsNil)")
 	}
 }

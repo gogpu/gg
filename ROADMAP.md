@@ -19,11 +19,13 @@
 
 ---
 
-## Current State: v0.42.0
+## Current State: v0.43.1
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
 - **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
+- **Zero-readback compositor pipeline** (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, FillRectCPU, non-MSAA blit path (93% bandwidth reduction)
+- **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SetSharedEncoder + SubmitSharedEncoder for multi-context frames
 - **GPU-to-GPU texture compositing** — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern, zero readback)
 - **Bullet-proof encoder lifecycle** — defer-based safety, no silently swallowed errors
 - **Per-context GPU accelerator** (ADR-013) — Skia GrContext pattern, multi-context isolation
@@ -51,11 +53,39 @@
 
 ## Upcoming
 
-### v0.42.0 — Planned
+### v0.43.1 — In Progress
+- [x] Type-safe GPU handles (ADR-018) — `any` → `unsafe.Pointer` opaque structs in gpucontext
+- [x] Blit-only black screen fix + GPU texture resource leak fix
+- [x] GPU texture overlay stretched fix (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) — separate vertex buffers
+- [x] Enterprise GPU texture tests (14 tests: vertices, ortho, queueing, isBlitOnly, regression)
+- [x] `blit_only` example + documentation
+
+### v0.44.0 — Planned
 - [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
 - [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
+
+### Pre-1.0.0 — Public API Freeze Blockers
+- [ ] **API-001: GPU handle API shape** — generics `Handle[Tag]` vs plain structs (ADR-018 follow-up). Must decide before 1.0.0 — changing after = breaking. See `docs/dev/kanban/0-backlog/API-001-gpu-handle-generics-vs-struct.md`
+- [ ] **API-002: Eliminate remaining `any`** — `face any` in DrawText (circular dep), `Canvas.texture any` (internal), `PresentTexture(tex any)` (cross-package token)
+- [ ] **API-003: Public API review** — full audit of exported types, methods, interfaces before freeze
+
+### v0.43.0–v0.43.1 ✅ Released
+- [x] Zero-readback compositor pipeline (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, non-MSAA blit path
+- [x] Single command buffer compositor (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SubmitSharedEncoder
+- [x] Non-MSAA blit-only fast path — 93% bandwidth reduction for compositor-only frames
+- [x] FillRectCPU + Pixmap.FillRect — CPU-only rect fill bypassing GPU accelerator
+- [x] FlushGPUWithViewDamage — damage-aware sub-region compositing
+- [x] Blit-only black screen fix — early return skipped baseLayer-only frames
+- [x] GPU texture resource leak fix — session-level persistent buffers (grow-only)
+- [x] `blit_only` example — standalone non-MSAA compositor demo
+- [x] Dependencies: wgpu v0.26.4, gogpu v0.29.2
+
+### v0.42.0–v0.42.1 ✅ Released
+- [x] GPU-to-GPU texture compositing — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern)
+- [x] Bullet-proof encoder lifecycle — defer-based safety, MinBindingSize
+- [x] DrawGPUTexture deep-copy fix (v0.42.1)
 
 ### v0.41.0 ✅ Released
 - [x] Per-context GPU accelerator (ARCH-GG-001, ADR-013) — Skia GrContext pattern

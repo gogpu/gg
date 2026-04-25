@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-04-25
+
+### Added
+
+- **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) —
+  `CreateSharedEncoder()`, `SetSharedEncoder()`, `SubmitSharedEncoder()` on Context.
+  Complete lifecycle: create → set on each context → flush all → submit once.
+  Multiple render sessions record passes into one encoder. One `Submit` per frame,
+  zero Vulkan semaphore conflicts. `encodeToEncoder()` + `encodeBlitToEncoder()`
+  in render session. Backward compatible: nil encoder = existing per-context submit.
+
+- **`examples/blit_only/`** — standalone example demonstrating the non-MSAA blit-only
+  compositor path (ADR-016). CPU-drawn content (FillRectCPU, SetPixelPremul circles,
+  grid lines) uploaded via FlushPixmap and composited via DrawGPUTextureBase +
+  FlushGPUWithView. No SDF shapes, no GPU text — isBlitOnly=true triggers the 1x
+  render pass. This is the path `ui/desktop.go` uses for RepaintBoundary compositing.
+
+- **Type-safe GPU resource handles** (ADR-018, Vulkan/Ebitengine opaque handle pattern) —
+  `gpucontext.TextureView` and `gpucontext.CommandEncoder` are now `struct{ ptr unsafe.Pointer }`
+  instead of `interface{}`. Zero `any` in GPU pipeline public API. Compile-time type
+  safety: TextureView cannot be confused with CommandEncoder or other resource types.
+  8 bytes, value type, zero allocations. GC-safe (unsafe.Pointer keeps object alive).
+  Breaking: `FlushGPUWithView(view any, ...)` → `FlushGPUWithView(view gpucontext.TextureView, ...)`,
+  `SetSharedEncoder(encoder any)` → `SetSharedEncoder(encoder gpucontext.CommandEncoder)`.
+  Requires gpucontext v0.15.0.
+
+### Fixed
+
+- **Blit-only path black screen** — `RenderFrameGrouped` early-returned on
+  `totalItems == 0` without checking `baseLayer`, silently skipping the entire
+  blit render pass when a frame contained only a base layer texture with zero
+  vector shapes. The non-MSAA fast path (ADR-016) was dead code for pure
+  compositor frames. Fixed: `totalItems == 0 && baseLayer == nil`.
+
+- **GPU texture resource leak** — `buildGPUTextureResources` allocated new vertex
+  and uniform buffers every frame for base layer / overlay textures without releasing
+  previous ones. GC eventually collected them (`Buffer released by GC` warnings), but
+  GPU memory grew unbounded between collections. Fixed: session-level persistent buffers
+  with grow-only reallocation (same pattern as SDF/convex/image/text tiers). Bind groups
+  are recreated per frame (texture view changes) but uniform/vertex buffers are reused.
+
+- **Nil-guard in CreateEncoder/SubmitEncoder** — nil session check prevents panic
+  when GPU is not initialized.
+
+- **GPU texture overlay stretched to full screen** (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) —
+  `DrawGPUTexture(view, x, y, 48, 48)` rendered at ~300px instead of 48×48.
+  Root cause: `buildGPUTextureResources` used a single shared vertex buffer
+  (`gpuTexVertBuf`) for both base layer and overlay textures. Base layer
+  (full-screen quad) overwrote overlay vertex positions. Fixed: separate
+  `gpuTexBaseVertBuf` for base layer, `gpuTexVertBuf` for overlays.
+  Regression test: `TestBuildGPUTextureResources_SeparateVertexBuffers`.
+
+### Changed
+
+- **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix);
+  gpucontext v0.14.0 → v0.15.0 (type-safe TextureView/CommandEncoder handles)
+- **Breaking:** `FlushGPUWithView`, `FlushGPUWithViewDamage` — `view any` → `view gpucontext.TextureView`;
+  `SetSharedEncoder`, `CreateSharedEncoder`, `SubmitSharedEncoder` — `any` → `gpucontext.CommandEncoder`;
+  `ggcanvas.RenderTarget.SurfaceView()` — `any` → `gpucontext.TextureView`;
+  `ggcanvas.RenderDirect` — `surfaceView any` → `surfaceView gpucontext.TextureView`.
+  Nil checks: `view == nil` → `view.IsNil()`.
+- **Examples dependencies:** all examples updated to gogpu v0.29.3 + wgpu v0.26.4
+- **Enterprise GPU texture tests** — 14 new tests covering vertex positioning,
+  ortho projection, command queueing, PendingCount, isBlitOnly detection, and
+  regression guards for BUG-GG-BLIT-PATH-001 and BUG-GG-GPU-TEXTURE-OVERLAY-SIZE.
+
 ## [0.43.0] - 2026-04-25
 
 ### Added

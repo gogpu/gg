@@ -283,8 +283,8 @@ func getColorFromPaint(paint *gg.Paint) gg.RGBA {
 
 // sameTarget compares two GPU render targets for identity.
 func sameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
-	// GPU-direct mode: compare View identity.
-	if a.View != nil || b.View != nil {
+	// GPU-direct mode: compare View identity (same underlying pointer).
+	if !a.View.IsNil() || !b.View.IsNil() {
 		return a.View == b.View
 	}
 	// CPU readback mode: compare data buffer identity.

@@ -8,6 +8,7 @@ import (
 	"image"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -156,6 +157,17 @@ type GPURenderSession struct {
 	glyphMaskUniformBufs []*wgpu.Buffer
 	glyphMaskBindGroups  []*wgpu.BindGroup
 
+	// Tier 3b: GPU texture compositing persistent buffers.
+	// Overlay and base layer use SEPARATE vertex buffers to prevent
+	// base layer (full-screen quad) from overwriting overlay vertices.
+	// Both use the same uniform/bind-group pools (indexed independently).
+	gpuTexVertBuf        *wgpu.Buffer // overlay GPU textures
+	gpuTexVertBufCap     uint64
+	gpuTexBaseVertBuf    *wgpu.Buffer // base layer only (1 quad, never shares with overlays)
+	gpuTexBaseVertBufCap uint64
+	gpuTexUniformBufs    []*wgpu.Buffer
+	gpuTexBindGroups     []*wgpu.BindGroup
+
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
 
@@ -296,7 +308,7 @@ func (s *GPURenderSession) FrameState() (frameRendered bool, lastView *wgpu.Text
 //
 // Returns nil when rendering should use the CPU readback path.
 func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.TextureView {
-	if target.View != nil {
+	if !target.View.IsNil() {
 		if v := extractTextureView(target.View); v != nil {
 			return v
 		}
@@ -307,20 +319,13 @@ func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.Te
 	return nil
 }
 
-// extractTextureView type-asserts a gpucontext.TextureView to
-// *wgpu.TextureView, trying the direct assertion first and then the
-// HalTextureView() accessor pattern used by gogpu wrappers.
-func extractTextureView(view any) *wgpu.TextureView {
-	if halView, ok := view.(*wgpu.TextureView); ok && halView != nil {
-		return halView
+// extractTextureView converts a gpucontext.TextureView opaque handle to
+// the concrete *wgpu.TextureView via unsafe.Pointer (Go spec Rule 1).
+func extractTextureView(view gpucontext.TextureView) *wgpu.TextureView {
+	if view.IsNil() {
+		return nil
 	}
-	type halTextureViewAccessor interface {
-		HalTextureView() *wgpu.TextureView
-	}
-	if hva, ok := view.(halTextureViewAccessor); ok {
-		return hva.HalTextureView()
-	}
-	return nil
+	return (*wgpu.TextureView)(view.Pointer())
 }
 
 // effectiveDimensions returns the width and height to use for MSAA textures
@@ -329,7 +334,7 @@ func extractTextureView(view any) *wgpu.TextureView {
 func (s *GPURenderSession) effectiveDimensions(target gg.GPURenderTarget, activeView *wgpu.TextureView) (uint32, uint32) {
 	if activeView != nil {
 		// Per-pass view dimensions from target take priority.
-		if target.View != nil && target.ViewWidth > 0 && target.ViewHeight > 0 {
+		if !target.View.IsNil() && target.ViewWidth > 0 && target.ViewHeight > 0 {
 			return target.ViewWidth, target.ViewHeight
 		}
 		// Fall back to session-level surface dimensions (backward compat).
@@ -509,7 +514,7 @@ type groupResources struct {
 //
 // For frames with no scissor changes (single group with nil rect), this
 // behaves identically to the original RenderFrame.
-func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup, baseLayer *GPUTextureDrawCommand) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
+func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups []ScissorGroup, baseLayer *GPUTextureDrawCommand, sharedEncoder *wgpu.CommandEncoder) error { //nolint:gocognit,gocyclo,cyclop,funlen,maintidx // sequential resource setup + group dispatch
 	if len(groups) == 0 && baseLayer == nil {
 		return nil
 	}
@@ -520,7 +525,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
 			len(groups[i].ImageCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
 	}
-	if totalItems == 0 {
+	if totalItems == 0 && baseLayer == nil {
 		return nil
 	}
 
@@ -626,7 +631,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 
 	var combinedGPUTexRes *imageFrameResources
 	if len(allGPUTex) > 0 {
-		res, err := s.buildGPUTextureResources(allGPUTex, w, h)
+		res, err := s.buildGPUTextureResources(allGPUTex, w, h, false)
 		if err != nil {
 			return fmt.Errorf("build gpu texture resources: %w", err)
 		}
@@ -715,7 +720,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 
 	var baseLayerRes *imageFrameResources
 	if baseLayer != nil {
-		res, err := s.buildGPUTextureResources([]GPUTextureDrawCommand{*baseLayer}, w, h)
+		res, err := s.buildGPUTextureResources([]GPUTextureDrawCommand{*baseLayer}, w, h, true)
 		if err != nil {
 			slogger().Warn("base layer resource build failed", "err", err)
 		} else {
@@ -723,13 +728,24 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 	}
 
-	if activeView != nil {
-		if s.isBlitOnly(grpRes, baseLayerRes) {
-			return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
-		}
-		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
+	if activeView == nil {
+		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 	}
-	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
+
+	blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
+
+	// ADR-017: shared encoder → record render pass without submit.
+	if sharedEncoder != nil {
+		if blitOnly {
+			return s.encodeBlitToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+		}
+		return s.encodeToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes)
+	}
+
+	if blitOnly {
+		return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+	}
+	return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -836,6 +852,30 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	if s.imagePipeline != nil {
 		s.imagePipeline.Destroy()
 		s.imagePipeline = nil
+	}
+	// Tier 3b: GPU texture compositing per-draw pools.
+	for i, bg := range s.gpuTexBindGroups {
+		if bg != nil {
+			bg.Release()
+			s.gpuTexBindGroups[i] = nil
+		}
+	}
+	s.gpuTexBindGroups = nil
+	for _, buf := range s.gpuTexUniformBufs {
+		if buf != nil {
+			buf.Release()
+		}
+	}
+	s.gpuTexUniformBufs = nil
+	if s.gpuTexVertBuf != nil {
+		s.gpuTexVertBuf.Release()
+		s.gpuTexVertBuf = nil
+		s.gpuTexVertBufCap = 0
+	}
+	if s.gpuTexBaseVertBuf != nil {
+		s.gpuTexBaseVertBuf.Release()
+		s.gpuTexBaseVertBuf = nil
+		s.gpuTexBaseVertBufCap = 0
 	}
 	// Tier 4: Text per-batch pools.
 	for i, bg := range s.textBindGroups {
@@ -1662,7 +1702,12 @@ func (s *GPURenderSession) buildImageResources(cmds []ImageDrawCommand, w, h uin
 
 // buildGPUTextureResources builds render resources for GPU-to-GPU texture compositing.
 // Same pipeline as CPU images, but texture view comes directly — no ImageCache upload.
-func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand, w, h uint32) (*imageFrameResources, error) {
+// Uses session-level persistent buffers (grow-only) to avoid per-frame GPU allocation.
+//
+// isBaseLayer selects a separate vertex buffer for the base layer to prevent
+// base layer vertices (full-screen quad) from overwriting overlay vertices
+// (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE).
+func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand, w, h uint32, isBaseLayer bool) (*imageFrameResources, error) {
 	if len(cmds) == 0 {
 		return nil, nil //nolint:nilnil // no GPU texture commands
 	}
@@ -1680,58 +1725,83 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 			U0: 0, V0: 0, U1: 1, V1: 1,
 		}
 		allVertData = append(allVertData, buildImageVertices(&imgCmd)...)
-		_ = i
+	}
+
+	// Select vertex buffer: base layer and overlays use SEPARATE buffers
+	// to prevent overwrite (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE).
+	vertBufPtr := &s.gpuTexVertBuf
+	vertCapPtr := &s.gpuTexVertBufCap
+	label := "gpu_tex_vert_buf"
+	if isBaseLayer {
+		vertBufPtr = &s.gpuTexBaseVertBuf
+		vertCapPtr = &s.gpuTexBaseVertBufCap
+		label = "gpu_tex_base_vert_buf"
 	}
 
 	needed := uint64(totalVertBytes) //nolint:gosec // bounded
-	vertBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "gpu_tex_vert_buf",
-		Size:  needed,
-		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create gpu texture vertex buffer: %w", err)
+	if *vertBufPtr == nil || *vertCapPtr < needed {
+		if *vertBufPtr != nil {
+			(*vertBufPtr).Release()
+		}
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: label,
+			Size:  needed,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create gpu texture vertex buffer: %w", err)
+		}
+		*vertBufPtr = buf
+		*vertCapPtr = needed
 	}
-	if err := s.queue.WriteBuffer(vertBuf, 0, allVertData); err != nil {
-		vertBuf.Release()
+	if err := s.queue.WriteBuffer(*vertBufPtr, 0, allVertData); err != nil {
 		return nil, fmt.Errorf("upload gpu texture vertices: %w", err)
 	}
 
 	drawCalls := make([]imageDrawCall, 0, len(cmds))
 	for i := range cmds {
 		cmd := &cmds[i]
-		texView, ok := cmd.View.(*wgpu.TextureView)
-		if !ok || texView == nil {
+		if cmd.View.IsNil() {
 			continue
+		}
+		texView := (*wgpu.TextureView)(cmd.View.Pointer())
+
+		// Grow uniform buffer pool.
+		for len(s.gpuTexUniformBufs) <= i {
+			buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+				Label: fmt.Sprintf("gpu_tex_uniform_%d", len(s.gpuTexUniformBufs)),
+				Size:  imageUniformSize,
+				Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create gpu texture uniform buffer: %w", err)
+			}
+			s.gpuTexUniformBufs = append(s.gpuTexUniformBufs, buf)
+			s.gpuTexBindGroups = append(s.gpuTexBindGroups, nil)
 		}
 
-		uniformBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: fmt.Sprintf("gpu_tex_uniform_%d", i),
-			Size:  imageUniformSize,
-			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			continue
-		}
 		uniformData := makeImageUniform(w, h, cmd.Opacity)
-		if err := s.queue.WriteBuffer(uniformBuf, 0, uniformData); err != nil {
-			uniformBuf.Release()
+		if err := s.queue.WriteBuffer(s.gpuTexUniformBufs[i], 0, uniformData); err != nil {
 			continue
 		}
 
+		// Bind group must be recreated each frame because the texture view changes.
+		if s.gpuTexBindGroups[i] != nil {
+			s.gpuTexBindGroups[i].Release()
+		}
 		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:  fmt.Sprintf("gpu_tex_bind_%d", i),
 			Layout: s.imagePipeline.uniformLayout,
 			Entries: []wgpu.BindGroupEntry{
-				{Binding: 0, Buffer: uniformBuf, Offset: 0, Size: imageUniformSize},
+				{Binding: 0, Buffer: s.gpuTexUniformBufs[i], Offset: 0, Size: imageUniformSize},
 				{Binding: 1, TextureView: texView},
 				{Binding: 2, Sampler: s.imagePipeline.sampler},
 			},
 		})
 		if err != nil {
-			uniformBuf.Release()
 			continue
 		}
+		s.gpuTexBindGroups[i] = bg
 
 		drawCalls = append(drawCalls, imageDrawCall{
 			bindGroup:   bg,
@@ -1740,7 +1810,7 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	}
 
 	return &imageFrameResources{
-		vertBuf:   vertBuf,
+		vertBuf:   *vertBufPtr,
 		drawCalls: drawCalls,
 	}, nil
 }
@@ -2689,10 +2759,10 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	if _, err := s.queue.Submit(cmdBuf); err != nil {
+	if _, submitErr := s.queue.Submit(cmdBuf); submitErr != nil {
 		s.device.FreeCommandBuffer(cmdBuf)
 		s.prevCmdBuf = nil
-		return fmt.Errorf("submit blit: %w", err)
+		return fmt.Errorf("submit blit: %w", submitErr)
 	}
 	s.prevCmdBuf = cmdBuf
 	s.frameRendered = true
@@ -2815,6 +2885,131 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	// Mark that at least one render pass has been submitted this frame.
 	s.frameRendered = true
 
+	return nil
+}
+
+// encodeToEncoder records a surface render pass into an external command encoder
+// WITHOUT creating the encoder or submitting. The caller is responsible for
+// encoder.Finish() + queue.Submit(). Used for single-command-buffer frames
+// where multiple contexts share one encoder (ADR-017, Flutter Impeller pattern).
+func (s *GPURenderSession) encodeToEncoder(
+	encoder *wgpu.CommandEncoder,
+	view *wgpu.TextureView,
+	w, h uint32,
+	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
+) error {
+	if view != s.lastView {
+		s.frameRendered = false
+		s.lastView = view
+	}
+
+	colorLoadOp := gputypes.LoadOpClear
+	stencilLoadOp := gputypes.LoadOpClear
+	depthLoadOp := gputypes.LoadOpClear
+	if s.frameRendered {
+		colorLoadOp = gputypes.LoadOpLoad
+		stencilLoadOp = gputypes.LoadOpLoad
+		depthLoadOp = gputypes.LoadOpLoad
+	}
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_shared_surface_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:          s.textures.msaaView,
+			ResolveTarget: view,
+			LoadOp:        colorLoadOp,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       depthLoadOp,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     stencilLoadOp,
+			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilClearValue: 0,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("begin shared render pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
+		rp.SetScissorRect(0, 0, w, h)
+		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
+	}
+
+	for i := range grpRes {
+		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
+		s.recordGroupDraws(rp, &grpRes[i])
+	}
+
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("shared render pass End failed", "err", endErr)
+	}
+
+	s.frameRendered = true
+	return nil
+}
+
+// encodeBlitToEncoder records a non-MSAA blit pass into an external encoder.
+// Same as encodeBlitOnlyPass but without encoder creation or submit.
+func (s *GPURenderSession) encodeBlitToEncoder(
+	encoder *wgpu.CommandEncoder,
+	view *wgpu.TextureView,
+	w, h uint32,
+	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
+	damageRect image.Rectangle,
+) error {
+	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
+		return fmt.Errorf("ensure blit pipeline: %w", err)
+	}
+
+	loadOp := gputypes.LoadOpClear
+	if !damageRect.Empty() && s.frameRendered {
+		loadOp = gputypes.LoadOpLoad
+	}
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_shared_blit_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       view,
+			LoadOp:     loadOp,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("begin shared blit pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	if !damageRect.Empty() {
+		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
+		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
+		dw := uint32(damageRect.Dx())          //nolint:gosec // positive
+		dh := uint32(damageRect.Dy())          //nolint:gosec // positive
+		rp.SetScissorRect(dx, dy, dw, dh)
+	}
+
+	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+
+	for i := range grpRes {
+		gr := &grpRes[i]
+		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+		}
+	}
+
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("shared blit pass End failed", "err", endErr)
+	}
+
+	s.frameRendered = true
 	return nil
 }
 
