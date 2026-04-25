@@ -1191,8 +1191,8 @@ func TestIsBlitOnly(t *testing.T) {
 		grpRes := []groupResources{{
 			gpuTexRes: &imageFrameResources{drawCalls: []imageDrawCall{{}}},
 		}}
-		if s.isBlitOnly(grpRes, baseRes) {
-			t.Error("expected NOT blit-only with overlay GPU textures")
+		if !s.isBlitOnly(grpRes, baseRes) {
+			t.Error("expected blit-only — GPU textures are textured quads, no MSAA needed")
 		}
 	})
 
