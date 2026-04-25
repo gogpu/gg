@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-text/typesetting v0.3.4
-	github.com/gogpu/gpucontext v0.14.0
+	github.com/gogpu/gpucontext v0.15.0
 	github.com/gogpu/gputypes v0.5.0
 	github.com/gogpu/naga v0.17.6
 	github.com/gogpu/wgpu v0.26.4
