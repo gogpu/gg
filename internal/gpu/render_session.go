@@ -8,6 +8,7 @@ import (
 	"image"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -303,7 +304,7 @@ func (s *GPURenderSession) FrameState() (frameRendered bool, lastView *wgpu.Text
 //
 // Returns nil when rendering should use the CPU readback path.
 func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.TextureView {
-	if target.View != nil {
+	if !target.View.IsNil() {
 		if v := extractTextureView(target.View); v != nil {
 			return v
 		}
@@ -314,20 +315,13 @@ func (s *GPURenderSession) resolveActiveView(target gg.GPURenderTarget) *wgpu.Te
 	return nil
 }
 
-// extractTextureView type-asserts a gpucontext.TextureView to
-// *wgpu.TextureView, trying the direct assertion first and then the
-// HalTextureView() accessor pattern used by gogpu wrappers.
-func extractTextureView(view any) *wgpu.TextureView {
-	if halView, ok := view.(*wgpu.TextureView); ok && halView != nil {
-		return halView
+// extractTextureView converts a gpucontext.TextureView opaque handle to
+// the concrete *wgpu.TextureView via unsafe.Pointer (Go spec Rule 1).
+func extractTextureView(view gpucontext.TextureView) *wgpu.TextureView {
+	if view.IsNil() {
+		return nil
 	}
-	type halTextureViewAccessor interface {
-		HalTextureView() *wgpu.TextureView
-	}
-	if hva, ok := view.(halTextureViewAccessor); ok {
-		return hva.HalTextureView()
-	}
-	return nil
+	return (*wgpu.TextureView)(view.Pointer())
 }
 
 // effectiveDimensions returns the width and height to use for MSAA textures
@@ -336,7 +330,7 @@ func extractTextureView(view any) *wgpu.TextureView {
 func (s *GPURenderSession) effectiveDimensions(target gg.GPURenderTarget, activeView *wgpu.TextureView) (uint32, uint32) {
 	if activeView != nil {
 		// Per-pass view dimensions from target take priority.
-		if target.View != nil && target.ViewWidth > 0 && target.ViewHeight > 0 {
+		if !target.View.IsNil() && target.ViewWidth > 0 && target.ViewHeight > 0 {
 			return target.ViewWidth, target.ViewHeight
 		}
 		// Fall back to session-level surface dimensions (backward compat).
@@ -1743,10 +1737,10 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	drawCalls := make([]imageDrawCall, 0, len(cmds))
 	for i := range cmds {
 		cmd := &cmds[i]
-		texView, ok := cmd.View.(*wgpu.TextureView)
-		if !ok || texView == nil {
+		if cmd.View.IsNil() {
 			continue
 		}
+		texView := (*wgpu.TextureView)(cmd.View.Pointer())
 
 		// Grow uniform buffer pool.
 		for len(s.gpuTexUniformBufs) <= i {

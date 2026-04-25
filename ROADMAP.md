@@ -53,12 +53,21 @@
 
 ## Upcoming
 
+### v0.43.1 — In Progress
+- [x] Type-safe GPU handles (ADR-018) — `any` → `unsafe.Pointer` opaque structs in gpucontext
+- [x] Blit-only black screen fix + GPU texture resource leak fix
+- [x] `blit_only` example + documentation
+
 ### v0.44.0 — Planned
-- [ ] Type-safe GPU pipeline — replace `any` in `FlushGPUWithView`, `gpucontext.TextureView`, `SetSharedEncoder` with typed interfaces
 - [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
 - [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
+
+### Pre-1.0.0 — Public API Freeze Blockers
+- [ ] **API-001: GPU handle API shape** — generics `Handle[Tag]` vs plain structs (ADR-018 follow-up). Must decide before 1.0.0 — changing after = breaking. See `docs/dev/kanban/0-backlog/API-001-gpu-handle-generics-vs-struct.md`
+- [ ] **API-002: Eliminate remaining `any`** — `face any` in DrawText (circular dep), `Canvas.texture any` (internal), `PresentTexture(tex any)` (cross-package token)
+- [ ] **API-003: Public API review** — full audit of exported types, methods, interfaces before freeze
 
 ### v0.43.0–v0.43.1 ✅ Released
 - [x] Zero-readback compositor pipeline (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, non-MSAA blit path

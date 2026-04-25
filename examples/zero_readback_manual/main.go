@@ -109,8 +109,8 @@ func main() {
 		// ── Phase 3: Single-pass compositor ──
 
 		view := canvas.PixmapTextureView()
-		sv := dc.SurfaceView()
-		if view == nil || sv == nil {
+		sv := dc.RenderTarget().SurfaceView()
+		if view.IsNil() || sv.IsNil() {
 			return
 		}
 

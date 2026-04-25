@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   FlushGPUWithView. No SDF shapes, no GPU text — isBlitOnly=true triggers the 1x
   render pass. This is the path `ui/desktop.go` uses for RepaintBoundary compositing.
 
+- **Type-safe GPU resource handles** (ADR-018, Vulkan/Ebitengine opaque handle pattern) —
+  `gpucontext.TextureView` and `gpucontext.CommandEncoder` are now `struct{ ptr unsafe.Pointer }`
+  instead of `interface{}`. Zero `any` in GPU pipeline public API. Compile-time type
+  safety: TextureView cannot be confused with CommandEncoder or other resource types.
+  8 bytes, value type, zero allocations. GC-safe (unsafe.Pointer keeps object alive).
+  Breaking: `FlushGPUWithView(view any, ...)` → `FlushGPUWithView(view gpucontext.TextureView, ...)`,
+  `SetSharedEncoder(encoder any)` → `SetSharedEncoder(encoder gpucontext.CommandEncoder)`.
+  Requires gpucontext v0.15.0.
+
 ### Fixed
 
 - **Blit-only path black screen** — `RenderFrameGrouped` early-returned on
@@ -41,7 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix)
+- **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix);
+  gpucontext v0.14.0 → v0.15.0 (type-safe TextureView/CommandEncoder handles)
+- **Breaking:** `FlushGPUWithView`, `FlushGPUWithViewDamage` — `view any` → `view gpucontext.TextureView`;
+  `SetSharedEncoder`, `CreateSharedEncoder`, `SubmitSharedEncoder` — `any` → `gpucontext.CommandEncoder`;
+  `ggcanvas.RenderTarget.SurfaceView()` — `any` → `gpucontext.TextureView`;
+  `ggcanvas.RenderDirect` — `surfaceView any` → `surfaceView gpucontext.TextureView`.
+  Nil checks: `view == nil` → `view.IsNil()`.
 - **Examples dependencies:** all examples updated to gogpu v0.29.2 + wgpu v0.26.4
 
 ## [0.43.0] - 2026-04-25

@@ -4,8 +4,10 @@ package gpu
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
@@ -524,7 +526,7 @@ func TestRenderSessionSurfaceMode(t *testing.T) {
 	// Render a frame with SDF shapes in surface mode.
 	// Pass the view through GPURenderTarget.View (per-pass routing).
 	target := gg.GPURenderTarget{
-		View:       view,
+		View:       gpucontext.NewTextureView(unsafe.Pointer(view)),
 		ViewWidth:  800,
 		ViewHeight: 600,
 		Width:      800,

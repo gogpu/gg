@@ -103,8 +103,8 @@ func main() {
 		}
 
 		view := canvas.PixmapTextureView()
-		sv := dc.SurfaceView()
-		if view == nil || sv == nil {
+		sv := dc.RenderTarget().SurfaceView()
+		if view.IsNil() || sv.IsNil() {
 			return
 		}
 

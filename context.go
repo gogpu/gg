@@ -1142,13 +1142,12 @@ func (c *Context) ResizeTarget() *Pixmap {
 // record render passes into this encoder instead of creating their own and
 // submitting. The caller is responsible for encoder.Finish() + queue.Submit().
 //
-// Pass nil to restore normal per-context submit behavior.
-// The encoder parameter is typed as any to avoid importing wgpu at root level.
-// Internally type-asserted to *wgpu.CommandEncoder.
-func (c *Context) SetSharedEncoder(encoder any) {
+// Pass a zero-value CommandEncoder (IsNil() == true) to restore normal
+// per-context submit behavior.
+func (c *Context) SetSharedEncoder(encoder gpucontext.CommandEncoder) {
 	if rc := c.gpuCtxOps(); rc != nil {
 		type encoderSetter interface {
-			SetSharedEncoder(encoder any)
+			SetSharedEncoder(encoder gpucontext.CommandEncoder)
 		}
 		if es, ok := rc.(encoderSetter); ok {
 			es.SetSharedEncoder(encoder)
@@ -1160,32 +1159,32 @@ func (c *Context) SetSharedEncoder(encoder any) {
 // frames (ADR-017). Multiple gg.Contexts record render passes into this
 // encoder via SetSharedEncoder. Call SubmitSharedEncoder after all contexts
 // have flushed to submit in one GPU call.
-// Returns nil if GPU is not available.
-func (c *Context) CreateSharedEncoder() any {
+// Returns a zero-value CommandEncoder (IsNil() == true) if GPU is not available.
+func (c *Context) CreateSharedEncoder() gpucontext.CommandEncoder {
 	rc := c.gpuCtxOps()
 	if rc == nil {
-		return nil
+		return gpucontext.CommandEncoder{}
 	}
 	type encoderCreator interface {
-		CreateEncoder() any
+		CreateEncoder() gpucontext.CommandEncoder
 	}
 	if ec, ok := rc.(encoderCreator); ok {
 		return ec.CreateEncoder()
 	}
-	return nil
+	return gpucontext.CommandEncoder{}
 }
 
 // SubmitSharedEncoder finishes the shared encoder and submits the resulting
 // command buffer to the GPU. Call after all contexts have flushed their
 // render passes into the encoder. Returns the command buffer submission
 // index for fence tracking, or error.
-func (c *Context) SubmitSharedEncoder(encoder any) error {
+func (c *Context) SubmitSharedEncoder(encoder gpucontext.CommandEncoder) error {
 	rc := c.gpuCtxOps()
 	if rc == nil {
 		return nil
 	}
 	type encoderSubmitter interface {
-		SubmitEncoder(encoder any) error
+		SubmitEncoder(encoder gpucontext.CommandEncoder) error
 	}
 	if es, ok := rc.(encoderSubmitter); ok {
 		return es.SubmitEncoder(encoder)
@@ -1225,10 +1224,10 @@ func (c *Context) FlushGPU() error {
 // without cross-contamination.
 //
 // This is the per-pass render target path for ggcanvas.RenderDirect.
-// When view is nil, behaves identically to FlushGPU (CPU readback).
-func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
+// When view is nil/zero, behaves identically to FlushGPU (CPU readback).
+func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height uint32) error {
 	t := c.gpuRenderTarget()
-	if view != nil {
+	if !view.IsNil() {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height
@@ -1252,9 +1251,9 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 //
 // This enables sub-region compositing: a 48×48 spinner updates only 9KB
 // instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
-func (c *Context) FlushGPUWithViewDamage(view any, width, height uint32, damageRect image.Rectangle) error {
+func (c *Context) FlushGPUWithViewDamage(view gpucontext.TextureView, width, height uint32, damageRect image.Rectangle) error {
 	t := c.gpuRenderTarget()
-	if view != nil {
+	if !view.IsNil() {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height

@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/stroke"
@@ -121,42 +122,41 @@ func (rc *GPURenderContext) BeginFrame() {
 // frames (ADR-017). When set, Flush() records render passes into this encoder
 // instead of creating its own and submitting. The caller is responsible for
 // encoder.Finish() + queue.Submit() after all contexts have flushed.
-// Pass nil to restore normal per-context submit behavior.
-// Accepts any (type-asserted to *wgpu.CommandEncoder) to support duck-typed
-// public API in gg.Context without wgpu import at root level.
-func (rc *GPURenderContext) SetSharedEncoder(encoder any) {
-	if encoder == nil {
+// Pass a zero-value CommandEncoder (IsNil() == true) to restore normal
+// per-context submit behavior.
+func (rc *GPURenderContext) SetSharedEncoder(encoder gpucontext.CommandEncoder) {
+	if encoder.IsNil() {
 		rc.sharedEncoder = nil
 		return
 	}
-	if enc, ok := encoder.(*wgpu.CommandEncoder); ok {
-		rc.sharedEncoder = enc
-	}
+	rc.sharedEncoder = (*wgpu.CommandEncoder)(encoder.Pointer())
 }
 
 // CreateEncoder creates a new command encoder for shared use across contexts.
-func (rc *GPURenderContext) CreateEncoder() any {
+// Returns a zero-value CommandEncoder (IsNil() == true) if the session is not
+// initialized or encoder creation fails.
+func (rc *GPURenderContext) CreateEncoder() gpucontext.CommandEncoder {
 	if rc.session == nil {
-		return nil
+		return gpucontext.CommandEncoder{}
 	}
 	enc, err := rc.session.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "shared_frame_encoder",
 	})
 	if err != nil {
-		return nil
+		return gpucontext.CommandEncoder{}
 	}
-	return enc
+	return gpucontext.NewCommandEncoder(unsafe.Pointer(enc))
 }
 
 // SubmitEncoder finishes the shared encoder and submits the command buffer.
-func (rc *GPURenderContext) SubmitEncoder(encoder any) error {
+func (rc *GPURenderContext) SubmitEncoder(encoder gpucontext.CommandEncoder) error {
 	if rc.session == nil {
 		return fmt.Errorf("GPU session not initialized")
 	}
-	enc, ok := encoder.(*wgpu.CommandEncoder)
-	if !ok || enc == nil {
-		return fmt.Errorf("invalid encoder type")
+	if encoder.IsNil() {
+		return fmt.Errorf("nil command encoder")
 	}
+	enc := (*wgpu.CommandEncoder)(encoder.Pointer())
 	cmdBuf, err := enc.Finish()
 	if err != nil {
 		return fmt.Errorf("finish shared encoder: %w", err)
@@ -717,19 +717,19 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 // and DrawGPUTexture (sample from). Returns view + release function.
 func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
 	if rc.shared == nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 	if !rc.shared.gpuReady {
 		rc.shared.mu.Lock()
 		err := rc.shared.ensureGPU()
 		rc.shared.mu.Unlock()
 		if err != nil || !rc.shared.gpuReady {
-			return nil, nil
+			return gpucontext.TextureView{}, nil
 		}
 	}
 	device := rc.shared.Device()
 	if device == nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
@@ -742,7 +742,7 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageTextureBinding,
 	})
 	if err != nil {
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
@@ -754,14 +754,14 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 	})
 	if err != nil {
 		tex.Release()
-		return nil, nil
+		return gpucontext.TextureView{}, nil
 	}
 
 	release := func() {
 		view.Release()
 		tex.Release()
 	}
-	return view, release
+	return gpucontext.NewTextureView(unsafe.Pointer(view)), release
 }
 
 // Close releases this context's GPU resources. Shared resources are NOT
