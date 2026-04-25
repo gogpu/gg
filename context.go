@@ -1233,7 +1233,8 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 		t.ViewWidth = width
 		t.ViewHeight = height
 	}
-	if rc := c.gpuCtxOps(); rc != nil {
+	rc := c.gpuCtxOps()
+	if rc != nil {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {

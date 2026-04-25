@@ -156,6 +156,13 @@ type GPURenderSession struct {
 	glyphMaskUniformBufs []*wgpu.Buffer
 	glyphMaskBindGroups  []*wgpu.BindGroup
 
+	// Tier 3b: GPU texture compositing persistent buffers (base layer + overlays).
+	// Same grow-only pattern as image/text tiers — avoids per-frame alloc/GC.
+	gpuTexVertBuf     *wgpu.Buffer
+	gpuTexVertBufCap  uint64
+	gpuTexUniformBufs []*wgpu.Buffer
+	gpuTexBindGroups  []*wgpu.BindGroup
+
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
 
@@ -520,7 +527,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
 			len(groups[i].ImageCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
 	}
-	if totalItems == 0 {
+	if totalItems == 0 && baseLayer == nil {
 		return nil
 	}
 
@@ -847,6 +854,25 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	if s.imagePipeline != nil {
 		s.imagePipeline.Destroy()
 		s.imagePipeline = nil
+	}
+	// Tier 3b: GPU texture compositing per-draw pools.
+	for i, bg := range s.gpuTexBindGroups {
+		if bg != nil {
+			bg.Release()
+			s.gpuTexBindGroups[i] = nil
+		}
+	}
+	s.gpuTexBindGroups = nil
+	for _, buf := range s.gpuTexUniformBufs {
+		if buf != nil {
+			buf.Release()
+		}
+	}
+	s.gpuTexUniformBufs = nil
+	if s.gpuTexVertBuf != nil {
+		s.gpuTexVertBuf.Release()
+		s.gpuTexVertBuf = nil
+		s.gpuTexVertBufCap = 0
 	}
 	// Tier 4: Text per-batch pools.
 	for i, bg := range s.textBindGroups {
@@ -1673,6 +1699,7 @@ func (s *GPURenderSession) buildImageResources(cmds []ImageDrawCommand, w, h uin
 
 // buildGPUTextureResources builds render resources for GPU-to-GPU texture compositing.
 // Same pipeline as CPU images, but texture view comes directly — no ImageCache upload.
+// Uses session-level persistent buffers (grow-only) to avoid per-frame GPU allocation.
 func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand, w, h uint32) (*imageFrameResources, error) {
 	if len(cmds) == 0 {
 		return nil, nil //nolint:nilnil // no GPU texture commands
@@ -1691,20 +1718,25 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 			U0: 0, V0: 0, U1: 1, V1: 1,
 		}
 		allVertData = append(allVertData, buildImageVertices(&imgCmd)...)
-		_ = i
 	}
 
 	needed := uint64(totalVertBytes) //nolint:gosec // bounded
-	vertBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-		Label: "gpu_tex_vert_buf",
-		Size:  needed,
-		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create gpu texture vertex buffer: %w", err)
+	if s.gpuTexVertBuf == nil || s.gpuTexVertBufCap < needed {
+		if s.gpuTexVertBuf != nil {
+			s.gpuTexVertBuf.Release()
+		}
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: "gpu_tex_vert_buf",
+			Size:  needed,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create gpu texture vertex buffer: %w", err)
+		}
+		s.gpuTexVertBuf = buf
+		s.gpuTexVertBufCap = needed
 	}
-	if err := s.queue.WriteBuffer(vertBuf, 0, allVertData); err != nil {
-		vertBuf.Release()
+	if err := s.queue.WriteBuffer(s.gpuTexVertBuf, 0, allVertData); err != nil {
 		return nil, fmt.Errorf("upload gpu texture vertices: %w", err)
 	}
 
@@ -1716,33 +1748,42 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 			continue
 		}
 
-		uniformBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: fmt.Sprintf("gpu_tex_uniform_%d", i),
-			Size:  imageUniformSize,
-			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			continue
+		// Grow uniform buffer pool.
+		for len(s.gpuTexUniformBufs) <= i {
+			buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+				Label: fmt.Sprintf("gpu_tex_uniform_%d", len(s.gpuTexUniformBufs)),
+				Size:  imageUniformSize,
+				Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create gpu texture uniform buffer: %w", err)
+			}
+			s.gpuTexUniformBufs = append(s.gpuTexUniformBufs, buf)
+			s.gpuTexBindGroups = append(s.gpuTexBindGroups, nil)
 		}
+
 		uniformData := makeImageUniform(w, h, cmd.Opacity)
-		if err := s.queue.WriteBuffer(uniformBuf, 0, uniformData); err != nil {
-			uniformBuf.Release()
+		if err := s.queue.WriteBuffer(s.gpuTexUniformBufs[i], 0, uniformData); err != nil {
 			continue
 		}
 
+		// Bind group must be recreated each frame because the texture view changes.
+		if s.gpuTexBindGroups[i] != nil {
+			s.gpuTexBindGroups[i].Release()
+		}
 		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:  fmt.Sprintf("gpu_tex_bind_%d", i),
 			Layout: s.imagePipeline.uniformLayout,
 			Entries: []wgpu.BindGroupEntry{
-				{Binding: 0, Buffer: uniformBuf, Offset: 0, Size: imageUniformSize},
+				{Binding: 0, Buffer: s.gpuTexUniformBufs[i], Offset: 0, Size: imageUniformSize},
 				{Binding: 1, TextureView: texView},
 				{Binding: 2, Sampler: s.imagePipeline.sampler},
 			},
 		})
 		if err != nil {
-			uniformBuf.Release()
 			continue
 		}
+		s.gpuTexBindGroups[i] = bg
 
 		drawCalls = append(drawCalls, imageDrawCall{
 			bindGroup:   bg,
@@ -1751,7 +1792,7 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	}
 
 	return &imageFrameResources{
-		vertBuf:   vertBuf,
+		vertBuf:   s.gpuTexVertBuf,
 		drawCalls: drawCalls,
 	}, nil
 }
@@ -2700,10 +2741,10 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 		s.device.FreeCommandBuffer(s.prevCmdBuf)
 	}
 
-	if _, err := s.queue.Submit(cmdBuf); err != nil {
+	if _, submitErr := s.queue.Submit(cmdBuf); submitErr != nil {
 		s.device.FreeCommandBuffer(cmdBuf)
 		s.prevCmdBuf = nil
-		return fmt.Errorf("submit blit: %w", err)
+		return fmt.Errorf("submit blit: %w", submitErr)
 	}
 	s.prevCmdBuf = cmdBuf
 	s.frameRendered = true

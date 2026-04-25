@@ -41,7 +41,7 @@
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
-| **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks (per-shape, per-layer, luminance, post-process) |
+| **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, damage-aware sub-region updates) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
 | **Vector Export** | Recording system with PDF and SVG backends |
@@ -162,6 +162,14 @@ For zero-copy rendering directly to a GPU surface (e.g., in a gogpu window),
 use [`ggcanvas.Canvas.RenderDirect`](integration/ggcanvas/) — see the
 [gogpu integration example](examples/gogpu_integration/). The example uses
 event-driven rendering with `AnimationToken` for power-efficient VSync (0% CPU when idle).
+
+**Compositor examples:**
+
+| Example | Description |
+|---------|-------------|
+| [`zero_readback/`](examples/zero_readback/) | GPU-direct rendering — SDF shapes + text rendered to swapchain in a single MSAA pass, zero CPU readback |
+| [`blit_only/`](examples/blit_only/) | Non-MSAA compositor path — CPU pixmap uploaded via `FlushPixmap`, composited via `DrawGPUTextureBase` in a 1x render pass (93% bandwidth reduction, ADR-016) |
+| [`zero_readback_manual/`](examples/zero_readback_manual/) | Manual zero-readback pipeline — `FlushPixmap` + `EnsureGPUTexture` + `DrawGPUTextureBase` + `FlushGPUWithView` step-by-step |
 
 ### Custom Pixmap
 

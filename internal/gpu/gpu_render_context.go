@@ -528,8 +528,8 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 
 // Flush dispatches all pending commands for this context via the render session.
 func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cyclop,gocognit,gocyclo,funlen // sequential resource setup + group dispatch
-	if rc.PendingCount() == 0 {
-		// Still flush Vello if it has pending paths.
+	pending := rc.PendingCount()
+	if pending == 0 {
 		return rc.flushVello(target)
 	}
 

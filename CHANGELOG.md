@@ -18,9 +18,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero Vulkan semaphore conflicts. `encodeToEncoder()` + `encodeBlitToEncoder()`
   in render session. Backward compatible: nil encoder = existing per-context submit.
 
+- **`examples/blit_only/`** — standalone example demonstrating the non-MSAA blit-only
+  compositor path (ADR-016). CPU-drawn content (FillRectCPU, SetPixelPremul circles,
+  grid lines) uploaded via FlushPixmap and composited via DrawGPUTextureBase +
+  FlushGPUWithView. No SDF shapes, no GPU text — isBlitOnly=true triggers the 1x
+  render pass. This is the path `ui/desktop.go` uses for RepaintBoundary compositing.
+
+### Fixed
+
+- **Blit-only path black screen** — `RenderFrameGrouped` early-returned on
+  `totalItems == 0` without checking `baseLayer`, silently skipping the entire
+  blit render pass when a frame contained only a base layer texture with zero
+  vector shapes. The non-MSAA fast path (ADR-016) was dead code for pure
+  compositor frames. Fixed: `totalItems == 0 && baseLayer == nil`.
+
+- **GPU texture resource leak** — `buildGPUTextureResources` allocated new vertex
+  and uniform buffers every frame for base layer / overlay textures without releasing
+  previous ones. GC eventually collected them (`Buffer released by GC` warnings), but
+  GPU memory grew unbounded between collections. Fixed: session-level persistent buffers
+  with grow-only reallocation (same pattern as SDF/convex/image/text tiers). Bind groups
+  are recreated per frame (texture view changes) but uniform/vertex buffers are reused.
+
 ### Changed
 
 - **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix)
+- **Examples dependencies:** all examples updated to gogpu v0.29.2 + wgpu v0.26.4
 
 ## [0.43.0] - 2026-04-25
 

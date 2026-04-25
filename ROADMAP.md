@@ -53,11 +53,28 @@
 
 ## Upcoming
 
-### v0.42.0 — Planned
+### v0.44.0 — Planned
+- [ ] Type-safe GPU pipeline — replace `any` in `FlushGPUWithView`, `gpucontext.TextureView`, `SetSharedEncoder` with typed interfaces
 - [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
 - [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
+
+### v0.43.0–v0.43.1 ✅ Released
+- [x] Zero-readback compositor pipeline (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, non-MSAA blit path
+- [x] Single command buffer compositor (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SubmitSharedEncoder
+- [x] Non-MSAA blit-only fast path — 93% bandwidth reduction for compositor-only frames
+- [x] FillRectCPU + Pixmap.FillRect — CPU-only rect fill bypassing GPU accelerator
+- [x] FlushGPUWithViewDamage — damage-aware sub-region compositing
+- [x] Blit-only black screen fix — early return skipped baseLayer-only frames
+- [x] GPU texture resource leak fix — session-level persistent buffers (grow-only)
+- [x] `blit_only` example — standalone non-MSAA compositor demo
+- [x] Dependencies: wgpu v0.26.4, gogpu v0.29.2
+
+### v0.42.0–v0.42.1 ✅ Released
+- [x] GPU-to-GPU texture compositing — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern)
+- [x] Bullet-proof encoder lifecycle — defer-based safety, MinBindingSize
+- [x] DrawGPUTexture deep-copy fix (v0.42.1)
 
 ### v0.41.0 ✅ Released
 - [x] Per-context GPU accelerator (ARCH-GG-001, ADR-013) — Skia GrContext pattern
