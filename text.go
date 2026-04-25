@@ -110,6 +110,7 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 	if a == nil {
 		return false
 	}
+	c.warnGPUFallback("tryGPUText")
 	if !a.CanAccelerate(AccelText) {
 		return false
 	}
@@ -139,6 +140,7 @@ func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
 	if a == nil {
 		return false
 	}
+	c.warnGPUFallback("tryGPUGlyphMaskText")
 	gma, ok := a.(GPUGlyphMaskAccelerator)
 	if !ok {
 		return false

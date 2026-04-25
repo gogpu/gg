@@ -64,7 +64,8 @@ type Context struct {
 	// Per-context GPU render context (isolated pending commands, clips, frame tracking).
 	// Lazily created when GPURenderContextProvider is available.
 	// Type: *gpu.GPURenderContext (stored as any to avoid circular import).
-	gpuCtx any
+	gpuCtx            any
+	gpuFallbackWarned bool // true after first global fallback warning (avoid log spam)
 
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
@@ -1154,6 +1155,7 @@ func (c *Context) FlushGPU() error {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPU")
 		return a.Flush(t)
 	}
 	return nil
@@ -1178,6 +1180,7 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPUWithView")
 		return a.Flush(t)
 	}
 	return nil
@@ -1205,6 +1208,7 @@ func (c *Context) FlushGPUWithViewDamage(view any, width, height uint32, damageR
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPUWithViewDamage")
 		return a.Flush(t)
 	}
 	return nil
@@ -1283,6 +1287,17 @@ func (c *Context) gpuRenderTarget() GPURenderTarget {
 	}
 }
 
+// warnGPUFallback logs a one-time warning when a GPU operation falls back to
+// the global accelerator instead of the per-context GPURenderContext. This
+// indicates shape leaking risk in multi-context scenarios (RepaintBoundary).
+func (c *Context) warnGPUFallback(op string) {
+	if !c.gpuFallbackWarned {
+		c.gpuFallbackWarned = true
+		Logger().Warn("GPU operation using global accelerator instead of per-context — shapes may leak in multi-context",
+			"op", op, "w", c.width, "h", c.height)
+	}
+}
+
 // flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
 func (c *Context) flushGPUAccelerator() {
 	if rc := c.gpuCtxOps(); rc != nil {
@@ -1290,6 +1305,7 @@ func (c *Context) flushGPUAccelerator() {
 		return
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("flushGPUAccelerator")
 		_ = a.Flush(c.gpuRenderTarget())
 	}
 }
@@ -1310,6 +1326,7 @@ func (c *Context) tryGPUFill() error {
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	c.warnGPUFallback("tryGPUFill")
 	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
 
@@ -1329,6 +1346,7 @@ func (c *Context) tryGPUStroke() error {
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	c.warnGPUFallback("tryGPUStroke")
 	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
 }
 
