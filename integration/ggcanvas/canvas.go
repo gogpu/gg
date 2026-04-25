@@ -203,6 +203,32 @@ func (c *Canvas) DeviceScale() float64 {
 	return c.ctx.DeviceScale()
 }
 
+// PixmapTextureView returns the GPU texture view of the uploaded pixmap.
+// Returns nil if the pixmap has not been uploaded yet (call FlushPixmap first)
+// or if the texture does not expose a view (e.g., pendingTexture before promotion).
+//
+// Use this with DrawGPUTextureBase for single-pass zero-readback compositing:
+//
+//	canvas.FlushPixmap()                          // upload, no GPU readback
+//	view := canvas.PixmapTextureView()            // get GPU texture view
+//	cc.DrawGPUTextureBase(view, 0, 0, w, h)       // base layer
+//	cc.FlushGPUWithView(surfaceView, sw, sh)      // single pass compositor
+//
+// The view is valid until the texture is destroyed (resize, close).
+// Uses Go structural typing — no gogpu import required.
+func (c *Canvas) PixmapTextureView() gpucontext.TextureView {
+	if c.texture == nil {
+		return nil
+	}
+	type viewProvider interface {
+		TextureView() gpucontext.TextureView
+	}
+	if vp, ok := c.texture.(viewProvider); ok {
+		return vp.TextureView()
+	}
+	return nil
+}
+
 // SetDeviceScale changes the device scale factor on the canvas.
 // This delegates to the gg.Context and marks the canvas for re-upload.
 // Scale must be > 0; values <= 0 are ignored.

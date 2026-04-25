@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rect is set, uses `LoadOpLoad` (preserve previous frame) + scissor-clip to dirty region.
   Only the damaged pixels are re-composited (48×48 spinner = 9KB vs 8MB full surface at 1080p).
 
+- **`PixmapTextureView()`** in ggcanvas — returns the GPU texture view of the uploaded pixmap
+  for single-pass zero-readback compositing via `DrawGPUTextureBase()`. Uses Go structural
+  typing (duck typing) — no gogpu import required. Requires gogpu `Texture.TextureView()`.
+
 - **`FillRectCPU()`** + **`Pixmap.FillRect()`** — CPU-only rectangle fill that bypasses the
   GPU SDF accelerator. Without this, dirty-region background clearing routes through SDF →
   blocks non-MSAA blit path (`isBlitOnly` = false). Enterprise pattern: Qt `fillRegion()`,

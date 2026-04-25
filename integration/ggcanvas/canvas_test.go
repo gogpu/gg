@@ -1018,3 +1018,74 @@ func TestExtractRegion(t *testing.T) {
 		})
 	}
 }
+
+// TestPixmapTextureView_BeforeFlush returns nil before any flush.
+func TestPixmapTextureView_BeforeFlush(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	if v := c.PixmapTextureView(); v != nil {
+		t.Error("PixmapTextureView() before flush should be nil")
+	}
+}
+
+// TestPixmapTextureView_PendingTexture returns nil for pendingTexture
+// (not yet promoted to real GPU texture).
+func TestPixmapTextureView_PendingTexture(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	_, _ = c.FlushPixmap()
+
+	// pendingTexture does not implement viewProvider → nil
+	if v := c.PixmapTextureView(); v != nil {
+		t.Error("PixmapTextureView() on pendingTexture should be nil")
+	}
+}
+
+// TestPixmapTextureView_PromotedTexture returns view after texture promotion.
+func TestPixmapTextureView_PromotedTexture(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// RenderTo promotes pendingTexture to real mockTexture.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("RenderTo() error = %v", err)
+	}
+
+	// mockTexture does not implement TextureView() → nil.
+	// In production, *gogpu.Texture implements TextureView() → non-nil.
+	v := c.PixmapTextureView()
+	if v != nil {
+		t.Error("mockTexture does not implement viewProvider, expected nil")
+	}
+}
+
+// TestPixmapTextureView_ClosedCanvas returns nil on closed canvas.
+func TestPixmapTextureView_ClosedCanvas(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_ = c.Close()
+
+	if v := c.PixmapTextureView(); v != nil {
+		t.Error("PixmapTextureView() on closed canvas should be nil")
+	}
+}
