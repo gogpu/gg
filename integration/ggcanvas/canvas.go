@@ -507,6 +507,35 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	return dc.PresentTexture(tex)
 }
 
+// EnsureGPUTexture promotes the internal pendingTexture to a real GPU texture
+// if needed. After this call, PixmapTextureView() returns non-nil.
+//
+// Call this once after the first FlushPixmap() to create the GPU texture.
+// Subsequent calls are no-ops (texture already promoted). The RenderTarget
+// provides TextureCreator for GPU texture allocation.
+//
+// This is the setup step for zero-readback compositing:
+//
+//	canvas.FlushPixmap()                    // upload pixmap (no GPU readback)
+//	canvas.EnsureGPUTexture(dc.RenderTarget()) // promote once
+//	view := canvas.PixmapTextureView()      // now non-nil
+//	cc.DrawGPUTextureBase(view, ...)        // base layer
+//	cc.FlushGPUWithView(surface, ...)       // single pass
+func (c *Canvas) EnsureGPUTexture(dc RenderTarget) error {
+	if c.texture == nil || c.closed {
+		return nil
+	}
+	if _, ok := c.texture.(*pendingTexture); !ok {
+		return nil
+	}
+	promoted, err := c.promoteIfPending(c.texture, dc)
+	if err != nil {
+		return err
+	}
+	c.texture = promoted
+	return nil
+}
+
 // promoteIfPending promotes a pendingTexture to a real GPU texture if needed.
 // Returns the texture unchanged if it is not pending.
 func (c *Canvas) promoteIfPending(tex any, dc RenderTarget) (any, error) {
