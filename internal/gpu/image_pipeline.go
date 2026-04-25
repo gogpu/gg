@@ -83,6 +83,12 @@ type TexturedQuadPipeline struct {
 	// interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Non-MSAA blit pipeline for compositor fast path (ADR-016).
+	// SampleCount=1, no depth/stencil — used when the frame contains
+	// only textured quads (base layer + overlays) with no vector shapes.
+	blitPipeline *wgpu.RenderPipeline
+	blitLayout   *wgpu.PipelineLayout // single bind group, no clip
+
 	// Default sampler for image textures (bilinear filtering, clamp-to-edge).
 	sampler *wgpu.Sampler
 
@@ -158,6 +164,78 @@ func (p *TexturedQuadPipeline) ensurePipelineWithStencil() error {
 	}
 	p.pipelineWithStencil = pipeline
 	return nil
+}
+
+// ensureBlitPipeline creates the non-MSAA pipeline variant for compositor
+// fast path (ADR-016). SampleCount=1, no depth/stencil attachment.
+func (p *TexturedQuadPipeline) ensureBlitPipeline() error {
+	if err := p.ensureBase(); err != nil {
+		return err
+	}
+	if p.blitPipeline != nil {
+		return nil
+	}
+
+	// Blit pipeline uses a single-bind-group layout (no clip group).
+	// The regular pipeLayout may have 2 bind groups (texture + clip),
+	// and RecordBlitDraws only sets group 0 — leaving group 1 undefined
+	// would cause GPU validation errors.
+	if p.blitLayout == nil {
+		layout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+			Label:            "textured_quad_blit_layout",
+			BindGroupLayouts: []*wgpu.BindGroupLayout{p.uniformLayout},
+		})
+		if err != nil {
+			return fmt.Errorf("create blit pipeline layout: %w", err)
+		}
+		p.blitLayout = layout
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "textured_quad_blit_pipeline",
+		Layout: p.blitLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.shader,
+			EntryPoint: "vs_main",
+			Buffers:    imageVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.shader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		Primitive: triangleListPrimitive(),
+		Multisample: gputypes.MultisampleState{
+			Count: 1,
+			Mask:  0xFFFFFFFF,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create textured quad blit pipeline: %w", err)
+	}
+	p.blitPipeline = pipeline
+	return nil
+}
+
+// RecordBlitDraws records draw calls using the non-MSAA blit pipeline.
+// Used for compositor fast path when no vector shapes need MSAA.
+func (p *TexturedQuadPipeline) RecordBlitDraws(rp *wgpu.RenderPassEncoder, res *imageFrameResources) {
+	if p.blitPipeline == nil || res == nil {
+		return
+	}
+	rp.SetPipeline(p.blitPipeline)
+	rp.SetVertexBuffer(0, res.vertBuf, 0)
+	for _, dc := range res.drawCalls {
+		rp.SetBindGroup(0, dc.bindGroup, nil)
+		rp.Draw(6, 1, dc.firstVertex, 0)
+	}
 }
 
 // ensureBase creates the shader, sampler, bind group layout, and pipeline layout
@@ -266,6 +344,14 @@ func (p *TexturedQuadPipeline) destroyPipeline() {
 	if p.pipelineWithStencil != nil {
 		p.pipelineWithStencil.Release()
 		p.pipelineWithStencil = nil
+	}
+	if p.blitPipeline != nil {
+		p.blitPipeline.Release()
+		p.blitPipeline = nil
+	}
+	if p.blitLayout != nil {
+		p.blitLayout.Release()
+		p.blitLayout = nil
 	}
 	if p.pipeLayout != nil {
 		p.pipeLayout.Release()

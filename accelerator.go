@@ -2,6 +2,7 @@ package gg
 
 import (
 	"errors"
+	"image"
 	"sync"
 
 	"github.com/gogpu/gpucontext"
@@ -61,6 +62,10 @@ type GPURenderTarget struct {
 	View       gpucontext.TextureView
 	ViewWidth  uint32
 	ViewHeight uint32
+
+	// Damage-aware compositing (ADR-016 Phase 2): when non-empty, compositor
+	// uses LoadOpLoad (preserve previous frame) and scissor-clips to this rect.
+	DamageRect image.Rectangle
 
 	// CPU readback path.
 	Data          []uint8

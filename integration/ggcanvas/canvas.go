@@ -203,6 +203,32 @@ func (c *Canvas) DeviceScale() float64 {
 	return c.ctx.DeviceScale()
 }
 
+// PixmapTextureView returns the GPU texture view of the uploaded pixmap.
+// Returns nil if the pixmap has not been uploaded yet (call FlushPixmap first)
+// or if the texture does not expose a view (e.g., pendingTexture before promotion).
+//
+// Use this with DrawGPUTextureBase for single-pass zero-readback compositing:
+//
+//	canvas.FlushPixmap()                          // upload, no GPU readback
+//	view := canvas.PixmapTextureView()            // get GPU texture view
+//	cc.DrawGPUTextureBase(view, 0, 0, w, h)       // base layer
+//	cc.FlushGPUWithView(surfaceView, sw, sh)      // single pass compositor
+//
+// The view is valid until the texture is destroyed (resize, close).
+// Uses Go structural typing — no gogpu import required.
+func (c *Canvas) PixmapTextureView() gpucontext.TextureView {
+	if c.texture == nil {
+		return nil
+	}
+	type viewProvider interface {
+		TextureView() gpucontext.TextureView
+	}
+	if vp, ok := c.texture.(viewProvider); ok {
+		return vp.TextureView()
+	}
+	return nil
+}
+
 // SetDeviceScale changes the device scale factor on the canvas.
 // This delegates to the gg.Context and marks the canvas for re-upload.
 // Scale must be > 0; values <= 0 are ignored.
@@ -305,6 +331,10 @@ func (c *Canvas) Resize(width, height int) error {
 // Flush uploads the canvas content to GPU texture if dirty.
 // Returns the texture for manual drawing if needed.
 //
+// This first calls FlushGPU() to render any pending GPU-accelerated shapes
+// (SDF, stencil, text) back into the CPU pixmap, then uploads the pixmap
+// to a GPU texture. For zero-readback rendering, use FlushPixmap() instead.
+//
 // The texture is created lazily on first Flush().
 // Subsequent calls only upload data if dirty flag is set.
 //
@@ -314,34 +344,39 @@ func (c *Canvas) Flush() (any, error) {
 		return nil, ErrCanvasClosed
 	}
 
-	// If size changed, defer old texture destruction until after GPU is idle.
-	// The old texture may still be referenced by in-flight GPU command buffers.
-	// Destroying it now would free descriptor heap entries that the GPU is reading,
-	// causing it to sample zeros (transparent). Instead, keep it alive and destroy
-	// it in RenderToEx after WriteTexture (which calls waitForGPU internally).
+	// Flush pending GPU shapes to pixel buffer before reading pixel data.
+	// Errors are logged but not fatal — CPU fallback may have already rendered.
+	if err := c.ctx.FlushGPU(); err != nil {
+		gg.Logger().Warn("FlushGPU error", "err", err)
+	}
+
+	return c.FlushPixmap()
+}
+
+// FlushPixmap uploads the CPU pixmap to GPU texture without flushing GPU shapes.
+// Unlike Flush(), this does NOT call FlushGPU() — pending GPU-accelerated shapes
+// remain queued in GPURenderContext for the caller to flush separately (e.g., via
+// FlushGPUWithView for zero-readback rendering to a surface view).
+//
+// Use this when GPU shapes should render directly to the display surface
+// instead of being read back into the CPU pixmap. See ADR-006.
+func (c *Canvas) FlushPixmap() (any, error) {
+	if c.closed {
+		return nil, ErrCanvasClosed
+	}
+
 	if c.sizeChanged {
 		c.deferTextureDestruction()
 		c.sizeChanged = false
 	}
 
-	// Skip if not dirty
 	if !c.dirty && c.texture != nil {
 		return c.texture, nil
 	}
 
-	// Flush pending GPU shapes to pixel buffer before reading pixel data.
-	// Errors are logged but not fatal — CPU fallback may have already rendered.
-	if err := c.ctx.FlushGPU(); err != nil {
-		// FlushGPU can fail if GPU accelerator has issues (e.g., compute dispatch failure).
-		// This is non-fatal: CPU-rendered content is still in the pixmap.
-		gg.Logger().Warn("FlushGPU error", "err", err)
-	}
-
-	// Get pixel data from gg context
 	pixmap := c.ctx.ResizeTarget()
 	data := pixmap.Data()
 
-	// Create texture if needed (lazy initialization)
 	if c.texture == nil {
 		c.texture = c.createTexture(data)
 		c.dirty = false
@@ -349,7 +384,6 @@ func (c *Canvas) Flush() (any, error) {
 		return c.texture, nil
 	}
 
-	// Update existing texture — prefer partial upload when possible.
 	if err := c.uploadTexture(pixmap, data); err != nil {
 		return nil, err
 	}
@@ -471,6 +505,35 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	}
 
 	return dc.PresentTexture(tex)
+}
+
+// EnsureGPUTexture promotes the internal pendingTexture to a real GPU texture
+// if needed. After this call, PixmapTextureView() returns non-nil.
+//
+// Call this once after the first FlushPixmap() to create the GPU texture.
+// Subsequent calls are no-ops (texture already promoted). The RenderTarget
+// provides TextureCreator for GPU texture allocation.
+//
+// This is the setup step for zero-readback compositing:
+//
+//	canvas.FlushPixmap()                    // upload pixmap (no GPU readback)
+//	canvas.EnsureGPUTexture(dc.RenderTarget()) // promote once
+//	view := canvas.PixmapTextureView()      // now non-nil
+//	cc.DrawGPUTextureBase(view, ...)        // base layer
+//	cc.FlushGPUWithView(surface, ...)       // single pass
+func (c *Canvas) EnsureGPUTexture(dc RenderTarget) error {
+	if c.texture == nil || c.closed {
+		return nil
+	}
+	if _, ok := c.texture.(*pendingTexture); !ok {
+		return nil
+	}
+	promoted, err := c.promoteIfPending(c.texture, dc)
+	if err != nil {
+		return err
+	}
+	c.texture = promoted
+	return nil
 }
 
 // promoteIfPending promotes a pendingTexture to a real GPU texture if needed.

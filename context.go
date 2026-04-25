@@ -63,8 +63,10 @@ type Context struct {
 
 	// Per-context GPU render context (isolated pending commands, clips, frame tracking).
 	// Lazily created when GPURenderContextProvider is available.
-	// Type: *gpu.GPURenderContext (stored as any to avoid circular import).
-	gpuCtx any
+	// Typed as gpuContextOps (defined in this package) to avoid circular import
+	// with internal/gpu while maintaining type safety.
+	gpuCtx            gpuContextOps
+	gpuFallbackWarned bool // true after first global fallback warning (avoid log spam)
 
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
@@ -430,6 +432,35 @@ func (c *Context) Clear() {
 // This is the recommended way to set a background color before drawing.
 func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
+}
+
+// FillRectCPU fills a rectangle directly on the CPU pixmap without engaging
+// the GPU SDF accelerator. Coordinates are in user space (device scale applied
+// automatically). Pending GPU shapes are flushed first for correct z-ordering.
+//
+// Use for operations where GPU acceleration is counterproductive, such as
+// dirty-region background clearing in retained-mode compositors. Without this,
+// DrawRectangle+Fill routes through SDF accelerator → blocks non-MSAA blit path.
+//
+// See ADR-016, TASK-GG-COMPOSITOR-003.
+func (c *Context) FillRectCPU(x, y, w, h float64, col RGBA) {
+	c.flushGPUAccelerator()
+
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(x, y))
+	br := ctm.TransformPoint(Pt(x+w, y+h))
+
+	px0 := int(tl.X)
+	py0 := int(tl.Y)
+	px1 := int(br.X + 0.5)
+	py1 := int(br.Y + 0.5)
+
+	pr := uint8(clamp255(col.R * col.A * 255))
+	pg := uint8(clamp255(col.G * col.A * 255))
+	pb := uint8(clamp255(col.B * col.A * 255))
+	pa := uint8(clamp255(col.A * 255))
+
+	c.pixmap.FillRect(image.Rect(px0, py0, px1, py1), pr, pg, pb, pa)
 }
 
 // SetColor sets the current drawing color.
@@ -1106,12 +1137,26 @@ func (c *Context) ResizeTarget() *Pixmap {
 // FlushGPU flushes any pending GPU accelerator operations to the pixel buffer.
 // Call this before reading pixel data (e.g., SavePNG, Image) when using a
 // batch-capable GPU accelerator. For immediate-mode accelerators this is a no-op.
+// BeginGPUFrame resets per-context GPU frame state so the next render pass
+// uses LoadOpClear. Call this on persistent contexts before re-rendering
+// to the same view — without it, frameRendered=true from the previous frame
+// causes LoadOpLoad, preserving stale content.
+//
+// Not needed for one-shot contexts (NewContext + Close per frame).
+// Not needed when the view changes between frames (auto-reset on view change).
+func (c *Context) BeginGPUFrame() {
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.BeginFrame()
+	}
+}
+
 func (c *Context) FlushGPU() error {
 	t := c.gpuRenderTarget()
 	if rc := c.gpuCtxOps(); rc != nil {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPU")
 		return a.Flush(t)
 	}
 	return nil
@@ -1136,6 +1181,35 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPUWithView")
+		return a.Flush(t)
+	}
+	return nil
+}
+
+// FlushGPUWithViewDamage flushes pending GPU operations with damage-aware
+// optimization. When damageRect is non-empty, the compositor uses LoadOpLoad
+// (preserves previous frame) and scissor-clips to the dirty region — only
+// the damaged pixels are re-composited. When damageRect is empty, behaves
+// identically to FlushGPUWithView (full compositor pass).
+//
+// This enables sub-region compositing: a 48×48 spinner updates only 9KB
+// instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
+func (c *Context) FlushGPUWithViewDamage(view any, width, height uint32, damageRect image.Rectangle) error {
+	t := c.gpuRenderTarget()
+	if view != nil {
+		t.View = view
+		t.ViewWidth = width
+		t.ViewHeight = height
+	}
+	if !damageRect.Empty() {
+		t.DamageRect = damageRect
+	}
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.Flush(t)
+	}
+	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPUWithViewDamage")
 		return a.Flush(t)
 	}
 	return nil
@@ -1155,6 +1229,8 @@ type gpuContextOps interface {
 		dstX, dstY, dstW, dstH, opacity float32, viewportW, viewportH uint32,
 		u0, v0, u1, v1 float32)
 	QueueGPUTextureDraw(target GPURenderTarget, view gpucontext.TextureView,
+		dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32)
+	QueueBaseLayer(target GPURenderTarget, view gpucontext.TextureView,
 		dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32)
 	Flush(target GPURenderTarget) error
 	SetClipRect(x, y, w, h uint32)
@@ -1185,21 +1261,25 @@ func (c *Context) ensureGPUCtx() {
 	if a == nil {
 		return
 	}
-	if p, ok := a.(GPURenderContextProvider); ok {
-		c.gpuCtx = p.NewGPURenderContext()
+	p, ok := a.(GPURenderContextProvider)
+	if !ok {
+		return
 	}
+	rc := p.NewGPURenderContext()
+	if rc == nil {
+		return
+	}
+	ops, ok := rc.(gpuContextOps)
+	if !ok {
+		return
+	}
+	c.gpuCtx = ops
 }
 
 // gpuCtxOps returns the per-context GPU ops interface, or nil if unavailable.
 func (c *Context) gpuCtxOps() gpuContextOps {
 	c.ensureGPUCtx()
-	if c.gpuCtx == nil {
-		return nil
-	}
-	if ops, ok := c.gpuCtx.(gpuContextOps); ok {
-		return ops
-	}
-	return nil
+	return c.gpuCtx
 }
 
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
@@ -1212,6 +1292,17 @@ func (c *Context) gpuRenderTarget() GPURenderTarget {
 	}
 }
 
+// warnGPUFallback logs a one-time warning when a GPU operation falls back to
+// the global accelerator instead of the per-context GPURenderContext. This
+// indicates shape leaking risk in multi-context scenarios (RepaintBoundary).
+func (c *Context) warnGPUFallback(op string) {
+	if !c.gpuFallbackWarned {
+		c.gpuFallbackWarned = true
+		Logger().Warn("GPU operation using global accelerator instead of per-context — shapes may leak in multi-context",
+			"op", op, "w", c.width, "h", c.height)
+	}
+}
+
 // flushGPUAccelerator flushes pending GPU shapes before a CPU fallback operation.
 func (c *Context) flushGPUAccelerator() {
 	if rc := c.gpuCtxOps(); rc != nil {
@@ -1219,6 +1310,7 @@ func (c *Context) flushGPUAccelerator() {
 		return
 	}
 	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("flushGPUAccelerator")
 		_ = a.Flush(c.gpuRenderTarget())
 	}
 }
@@ -1239,6 +1331,7 @@ func (c *Context) tryGPUFill() error {
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	c.warnGPUFallback("tryGPUFill")
 	return c.tryGPUOp(a, a.FillShape, a.FillPath, AccelFill)
 }
 
@@ -1258,6 +1351,7 @@ func (c *Context) tryGPUStroke() error {
 	if a == nil {
 		return ErrFallbackToCPU
 	}
+	c.warnGPUFallback("tryGPUStroke")
 	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
 }
 

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-04-25
+
+### Added
+
+- **Non-MSAA compositor fast path** (ADR-016) — when a frame contains only textured quads
+  (base layer + overlays) with no vector shapes, uses a 1x render pass directly to swapchain
+  instead of 4x MSAA render + resolve. 93% bandwidth reduction (116 MB/frame → 8 MB at 1080p).
+  `isBlitOnly()` detection + `encodeBlitOnlyPass()` + `RecordBlitDraws()` with dedicated
+  1x pipeline. Enterprise pattern: Flutter/Chrome/Qt all use non-MSAA compositor passes.
+
+- **`FlushGPUWithViewDamage()`** (ADR-016 Phase 2) — damage-aware compositor. When damage
+  rect is set, uses `LoadOpLoad` (preserve previous frame) + scissor-clip to dirty region.
+  Only the damaged pixels are re-composited (48×48 spinner = 9KB vs 8MB full surface at 1080p).
+
+- **`PixmapTextureView()`** in ggcanvas — returns the GPU texture view of the uploaded pixmap
+  for single-pass zero-readback compositing via `DrawGPUTextureBase()`. Uses Go structural
+  typing (duck typing) — no gogpu import required. Requires gogpu `Texture.TextureView()`.
+
+- **`FillRectCPU()`** + **`Pixmap.FillRect()`** — CPU-only rectangle fill that bypasses the
+  GPU SDF accelerator. Without this, dirty-region background clearing routes through SDF →
+  blocks non-MSAA blit path (`isBlitOnly` = false). Enterprise pattern: Qt `fillRegion()`,
+  Flutter `memset`, Chrome `glClear+scissor`. Premultiplied RGBA, device-scale aware, row-copy
+  optimized (fill first row, `copy()` remaining).
+
+- **`BeginGPUFrame()`** on Context — resets per-context GPU frame state for persistent contexts.
+  Required when reusing a Context across frames with the same view (RepaintBoundary pattern).
+  Without this, `frameRendered=true` from previous frame causes `LoadOpLoad` instead of
+  `LoadOpClear`, preserving stale content.
+
+- **`DrawGPUTextureBase()`** — compositor base layer: textured quad drawn BEFORE all GPU
+  tiers in the render pass (ADR-015). Enables zero-readback rendering where CPU pixmap is
+  the background and GPU shapes (SDF, text) render on top in a single pass. Flutter
+  OffsetLayer pattern. Stencil/depth available across all tiers including base layer.
+
+- **`FlushPixmap()`** in ggcanvas — uploads CPU pixmap to GPU texture without calling
+  `FlushGPU()`. Pending GPU shapes remain queued for zero-readback rendering via
+  `FlushGPUWithView()`. Enables ui ADR-006 Phase 1 (GPU <5% for spinner @60fps).
+  Existing `Flush()` refactored to delegate to `FlushPixmap()` after `FlushGPU()`.
+
+- **`EnsureGPUTexture()`** in ggcanvas — promotes pendingTexture to real GPU texture
+  (one-time setup for zero-readback pipeline). Required before `PixmapTextureView()`.
+
+### Changed
+
+- **`gpuCtx` typed as `gpuContextOps`** — replaced `any` with compile-time type safety.
+  Type assertion moved to `ensureGPUCtx()` (once at creation), `gpuCtxOps()` simplified
+  to direct return.
+
+- **Dependencies:** wgpu v0.25.7 → v0.26.2 (PresentWithDamage all backends +
+  Buffer/BindGroup automatic cleanup via runtime.AddCleanup)
+
+### Fixed
+
+- **GPU global fallback warnings** — all 8 GPU code paths (Fill, Stroke, Text, Flush,
+  Clip) that silently fall back to global `SDFAccelerator.defaultCtx` when per-context
+  `gpuCtxOps()` returns nil now log `slog.Warn`. Prevents silent shape leaking in
+  multi-context scenarios (RepaintBoundary). One-time warning per context.
+
+- **Compute mode test assumptions** — `TestSDFAccelerator_ComputeMode_DelegatesToVello`
+  and `TestSDFAccelerator_FillShape_ComputeMode` incorrectly assumed `CanCompute()=false`
+  when `NewRenderContext()` initializes the GPU (including Vello dispatcher). Fixed to
+  verify commands are queued regardless of compute availability.
+
 ## [0.42.1] - 2026-04-24
 
 ### Fixed
