@@ -87,6 +87,7 @@ type TexturedQuadPipeline struct {
 	// SampleCount=1, no depth/stencil — used when the frame contains
 	// only textured quads (base layer + overlays) with no vector shapes.
 	blitPipeline *wgpu.RenderPipeline
+	blitLayout   *wgpu.PipelineLayout // single bind group, no clip
 
 	// Default sampler for image textures (bilinear filtering, clamp-to-edge).
 	sampler *wgpu.Sampler
@@ -175,10 +176,25 @@ func (p *TexturedQuadPipeline) ensureBlitPipeline() error {
 		return nil
 	}
 
+	// Blit pipeline uses a single-bind-group layout (no clip group).
+	// The regular pipeLayout may have 2 bind groups (texture + clip),
+	// and RecordBlitDraws only sets group 0 — leaving group 1 undefined
+	// would cause GPU validation errors.
+	if p.blitLayout == nil {
+		layout, err := p.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
+			Label:            "textured_quad_blit_layout",
+			BindGroupLayouts: []*wgpu.BindGroupLayout{p.uniformLayout},
+		})
+		if err != nil {
+			return fmt.Errorf("create blit pipeline layout: %w", err)
+		}
+		p.blitLayout = layout
+	}
+
 	premulBlend := gputypes.BlendStatePremultiplied()
 	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "textured_quad_blit_pipeline",
-		Layout: p.pipeLayout,
+		Layout: p.blitLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
 			EntryPoint: "vs_main",
@@ -332,6 +348,10 @@ func (p *TexturedQuadPipeline) destroyPipeline() {
 	if p.blitPipeline != nil {
 		p.blitPipeline.Release()
 		p.blitPipeline = nil
+	}
+	if p.blitLayout != nil {
+		p.blitLayout.Release()
+		p.blitLayout = nil
 	}
 	if p.pipeLayout != nil {
 		p.pipeLayout.Release()
