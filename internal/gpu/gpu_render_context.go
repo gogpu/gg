@@ -145,7 +145,7 @@ func (rc *GPURenderContext) CreateEncoder() gpucontext.CommandEncoder {
 	if err != nil {
 		return gpucontext.CommandEncoder{}
 	}
-	return gpucontext.NewCommandEncoder(unsafe.Pointer(enc))
+	return gpucontext.NewCommandEncoder(unsafe.Pointer(enc)) //nolint:gosec // Go spec Rule 1 (ADR-018)
 }
 
 // SubmitEncoder finishes the shared encoder and submits the command buffer.
@@ -761,7 +761,7 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 		view.Release()
 		tex.Release()
 	}
-	return gpucontext.NewTextureView(unsafe.Pointer(view)), release
+	return gpucontext.NewTextureView(unsafe.Pointer(view)), release //nolint:gosec // Go spec Rule 1 (ADR-018)
 }
 
 // Close releases this context's GPU resources. Shared resources are NOT
