@@ -19,11 +19,13 @@
 
 ---
 
-## Current State: v0.42.0
+## Current State: v0.43.1
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
 - **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
+- **Zero-readback compositor pipeline** (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, FillRectCPU, non-MSAA blit path (93% bandwidth reduction)
+- **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SetSharedEncoder + SubmitSharedEncoder for multi-context frames
 - **GPU-to-GPU texture compositing** — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern, zero readback)
 - **Bullet-proof encoder lifecycle** — defer-based safety, no silently swallowed errors
 - **Per-context GPU accelerator** (ADR-013) — Skia GrContext pattern, multi-context isolation
