@@ -723,6 +723,9 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	}
 
 	if activeView != nil {
+		if s.isBlitOnly(grpRes, baseLayerRes) {
+			return s.encodeBlitOnlyPass(activeView, w, h, baseLayerRes)
+		}
 		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
 	}
 	return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
@@ -2582,6 +2585,93 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 
 	// Encode copy and submit, then read back pixels to the target.
 	return s.copySubmitAndReadback(encoder, w, h, target)
+}
+
+// isBlitOnly returns true when the frame contains only textured quads (base
+// layer + overlay GPU textures) with zero vector shapes that need MSAA.
+func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *imageFrameResources) bool {
+	if baseLayerRes == nil || len(baseLayerRes.drawCalls) == 0 {
+		return false
+	}
+	for i := range grpRes {
+		gr := &grpRes[i]
+		if (gr.sdfRes != nil && gr.sdfRes.vertCount > 0) ||
+			(gr.convexRes != nil && gr.convexRes.vertCount > 0) ||
+			len(gr.stencilRes) > 0 ||
+			(gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0) ||
+			(gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0) ||
+			(gr.textRes != nil && len(gr.textRes.drawCalls) > 0) ||
+			(gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// encodeBlitOnlyPass renders textured quads directly to the swapchain surface
+// in a non-MSAA (1x) render pass. No MSAA texture, no depth/stencil, no resolve.
+// This is the compositor fast path (ADR-016) — 93% bandwidth reduction vs 4x MSAA.
+func (s *GPURenderSession) encodeBlitOnlyPass(
+	view *wgpu.TextureView, w, h uint32,
+	baseLayerRes *imageFrameResources,
+) error {
+	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
+		return fmt.Errorf("ensure blit pipeline: %w", err)
+	}
+
+	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+		Label: "session_blit_encoder",
+	})
+	if err != nil {
+		return fmt.Errorf("create command encoder: %w", err)
+	}
+	encoderConsumed := false
+	defer func() {
+		if !encoderConsumed {
+			encoder.DiscardEncoding()
+		}
+	}()
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_blit_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       view,
+			LoadOp:     gputypes.LoadOpClear,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("begin blit render pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+
+	if endErr := rp.End(); endErr != nil {
+		slogger().Warn("blit render pass End failed", "err", endErr)
+	}
+
+	cmdBuf, err := encoder.Finish()
+	if err != nil {
+		return fmt.Errorf("end blit encoding: %w", err)
+	}
+	encoderConsumed = true
+
+	if s.prevCmdBuf != nil {
+		s.device.FreeCommandBuffer(s.prevCmdBuf)
+	}
+
+	if _, err := s.queue.Submit(cmdBuf); err != nil {
+		s.device.FreeCommandBuffer(cmdBuf)
+		s.prevCmdBuf = nil
+		return fmt.Errorf("submit blit: %w", err)
+	}
+	s.prevCmdBuf = cmdBuf
+	s.frameRendered = true
+	s.lastView = view
+
+	return nil
 }
 
 // encodeSubmitSurfaceGrouped encodes a single render pass with per-group

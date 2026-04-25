@@ -1142,3 +1142,63 @@ func TestRenderSessionEnsurePipelines_FullFlow(t *testing.T) {
 		t.Error("stencil cover pipeline should have clip layout")
 	}
 }
+
+// TestIsBlitOnly verifies blit-only detection for compositor fast path (ADR-016).
+func TestIsBlitOnly(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	baseRes := &imageFrameResources{
+		drawCalls: []imageDrawCall{{firstVertex: 0}},
+	}
+
+	t.Run("base layer only", func(t *testing.T) {
+		grpRes := []groupResources{{}}
+		if !s.isBlitOnly(grpRes, baseRes) {
+			t.Error("expected blit-only with empty groups + base layer")
+		}
+	})
+
+	t.Run("no base layer", func(t *testing.T) {
+		grpRes := []groupResources{{}}
+		if s.isBlitOnly(grpRes, nil) {
+			t.Error("expected NOT blit-only without base layer")
+		}
+	})
+
+	t.Run("base layer with SDF shapes", func(t *testing.T) {
+		grpRes := []groupResources{{
+			sdfRes: &sdfFrameResources{vertCount: 6},
+		}}
+		if s.isBlitOnly(grpRes, baseRes) {
+			t.Error("expected NOT blit-only with SDF shapes")
+		}
+	})
+
+	t.Run("base layer with text", func(t *testing.T) {
+		grpRes := []groupResources{{
+			textRes: &textFrameResources{drawCalls: []textDrawCall{{}}},
+		}}
+		if s.isBlitOnly(grpRes, baseRes) {
+			t.Error("expected NOT blit-only with text batches")
+		}
+	})
+
+	t.Run("base layer with overlay GPU textures", func(t *testing.T) {
+		grpRes := []groupResources{{
+			gpuTexRes: &imageFrameResources{drawCalls: []imageDrawCall{{}}},
+		}}
+		if s.isBlitOnly(grpRes, baseRes) {
+			t.Error("expected NOT blit-only with overlay GPU textures")
+		}
+	})
+
+	t.Run("empty groups", func(t *testing.T) {
+		if !s.isBlitOnly(nil, baseRes) {
+			t.Error("expected blit-only with nil groups + base layer")
+		}
+	})
+}

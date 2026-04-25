@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Non-MSAA compositor fast path** (ADR-016) — when a frame contains only textured quads
+  (base layer + overlays) with no vector shapes, uses a 1x render pass directly to swapchain
+  instead of 4x MSAA render + resolve. 93% bandwidth reduction (116 MB/frame → 8 MB at 1080p).
+  `isBlitOnly()` detection + `encodeBlitOnlyPass()` + `RecordBlitDraws()` with dedicated
+  1x pipeline. Enterprise pattern: Flutter/Chrome/Qt all use non-MSAA compositor passes.
+
 - **`BeginGPUFrame()`** on Context — resets per-context GPU frame state for persistent contexts.
   Required when reusing a Context across frames with the same view (RepaintBoundary pattern).
   Without this, `frameRendered=true` from previous frame causes `LoadOpLoad` instead of
