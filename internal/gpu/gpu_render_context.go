@@ -134,6 +134,34 @@ func (rc *GPURenderContext) SetSharedEncoder(encoder any) {
 	}
 }
 
+// CreateEncoder creates a new command encoder for shared use across contexts.
+func (rc *GPURenderContext) CreateEncoder() any {
+	enc, err := rc.session.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+		Label: "shared_frame_encoder",
+	})
+	if err != nil {
+		return nil
+	}
+	return enc
+}
+
+// SubmitEncoder finishes the shared encoder and submits the command buffer.
+func (rc *GPURenderContext) SubmitEncoder(encoder any) error {
+	enc, ok := encoder.(*wgpu.CommandEncoder)
+	if !ok || enc == nil {
+		return fmt.Errorf("invalid encoder type")
+	}
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		return fmt.Errorf("finish shared encoder: %w", err)
+	}
+	if _, err := rc.session.queue.Submit(cmdBuf); err != nil {
+		rc.session.device.FreeCommandBuffer(cmdBuf)
+		return fmt.Errorf("submit shared encoder: %w", err)
+	}
+	return nil
+}
+
 // SceneStats returns the accumulated scene statistics for this context.
 func (rc *GPURenderContext) SceneStats() gg.SceneStats {
 	return rc.sceneStats

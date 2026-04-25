@@ -1156,6 +1156,43 @@ func (c *Context) SetSharedEncoder(encoder any) {
 	}
 }
 
+// CreateSharedEncoder creates a command encoder for single-command-buffer
+// frames (ADR-017). Multiple gg.Contexts record render passes into this
+// encoder via SetSharedEncoder. Call SubmitSharedEncoder after all contexts
+// have flushed to submit in one GPU call.
+// Returns nil if GPU is not available.
+func (c *Context) CreateSharedEncoder() any {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return nil
+	}
+	type encoderCreator interface {
+		CreateEncoder() any
+	}
+	if ec, ok := rc.(encoderCreator); ok {
+		return ec.CreateEncoder()
+	}
+	return nil
+}
+
+// SubmitSharedEncoder finishes the shared encoder and submits the resulting
+// command buffer to the GPU. Call after all contexts have flushed their
+// render passes into the encoder. Returns the command buffer submission
+// index for fence tracking, or error.
+func (c *Context) SubmitSharedEncoder(encoder any) error {
+	rc := c.gpuCtxOps()
+	if rc == nil {
+		return nil
+	}
+	type encoderSubmitter interface {
+		SubmitEncoder(encoder any) error
+	}
+	if es, ok := rc.(encoderSubmitter); ok {
+		return es.SubmitEncoder(encoder)
+	}
+	return nil
+}
+
 // BeginGPUFrame resets per-context GPU frame state so the next render pass
 // uses LoadOpClear. Call this on persistent contexts before re-rendering
 // to the same view — without it, frameRendered=true from the previous frame
