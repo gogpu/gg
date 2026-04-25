@@ -130,8 +130,7 @@ func TestQueueGPUTextureDraw_OverlayCoordinates(t *testing.T) {
 	rc := &GPURenderContext{shared: NewGPUShared()}
 	target := makeTestTarget(600, 400)
 
-	dummyPtr := uintptr(0xDEADBEEF)
-	view := gpucontext.NewTextureView(unsafe.Pointer(dummyPtr)) //nolint:gosec // test dummy
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
 
 	rc.QueueGPUTextureDraw(target, view,
 		100, 100, 48, 48, 1.0, 600, 400)
@@ -154,8 +153,7 @@ func TestQueueBaseLayer_FullScreen(t *testing.T) {
 	rc := &GPURenderContext{shared: NewGPUShared()}
 	target := makeTestTarget(600, 400)
 
-	dummyPtr := uintptr(0xDEADBEEF)
-	view := gpucontext.NewTextureView(unsafe.Pointer(dummyPtr)) //nolint:gosec // test dummy
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
 
 	rc.QueueBaseLayer(target, view,
 		0, 0, 600, 400, 1.0, 600, 400)
@@ -178,8 +176,7 @@ func TestPendingCount_BaseLayerOnly(t *testing.T) {
 		t.Errorf("empty: got %d, want 0", rc.PendingCount())
 	}
 
-	dummyPtr := uintptr(0xDEADBEEF)
-	view := gpucontext.NewTextureView(unsafe.Pointer(dummyPtr)) //nolint:gosec // test dummy
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
 	rc.QueueBaseLayer(makeTestTarget(600, 400), view,
 		0, 0, 600, 400, 1.0, 600, 400)
 
@@ -191,8 +188,7 @@ func TestPendingCount_BaseLayerOnly(t *testing.T) {
 func TestPendingCount_OverlayOnly(t *testing.T) {
 	rc := &GPURenderContext{shared: NewGPUShared()}
 
-	dummyPtr := uintptr(0xDEADBEEF)
-	view := gpucontext.NewTextureView(unsafe.Pointer(dummyPtr)) //nolint:gosec // test dummy
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
 	rc.QueueGPUTextureDraw(makeTestTarget(600, 400), view,
 		100, 100, 48, 48, 1.0, 600, 400)
 
@@ -204,8 +200,7 @@ func TestPendingCount_OverlayOnly(t *testing.T) {
 func TestPendingCount_BaseLayerPlusOverlay(t *testing.T) {
 	rc := &GPURenderContext{shared: NewGPUShared()}
 
-	dummyPtr := uintptr(0xDEADBEEF)
-	view := gpucontext.NewTextureView(unsafe.Pointer(dummyPtr)) //nolint:gosec // test dummy
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
 	target := makeTestTarget(600, 400)
 
 	rc.QueueBaseLayer(target, view, 0, 0, 600, 400, 1.0, 600, 400)

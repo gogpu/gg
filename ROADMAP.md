@@ -56,6 +56,8 @@
 ### v0.43.1 — In Progress
 - [x] Type-safe GPU handles (ADR-018) — `any` → `unsafe.Pointer` opaque structs in gpucontext
 - [x] Blit-only black screen fix + GPU texture resource leak fix
+- [x] GPU texture overlay stretched fix (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) — separate vertex buffers
+- [x] Enterprise GPU texture tests (14 tests: vertices, ortho, queueing, isBlitOnly, regression)
 - [x] `blit_only` example + documentation
 
 ### v0.44.0 — Planned

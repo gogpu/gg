@@ -48,6 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with grow-only reallocation (same pattern as SDF/convex/image/text tiers). Bind groups
   are recreated per frame (texture view changes) but uniform/vertex buffers are reused.
 
+- **Nil-guard in CreateEncoder/SubmitEncoder** — nil session check prevents panic
+  when GPU is not initialized.
+
+- **GPU texture overlay stretched to full screen** (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) —
+  `DrawGPUTexture(view, x, y, 48, 48)` rendered at ~300px instead of 48×48.
+  Root cause: `buildGPUTextureResources` used a single shared vertex buffer
+  (`gpuTexVertBuf`) for both base layer and overlay textures. Base layer
+  (full-screen quad) overwrote overlay vertex positions. Fixed: separate
+  `gpuTexBaseVertBuf` for base layer, `gpuTexVertBuf` for overlays.
+  Regression test: `TestBuildGPUTextureResources_SeparateVertexBuffers`.
+
 ### Changed
 
 - **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix);
@@ -57,7 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ggcanvas.RenderTarget.SurfaceView()` — `any` → `gpucontext.TextureView`;
   `ggcanvas.RenderDirect` — `surfaceView any` → `surfaceView gpucontext.TextureView`.
   Nil checks: `view == nil` → `view.IsNil()`.
-- **Examples dependencies:** all examples updated to gogpu v0.29.2 + wgpu v0.26.4
+- **Examples dependencies:** all examples updated to gogpu v0.29.3 + wgpu v0.26.4
+- **Enterprise GPU texture tests** — 14 new tests covering vertex positioning,
+  ortho projection, command queueing, PendingCount, isBlitOnly detection, and
+  regression guards for BUG-GG-BLIT-PATH-001 and BUG-GG-GPU-TEXTURE-OVERLAY-SIZE.
 
 ## [0.43.0] - 2026-04-25
 
