@@ -136,6 +136,9 @@ func (rc *GPURenderContext) SetSharedEncoder(encoder any) {
 
 // CreateEncoder creates a new command encoder for shared use across contexts.
 func (rc *GPURenderContext) CreateEncoder() any {
+	if rc.session == nil {
+		return nil
+	}
 	enc, err := rc.session.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "shared_frame_encoder",
 	})
@@ -147,6 +150,9 @@ func (rc *GPURenderContext) CreateEncoder() any {
 
 // SubmitEncoder finishes the shared encoder and submits the command buffer.
 func (rc *GPURenderContext) SubmitEncoder(encoder any) error {
+	if rc.session == nil {
+		return fmt.Errorf("GPU session not initialized")
+	}
 	enc, ok := encoder.(*wgpu.CommandEncoder)
 	if !ok || enc == nil {
 		return fmt.Errorf("invalid encoder type")
