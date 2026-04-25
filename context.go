@@ -1154,6 +1154,33 @@ func (c *Context) FlushGPUWithView(view any, width, height uint32) error {
 	return nil
 }
 
+// FlushGPUWithViewDamage flushes pending GPU operations with damage-aware
+// optimization. When damageRect is non-empty, the compositor uses LoadOpLoad
+// (preserves previous frame) and scissor-clips to the dirty region — only
+// the damaged pixels are re-composited. When damageRect is empty, behaves
+// identically to FlushGPUWithView (full compositor pass).
+//
+// This enables sub-region compositing: a 48×48 spinner updates only 9KB
+// instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
+func (c *Context) FlushGPUWithViewDamage(view any, width, height uint32, damageRect image.Rectangle) error {
+	t := c.gpuRenderTarget()
+	if view != nil {
+		t.View = view
+		t.ViewWidth = width
+		t.ViewHeight = height
+	}
+	if !damageRect.Empty() {
+		t.DamageRect = damageRect
+	}
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.Flush(t)
+	}
+	if a := Accelerator(); a != nil {
+		return a.Flush(t)
+	}
+	return nil
+}
+
 // gpuContextOps is the per-context GPU rendering interface.
 // GPURenderContext (internal/gpu) implements this, allowing context.go
 // to route draw calls through the per-context queue without importing internal/gpu.

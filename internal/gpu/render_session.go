@@ -5,6 +5,8 @@ package gpu
 import (
 	"context"
 	"fmt"
+	"image"
+	"log"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
@@ -723,8 +725,11 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	}
 
 	if activeView != nil {
-		if s.isBlitOnly(grpRes, baseLayerRes) {
-			return s.encodeBlitOnlyPass(activeView, w, h, baseLayerRes)
+		blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
+		log.Printf("[GPU] render path: blitOnly=%v groups=%d hasBaseLayer=%v",
+			blitOnly, len(grpRes), baseLayerRes != nil)
+		if blitOnly {
+			return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
 		}
 		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
 	}
@@ -2591,19 +2596,26 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 // layer + overlay GPU textures) with zero vector shapes that need MSAA.
 func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *imageFrameResources) bool {
 	if baseLayerRes == nil || len(baseLayerRes.drawCalls) == 0 {
+		log.Printf("[GPU] isBlitOnly: false (no base layer)")
 		return false
 	}
 	for i := range grpRes {
 		gr := &grpRes[i]
-		if (gr.sdfRes != nil && gr.sdfRes.vertCount > 0) ||
-			(gr.convexRes != nil && gr.convexRes.vertCount > 0) ||
-			len(gr.stencilRes) > 0 ||
-			(gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0) ||
-			(gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0) ||
-			(gr.textRes != nil && len(gr.textRes.drawCalls) > 0) ||
-			(gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0) {
+		hasSDF := gr.sdfRes != nil && gr.sdfRes.vertCount > 0
+		hasConvex := gr.convexRes != nil && gr.convexRes.vertCount > 0
+		hasStencil := len(gr.stencilRes) > 0
+		hasImages := gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0
+		hasText := gr.textRes != nil && len(gr.textRes.drawCalls) > 0
+		hasGlyphMask := gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0
+		hasGPUTex := gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0
+		if hasSDF || hasConvex || hasStencil || hasImages || hasText || hasGlyphMask {
+			log.Printf("[GPU] isBlitOnly: false group=%d sdf=%v convex=%v stencil=%v img=%v text=%v glyph=%v gpuTex=%v",
+				i, hasSDF, hasConvex, hasStencil, hasImages, hasText, hasGlyphMask, hasGPUTex)
 			return false
 		}
+		// gpuTexRes (GPU texture overlays from RepaintBoundary) are textured
+		// quads — same shader as base layer, no MSAA needed. Allow them in
+		// the blit-only fast path.
 	}
 	return true
 }
@@ -2613,7 +2625,9 @@ func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *ima
 // This is the compositor fast path (ADR-016) — 93% bandwidth reduction vs 4x MSAA.
 func (s *GPURenderSession) encodeBlitOnlyPass(
 	view *wgpu.TextureView, w, h uint32,
+	grpRes []groupResources,
 	baseLayerRes *imageFrameResources,
+	damageRect image.Rectangle,
 ) error {
 	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
 		return fmt.Errorf("ensure blit pipeline: %w", err)
@@ -2632,11 +2646,16 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 		}
 	}()
 
+	loadOp := gputypes.LoadOpClear
+	if !damageRect.Empty() && s.frameRendered {
+		loadOp = gputypes.LoadOpLoad
+	}
+
 	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		Label: "session_blit_pass",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:       view,
-			LoadOp:     gputypes.LoadOpClear,
+			LoadOp:     loadOp,
 			StoreOp:    gputypes.StoreOpStore,
 			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 1},
 		}},
@@ -2646,7 +2665,24 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
+	if !damageRect.Empty() {
+		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
+		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
+		dw := uint32(damageRect.Dx())          //nolint:gosec // positive by Empty check
+		dh := uint32(damageRect.Dy())          //nolint:gosec // positive by Empty check
+		rp.SetScissorRect(dx, dy, dw, dh)
+	}
+
 	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+
+	// Draw GPU texture overlays (e.g., RepaintBoundary cached textures).
+	// These are textured quads using the same blit pipeline — no MSAA needed.
+	for i := range grpRes {
+		gr := &grpRes[i]
+		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+		}
+	}
 
 	if endErr := rp.End(); endErr != nil {
 		slogger().Warn("blit render pass End failed", "err", endErr)

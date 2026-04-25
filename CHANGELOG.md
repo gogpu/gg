@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `isBlitOnly()` detection + `encodeBlitOnlyPass()` + `RecordBlitDraws()` with dedicated
   1x pipeline. Enterprise pattern: Flutter/Chrome/Qt all use non-MSAA compositor passes.
 
+- **`FlushGPUWithViewDamage()`** (ADR-016 Phase 2) — damage-aware compositor. When damage
+  rect is set, uses `LoadOpLoad` (preserve previous frame) + scissor-clip to dirty region.
+  Only the damaged pixels are re-composited (48×48 spinner = 9KB vs 8MB full surface at 1080p).
+
 - **`BeginGPUFrame()`** on Context — resets per-context GPU frame state for persistent contexts.
   Required when reusing a Context across frames with the same view (RepaintBoundary pattern).
   Without this, `frameRendered=true` from previous frame causes `LoadOpLoad` instead of
