@@ -44,7 +44,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FlushGPUWithView()`. Enables ui ADR-006 Phase 1 (GPU <5% for spinner @60fps).
   Existing `Flush()` refactored to delegate to `FlushPixmap()` after `FlushGPU()`.
 
+- **`EnsureGPUTexture()`** in ggcanvas — promotes pendingTexture to real GPU texture
+  (one-time setup for zero-readback pipeline). Required before `PixmapTextureView()`.
+
+### Changed
+
+- **`gpuCtx` typed as `gpuContextOps`** — replaced `any` with compile-time type safety.
+  Type assertion moved to `ensureGPUCtx()` (once at creation), `gpuCtxOps()` simplified
+  to direct return.
+
+- **Dependencies:** wgpu v0.25.7 → v0.26.2 (PresentWithDamage all backends +
+  Buffer/BindGroup automatic cleanup via runtime.AddCleanup)
+
 ### Fixed
+
+- **GPU global fallback warnings** — all 8 GPU code paths (Fill, Stroke, Text, Flush,
+  Clip) that silently fall back to global `SDFAccelerator.defaultCtx` when per-context
+  `gpuCtxOps()` returns nil now log `slog.Warn`. Prevents silent shape leaking in
+  multi-context scenarios (RepaintBoundary). One-time warning per context.
 
 - **Compute mode test assumptions** — `TestSDFAccelerator_ComputeMode_DelegatesToVello`
   and `TestSDFAccelerator_FillShape_ComputeMode` incorrectly assumed `CanCompute()=false`
