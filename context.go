@@ -63,8 +63,9 @@ type Context struct {
 
 	// Per-context GPU render context (isolated pending commands, clips, frame tracking).
 	// Lazily created when GPURenderContextProvider is available.
-	// Type: *gpu.GPURenderContext (stored as any to avoid circular import).
-	gpuCtx            any
+	// Typed as gpuContextOps (defined in this package) to avoid circular import
+	// with internal/gpu while maintaining type safety.
+	gpuCtx            gpuContextOps
 	gpuFallbackWarned bool // true after first global fallback warning (avoid log spam)
 
 	// Lifecycle
@@ -1260,21 +1261,25 @@ func (c *Context) ensureGPUCtx() {
 	if a == nil {
 		return
 	}
-	if p, ok := a.(GPURenderContextProvider); ok {
-		c.gpuCtx = p.NewGPURenderContext()
+	p, ok := a.(GPURenderContextProvider)
+	if !ok {
+		return
 	}
+	rc := p.NewGPURenderContext()
+	if rc == nil {
+		return
+	}
+	ops, ok := rc.(gpuContextOps)
+	if !ok {
+		return
+	}
+	c.gpuCtx = ops
 }
 
 // gpuCtxOps returns the per-context GPU ops interface, or nil if unavailable.
 func (c *Context) gpuCtxOps() gpuContextOps {
 	c.ensureGPUCtx()
-	if c.gpuCtx == nil {
-		return nil
-	}
-	if ops, ok := c.gpuCtx.(gpuContextOps); ok {
-		return ops
-	}
-	return nil
+	return c.gpuCtx
 }
 
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
