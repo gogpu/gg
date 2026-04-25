@@ -2932,8 +2932,8 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	if !damageRect.Empty() {
 		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
 		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
-		dw := uint32(damageRect.Dx())           //nolint:gosec // positive
-		dh := uint32(damageRect.Dy())           //nolint:gosec // positive
+		dw := uint32(damageRect.Dx())          //nolint:gosec // positive
+		dh := uint32(damageRect.Dy())          //nolint:gosec // positive
 		rp.SetScissorRect(dx, dy, dw, dh)
 	}
 

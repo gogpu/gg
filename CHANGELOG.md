@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dependencies:** wgpu v0.26.2 → v0.26.3
+- **Dependencies:** wgpu v0.26.2 → v0.26.4 (PresentWithDamage + auto-cleanup + VK-006 layout fix)
 
 ## [0.43.0] - 2026-04-25
 
