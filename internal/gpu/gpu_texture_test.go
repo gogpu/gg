@@ -346,4 +346,55 @@ func assertFloat(t *testing.T, got, want float32, label string) {
 	}
 }
 
+// --- Regression: BUG-GG-GPU-TEXTURE-OVERLAY-SIZE ---
+
+func TestBuildGPUTextureResources_SeparateVertexBuffers(t *testing.T) {
+	// Regression test for BUG-GG-GPU-TEXTURE-OVERLAY-SIZE:
+	// Base layer (full-screen quad) must NOT overwrite overlay vertices.
+	// Before fix: both used s.gpuTexVertBuf → base layer overwrote overlay.
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	overlayCmd := GPUTextureDrawCommand{
+		DstX: 100, DstY: 100, DstW: 48, DstH: 48,
+		Opacity: 1.0, ViewportWidth: 600, ViewportHeight: 400,
+	}
+	baseCmd := GPUTextureDrawCommand{
+		DstX: 0, DstY: 0, DstW: 600, DstH: 400,
+		Opacity: 1.0, ViewportWidth: 600, ViewportHeight: 400,
+	}
+
+	// Build overlay first, then base layer (same order as RenderFrameGrouped).
+	overlayRes, err := s.buildGPUTextureResources(
+		[]GPUTextureDrawCommand{overlayCmd}, 600, 400, false)
+	if err != nil {
+		t.Fatalf("overlay build: %v", err)
+	}
+
+	baseRes, err := s.buildGPUTextureResources(
+		[]GPUTextureDrawCommand{baseCmd}, 600, 400, true)
+	if err != nil {
+		t.Fatalf("base build: %v", err)
+	}
+
+	// Key assertion: overlay and base layer must use DIFFERENT vertex buffers.
+	if overlayRes.vertBuf == baseRes.vertBuf {
+		t.Fatal("REGRESSION: overlay and base layer share the same vertex buffer — " +
+			"base layer will overwrite overlay vertices (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE)")
+	}
+
+	// Verify overlay vertex buffer is the overlay buffer.
+	if overlayRes.vertBuf != s.gpuTexVertBuf {
+		t.Error("overlay should use s.gpuTexVertBuf")
+	}
+
+	// Verify base layer vertex buffer is the base layer buffer.
+	if baseRes.vertBuf != s.gpuTexBaseVertBuf {
+		t.Error("base layer should use s.gpuTexBaseVertBuf")
+	}
+}
+
 // abs32 already defined in vello_tiles.go
