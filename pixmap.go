@@ -102,6 +102,43 @@ func (p *Pixmap) SetPixelPremul(x, y int, r, g, b, a uint8) {
 	p.data[i+3] = a
 }
 
+// FillRect fills a rectangular region with a solid premultiplied color.
+// The rectangle is clamped to pixmap bounds. This is a CPU-only operation —
+// it writes directly to the pixel buffer without engaging the GPU accelerator.
+//
+// Use for dirty-region clearing in retained-mode compositors where GPU
+// acceleration is counterproductive (would block the non-MSAA blit path).
+func (p *Pixmap) FillRect(r image.Rectangle, pr, pg, pb, pa uint8) {
+	r = r.Intersect(image.Rect(0, 0, p.width, p.height))
+	if r.Empty() {
+		return
+	}
+
+	stride := p.width * 4
+	pixel := [4]uint8{pr, pg, pb, pa}
+
+	y0, y1 := r.Min.Y, r.Max.Y
+	x0, x1 := r.Min.X, r.Max.X
+	rowBytes := (x1 - x0) * 4
+
+	first := y0*stride + x0*4
+	for x := x0; x < x1; x++ {
+		off := first + (x-x0)*4
+		p.data[off+0] = pixel[0]
+		p.data[off+1] = pixel[1]
+		p.data[off+2] = pixel[2]
+		p.data[off+3] = pixel[3]
+	}
+
+	src := p.data[first : first+rowBytes]
+	for y := y0 + 1; y < y1; y++ {
+		dst := y*stride + x0*4
+		copy(p.data[dst:dst+rowBytes], src)
+	}
+
+	p.genID = nextPixmapGenID.Add(1)
+}
+
 // GetPixel returns the color of a single pixel as straight (non-premultiplied) RGBA.
 // Internally the pixel is stored as premultiplied alpha; this method un-premultiplies.
 func (p *Pixmap) GetPixel(x, y int) RGBA {

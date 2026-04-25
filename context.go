@@ -432,6 +432,35 @@ func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
 }
 
+// FillRectCPU fills a rectangle directly on the CPU pixmap without engaging
+// the GPU SDF accelerator. Coordinates are in user space (device scale applied
+// automatically). Pending GPU shapes are flushed first for correct z-ordering.
+//
+// Use for operations where GPU acceleration is counterproductive, such as
+// dirty-region background clearing in retained-mode compositors. Without this,
+// DrawRectangle+Fill routes through SDF accelerator → blocks non-MSAA blit path.
+//
+// See ADR-016, TASK-GG-COMPOSITOR-003.
+func (c *Context) FillRectCPU(x, y, w, h float64, col RGBA) {
+	c.flushGPUAccelerator()
+
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(x, y))
+	br := ctm.TransformPoint(Pt(x+w, y+h))
+
+	px0 := int(tl.X)
+	py0 := int(tl.Y)
+	px1 := int(br.X + 0.5)
+	py1 := int(br.Y + 0.5)
+
+	pr := uint8(clamp255(col.R * col.A * 255))
+	pg := uint8(clamp255(col.G * col.A * 255))
+	pb := uint8(clamp255(col.B * col.A * 255))
+	pa := uint8(clamp255(col.A * 255))
+
+	c.pixmap.FillRect(image.Rect(px0, py0, px1, py1), pr, pg, pb, pa)
+}
+
 // SetColor sets the current drawing color.
 func (c *Context) SetColor(col color.Color) {
 	c.paint.SetBrush(Solid(FromColor(col)))

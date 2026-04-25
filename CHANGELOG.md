@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rect is set, uses `LoadOpLoad` (preserve previous frame) + scissor-clip to dirty region.
   Only the damaged pixels are re-composited (48×48 spinner = 9KB vs 8MB full surface at 1080p).
 
+- **`FillRectCPU()`** + **`Pixmap.FillRect()`** — CPU-only rectangle fill that bypasses the
+  GPU SDF accelerator. Without this, dirty-region background clearing routes through SDF →
+  blocks non-MSAA blit path (`isBlitOnly` = false). Enterprise pattern: Qt `fillRegion()`,
+  Flutter `memset`, Chrome `glClear+scissor`. Premultiplied RGBA, device-scale aware, row-copy
+  optimized (fill first row, `copy()` remaining).
+
 - **`BeginGPUFrame()`** on Context — resets per-context GPU frame state for persistent contexts.
   Required when reusing a Context across frames with the same view (RepaintBoundary pattern).
   Without this, `frameRendered=true` from previous frame causes `LoadOpLoad` instead of

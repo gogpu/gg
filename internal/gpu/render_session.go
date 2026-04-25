@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"log"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
@@ -725,10 +724,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	}
 
 	if activeView != nil {
-		blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
-		log.Printf("[GPU] render path: blitOnly=%v groups=%d hasBaseLayer=%v",
-			blitOnly, len(grpRes), baseLayerRes != nil)
-		if blitOnly {
+		if s.isBlitOnly(grpRes, baseLayerRes) {
 			return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
 		}
 		return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
@@ -2596,21 +2592,16 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 // layer + overlay GPU textures) with zero vector shapes that need MSAA.
 func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *imageFrameResources) bool {
 	if baseLayerRes == nil || len(baseLayerRes.drawCalls) == 0 {
-		log.Printf("[GPU] isBlitOnly: false (no base layer)")
 		return false
 	}
 	for i := range grpRes {
 		gr := &grpRes[i]
-		hasSDF := gr.sdfRes != nil && gr.sdfRes.vertCount > 0
-		hasConvex := gr.convexRes != nil && gr.convexRes.vertCount > 0
-		hasStencil := len(gr.stencilRes) > 0
-		hasImages := gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0
-		hasText := gr.textRes != nil && len(gr.textRes.drawCalls) > 0
-		hasGlyphMask := gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0
-		hasGPUTex := gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0
-		if hasSDF || hasConvex || hasStencil || hasImages || hasText || hasGlyphMask {
-			log.Printf("[GPU] isBlitOnly: false group=%d sdf=%v convex=%v stencil=%v img=%v text=%v glyph=%v gpuTex=%v",
-				i, hasSDF, hasConvex, hasStencil, hasImages, hasText, hasGlyphMask, hasGPUTex)
+		if (gr.sdfRes != nil && gr.sdfRes.vertCount > 0) ||
+			(gr.convexRes != nil && gr.convexRes.vertCount > 0) ||
+			len(gr.stencilRes) > 0 ||
+			(gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0) ||
+			(gr.textRes != nil && len(gr.textRes.drawCalls) > 0) ||
+			(gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0) {
 			return false
 		}
 		// gpuTexRes (GPU texture overlays from RepaintBoundary) are textured

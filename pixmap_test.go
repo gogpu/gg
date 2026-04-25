@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"image"
 	"testing"
 )
 
@@ -426,5 +427,160 @@ func TestPixmapFillSpanBounds(t *testing.T) {
 			// Should not panic
 			pm.FillSpan(tc.x1, tc.x2, tc.y, Red)
 		})
+	}
+}
+
+func TestPixmapFillRect(t *testing.T) {
+	pm := NewPixmap(10, 10)
+
+	pm.FillRect(image.Rect(2, 3, 5, 6), 255, 0, 0, 255)
+
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			i := (y*10 + x) * 4
+			inside := x >= 2 && x < 5 && y >= 3 && y < 6
+			if inside {
+				if pm.data[i] != 255 || pm.data[i+1] != 0 || pm.data[i+2] != 0 || pm.data[i+3] != 255 {
+					t.Errorf("pixel (%d,%d) inside rect: got [%d,%d,%d,%d], want [255,0,0,255]",
+						x, y, pm.data[i], pm.data[i+1], pm.data[i+2], pm.data[i+3])
+				}
+			} else {
+				if pm.data[i] != 0 || pm.data[i+3] != 0 {
+					t.Errorf("pixel (%d,%d) outside rect: got [%d,%d,%d,%d], want [0,0,0,0]",
+						x, y, pm.data[i], pm.data[i+1], pm.data[i+2], pm.data[i+3])
+				}
+			}
+		}
+	}
+}
+
+func TestPixmapFillRect_Clamp(t *testing.T) {
+	pm := NewPixmap(5, 5)
+
+	pm.FillRect(image.Rect(-2, -2, 8, 8), 0, 255, 0, 255)
+
+	for y := 0; y < 5; y++ {
+		for x := 0; x < 5; x++ {
+			i := (y*5 + x) * 4
+			if pm.data[i+1] != 255 || pm.data[i+3] != 255 {
+				t.Errorf("pixel (%d,%d): got [%d,%d,%d,%d], want [0,255,0,255]",
+					x, y, pm.data[i], pm.data[i+1], pm.data[i+2], pm.data[i+3])
+			}
+		}
+	}
+}
+
+func TestPixmapFillRect_OutOfBounds(t *testing.T) {
+	pm := NewPixmap(5, 5)
+	genBefore := pm.genID
+
+	pm.FillRect(image.Rect(10, 10, 20, 20), 255, 0, 0, 255)
+
+	if pm.genID != genBefore {
+		t.Error("out-of-bounds FillRect should not change genID")
+	}
+}
+
+func TestPixmapFillRect_GenID(t *testing.T) {
+	pm := NewPixmap(5, 5)
+	genBefore := pm.genID
+
+	pm.FillRect(image.Rect(0, 0, 3, 3), 255, 0, 0, 255)
+
+	if pm.genID == genBefore {
+		t.Error("FillRect should increment genID")
+	}
+}
+
+func TestFillRectCPU(t *testing.T) {
+	dc := NewContext(20, 20)
+	defer dc.Close()
+
+	dc.FillRectCPU(5, 5, 10, 10, RGBA{1, 0, 0, 1})
+
+	px := dc.ResizeTarget().GetPixel(10, 10)
+	if px.R < 0.9 || px.A < 0.9 {
+		t.Errorf("pixel inside FillRectCPU: got R=%f A=%f, want ~1.0", px.R, px.A)
+	}
+
+	px = dc.ResizeTarget().GetPixel(0, 0)
+	if px.A > 0.01 {
+		t.Errorf("pixel outside FillRectCPU: got A=%f, want ~0", px.A)
+	}
+}
+
+func TestFillRectCPU_DoesNotQueueSDF(t *testing.T) {
+	dc := NewContext(20, 20)
+	defer dc.Close()
+
+	dc.FillRectCPU(0, 0, 20, 20, RGBA{0.5, 0.5, 0.5, 1})
+
+	rc := dc.GPURenderContext()
+	if rc != nil {
+		type pendingCounter interface{ PendingCount() int }
+		if pc, ok := rc.(pendingCounter); ok {
+			if pc.PendingCount() != 0 {
+				t.Errorf("FillRectCPU should not queue GPU shapes, got %d pending", pc.PendingCount())
+			}
+		}
+	}
+}
+
+func TestPixmap_FillRect(t *testing.T) {
+	pm := NewPixmap(10, 10)
+
+	pm.FillRect(image.Rect(2, 3, 5, 6), 255, 0, 0, 255)
+
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			i := (y*10 + x) * 4
+			inside := x >= 2 && x < 5 && y >= 3 && y < 6
+			if inside {
+				if pm.data[i] != 255 || pm.data[i+1] != 0 || pm.data[i+2] != 0 || pm.data[i+3] != 255 {
+					t.Errorf("pixel(%d,%d) = %v, want [255 0 0 255]", x, y, pm.data[i:i+4])
+				}
+			} else {
+				if pm.data[i] != 0 || pm.data[i+1] != 0 || pm.data[i+2] != 0 || pm.data[i+3] != 0 {
+					t.Errorf("pixel(%d,%d) = %v, want [0 0 0 0]", x, y, pm.data[i:i+4])
+				}
+			}
+		}
+	}
+}
+
+func TestPixmap_FillRect_Clamped(t *testing.T) {
+	pm := NewPixmap(5, 5)
+
+	pm.FillRect(image.Rect(-2, -2, 8, 8), 0, 255, 0, 255)
+
+	i := 0
+	if pm.data[i] != 0 || pm.data[i+1] != 255 || pm.data[i+2] != 0 || pm.data[i+3] != 255 {
+		t.Errorf("pixel(0,0) = %v, want [0 255 0 255]", pm.data[i:i+4])
+	}
+	last := (4*5 + 4) * 4
+	if pm.data[last] != 0 || pm.data[last+1] != 255 {
+		t.Errorf("pixel(4,4) = %v, want [0 255 0 255]", pm.data[last:last+4])
+	}
+}
+
+func TestPixmap_FillRect_Empty(t *testing.T) {
+	pm := NewPixmap(5, 5)
+	origGen := pm.genID
+
+	pm.FillRect(image.Rect(10, 10, 20, 20), 255, 0, 0, 255)
+
+	if pm.genID != origGen {
+		t.Error("genID should not change for out-of-bounds rect")
+	}
+}
+
+func TestPixmap_FillRect_GenID(t *testing.T) {
+	pm := NewPixmap(5, 5)
+	gen1 := pm.genID
+
+	pm.FillRect(image.Rect(0, 0, 3, 3), 255, 0, 0, 255)
+
+	if pm.genID == gen1 {
+		t.Error("genID should change after FillRect")
 	}
 }
