@@ -445,6 +445,28 @@ func (s *Scene) IsEmpty() bool {
 	return s.encoding.IsEmpty() && s.layerStack.Root().IsEmpty()
 }
 
+// Append merges another Scene into this one, combining encodings, image
+// registries, and bounds. Image indices in the appended scene's encoding
+// are adjusted to account for images already registered in this scene.
+//
+// This is the Scene-level equivalent of Flutter's SceneBuilder.addPicture() —
+// composing cached display lists from multiple RepaintBoundary nodes into a
+// single scene for rendering.
+//
+// The other scene is flattened (layers collapsed) before appending.
+func (s *Scene) Append(other *Scene) {
+	if other == nil || other.IsEmpty() {
+		return
+	}
+	otherEnc := other.Encoding()
+	//nolint:gosec // image registry length is bounded
+	imageOffset := uint32(len(s.imageRegistry))
+	s.encoding.AppendWithImages(otherEnc, imageOffset)
+	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
+	s.bounds = s.bounds.Union(other.Bounds())
+	s.version++
+}
+
 // LayerDepth returns the current layer stack depth.
 func (s *Scene) LayerDepth() int {
 	return s.layerStack.Depth()
