@@ -157,7 +157,7 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 		}
 	}
 
-	for range transformDepth {
+	if transformDepth > 0 {
 		dc.Pop()
 	}
 
