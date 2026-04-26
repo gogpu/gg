@@ -149,6 +149,28 @@ func TestQueueGPUTextureDraw_OverlayCoordinates(t *testing.T) {
 	}
 }
 
+func TestQueueGPUTextureDraw_OpacityPassthrough(t *testing.T) {
+	rc := &GPURenderContext{shared: NewGPUShared()}
+	target := makeTestTarget(600, 400)
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
+
+	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.5, 600, 400)
+
+	cmd := rc.pendingGPUTextureCommands[0]
+	assertFloat(t, cmd.Opacity, 0.5, "opacity")
+}
+
+func TestQueueGPUTextureDraw_OpacityZero(t *testing.T) {
+	rc := &GPURenderContext{shared: NewGPUShared()}
+	target := makeTestTarget(600, 400)
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
+
+	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.0, 600, 400)
+
+	cmd := rc.pendingGPUTextureCommands[0]
+	assertFloat(t, cmd.Opacity, 0.0, "opacity zero")
+}
+
 func TestQueueBaseLayer_FullScreen(t *testing.T) {
 	rc := &GPURenderContext{shared: NewGPUShared()}
 	target := makeTestTarget(600, 400)

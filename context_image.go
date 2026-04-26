@@ -585,6 +585,30 @@ func (c *Context) DrawGPUTexture(view gpucontext.TextureView, x, y float64, widt
 		1.0, vpW, vpH)
 }
 
+// DrawGPUTextureWithOpacity composites a GPU texture view as an overlay with
+// the specified opacity (0.0 = fully transparent, 1.0 = fully opaque).
+// Same as DrawGPUTexture but with alpha blending for fade transitions
+// and OpacityLayer compositing (Flutter pattern).
+func (c *Context) DrawGPUTextureWithOpacity(view gpucontext.TextureView, x, y float64, width, height int, opacity float32) {
+	rc := c.gpuCtxOps()
+	if rc == nil || view.IsNil() {
+		return
+	}
+	defer c.setGPUClipRect()()
+
+	ctm := c.totalMatrix()
+	tl := ctm.TransformPoint(Pt(x, y))
+	br := ctm.TransformPoint(Pt(x+float64(width), y+float64(height)))
+
+	target := c.gpuRenderTarget()
+	vpW := uint32(target.Width)  //nolint:gosec // viewport fits uint32
+	vpH := uint32(target.Height) //nolint:gosec // viewport fits uint32
+
+	rc.QueueGPUTextureDraw(target, view,
+		float32(tl.X), float32(tl.Y), float32(br.X-tl.X), float32(br.Y-tl.Y),
+		opacity, vpW, vpH)
+}
+
 // DrawGPUTextureBase composites a GPU texture view as the compositor base layer.
 // The base layer is drawn BEFORE all GPU tiers (SDF, convex, stencil, text) in
 // the render pass, making it the background for zero-readback rendering.
