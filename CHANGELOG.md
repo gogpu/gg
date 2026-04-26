@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.2] - 2026-04-26
+
+### Changed
+
+- **Dependencies:** wgpu v0.26.4 → v0.26.6 (CopyTextureToTexture DMA copy,
+  compute dispatch barriers VAL-008, workgroup validation VAL-009/VAL-010)
+- **Examples dependencies:** all examples updated to gogpu v0.29.4 + wgpu v0.26.6
+
 ## [0.43.1] - 2026-04-25
 
 ### Added
