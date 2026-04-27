@@ -50,6 +50,8 @@ func main() {
 				log.Fatalf("ggcanvas.New: %v", err)
 			}
 			animToken = app.StartAnimation()
+		} else {
+			_ = canvas.Resize(w, h)
 		}
 
 		t := time.Since(startTime).Seconds()

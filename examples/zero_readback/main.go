@@ -60,6 +60,8 @@ func main() {
 				return
 			}
 			animToken = app.StartAnimation()
+		} else {
+			_ = canvas.Resize(w, h)
 		}
 
 		_ = canvas.Draw(func(cc *gg.Context) {

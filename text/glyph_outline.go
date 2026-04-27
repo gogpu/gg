@@ -3,6 +3,7 @@ package text
 
 import (
 	"math"
+	"sort"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/sfnt"
@@ -543,7 +544,50 @@ func buildYSnapMap(outline *GlyphOutline) map[float32]float32 {
 		}
 	}
 
+	// Stem-width preservation (FreeType pattern): detect snapped Y-values
+	// that collapsed to the same pixel row and enforce minimum 1px separation.
+	// Without this, thin horizontal features (T crossbar, E/F bars) at 10-16px
+	// collapse to 0px height and become invisible.
+	enforceMinStemWidth(ySnaps)
+
 	return ySnaps
+}
+
+// enforceMinStemWidth detects pairs of original Y-coordinates that mapped to
+// the same snapped value and pushes them apart to maintain at least 1px stem.
+// This matches FreeType's af_latin_hints_compute_edges pattern.
+func enforceMinStemWidth(ySnaps map[float32]float32) {
+	if len(ySnaps) < 2 {
+		return
+	}
+
+	type snapEntry struct {
+		orig    float32
+		snapped float32
+	}
+	entries := make([]snapEntry, 0, len(ySnaps))
+	for orig, snapped := range ySnaps {
+		entries = append(entries, snapEntry{orig, snapped})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].orig < entries[j].orig })
+
+	for i := 0; i < len(entries)-1; i++ {
+		curr := entries[i]
+		next := entries[i+1]
+
+		origGap := next.orig - curr.orig
+		if origGap < 0.1 {
+			continue // duplicate or near-duplicate points, not a stem
+		}
+
+		if curr.snapped == next.snapped && origGap > 0.3 {
+			// Two distinct edges collapsed to same pixel row → stem invisible.
+			// Push the lower (smaller Y = higher on screen in Y-down) edge up by 1px.
+			newSnapped := next.snapped - 1.0
+			ySnaps[curr.orig] = newSnapped
+			entries[i] = snapEntry{curr.orig, newSnapped}
+		}
+	}
 }
 
 // applyGridFit applies the snap map to outline coordinates and refreshes bounds.

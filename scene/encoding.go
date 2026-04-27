@@ -641,7 +641,18 @@ func (e *Encoding) Hash() uint64 {
 
 // Append merges another encoding into this one.
 // The other encoding's content is appended after the current content.
+// Append merges another Encoding into this one, adjusting brush indices.
+// For scene-level merging with image registry offset, use AppendWithImages.
 func (e *Encoding) Append(other *Encoding) {
+	e.AppendWithImages(other, 0)
+}
+
+// AppendWithImages merges another Encoding into this one, adjusting both
+// brush indices and image indices by their respective offsets.
+// imageOffset is the number of images already registered in the target scene;
+// it shifts TagImage drawData entries so they reference the correct images
+// after merging two image registries.
+func (e *Encoding) AppendWithImages(other *Encoding, imageOffset uint32) {
 	if other == nil || len(other.tags) == 0 {
 		return
 	}
@@ -688,7 +699,10 @@ func (e *Encoding) Append(other *Encoding) {
 		case TagPushLayer:
 			drawIdx += 2 // blend mode + alpha
 		case TagImage:
-			drawIdx++ // image index (not adjusted, handled separately)
+			if imageOffset > 0 && drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += imageOffset
+			}
+			drawIdx++
 		}
 	}
 

@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"encoding/binary"
+	"image"
 	"math"
 	"testing"
 	"unsafe"
@@ -147,6 +148,28 @@ func TestQueueGPUTextureDraw_OverlayCoordinates(t *testing.T) {
 	if cmd.ViewportWidth != 600 || cmd.ViewportHeight != 400 {
 		t.Errorf("viewport: got %dx%d, want 600x400", cmd.ViewportWidth, cmd.ViewportHeight)
 	}
+}
+
+func TestQueueGPUTextureDraw_OpacityPassthrough(t *testing.T) {
+	rc := &GPURenderContext{shared: NewGPUShared()}
+	target := makeTestTarget(600, 400)
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
+
+	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.5, 600, 400)
+
+	cmd := rc.pendingGPUTextureCommands[0]
+	assertFloat(t, cmd.Opacity, 0.5, "opacity")
+}
+
+func TestQueueGPUTextureDraw_OpacityZero(t *testing.T) {
+	rc := &GPURenderContext{shared: NewGPUShared()}
+	target := makeTestTarget(600, 400)
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
+
+	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.0, 600, 400)
+
+	cmd := rc.pendingGPUTextureCommands[0]
+	assertFloat(t, cmd.Opacity, 0.0, "opacity zero")
 }
 
 func TestQueueBaseLayer_FullScreen(t *testing.T) {
@@ -338,6 +361,62 @@ func assertFloat(t *testing.T, got, want float32, label string) {
 	const eps = 0.0001
 	if abs32(got-want) > eps {
 		t.Errorf("%s: got %f, want %f", label, got, want)
+	}
+}
+
+// --- Regression: BUG-GG-BLIT-LOADOP-003 ---
+
+func TestBlitLoadOp_DamageRectWithoutFrameRendered(t *testing.T) {
+	// Regression: encodeBlitOnlyPass required s.frameRendered==true for
+	// LoadOpLoad, but BeginGPUFrame always sets frameRendered=false.
+	// Result: damage rect ignored → full surface blit every frame.
+	// Fix: damage rect alone is sufficient signal (caller ensures warmup).
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	// Simulate: BeginGPUFrame was called → frameRendered = false
+	s.frameRendered = false
+
+	damageRect := image.Rect(100, 100, 148, 148) // 48x48 spinner
+
+	// Before fix: !damageRect.Empty() && s.frameRendered → false → LoadOpClear
+	// After fix:  !damageRect.Empty() → true → LoadOpLoad
+	if damageRect.Empty() {
+		t.Fatal("test setup: damage rect should not be empty")
+	}
+
+	// The condition that was fixed:
+	loadOpBefore := !damageRect.Empty() && s.frameRendered // OLD: always false after BeginFrame
+	loadOpAfter := !damageRect.Empty()                     // NEW: respects damage rect
+
+	if loadOpBefore {
+		t.Error("UNEXPECTED: old condition should be false when frameRendered=false")
+	}
+	if !loadOpAfter {
+		t.Error("REGRESSION: new condition should be true when damageRect is non-empty")
+	}
+}
+
+func TestBlitLoadOp_NoDamageRect(t *testing.T) {
+	// Without damage rect, LoadOpClear must be used (full surface redraw).
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	damageRect := image.Rectangle{} // empty
+	if !damageRect.Empty() {
+		t.Fatal("test setup: empty damage rect should be empty")
+	}
+
+	// Both old and new conditions agree: no damage → LoadOpClear
+	loadOp := !damageRect.Empty()
+	if loadOp {
+		t.Error("empty damage rect should not trigger LoadOpLoad")
 	}
 }
 

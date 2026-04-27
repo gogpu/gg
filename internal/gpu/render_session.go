@@ -2708,7 +2708,7 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	}()
 
 	loadOp := gputypes.LoadOpClear
-	if !damageRect.Empty() && s.frameRendered {
+	if !damageRect.Empty() {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -2970,7 +2970,7 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	}
 
 	loadOp := gputypes.LoadOpClear
-	if !damageRect.Empty() && s.frameRendered {
+	if !damageRect.Empty() {
 		loadOp = gputypes.LoadOpLoad
 	}
 

@@ -54,12 +54,17 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 
 	dc := r.dc
 	path := gg.NewPath()
+	transformDepth := 0
 
 	for dec.Next() {
 		switch dec.Tag() {
 		case TagTransform:
 			a := dec.Transform()
-			dc.Identity()
+			if transformDepth > 0 {
+				dc.Pop()
+			}
+			dc.Push()
+			transformDepth++
 			dc.Transform(gg.Matrix{
 				A: float64(a.A), B: float64(a.B), C: float64(a.C),
 				D: float64(a.D), E: float64(a.E), F: float64(a.F),
@@ -91,21 +96,43 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			// Path building complete; fill/stroke tag follows.
 
 		case TagFill:
-			brush, _ := dec.Fill()
-			dc.SetPath(path)
+			brush, style := dec.Fill()
 			applySceneBrush(dc, brush)
-			_ = dc.FillPreserve()
-			dc.ClearPath()
+			if style == FillEvenOdd {
+				dc.SetFillRule(gg.FillRuleEvenOdd)
+			} else {
+				dc.SetFillRule(gg.FillRuleNonZero)
+			}
+			_ = dc.FillPath(path)
+			path.Clear()
+
+		case TagFillRoundRect:
+			brush, style, rect, rx, ry := dec.FillRoundRect()
+			applySceneBrush(dc, brush)
+			if style == FillEvenOdd {
+				dc.SetFillRule(gg.FillRuleEvenOdd)
+			} else {
+				dc.SetFillRule(gg.FillRuleNonZero)
+			}
+			radius := float64(rx)
+			if ry > rx {
+				radius = float64(ry)
+			}
+			dc.DrawRoundedRectangle(
+				float64(rect.MinX), float64(rect.MinY),
+				float64(rect.MaxX-rect.MinX), float64(rect.MaxY-rect.MinY),
+				radius,
+			)
+			_ = dc.Fill()
 
 		case TagStroke:
 			brush, style := dec.Stroke()
-			dc.SetPath(path)
 			applySceneBrush(dc, brush)
 			if style != nil && style.Width > 0 {
 				dc.SetLineWidth(float64(style.Width))
 			}
-			_ = dc.StrokePreserve()
-			dc.ClearPath()
+			_ = dc.StrokePath(path)
+			path.Clear()
 
 		case TagPushLayer:
 			dc.Push()
@@ -114,21 +141,24 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			dc.Pop()
 
 		case TagBeginClip:
-			dc.SetPath(path)
+			dc.DrawPath(path)
 			dc.Clip()
 			dc.ClearPath()
+			path.Clear()
 
 		case TagEndClip:
 			dc.ResetClip()
 
 		case TagImage:
 			_, _ = dec.Image()
-			// Image rendering requires converting scene.Image Data to image.Image.
-			// For the initial GPU scene renderer, images fall through to CPU.
 
 		default:
 			// Unknown tags are skipped by the decoder advancing tagIdx.
 		}
+	}
+
+	if transformDepth > 0 {
+		dc.Pop()
 	}
 
 	return nil
