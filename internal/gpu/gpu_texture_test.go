@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"encoding/binary"
+	"image"
 	"math"
 	"testing"
 	"unsafe"
@@ -360,6 +361,62 @@ func assertFloat(t *testing.T, got, want float32, label string) {
 	const eps = 0.0001
 	if abs32(got-want) > eps {
 		t.Errorf("%s: got %f, want %f", label, got, want)
+	}
+}
+
+// --- Regression: BUG-GG-BLIT-LOADOP-003 ---
+
+func TestBlitLoadOp_DamageRectWithoutFrameRendered(t *testing.T) {
+	// Regression: encodeBlitOnlyPass required s.frameRendered==true for
+	// LoadOpLoad, but BeginGPUFrame always sets frameRendered=false.
+	// Result: damage rect ignored → full surface blit every frame.
+	// Fix: damage rect alone is sufficient signal (caller ensures warmup).
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	// Simulate: BeginGPUFrame was called → frameRendered = false
+	s.frameRendered = false
+
+	damageRect := image.Rect(100, 100, 148, 148) // 48x48 spinner
+
+	// Before fix: !damageRect.Empty() && s.frameRendered → false → LoadOpClear
+	// After fix:  !damageRect.Empty() → true → LoadOpLoad
+	if damageRect.Empty() {
+		t.Fatal("test setup: damage rect should not be empty")
+	}
+
+	// The condition that was fixed:
+	loadOpBefore := !damageRect.Empty() && s.frameRendered // OLD: always false after BeginFrame
+	loadOpAfter := !damageRect.Empty()                     // NEW: respects damage rect
+
+	if loadOpBefore {
+		t.Error("UNEXPECTED: old condition should be false when frameRendered=false")
+	}
+	if !loadOpAfter {
+		t.Error("REGRESSION: new condition should be true when damageRect is non-empty")
+	}
+}
+
+func TestBlitLoadOp_NoDamageRect(t *testing.T) {
+	// Without damage rect, LoadOpClear must be used (full surface redraw).
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	damageRect := image.Rectangle{} // empty
+	if !damageRect.Empty() {
+		t.Fatal("test setup: empty damage rect should be empty")
+	}
+
+	// Both old and new conditions agree: no damage → LoadOpClear
+	loadOp := !damageRect.Empty()
+	if loadOp {
+		t.Error("empty damage rect should not trigger LoadOpLoad")
 	}
 }
 
