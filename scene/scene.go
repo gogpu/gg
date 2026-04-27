@@ -467,6 +467,31 @@ func (s *Scene) Append(other *Scene) {
 	s.version++
 }
 
+// AppendWithTranslation merges another scene into this one, offsetting all
+// coordinates by (dx, dy). Image indices are adjusted to avoid conflicts.
+//
+// This is the Vello-derived pattern for composing child scenes recorded at
+// local (0,0) into a parent at a specific position. Used by RepaintBoundary
+// scene composition (ADR-007 Phase 5).
+func (s *Scene) AppendWithTranslation(other *Scene, dx, dy float32) {
+	if other == nil || other.IsEmpty() {
+		return
+	}
+	otherEnc := other.Encoding()
+	//nolint:gosec // image registry length is bounded
+	imageOffset := uint32(len(s.imageRegistry))
+	s.encoding.AppendWithTranslation(otherEnc, dx, dy, imageOffset)
+	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
+
+	ob := other.Bounds()
+	ob.MinX += dx
+	ob.MinY += dy
+	ob.MaxX += dx
+	ob.MaxY += dy
+	s.bounds = s.bounds.Union(ob)
+	s.version++
+}
+
 // LayerDepth returns the current layer stack depth.
 func (s *Scene) LayerDepth() int {
 	return s.layerStack.Depth()
