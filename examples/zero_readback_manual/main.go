@@ -61,6 +61,8 @@ func main() {
 				return
 			}
 			animToken = app.StartAnimation()
+		} else {
+			_ = canvas.Resize(w, h)
 		}
 
 		cc := canvas.Context()

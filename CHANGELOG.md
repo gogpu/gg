@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.3] - 2026-04-27
+
+### Added
+
+- **`DrawGPUTextureWithOpacity()`** — GPU texture overlay with alpha blending
+  for fade transitions and OpacityLayer compositing (Flutter pattern).
+  Internal pipeline already supported opacity — only the public API was missing.
+
+- **`Scene.Append()`** — merges two scenes including encodings, image registries,
+  and bounds. Image indices in the appended scene are adjusted to prevent
+  cross-scene image reference corruption (TASK-GG-SCENE-005). Flutter
+  `SceneBuilder.addPicture()` equivalent for retained-mode compositing.
+
+- **`Encoding.AppendWithImages()`** — encoding-level merge with image index offset.
+  `Encoding.Append()` unchanged (backward compatible, delegates with offset=0).
+
+### Fixed
+
+- **GPUSceneRenderer: SetPath bypasses CTM** (BUG-GG-GPU-SCENE-RENDERER-TEXT-001) —
+  `SetPath(path)` copies raw coordinates without applying user transform matrix.
+  Text and shapes rendered at wrong position (invisible when translated).
+  Fix: `FillPath(path)` / `StrokePath(path)` which apply CTM via `DrawPath`.
+  Also: `dc.Identity()` in TagTransform reset parent CTM → replaced with Push/Pop.
+  Added TagFillRoundRect handler (was silently dropped).
+
+- **GPUSceneRenderer: transform stack corruption** (BUG-002) — `transformDepth`
+  counter incremented for every TagTransform but only one push was active.
+  Cleanup popped N times instead of 1, corrupting parent transform stack.
+  ListView items all rendered at first position. Fix: `if depth > 0` not `for range`.
+
+- **Blit LoadOp ignores damageRect after BeginGPUFrame** (BUG-GG-BLIT-LOADOP-003) —
+  `encodeBlitOnlyPass` required `s.frameRendered==true` for `LoadOpLoad`, but
+  `BeginGPUFrame` always resets to false. Damage rect ignored → full surface blit
+  every frame (22% GPU for spinner). Fix: non-empty damageRect alone triggers
+  `LoadOpLoad` — caller guarantees swapchain warmup.
+
+- **Encoding.Append image index corruption** (TASK-GG-SCENE-005) — `TagImage`
+  drawData indices not adjusted when merging encodings. Scene B images pointed
+  to scene A images after merge (data corruption).
+
+### Changed
+
+- **Dependencies:** wgpu v0.26.6 → v0.26.8 (DX12 buffer state tracking, Vulkan
+  buffer mapping audit BUG-VK-009, pipeline overridable constants, zero-init
+  workgroup memory)
+- **Examples:** all examples updated to wgpu v0.26.8
+
+### Architecture
+
+- **ADR-019:** Render pass blit (not DMA copy) for swapchain compositing.
+  DMA `CopyTextureToTexture` rejected: fails on GLES + WebGPU (2/5 backends),
+  driver-dependent on Vulkan. All enterprise frameworks (wgpu, Vello, Flutter,
+  Chrome) use render pass. Research: `docs/dev/research/DMA-BLIT-VS-RENDER-PASS-RESEARCH.md`
+
 ## [0.43.2] - 2026-04-26
 
 ### Changed
