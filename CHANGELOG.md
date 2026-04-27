@@ -47,12 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drawData indices not adjusted when merging encodings. Scene B images pointed
   to scene A images after merge (data corruption).
 
+- **Auto-hinter collapses thin horizontal stems at 12px** (BUG-GG-TEXT-HINTING-STEM-COLLAPSE-001) —
+  `buildYSnapMap` snapped Y-coordinates independently. Two edges forming a thin
+  horizontal stem (T crossbar, E/F bars) could both round to the same pixel row,
+  collapsing the feature to 0px. "T" at 12px rendered as "I". Fix: `enforceMinStemWidth()`
+  detects collapsed pairs and enforces minimum 1px separation (FreeType pattern).
+
 ### Changed
 
 - **Dependencies:** wgpu v0.26.6 → v0.26.8 (DX12 buffer state tracking, Vulkan
   buffer mapping audit BUG-VK-009, pipeline overridable constants, zero-init
-  workgroup memory)
-- **Examples:** all examples updated to wgpu v0.26.8
+  workgroup memory); examples gogpu v0.29.4 → v0.30.0
+- **Examples:** all examples updated to wgpu v0.26.8 + gogpu v0.30.0; resize handling
+  added to all ggcanvas-based examples (blit_only, zero_readback, zero_readback_manual,
+  scene_gpu_visual)
 
 ### Architecture
 

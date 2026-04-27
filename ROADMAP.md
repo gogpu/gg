@@ -53,11 +53,21 @@
 
 ## Upcoming
 
-### v0.43.1 — In Progress
+### v0.43.3 — In Progress
+- [x] DrawGPUTextureWithOpacity — alpha blending for GPU texture overlays
+- [x] Scene.Append + Encoding.AppendWithImages — image index fix (TASK-GG-SCENE-005)
+- [x] GPUSceneRenderer: SetPath CTM fix + TagFillRoundRect handler (BUG-001)
+- [x] GPUSceneRenderer: transform stack corruption fix (BUG-002)
+- [x] Blit LoadOp damageRect fix after BeginGPUFrame (BUG-003)
+- [x] Auto-hinter stem collapse at 12px — enforceMinStemWidth (BUG-STEM-001)
+- [x] ADR-019: render pass blit, not DMA copy (research + decision)
+- [x] Examples: resize handling + gogpu v0.30.0 + wgpu v0.26.8
+
+### v0.43.1–v0.43.2 ✅ Released
 - [x] Type-safe GPU handles (ADR-018) — `any` → `unsafe.Pointer` opaque structs in gpucontext
 - [x] Blit-only black screen fix + GPU texture resource leak fix
 - [x] GPU texture overlay stretched fix (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) — separate vertex buffers
-- [x] Enterprise GPU texture tests (14 tests: vertices, ortho, queueing, isBlitOnly, regression)
+- [x] Enterprise GPU texture tests (14 tests)
 - [x] `blit_only` example + documentation
 
 ### v0.44.0 — Planned
