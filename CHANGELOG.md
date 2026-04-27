@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.4] - 2026-04-27
+
+### Added
+
+- **`Scene.AppendWithTranslation()`** — merges a child scene into a parent with
+  (dx, dy) coordinate offset. All pathData coordinates (MoveTo, LineTo, QuadTo,
+  CubicTo, FillRoundRect) are offset at append time. Transform stream copied
+  verbatim (our architecture pre-bakes coordinates, unlike Vello which uses
+  transform composition). Panic on unknown tags for exhaustiveness safety.
+  8 tests covering all coordinate tags, bounds, transforms, nil/empty.
+
+- **`Encoding.AppendWithTranslation()`** — encoding-level merge with coordinate
+  offset + brush/image index adjustment. Enables ADR-007 Phase 5 scene
+  composition in ui (RepaintBoundary at local coordinates → parent scene at offset).
+
 ## [0.43.3] - 2026-04-27
 
 ### Added

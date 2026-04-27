@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/gogpu/gg"
@@ -716,6 +717,160 @@ func (e *Encoding) AppendWithImages(other *Encoding, imageOffset uint32) {
 	e.bounds = e.bounds.Union(other.bounds)
 
 	// Update statistics
+	e.pathCount += other.pathCount
+	e.shapeCount += other.shapeCount
+}
+
+// AppendWithTranslation merges another encoding with a translation offset
+// applied to all path coordinates.
+//
+// Architecture: pathData coordinate offset approach.
+//
+// Our SceneCanvas pre-bakes absolute coordinates via applyTransform() and
+// records Identity transforms in the encoding. This differs from Vello where
+// paths stay in local coordinates and the transform stream carries the full
+// transformation (Vello composes transforms at append: parent * child).
+//
+// Because our pathData already contains absolute coordinates with Identity
+// transforms, the correct offset strategy is:
+//
+//   - pathData: offset all coordinate float32 values by (dx, dy)
+//   - transforms: copy VERBATIM (they are Identity; composing translation
+//     would cause double-offset since the renderer applies transforms to
+//     already-offset pathData coordinates)
+//
+// Alternative approaches considered:
+//
+//   - Vello pattern (transform composition only): multiply each child
+//     transform by TranslateAffine(dx, dy). Does NOT work with our
+//     pre-baked coordinate architecture — coordinates would stay at (0,0)
+//     since transforms are Identity.
+//
+//   - Skia/Flutter pattern (replay-time canvas transform): wrap replay in
+//     Push/Translate/Pop on the target canvas. Works with render.Canvas
+//     (used by current desktop compositor) but NOT with SceneCanvas
+//     (Scene.Append has no canvas context).
+//
+//   - Migrate to Vello architecture: stop pre-baking coordinates, record
+//     transforms in encoding, compose at append. Correct long-term but
+//     requires rewriting SceneCanvas coordinate handling.
+//
+// Tag exhaustiveness: every Tag that consumes pathData floats MUST have a
+// case in the switch below. Adding a new tag with pathData without updating
+// this switch will cause silent coordinate corruption. The default case
+// handles tags with zero pathData/drawData (markers, clip, pop).
+func (e *Encoding) AppendWithTranslation(other *Encoding, dx, dy float32, imageOffset uint32) {
+	if other == nil || len(other.tags) == 0 {
+		return
+	}
+	if dx == 0 && dy == 0 {
+		e.AppendWithImages(other, imageOffset)
+		return
+	}
+
+	//nolint:gosec // brush slice length is bounded
+	brushOffset := uint32(len(e.brushes))
+
+	e.tags = append(e.tags, other.tags...)
+
+	pathStart := len(e.pathData)
+	e.pathData = append(e.pathData, other.pathData...)
+
+	drawDataStart := len(e.drawData)
+	e.drawData = append(e.drawData, other.drawData...)
+
+	pathIdx := 0
+	drawIdx := 0
+	for _, tag := range other.tags {
+		switch tag {
+		// --- Coordinate tags: offset pathData by (dx, dy) ---
+
+		case TagMoveTo, TagLineTo:
+			e.pathData[pathStart+pathIdx] += dx
+			e.pathData[pathStart+pathIdx+1] += dy
+			pathIdx += 2
+
+		case TagQuadTo:
+			for i := 0; i < 4; i += 2 {
+				e.pathData[pathStart+pathIdx+i] += dx
+				e.pathData[pathStart+pathIdx+i+1] += dy
+			}
+			pathIdx += 4
+
+		case TagCubicTo:
+			for i := 0; i < 6; i += 2 {
+				e.pathData[pathStart+pathIdx+i] += dx
+				e.pathData[pathStart+pathIdx+i+1] += dy
+			}
+			pathIdx += 6
+
+		case TagFillRoundRect:
+			// 6 floats: minX, minY, maxX, maxY (offset), radiusX, radiusY (no offset).
+			e.pathData[pathStart+pathIdx] += dx
+			e.pathData[pathStart+pathIdx+1] += dy
+			e.pathData[pathStart+pathIdx+2] += dx
+			e.pathData[pathStart+pathIdx+3] += dy
+			pathIdx += 6
+			if drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += brushOffset
+			}
+			drawIdx += 2
+
+		// --- Non-coordinate pathData: skip without offset ---
+
+		case TagBrush:
+			pathIdx += 4 // 4 float32: R, G, B, A — not coordinates
+
+		// --- Draw data only (no pathData) ---
+
+		case TagFill:
+			if drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += brushOffset
+			}
+			drawIdx += 2
+
+		case TagStroke:
+			if drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += brushOffset
+			}
+			drawIdx += 5 // brush + width + miterLimit + cap + join
+
+		case TagPushLayer:
+			drawIdx += 2 // blend mode + alpha
+
+		case TagImage:
+			if imageOffset > 0 && drawIdx < len(other.drawData) {
+				e.drawData[drawDataStart+drawIdx] += imageOffset
+			}
+			drawIdx++ // image index only; transform is in transforms stream
+
+		// --- Marker/structural tags: zero pathData, zero drawData ---
+
+		case TagTransform:
+			// Transform data is in the separate transforms stream, not pathData.
+			// Handled below (copied verbatim).
+
+		case TagBeginPath, TagEndPath, TagClosePath,
+			TagPopLayer, TagBeginClip, TagEndClip:
+			// Pure markers — no data in any stream.
+
+		default:
+			panic(fmt.Sprintf("scene.AppendWithTranslation: unhandled tag 0x%02X (%s) — update switch to handle pathData/drawData layout for this tag", byte(tag), tag))
+		}
+	}
+
+	// Transforms copied verbatim — see architecture note above.
+	e.transforms = append(e.transforms, other.transforms...)
+
+	e.brushes = append(e.brushes, other.brushes...)
+
+	ob := other.bounds
+	ob.MinX += dx
+	ob.MinY += dy
+	ob.MaxX += dx
+	ob.MaxY += dy
+	e.bounds = e.bounds.Union(ob)
+
 	e.pathCount += other.pathCount
 	e.shapeCount += other.shapeCount
 }
