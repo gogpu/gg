@@ -3,7 +3,12 @@
 
 package gg
 
-import "testing"
+import (
+	"image/color"
+	"testing"
+
+	"github.com/gogpu/gg/text"
+)
 
 func TestNewContextWithScale(t *testing.T) {
 	tests := []struct {
@@ -296,4 +301,80 @@ func TestDrawingAtDeviceScale(t *testing.T) {
 	if bounds.Dx() != 20 || bounds.Dy() != 20 {
 		t.Errorf("Image bounds = %dx%d, want 20x20", bounds.Dx(), bounds.Dy())
 	}
+}
+
+func TestDrawStringBitmapRetinaScaling(t *testing.T) {
+	// Regression: gg#276 — drawStringBitmap used user-space font size on
+	// device-space pixmap. On Retina (2x), text appeared half-size.
+	// Fix: drawStringBitmap creates a device-scaled face when deviceScale != 1.0.
+	dc1 := NewContext(200, 100)
+	defer func() { _ = dc1.Close() }()
+
+	dc2 := NewContext(200, 100, WithDeviceScale(2.0))
+	defer func() { _ = dc2.Close() }()
+
+	face := loadDeviceScaleTestFont(t, 24)
+
+	dc1.SetFont(face)
+	dc2.SetFont(face)
+
+	dc1.SetRGBA(1, 1, 1, 1)
+	dc2.SetRGBA(1, 1, 1, 1)
+
+	// Force CPU bitmap path via Translate (triggers IsTranslationOnly tier 0).
+	dc1.Translate(10, 50)
+	dc2.Translate(10, 50)
+
+	dc1.DrawString("Tg", 0, 0)
+	dc2.DrawString("Tg", 0, 0)
+
+	img1 := dc1.Image() // 200x100
+	img2 := dc2.Image() // 400x200 (2x physical)
+
+	// Count non-zero pixels in a horizontal strip around baseline.
+	// On dc2 (2x), the text should be physically larger (more pixels).
+	count1 := countNonBlackPixels(img1, 0, 30, 200, 70)
+	count2 := countNonBlackPixels(img2, 0, 60, 400, 140)
+
+	// dc2 has 4x total area but text is 2x larger in each dimension → ~4x pixels.
+	// Before fix: count2 ≈ count1 (same font size on bigger canvas).
+	// After fix: count2 ≈ 4 * count1 (font scaled to device pixels).
+	ratio := float64(count2) / float64(count1)
+	if count1 == 0 {
+		t.Fatal("no text pixels rendered on 1x canvas")
+	}
+	if ratio < 2.0 {
+		t.Errorf("REGRESSION gg#276: Retina text not scaled. Pixel ratio = %.1f (want ≥ 2.0)", ratio)
+	}
+}
+
+func loadDeviceScaleTestFont(t *testing.T, size float64) text.Face {
+	t.Helper()
+	candidates := []string{
+		"C:/Windows/Fonts/arial.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/System/Library/Fonts/Helvetica.ttc",
+		"/Library/Fonts/Arial.ttf",
+	}
+	for _, p := range candidates {
+		source, err := text.NewFontSourceFromFile(p)
+		if err == nil {
+			return source.Face(size)
+		}
+	}
+	t.Skip("no system font found for test")
+	return nil
+}
+
+func countNonBlackPixels(img interface{ At(x, y int) color.Color }, x0, y0, x1, y1 int) int {
+	count := 0
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r > 0 || g > 0 || b > 0 {
+				count++
+			}
+		}
+	}
+	return count
 }

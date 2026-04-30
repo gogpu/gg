@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.6] - 2026-04-30
+
+### Fixed
+
+- **Mac Retina: text half-size in CPU bitmap path** ([#276](https://github.com/gogpu/gg/issues/276)) —
+  `drawStringBitmap` (translation-only tier 0) rendered text with user-space font
+  size on device-space pixmap. On Retina/HiDPI (2x), 24px text appeared as 12px.
+  Fix: create device-scaled face (`size * deviceScale`) matching Skia and Cairo
+  pattern. Reported by @sverrehu.
+
 ## [0.43.5] - 2026-04-30
 
 ### Changed
