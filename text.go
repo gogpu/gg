@@ -416,7 +416,13 @@ func (c *Context) drawStringCPU(s string, x, y float64) {
 func (c *Context) drawStringBitmap(s string, x, y float64) {
 	p := c.totalMatrix().TransformPoint(Pt(x, y))
 	c.flushGPUAccelerator()
-	text.Draw(c.pixmap, s, c.face, p.X, p.Y, c.currentColor())
+	face := c.face
+	if c.deviceScale != 1.0 {
+		if source := c.face.Source(); source != nil {
+			face = source.Face(c.face.Size() * c.deviceScale)
+		}
+	}
+	text.Draw(c.pixmap, s, face, p.X, p.Y, c.currentColor())
 }
 
 // drawStringScaled renders text via bitmap rasterization at the device pixel size.
