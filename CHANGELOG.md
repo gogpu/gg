@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.5] - 2026-04-30
+
+### Changed
+
+- **Dependencies:** wgpu v0.26.8 → v0.26.10 (Validation Phase B: MinBindingSize,
+  DrawIndexed format, indirect buffer validation, depth/stencil aspect granularity,
+  bind group destruction tracking at submit — 5 P1 checks, 45% coverage),
+  gogpu v0.30.0 → v0.30.3 (multi-window deadlock fix + scroll fix),
+  naga v0.17.6 → v0.17.8 (transitive)
+- **Examples:** all 8 examples updated to latest ecosystem deps
+
 ## [0.43.4] - 2026-04-27
 
 ### Added
