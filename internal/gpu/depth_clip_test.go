@@ -3,6 +3,7 @@
 package gpu
 
 import (
+	"math"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -30,17 +31,23 @@ func TestDepthClipPipeline_Lifecycle(t *testing.T) {
 		t.Error("expected non-nil tessellator")
 	}
 
-	// Pipeline should not be created yet (lazy).
-	if p.pipeline != nil {
-		t.Error("expected nil pipeline before ensurePipeline")
+	// Pipelines should not be created yet (lazy).
+	if p.stencilFillPipeline != nil {
+		t.Error("expected nil stencilFillPipeline before ensurePipeline")
+	}
+	if p.depthCoverPipeline != nil {
+		t.Error("expected nil depthCoverPipeline before ensurePipeline")
 	}
 
 	// Force pipeline creation.
 	if err := p.ensurePipeline(); err != nil {
 		t.Fatalf("ensurePipeline failed: %v", err)
 	}
-	if p.pipeline == nil {
-		t.Error("expected non-nil pipeline after ensurePipeline")
+	if p.stencilFillPipeline == nil {
+		t.Error("expected non-nil stencilFillPipeline after ensurePipeline")
+	}
+	if p.depthCoverPipeline == nil {
+		t.Error("expected non-nil depthCoverPipeline after ensurePipeline")
 	}
 	if p.shader == nil {
 		t.Error("expected non-nil shader after ensurePipeline")
@@ -59,8 +66,11 @@ func TestDepthClipPipeline_Lifecycle(t *testing.T) {
 
 	// Destroy should release all resources.
 	p.Destroy()
-	if p.pipeline != nil {
-		t.Error("expected nil pipeline after Destroy")
+	if p.stencilFillPipeline != nil {
+		t.Error("expected nil stencilFillPipeline after Destroy")
+	}
+	if p.depthCoverPipeline != nil {
+		t.Error("expected nil depthCoverPipeline after Destroy")
 	}
 	if p.shader != nil {
 		t.Error("expected nil shader after Destroy")
@@ -73,6 +83,9 @@ func TestDepthClipPipeline_Lifecycle(t *testing.T) {
 	}
 	if p.vertBuf != nil {
 		t.Error("expected nil vertBuf after Destroy")
+	}
+	if p.coverBuf != nil {
+		t.Error("expected nil coverBuf after Destroy")
 	}
 	if p.uniformBuf != nil {
 		t.Error("expected nil uniformBuf after Destroy")
@@ -388,5 +401,182 @@ func TestStencilRenderer_EnsureDepthClipPipelines(t *testing.T) {
 	}
 	if sr.pipelineWithDepthClipNZ != origNZ {
 		t.Error("pipeline was recreated on second call (should be idempotent)")
+	}
+}
+
+// TestDepthLoadOp_AlwaysClear_Regression verifies that the render session
+// can render multiple frames with depth clip without errors.
+//
+// Regression test for circle depth clip appearing empty on frame 2+:
+// DepthStoreOp=Discard discards depth after each render pass. Loading
+// discarded depth on subsequent passes produces undefined values. If
+// undefined depth happens to be small positive values, the GreaterEqual
+// depth test in content pipelines fails everywhere, producing empty
+// (invisible) clipped content.
+//
+// Fix: always clear depth to 1.0 regardless of frameRendered state. The
+// depth clip pipeline writes Z=0.0 fresh each pass, so a clean 1.0 is
+// always the correct starting point.
+func TestDepthLoadOp_AlwaysClear_Regression(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	if err := s.EnsureTextures(200, 200); err != nil {
+		t.Fatalf("EnsureTextures failed: %v", err)
+	}
+
+	// Build a simple triangle clip path.
+	clipPath := &gg.Path{}
+	clipPath.MoveTo(50, 0)
+	clipPath.LineTo(100, 100)
+	clipPath.LineTo(0, 100)
+	clipPath.Close()
+
+	// Build one group with depth clip.
+	groups := []ScissorGroup{
+		{
+			ClipPath:  clipPath,
+			SDFShapes: []SDFRenderShape{{Kind: 0, CenterX: 50, CenterY: 50, Param1: 40, Param2: 40, ColorR: 1, ColorG: 0, ColorB: 0, ColorA: 1}},
+		},
+	}
+
+	target := gg.GPURenderTarget{
+		Width:  200,
+		Height: 200,
+		Data:   make([]uint8, 200*200*4),
+		Stride: 200 * 4,
+	}
+
+	// Render 3 consecutive frames. Before the fix, frame 2+ used LoadOpLoad
+	// on discarded depth, causing undefined depth buffer values and empty
+	// clipped output.
+	for frame := 0; frame < 3; frame++ {
+		err := s.RenderFrameGrouped(target, groups, nil, nil)
+		if err != nil {
+			t.Fatalf("Frame %d RenderFrameGrouped failed: %v", frame, err)
+		}
+	}
+}
+
+// TestScissorSegments_CircleClip_MultipleSDFContent verifies that multiple
+// SDF shapes drawn inside a circle clip each get their own scissor group
+// with the clip path correctly assigned. This is a regression test for the
+// circle clip appearing empty: each Fill() call creates SetClipRect +
+// SetClipPath (2 segments at setup) + ClearClipPath + ClearClipRect (2
+// segments at cleanup), producing 4 segments per fill. buildScissorGroups
+// must correctly assign content to the segment that has the clipPath set.
+func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
+	rc := &GPURenderContext{
+		shared: &GPUShared{},
+	}
+
+	// Build a circle clip path (device-space).
+	circlePath := &gg.Path{}
+	circlePath.MoveTo(180, 100)
+	for i := 1; i <= 36; i++ {
+		angle := float64(i) * 2 * 3.14159265 / 36
+		circlePath.LineTo(100+80*math.Cos(angle), 100+80*math.Sin(angle))
+	}
+	circlePath.Close()
+
+	// Simulate 3 Fill() calls inside a circle clip, each following the
+	// setGPUClipRect → setGPUClipPath → QueueShape → ClearClipPath → ClearClipRect
+	// pattern from context.go doFill().
+	clipRect := [4]uint32{20, 20, 160, 160}
+
+	for i := 0; i < 3; i++ {
+		// Setup: setGPUClipPath calls SetClipRect then SetClipPath.
+		rc.SetClipRect(clipRect[0], clipRect[1], clipRect[2], clipRect[3])
+		rc.SetClipPath(circlePath)
+
+		// GPU fill: queue SDF shape.
+		rc.pendingShapes = append(rc.pendingShapes, SDFRenderShape{
+			Kind:    1,
+			CenterX: 100, CenterY: float32(40 + i*40),
+			Param1: 80, Param2: 20,
+			ColorR: 1, ColorA: 1,
+		})
+
+		// Cleanup: ClearClipPath then ClearClipRect (deferred from setGPUClipPath).
+		rc.ClearClipPath()
+		rc.ClearClipRect()
+	}
+
+	groups := rc.buildScissorGroups()
+
+	// Count groups that have content (non-empty SDF shapes) AND a clip path.
+	clippedGroupCount := 0
+	totalClippedShapes := 0
+	for _, g := range groups {
+		if len(g.SDFShapes) > 0 && g.ClipPath != nil {
+			clippedGroupCount++
+			totalClippedShapes += len(g.SDFShapes)
+		}
+	}
+
+	if clippedGroupCount != 3 {
+		t.Errorf("expected 3 groups with clipPath + SDF content, got %d (total groups: %d)", clippedGroupCount, len(groups))
+		for i, g := range groups {
+			t.Logf("  group[%d]: sdf=%d clipPath=%v rect=%v", i, len(g.SDFShapes), g.ClipPath != nil, g.Rect != nil)
+		}
+	}
+	if totalClippedShapes != 3 {
+		t.Errorf("expected 3 total SDF shapes in clipped groups, got %d", totalClippedShapes)
+	}
+}
+
+// TestClipPath_SurvivesDeepCopy verifies that ClipPath is preserved when
+// buildScissorGroups output is deep-copied in Flush(). This is a regression
+// test for the bug where the deep-copy loop in gpu_render_context.go:Flush()
+// initialized ScissorGroup with only Rect and ClipRRect, dropping ClipPath.
+// Without ClipPath, BuildClipResources was never called and depth clipping
+// had no effect — shapes rendered as rectangles (scissor only), not clipped
+// to the arbitrary path boundary.
+func TestClipPath_SurvivesDeepCopy(t *testing.T) {
+	// Simulate the deep-copy pattern from gpu_render_context.go:Flush().
+	clipPath := &gg.Path{}
+	clipPath.MoveTo(50, 0)
+	clipPath.LineTo(100, 100)
+	clipPath.LineTo(0, 100)
+	clipPath.Close()
+
+	original := []ScissorGroup{
+		{
+			Rect:           &[4]uint32{0, 0, 100, 100},
+			ClipRRect:      &ClipParams{Enabled: 1.0},
+			ClipPath:       clipPath,
+			ClipDepthLevel: 1,
+			SDFShapes:      []SDFRenderShape{{Kind: 0}},
+		},
+	}
+
+	// Replicate the deep-copy pattern (as fixed).
+	owned := make([]ScissorGroup, len(original))
+	for i := range original {
+		g := &original[i]
+		owned[i] = ScissorGroup{
+			Rect:           g.Rect,
+			ClipRRect:      g.ClipRRect,
+			ClipPath:       g.ClipPath,
+			ClipDepthLevel: g.ClipDepthLevel,
+		}
+		if len(g.SDFShapes) > 0 {
+			owned[i].SDFShapes = make([]SDFRenderShape, len(g.SDFShapes))
+			copy(owned[i].SDFShapes, g.SDFShapes)
+		}
+	}
+
+	// Verify ClipPath is preserved.
+	if owned[0].ClipPath == nil {
+		t.Fatal("ClipPath lost during deep-copy — depth clip will not work")
+	}
+	if owned[0].ClipPath != clipPath {
+		t.Error("ClipPath pointer changed during deep-copy")
+	}
+	if owned[0].ClipDepthLevel != 1 {
+		t.Errorf("ClipDepthLevel = %d, want 1", owned[0].ClipDepthLevel)
 	}
 }

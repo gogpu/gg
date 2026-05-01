@@ -28,6 +28,7 @@ type scissorSegment struct {
 	hasRect      bool       // false = full framebuffer
 	clipRRect    ClipParams // RRect clip (valid when hasClipRRect=true)
 	hasClipRRect bool       // false = no RRect clip
+	clipPath     *gg.Path   // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 	sdfCount     int        // len(pendingShapes) at time of change
 	convexCount  int        // len(pendingConvexCommands) at time of change
 	stencilCount int        // len(pendingStencilPaths) at time of change

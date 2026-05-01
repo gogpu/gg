@@ -412,6 +412,29 @@ type RRectClipAware interface {
 	ClearClipRRect()
 }
 
+// PathClipAware is an optional interface for accelerators that support
+// GPU-accelerated arbitrary path clipping via depth buffer. When the Context
+// has an active path-based clip region (dc.Clip() with non-rect/non-rrect
+// path), it passes the device-space clip path to the accelerator.
+//
+// The GPU renders the clip path to the depth buffer using fan tessellation
+// (DepthClipPipeline), then content shaders test against the clip depth.
+// This is GPU-CLIP-003a — the third level of clip support after scissor rect
+// (ClipAware) and SDF rrect (RRectClipAware).
+//
+// Follows the Flutter Impeller pattern: depth buffer for clip discrimination,
+// stencil exclusively for path fill (Tier 2b).
+type PathClipAware interface {
+	// SetClipPath sets an arbitrary clip path for depth-based clipping.
+	// The path is in device-space coordinates. Subsequent GPU draw commands
+	// are clipped to the path region via the depth buffer.
+	SetClipPath(path *Path)
+
+	// ClearClipPath removes the arbitrary clip path, restoring full
+	// rendering for subsequent draw commands.
+	ClearClipPath()
+}
+
 // LCDLayoutAware is an optional interface for accelerators that support
 // LCD subpixel (ClearType) text rendering. When the Context calls
 // SetLCDLayout, it propagates the layout to the accelerator so the

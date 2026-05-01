@@ -689,6 +689,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		grpRes[i].clipBindGroup = clipBG
 
 		// GPU-CLIP-003a: depth clip resources for arbitrary path clipping.
+		// Each call creates per-group owned buffers to avoid cross-group overwrites.
 		if groups[i].ClipPath != nil && s.depthClipPipeline != nil {
 			res, dcErr := s.depthClipPipeline.BuildClipResources(groups[i].ClipPath, w, h)
 			if dcErr == nil && res != nil {
@@ -764,6 +765,9 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 	}
 
+	// GPU-CLIP-003a: release per-group depth clip buffers after frame encoding.
+	defer s.releaseDepthClipResources(grpRes)
+
 	if activeView == nil {
 		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 	}
@@ -782,6 +786,16 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
 	}
 	return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
+}
+
+// releaseDepthClipResources frees per-group owned depth clip buffers.
+func (s *GPURenderSession) releaseDepthClipResources(grpRes []groupResources) {
+	for i := range grpRes {
+		if grpRes[i].depthClipRes != nil {
+			grpRes[i].depthClipRes.Release()
+			grpRes[i].depthClipRes = nil
+		}
+	}
 }
 
 // prepareTextResources builds text GPU resources if there are text batches.
@@ -2421,12 +2435,16 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	// Without this, each flush would wipe previously rendered shapes.
 	colorLoadOp := gputypes.LoadOpClear
 	stencilLoadOp := gputypes.LoadOpClear
-	depthLoadOp := gputypes.LoadOpClear
 	if s.frameRendered {
 		colorLoadOp = gputypes.LoadOpLoad
 		stencilLoadOp = gputypes.LoadOpLoad
-		depthLoadOp = gputypes.LoadOpLoad
 	}
+	// Depth is ALWAYS cleared — never loaded. DepthStoreOp=Discard means
+	// depth content is undefined after each render pass, so LoadOpLoad would
+	// read garbage on subsequent passes. The depth clip pipeline (GPU-CLIP-003a)
+	// writes Z=0.0 inside clip regions fresh each pass, so clearing to 1.0 is
+	// always the correct initial state.
+	depthLoadOp := gputypes.LoadOpClear
 
 	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_surface_pass",
@@ -2903,12 +2921,16 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
 	colorLoadOp := gputypes.LoadOpClear
 	stencilLoadOp := gputypes.LoadOpClear
-	depthLoadOp := gputypes.LoadOpClear
 	if s.frameRendered {
 		colorLoadOp = gputypes.LoadOpLoad
 		stencilLoadOp = gputypes.LoadOpLoad
-		depthLoadOp = gputypes.LoadOpLoad
 	}
+	// Depth is ALWAYS cleared — never loaded. DepthStoreOp=Discard means
+	// depth content is undefined after each render pass, so LoadOpLoad would
+	// read garbage on subsequent passes. The depth clip pipeline (GPU-CLIP-003a)
+	// writes Z=0.0 inside clip regions fresh each pass, so clearing to 1.0 is
+	// always the correct initial state.
+	depthLoadOp := gputypes.LoadOpClear
 
 	rpDesc := &wgpu.RenderPassDescriptor{
 		Label: "session_surface_pass",
@@ -3002,12 +3024,12 @@ func (s *GPURenderSession) encodeToEncoder(
 
 	colorLoadOp := gputypes.LoadOpClear
 	stencilLoadOp := gputypes.LoadOpClear
-	depthLoadOp := gputypes.LoadOpClear
 	if s.frameRendered {
 		colorLoadOp = gputypes.LoadOpLoad
 		stencilLoadOp = gputypes.LoadOpLoad
-		depthLoadOp = gputypes.LoadOpLoad
 	}
+	// Depth always cleared (see encodeSubmitSurfaceGrouped comment).
+	depthLoadOp := gputypes.LoadOpClear
 
 	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		Label: "session_shared_surface_pass",
