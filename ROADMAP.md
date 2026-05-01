@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.43.3
+## Current State: v0.43.7
 
 ✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
 - Canvas API, Text, Images, Clipping, Layers
