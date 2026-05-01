@@ -53,28 +53,25 @@
 
 ## Upcoming
 
-### v0.43.3 — In Progress
-- [x] DrawGPUTextureWithOpacity — alpha blending for GPU texture overlays
-- [x] Scene.Append + Encoding.AppendWithImages — image index fix (TASK-GG-SCENE-005)
-- [x] GPUSceneRenderer: SetPath CTM fix + TagFillRoundRect handler (BUG-001)
-- [x] GPUSceneRenderer: transform stack corruption fix (BUG-002)
-- [x] Blit LoadOp damageRect fix after BeginGPUFrame (BUG-003)
-- [x] Auto-hinter stem collapse at 12px — enforceMinStemWidth (BUG-STEM-001)
-- [x] ADR-019: render pass blit, not DMA copy (research + decision)
-- [x] Examples: resize handling + gogpu v0.30.0 + wgpu v0.26.8
-
-### v0.43.1–v0.43.2 ✅ Released
-- [x] Type-safe GPU handles (ADR-018) — `any` → `unsafe.Pointer` opaque structs in gpucontext
-- [x] Blit-only black screen fix + GPU texture resource leak fix
-- [x] GPU texture overlay stretched fix (BUG-GG-GPU-TEXTURE-OVERLAY-SIZE) — separate vertex buffers
-- [x] Enterprise GPU texture tests (14 tests)
-- [x] `blit_only` example + documentation
-
-### v0.44.0 — Planned
-- [ ] GPU-CLIP-003: Stencil-based path clipping for text + arbitrary shapes (#205)
+### v0.44.0 — In Progress
+- [x] GPU-CLIP-003a: Depth-based arbitrary path clipping (Impeller/Graphite pattern)
+- [x] GPU-CLIP-003b: Vello coarse.wgsl clip tag dispatch
+- [x] Dual-approach clip strategy research (3 agents, Skia/Flutter/Vello)
+- [x] Depth clip pipeline variants for all 6 renderers (SDF, convex, stencil, image, text, glyph)
+- [x] 8 enterprise depth clip tests
+- [ ] GPU-CLIP-003c: Stencil bit partition for dc.Clip() immediate-mode (#205)
+- [ ] GPU-CLIP-003d: Vello GPU clip_reduce + clip_leaf stages
 - [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
 - [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
-- [ ] Vello compute clip GPU shaders (clip_reduce.wgsl + clip_leaf.wgsl)
+
+### v0.43.3–v0.43.7 ✅ Released
+- [x] Scene fixes (CTM, transform stack, LoadOp, image index, AppendWithTranslation)
+- [x] DrawGPUTextureWithOpacity, ADR-018 type-safe handles, ADR-019 render pass blit
+- [x] Auto-hinter stem collapse 12px, Retina text half-size fix (#276)
+- [x] deps cascade: wgpu v0.26.12, gogpu v0.31.0, naga v0.17.10
+
+### v0.43.1–v0.43.2 ✅ Released
+- [x] Blit-only fix, type-safe GPU handles (ADR-018), overlay fix, 14 enterprise tests
 
 ### Pre-1.0.0 — Public API Freeze Blockers
 - [ ] **API-001: GPU handle API shape** — generics `Handle[Tag]` vs plain structs (ADR-018 follow-up). Must decide before 1.0.0 — changing after = breaking. See `docs/dev/kanban/0-backlog/API-001-gpu-handle-generics-vs-struct.md`

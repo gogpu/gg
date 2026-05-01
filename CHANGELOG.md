@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-05-01
+
+### Added
+
+- **GPU-CLIP-003a: Depth-based arbitrary path clipping** — clip paths rendered to
+  depth buffer (Z=0.0, ColorWriteMask=None) before content; all GPU tiers test
+  DepthCompare=GreaterEqual to reject fragments outside clip region. Follows
+  Flutter Impeller (PR #50856) / Skia Graphite pattern: depth for clip, stencil
+  exclusively for Tier 2b path fill (zero conflict). Enables arbitrary path
+  clipping for ui widget tree via `ScissorGroup.ClipPath`.
+
+  New files: `depth_clip.go`, `shaders/depth_clip.wgsl`
+  Pipeline variants: SDF, convex, image, MSDF text, glyph mask, stencil fill/cover
+  (all 6 renderers). Lazy creation — no overhead when ClipPath unused.
+
+- **GPU-CLIP-003b: Vello coarse.wgsl clip tag dispatch** — `DRAWTAG_BEGIN_CLIP`
+  and `DRAWTAG_END_CLIP` handling in GPU coarse shader. BeginClip: tile coverage
+  check + `clip_zero_depth` optimization (suppress draws in empty clip tiles).
+  EndClip: clip path coverage + blend/alpha emission. Matches CPU `coarse.go`.
+  Prerequisite for full GPU compute clip pipeline (GPU-CLIP-003d).
+
+### Architecture
+
+- **Dual-approach clip strategy** (GPU-CLIP-003-DUAL-APPROACH-RESEARCH.md):
+  depth-based for retained-mode (scene/ui), stencil bit partition for immediate-mode
+  (dc.Clip, future GPU-CLIP-003c), Vello blend stack for compute (Tier 5, already working).
+  Research: 3 parallel agents analyzed Skia Ganesh/Graphite, Flutter Impeller, Vello source.
+  All three approaches coexist without conflicts (different buffer planes).
+
 ## [0.43.7] - 2026-05-01
 
 ### Changed
