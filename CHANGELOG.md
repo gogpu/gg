@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-05-02
+
+### Added
+
+- **dc.Clip() GPU bridge** — `dc.Clip()` with arbitrary paths (circles, beziers,
+  polygons) now routes to GPU depth clip instead of falling back to CPU. At-draw-time
+  pattern (Skia Graphite/Impeller): path stored at Clip() time, dispatched to GPU at
+  Fill/Stroke time. Two-level clipping: scissor rect + depth buffer.
+  New `PathClipAware` interface. CPU fallback preserved.
+
+- **`clip_path` example** — visual test for GPU-CLIP-003a: circle clip, star clip,
+  no-clip reference. Demonstrates arbitrary path clipping on GPU.
+
+### Fixed
+
+- **Stencil-then-cover-to-depth for non-convex clips** — fan tessellation direct
+  depth write was wrong for non-convex paths (star). Now uses two-phase algorithm:
+  Phase 1 stencil fill (winding number), Phase 2 cover quad (depth write where
+  stencil ≠ 0, stencil reset to 0). Skia Ganesh pattern.
+
+- **Shared depth clip buffers overwritten between groups** — `BuildClipResources()`
+  uploaded to pipeline-level shared buffers. Multiple clip groups overwrote each
+  other (circle → star data). Fix: per-group owned buffers with Release() cleanup.
+
+- **ClipPath dropped in Flush() deep-copy** — ScissorGroup deep-copy missing ClipPath
+  and ClipDepthLevel fields → depth clip never activated.
+
+- **DepthLoadOp=Load reads undefined after Discard** — depth buffer garbage on frame
+  2+ caused depth test failures. Fix: always clear depth (never load discarded data).
+
+### Changed
+
+- Pixel-level CPU clip tests + GPU bridge tests (29 clip tests total)
+
 ## [0.44.0] - 2026-05-01
 
 ### Added
@@ -17,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Flutter Impeller (PR #50856) / Skia Graphite pattern: depth for clip, stencil
   exclusively for Tier 2b path fill (zero conflict). Enables arbitrary path
   clipping for ui widget tree via `ScissorGroup.ClipPath`.
+
+- **dc.Clip() GPU bridge** — `dc.Clip()` with arbitrary paths (circles, beziers,
+  polygons) now routes to GPU depth clip instead of falling back to CPU. At-draw-time
+  pattern (Skia Graphite/Impeller): path stored at Clip() time, dispatched to GPU at
+  Fill/Stroke time via `SetClipPath()`. Two-level clipping: scissor rect (bounding box)
+  + depth buffer (precise path). CPU fallback preserved when GPU unavailable.
+  New `PathClipAware` interface. 8 bridge tests.
 
   New files: `depth_clip.go`, `shaders/depth_clip.wgsl`
   Pipeline variants: SDF, convex, image, MSDF text, glyph mask, stencil fill/cover

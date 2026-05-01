@@ -45,6 +45,7 @@ type GPURenderContext struct {
 	// Per-context clip state.
 	clipRect        *[4]uint32
 	clipRRect       *ClipParams
+	clipPath        *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 	scissorSegments []scissorSegment
 
 	// Per-context frame tracking (fixes LoadOp corruption).
@@ -111,9 +112,26 @@ func (rc *GPURenderContext) ClearClipRRect() {
 	rc.recordScissorSegment(rc.clipRect)
 }
 
+// SetClipPath sets an arbitrary clip path for depth-based clipping (GPU-CLIP-003a).
+// The path must be in device-space coordinates. When set, subsequent draws are
+// clipped to the path region via the depth buffer. The path is fan-tessellated
+// and rendered to the depth buffer before content; content fragments test against
+// the clip depth so only pixels within the clipped region pass.
+func (rc *GPURenderContext) SetClipPath(path *gg.Path) {
+	rc.clipPath = path
+	rc.recordScissorSegment(rc.clipRect)
+}
+
+// ClearClipPath removes the arbitrary clip path, restoring full rendering.
+func (rc *GPURenderContext) ClearClipPath() {
+	rc.clipPath = nil
+	rc.recordScissorSegment(rc.clipRect)
+}
+
 // BeginFrame resets per-frame state so the first render pass clears the surface.
 func (rc *GPURenderContext) BeginFrame() {
 	rc.clipRect = nil
+	rc.clipPath = nil
 	rc.frameRendered = false
 	rc.lastView = nil
 }
@@ -571,7 +589,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	ownedGroups := make([]ScissorGroup, len(groups))
 	for i := range groups {
 		g := &groups[i]
-		ownedGroups[i] = ScissorGroup{Rect: g.Rect, ClipRRect: g.ClipRRect}
+		ownedGroups[i] = ScissorGroup{Rect: g.Rect, ClipRRect: g.ClipRRect, ClipPath: g.ClipPath, ClipDepthLevel: g.ClipDepthLevel}
 		if len(g.SDFShapes) > 0 {
 			ownedGroups[i].SDFShapes = make([]SDFRenderShape, len(g.SDFShapes))
 			copy(ownedGroups[i].SDFShapes, g.SDFShapes)
@@ -785,6 +803,7 @@ func (rc *GPURenderContext) Close() {
 	rc.hasPendingTarget = false
 	rc.clipRect = nil
 	rc.clipRRect = nil
+	rc.clipPath = nil
 	rc.scissorSegments = nil
 	rc.sceneStats = gg.SceneStats{}
 }
@@ -808,6 +827,7 @@ func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
 		seg.clipRRect = *rc.clipRRect
 		seg.hasClipRRect = true
 	}
+	seg.clipPath = rc.clipPath
 	rc.scissorSegments = append(rc.scissorSegments, seg)
 }
 
@@ -883,6 +903,7 @@ func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
 		groups = append(groups, ScissorGroup{
 			Rect:               groupRect,
 			ClipRRect:          groupClip,
+			ClipPath:           seg.clipPath,
 			SDFShapes:          rc.pendingShapes[seg.sdfCount:endSDF],
 			ConvexCommands:     rc.pendingConvexCommands[seg.convexCount:endConvex],
 			StencilPaths:       rc.pendingStencilPaths[seg.stencilCount:endStencil],

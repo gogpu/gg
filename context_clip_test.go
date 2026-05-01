@@ -475,8 +475,9 @@ func TestClipDrawStringAnchored(t *testing.T) {
 
 // TestClipPathMaskText verifies that DrawString works with path-based
 // clip masks (circle clip), not just rectangular clips.
+// GPU-CLIP-003a provides depth-buffer clipping for this case.
 func TestClipPathMaskText(t *testing.T) {
-	t.Skip("requires GPU stencil clip (GPU-CLIP-002)")
+	t.Skip("requires GPU hardware to verify depth clip (GPU-CLIP-003a)")
 }
 
 // TestClipIsRectOnly verifies the IsRectOnly helper on ClipStack.
@@ -500,5 +501,165 @@ func TestClipIsRectOnly(t *testing.T) {
 	dc.Clip()
 	if dc.clipStack.IsRectOnly() {
 		t.Error("Expected IsRectOnly()=false after adding path-based clip")
+	}
+}
+
+// TestClipPathStoresGPUClipPath verifies that Clip() stores the device-space
+// path for GPU depth clipping (GPU-CLIP-003a bridge).
+func TestClipPathStoresGPUClipPath(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	// Before clipping, gpuClipPath should be nil.
+	if dc.gpuClipPath != nil {
+		t.Error("gpuClipPath should be nil before any clip")
+	}
+
+	// Apply a circle clip (arbitrary path, not rect/rrect).
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+
+	// gpuClipPath should now be set.
+	if dc.gpuClipPath == nil {
+		t.Fatal("gpuClipPath should be set after path clip")
+	}
+
+	// Verify the stored path has content (non-empty).
+	if dc.gpuClipPath.NumVerbs() == 0 {
+		t.Error("gpuClipPath should have verbs")
+	}
+}
+
+// TestClipPreserveStoresGPUClipPath verifies that ClipPreserve() stores
+// the GPU clip path while keeping the current path.
+func TestClipPreserveStoresGPUClipPath(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	dc.DrawCircle(100, 100, 50)
+	dc.ClipPreserve()
+
+	// gpuClipPath should be set.
+	if dc.gpuClipPath == nil {
+		t.Fatal("gpuClipPath should be set after ClipPreserve")
+	}
+
+	// Current path should still have content (preserved).
+	if dc.path.NumVerbs() == 0 {
+		t.Error("path should be preserved after ClipPreserve")
+	}
+}
+
+// TestClipPathClearedOnResetClip verifies that ResetClip() clears the GPU clip path.
+func TestClipPathClearedOnResetClip(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+	if dc.gpuClipPath == nil {
+		t.Fatal("gpuClipPath should be set")
+	}
+
+	dc.ResetClip()
+	if dc.gpuClipPath != nil {
+		t.Error("gpuClipPath should be nil after ResetClip")
+	}
+}
+
+// TestClipPathClearedOnPop verifies that Pop() clears the GPU clip path when
+// the path clip entry is popped from the clip stack.
+func TestClipPathClearedOnPop(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	dc.Push()
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+	if dc.gpuClipPath == nil {
+		t.Fatal("gpuClipPath should be set after Clip in Push scope")
+	}
+
+	dc.Pop()
+	if dc.gpuClipPath != nil {
+		t.Error("gpuClipPath should be nil after Pop removes the path clip")
+	}
+}
+
+// TestClipPathNotSetForRectClip verifies that rectangular clips don't set
+// the GPU clip path (they use scissor rect instead).
+func TestClipPathNotSetForRectClip(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	dc.ClipRect(10, 10, 100, 100)
+	if dc.gpuClipPath != nil {
+		t.Error("gpuClipPath should be nil for rectangular clip")
+	}
+}
+
+// TestClipPathNotSetForRRectClip verifies that rounded rect clips don't set
+// the GPU clip path (they use scissor + SDF instead).
+func TestClipPathNotSetForRRectClip(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	dc.ClipRoundRect(10, 10, 100, 100, 10)
+	if dc.gpuClipPath != nil {
+		t.Error("gpuClipPath should be nil for rounded rect clip")
+	}
+}
+
+// TestSetGPUClipPathNoGPU verifies that setGPUClipPath returns a no-op when
+// no GPU context is available (nogpu build tag scenario).
+func TestSetGPUClipPathNoGPU(t *testing.T) {
+	dc := NewContext(200, 200)
+
+	// Set up a path clip.
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+
+	// Without GPU registration, setGPUClipPath should return no-op.
+	cleanup := dc.setGPUClipPath()
+	cleanup() // Should not panic.
+}
+
+// TestClipPathDeviceSpace verifies that the stored GPU clip path is in
+// device-space coordinates (accounting for DeviceScale).
+func TestClipPathDeviceSpace(t *testing.T) {
+	dc := NewContext(100, 100)
+	dc.SetDeviceScale(2.0)
+
+	// Draw a circle at user-space (50, 50) radius 25.
+	dc.DrawCircle(50, 50, 25)
+	dc.Clip()
+
+	if dc.gpuClipPath == nil {
+		t.Fatal("gpuClipPath should be set")
+	}
+
+	// The device-space path should be scaled by 2x.
+	// Compute bounding box from path coordinates.
+	coords := dc.gpuClipPath.Coords()
+	if len(coords) < 2 {
+		t.Fatal("gpuClipPath has no coordinates")
+	}
+	minX, maxX := coords[0], coords[0]
+	minY, maxY := coords[1], coords[1]
+	for i := 0; i < len(coords)-1; i += 2 {
+		x, y := coords[i], coords[i+1]
+		if x < minX {
+			minX = x
+		}
+		if x > maxX {
+			maxX = x
+		}
+		if y < minY {
+			minY = y
+		}
+		if y > maxY {
+			maxY = y
+		}
+	}
+	w := maxX - minX
+	h := maxY - minY
+	// User-space circle at (50,50) r=25 → device-space at (100,100) r=50.
+	// Cubic approximation bounding box ≈ center ± radius → ~100x100.
+	if w < 90 || h < 90 {
+		t.Errorf("device-space path too small: w=%.1f h=%.1f (expected ~100x100)", w, h)
 	}
 }

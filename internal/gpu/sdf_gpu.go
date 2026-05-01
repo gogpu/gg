@@ -108,6 +108,22 @@ func (a *SDFAccelerator) ClearClipRRect() {
 	a.defaultCtx.ClearClipRRect()
 }
 
+// SetClipPath sets an arbitrary clip path for depth-based clipping (GPU-CLIP-003a).
+func (a *SDFAccelerator) SetClipPath(path *gg.Path) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ensureDefaultCtx()
+	a.defaultCtx.SetClipPath(path)
+}
+
+// ClearClipPath removes the arbitrary clip path from the default render context.
+func (a *SDFAccelerator) ClearClipPath() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.ensureDefaultCtx()
+	a.defaultCtx.ClearClipPath()
+}
+
 // CanAccelerate reports whether this accelerator supports the given operation.
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0

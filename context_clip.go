@@ -22,6 +22,10 @@ func (c *Context) Clip() {
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
 
+	// Store the device-space path for GPU depth clipping (GPU-CLIP-003a).
+	// The GPU DepthClipPipeline fan-tessellates this path at draw time.
+	c.gpuClipPath = devicePath.Clone()
+
 	// Clear the path
 	c.path.Clear()
 }
@@ -40,6 +44,9 @@ func (c *Context) ClipPreserve() {
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
+
+	// Store the device-space path for GPU depth clipping (GPU-CLIP-003a).
+	c.gpuClipPath = devicePath.Clone()
 	// Path is preserved
 }
 
@@ -120,6 +127,7 @@ func (c *Context) ResetClip() {
 	// Reset to physical pixel bounds (clip stack operates in device-space).
 	bounds := clip.NewRect(0, 0, float64(c.pixmap.Width()), float64(c.pixmap.Height()))
 	c.clipStack.Reset(bounds)
+	c.gpuClipPath = nil
 }
 
 // initClipStack initializes the clip stack with canvas bounds in device-space.
