@@ -36,6 +36,20 @@ const depthClipUniformSize = 16
 //   - Where clip drawn:     0.0 >= 0.0 → PASS
 //   - Where clip NOT drawn: 0.0 >= 1.0 → FAIL
 //
+// Nested clips:
+//
+//	All clip levels write Z=0.0. The intersection of nested clips happens
+//	GEOMETRICALLY — clip 2's path only covers pixels where clip 1 already
+//	wrote 0.0. Content at any depth tests GreaterEqual(0.0, buffer): passes
+//	where ANY clip wrote 0.0, fails where no clip touched. This is the
+//	simplest correct nested model.
+//
+//	Clip restore (pop) limitation: within a single ScissorGroup, depth writes
+//	cannot be "undone" without redrawing. For v1, each ScissorGroup has at
+//	most ONE ClipPath. Nested clips from the scene graph create nested groups
+//	or use the Context CPU clip stack. This matches other renderers (SDF,
+//	convex, text) which each have one depth clip state per group.
+//
 // Architecture:
 //
 //	ScissorGroup.ClipPath → FanTessellator → depth-only draw (before content)

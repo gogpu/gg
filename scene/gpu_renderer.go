@@ -141,6 +141,9 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			dc.Pop()
 
 		case TagBeginClip:
+			// CPU clip via DrawPath + Clip. GPU depth clip (GPU-CLIP-003a) is available
+			// via ScissorGroup.ClipPath for callers that build groups directly (e.g., ui).
+			// GPUSceneRenderer uses the Context clip stack which applies CPU clip masking.
 			dc.DrawPath(path)
 			dc.Clip()
 			dc.ClearPath()

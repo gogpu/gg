@@ -1094,6 +1094,9 @@ func (s *GPURenderSession) ensureDepthClipPipelineVariants() error {
 	if err := s.convexRenderer.ensureDepthClipPipeline(); err != nil {
 		return fmt.Errorf("convex depth clip pipeline: %w", err)
 	}
+	if err := s.stencilRenderer.ensureDepthClipPipelines(); err != nil {
+		return fmt.Errorf("stencil depth clip pipelines: %w", err)
+	}
 	if err := s.imagePipeline.ensureDepthClipPipeline(); err != nil {
 		return fmt.Errorf("image depth clip pipeline: %w", err)
 	}
@@ -2547,7 +2550,7 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 
 	// Tier 2b: Stencil-then-cover paths.
 	for i, bufs := range gr.stencilRes {
-		s.stencilRenderer.RecordPath(rp, bufs, gr.stencilPaths[i].FillRule, clipBG)
+		s.stencilRenderer.RecordPath(rp, bufs, gr.stencilPaths[i].FillRule, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 3: Textured quad images (CPU-uploaded).
