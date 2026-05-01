@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.7] - 2026-05-01
+
+### Changed
+
+- **deps:** wgpu v0.26.12 (test coverage boost, Metal entry point fix, naga v0.17.10), gpucontext v0.16.0 (WindowChrome.SetFullscreen/IsFullscreen), gogpu v0.31.0 (runtime fullscreen) in examples
+
 ## [0.43.6] - 2026-04-30
 
 ### Fixed
