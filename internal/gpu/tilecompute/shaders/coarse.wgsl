@@ -80,6 +80,8 @@ const CMD_BEGIN_CLIP: u32 = 10u;
 const CMD_END_CLIP: u32 = 11u;
 
 const DRAWTAG_COLOR: u32 = 0x44u;
+const DRAWTAG_BEGIN_CLIP: u32 = 0x9u;
+const DRAWTAG_END_CLIP: u32 = 0x21u;
 
 const TILE_WIDTH: u32 = 16u;
 const TILE_HEIGHT: u32 = 16u;
@@ -128,15 +130,119 @@ fn main(
     // Blend depth tracking for blend_spill allocation.
     var max_blend_depth = 0u;
 
+    // Clip state tracking (per-tile). Matches CPU coarse.go tileClipState.
+    var clip_depth = 0u;
+    var clip_zero_depth = 0u;
+    var render_blend_depth = 0u;
+
     // Iterate all draw objects in Z-order (path 0 first, path 1 second, ...).
     for (var draw_ix = 0u; draw_ix < config.n_drawobj; draw_ix = draw_ix + 1u) {
         let tag = scene[config.drawtag_base + draw_ix];
-        if tag != DRAWTAG_COLOR {
+        let dm = draw_monoids[draw_ix];
+        let path_ix = dm.path_ix;
+
+        // --- BeginClip: push clip level, suppress draws outside clip ---
+        if tag == DRAWTAG_BEGIN_CLIP {
+            if clip_zero_depth > 0u {
+                clip_depth = clip_depth + 1u;
+                continue;
+            }
+            if path_ix >= config.n_path {
+                clip_depth = clip_depth + 1u;
+                continue;
+            }
+            let path = paths[path_ix];
+            if tile_x < path.bbox_x0 || tile_x >= path.bbox_x1 ||
+               tile_y < path.bbox_y0 || tile_y >= path.bbox_y1 {
+                clip_zero_depth = clip_depth + 1u;
+                clip_depth = clip_depth + 1u;
+                continue;
+            }
+            let bbox_w = path.bbox_x1 - path.bbox_x0;
+            let local_x = tile_x - path.bbox_x0;
+            let local_y = tile_y - path.bbox_y0;
+            let local_ix = local_y * bbox_w + local_x;
+            let tile_ix_c = path.tiles + local_ix;
+            let tile_c = tiles[tile_ix_c];
+            if tile_c.segment_count_or_ix == 0u && tile_c.backdrop == 0 {
+                clip_zero_depth = clip_depth + 1u;
+                clip_depth = clip_depth + 1u;
+                continue;
+            }
+            // Tile has clip coverage — emit CmdBeginClip.
+            let base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+            ptcl[base] = CMD_BEGIN_CLIP;
+            ptcl_offset = ptcl_offset + 1u;
+            render_blend_depth = render_blend_depth + 1u;
+            if render_blend_depth > max_blend_depth {
+                max_blend_depth = render_blend_depth;
+            }
+            clip_depth = clip_depth + 1u;
             continue;
         }
 
-        let dm = draw_monoids[draw_ix];
-        let path_ix = dm.path_ix;
+        // --- EndClip: pop clip level, emit coverage + EndClip ---
+        if tag == DRAWTAG_END_CLIP {
+            clip_depth = clip_depth - 1u;
+            if clip_zero_depth > 0u {
+                if clip_depth < clip_zero_depth {
+                    clip_zero_depth = 0u;
+                }
+                continue;
+            }
+            if path_ix >= config.n_path {
+                continue;
+            }
+            let path = paths[path_ix];
+            // Emit fill for clip path coverage (matches CPU emitEndClipToTiles).
+            if tile_x >= path.bbox_x0 && tile_x < path.bbox_x1 &&
+               tile_y >= path.bbox_y0 && tile_y < path.bbox_y1 {
+                let bbox_w = path.bbox_x1 - path.bbox_x0;
+                let local_x = tile_x - path.bbox_x0;
+                let local_y = tile_y - path.bbox_y0;
+                let local_ix = local_y * bbox_w + local_x;
+                let tile_ix_e = path.tiles + local_ix;
+                let tile_e = tiles[tile_ix_e];
+                let n_segs_e = tile_e.segment_count_or_ix;
+                let even_odd_e = (path_styles[path_ix] & 0x02u) != 0u;
+                if n_segs_e != 0u {
+                    var seg_ix_e = atomicAdd(&bump.segments, n_segs_e);
+                    tiles[tile_ix_e].segment_count_or_ix = ~seg_ix_e;
+                    let fill_base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+                    let eo_flag = select(0u, 1u, even_odd_e);
+                    ptcl[fill_base] = CMD_FILL;
+                    ptcl[fill_base + 1u] = (n_segs_e << 1u) | eo_flag;
+                    ptcl[fill_base + 2u] = seg_ix_e;
+                    ptcl[fill_base + 3u] = bitcast<u32>(tile_e.backdrop);
+                    ptcl_offset = ptcl_offset + 4u;
+                } else if tile_e.backdrop != 0 {
+                    let sol_base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+                    ptcl[sol_base] = CMD_SOLID;
+                    ptcl_offset = ptcl_offset + 1u;
+                }
+            }
+            // Read blend_mode and alpha from draw data.
+            let scene_off = config.drawdata_base + dm.scene_offset;
+            let blend_val = scene[scene_off];
+            let alpha_bits = scene[scene_off + 1u];
+            let ec_base = tile_idx * PTCL_MAX_PER_TILE + ptcl_offset;
+            ptcl[ec_base] = CMD_END_CLIP;
+            ptcl[ec_base + 1u] = blend_val;
+            ptcl[ec_base + 2u] = alpha_bits;
+            ptcl_offset = ptcl_offset + 3u;
+            render_blend_depth = render_blend_depth - 1u;
+            continue;
+        }
+
+        // --- Color draw: emit fill + color (clip-aware) ---
+        if tag != DRAWTAG_COLOR {
+            continue;
+        }
+        // Suppress draws inside empty clip region.
+        if clip_zero_depth > 0u {
+            continue;
+        }
+
         if path_ix >= config.n_path {
             continue;
         }
