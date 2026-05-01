@@ -7,6 +7,11 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+const (
+	shaderEntryVS = "vs_main"
+	shaderEntryFS = "fs_main"
+)
+
 // stencilPassthroughDepthStencil returns a DepthStencilState that passes through
 // all stencil operations (no write, no test). Used by pipelines that render
 // alongside the stencil-then-cover renderer but don't interact with stencil.

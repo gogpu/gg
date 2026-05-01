@@ -261,12 +261,12 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    glyphMaskVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -303,12 +303,12 @@ func (p *GlyphMaskPipeline) ensureDepthClipPipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    glyphMaskVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -456,12 +456,12 @@ func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
 		Layout: p.lcdPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.lcdShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    glyphMaskVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.lcdShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,

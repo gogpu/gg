@@ -148,12 +148,12 @@ func (p *DepthClipPipeline) ensurePipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,

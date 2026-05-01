@@ -285,14 +285,14 @@ type RenderPipelineDescriptor struct {
 	VertexShader *ShaderModule
 
 	// VertexEntryPoint is the vertex shader entry point function name.
-	// Defaults to "vs_main" if empty.
+	// Defaults to shaderEntryVS if empty.
 	VertexEntryPoint string
 
 	// FragmentShader is the fragment shader module.
 	FragmentShader *ShaderModule
 
 	// FragmentEntryPoint is the fragment shader entry point function name.
-	// Defaults to "fs_main" if empty.
+	// Defaults to shaderEntryFS if empty.
 	FragmentEntryPoint string
 
 	// VertexBufferLayouts describes the vertex buffer layouts.
@@ -628,12 +628,12 @@ func createRenderPipeline(device *wgpu.Device, desc *RenderPipelineDescriptor) (
 	// Validate entry points and set defaults
 	vertexEntry := desc.VertexEntryPoint
 	if vertexEntry == "" {
-		vertexEntry = "vs_main"
+		vertexEntry = shaderEntryVS
 	}
 
 	fragmentEntry := desc.FragmentEntryPoint
 	if fragmentEntry == "" {
-		fragmentEntry = "fs_main"
+		fragmentEntry = shaderEntryFS
 	}
 
 	// Default sample count

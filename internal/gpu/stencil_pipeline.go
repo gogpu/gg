@@ -141,12 +141,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -191,12 +191,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -242,12 +242,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.coverPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.coverShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.coverShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -334,12 +334,12 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{Format: gputypes.TextureFormatBGRA8Unorm, WriteMask: gputypes.ColorWriteMaskNone},
 			},
@@ -373,12 +373,12 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{Format: gputypes.TextureFormatBGRA8Unorm, WriteMask: gputypes.ColorWriteMaskNone},
 			},
@@ -413,12 +413,12 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 		Layout: sr.coverPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.coverShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.coverShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,

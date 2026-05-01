@@ -334,12 +334,12 @@ func (p *SDFRenderPipeline) createPipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    sdfRenderVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -392,12 +392,12 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { // Ensure base r
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    sdfRenderVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -437,12 +437,12 @@ func (p *SDFRenderPipeline) ensureDepthClipPipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    sdfRenderVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,

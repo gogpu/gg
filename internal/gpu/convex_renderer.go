@@ -150,12 +150,12 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { // Ensure base res
 		Layout: cr.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     cr.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    convexVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     cr.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -199,12 +199,12 @@ func (cr *ConvexRenderer) ensureDepthClipPipeline() error {
 		Layout: cr.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     cr.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    convexVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     cr.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -297,12 +297,12 @@ func (cr *ConvexRenderer) createPipeline() error {
 		Layout: cr.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     cr.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    convexVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     cr.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,

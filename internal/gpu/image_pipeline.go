@@ -145,12 +145,12 @@ func (p *TexturedQuadPipeline) ensurePipelineWithStencil() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    imageVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -185,12 +185,12 @@ func (p *TexturedQuadPipeline) ensureDepthClipPipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    imageVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -241,12 +241,12 @@ func (p *TexturedQuadPipeline) ensureBlitPipeline() error {
 		Layout: p.blitLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    imageVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
