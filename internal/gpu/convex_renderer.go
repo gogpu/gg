@@ -76,6 +76,10 @@ type ConvexRenderer struct {
 	// The stencil test is Always/Keep (convex draws don't interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Depth-clipped pipeline variant (GPU-CLIP-003a). Same as pipelineWithStencil
+	// but with DepthCompare=GreaterEqual to test against the depth clip buffer.
+	pipelineWithDepthClip *wgpu.RenderPipeline
+
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
 	clipBindLayout *wgpu.BindGroupLayout
@@ -178,11 +182,61 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { // Ensure base res
 //
 // The resources parameter holds pre-built vertex buffer, uniform buffer, and
 // bind group for the current frame. This is a no-op if resources is nil.
-func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *convexFrameResources, clipBG *wgpu.BindGroup) {
+// ensureDepthClipPipeline creates the depth-clipped pipeline variant if needed.
+func (cr *ConvexRenderer) ensureDepthClipPipeline() error {
+	if cr.pipelineWithDepthClip != nil {
+		return nil
+	}
+	if cr.shader == nil || cr.pipeLayout == nil {
+		if err := cr.ensurePipelineWithStencil(); err != nil {
+			return err
+		}
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := cr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "convex_pipeline_depth_clip",
+		Layout: cr.pipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     cr.shader,
+			EntryPoint: "vs_main",
+			Buffers:    convexVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     cr.shader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: depthClipDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create convex pipeline with depth clip: %w", err)
+	}
+	cr.pipelineWithDepthClip = pipeline
+	return nil
+}
+
+// RecordDraws records convex polygon draws into an existing render pass.
+// When depthClipped is true (GPU-CLIP-003a), the depth-clipped pipeline
+// variant is used to test fragments against the depth clip buffer.
+func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *convexFrameResources, clipBG *wgpu.BindGroup, depthClipped ...bool) {
 	if resources == nil || resources.vertCount == 0 {
 		return
 	}
-	rp.SetPipeline(cr.pipelineWithStencil)
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && cr.pipelineWithDepthClip != nil
+	if useDepthClip {
+		rp.SetPipeline(cr.pipelineWithDepthClip)
+	} else {
+		rp.SetPipeline(cr.pipelineWithStencil)
+	}
 	rp.SetBindGroup(0, resources.bindGroup, nil)
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
@@ -272,6 +326,10 @@ func (cr *ConvexRenderer) createPipeline() error {
 func (cr *ConvexRenderer) destroyPipeline() {
 	if cr.device == nil {
 		return
+	}
+	if cr.pipelineWithDepthClip != nil {
+		cr.pipelineWithDepthClip.Release()
+		cr.pipelineWithDepthClip = nil
 	}
 	if cr.pipelineWithStencil != nil {
 		cr.pipelineWithStencil.Release()

@@ -27,6 +27,18 @@ type ScissorGroup struct {
 	// nil means no RRect clip (full rendering within scissor rect).
 	ClipRRect *ClipParams
 
+	// ClipPath is an arbitrary path for depth-based clipping (GPU-CLIP-003a).
+	// When set, the path is fan-tessellated and rendered to the depth buffer
+	// before any content draws. Content pipelines then test against the clip
+	// depth so fragments only pass within the clip region.
+	// nil means no depth clip (default). Independent of ClipRRect.
+	ClipPath *gg.Path
+
+	// ClipDepthLevel is the 1-based nesting level for depth clipping.
+	// Level 0 means no depth clip. Level 1..255 maps to depth values
+	// via clipDepthValue(). Nested clips use increasing levels.
+	ClipDepthLevel uint32
+
 	// Per-tier draw command subsets for this scissor state.
 	SDFShapes          []SDFRenderShape
 	ConvexCommands     []ConvexDrawCommand
@@ -167,6 +179,10 @@ type GPURenderSession struct {
 	gpuTexBaseVertBufCap uint64
 	gpuTexUniformBufs    []*wgpu.Buffer
 	gpuTexBindGroups     []*wgpu.BindGroup
+
+	// Depth clip pipeline (GPU-CLIP-003a): fan-tessellated clip path rendered
+	// to depth buffer before content draws. Lazily created on first use.
+	depthClipPipeline *DepthClipPipeline
 
 	// Stencil buffers are per-path, so we keep a pool of reusable buffer sets.
 	stencilBufPool []*stencilCoverBuffers
@@ -496,6 +512,8 @@ func (s *GPURenderSession) RenderFrame(
 type groupResources struct {
 	scissorRect   *[4]uint32
 	clipBindGroup *wgpu.BindGroup // @group(1) bind group for RRect clip (or no-clip)
+	depthClipRes  *DepthClipResources
+	hasDepthClip  bool
 	sdfRes        *sdfFrameResources
 	sdfShapes     []SDFRenderShape
 	convexRes     *convexFrameResources
@@ -670,6 +688,15 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		}
 		grpRes[i].clipBindGroup = clipBG
 
+		// GPU-CLIP-003a: depth clip resources for arbitrary path clipping.
+		if groups[i].ClipPath != nil && s.depthClipPipeline != nil {
+			res, dcErr := s.depthClipPipeline.BuildClipResources(groups[i].ClipPath, w, h)
+			if dcErr == nil && res != nil {
+				grpRes[i].depthClipRes = res
+				grpRes[i].hasDepthClip = true
+			}
+		}
+
 		// SDF: shared buffer, per-group firstVertex + vertCount.
 		if o.sdfCount > 0 && combinedSdfRes != nil {
 			grpRes[i].sdfRes = &sdfFrameResources{
@@ -715,6 +742,15 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		if o.glyphCount > 0 && combinedGlyphRes != nil {
 			grpRes[i].glyphMaskRes = s.sliceGlyphMaskResources(
 				combinedGlyphRes, allGlyph, o.glyphStart, o.glyphCount)
+		}
+	}
+
+	// GPU-CLIP-003a: ensure depth-clipped pipeline variants exist if any group
+	// uses depth clipping. Created lazily on first use to avoid unnecessary
+	// pipeline compilation when no depth clip is active.
+	if s.hasAnyDepthClip(grpRes) {
+		if err := s.ensureDepthClipPipelineVariants(); err != nil {
+			slogger().Warn("depth clip pipeline variant creation failed", "err", err)
 		}
 	}
 
@@ -933,6 +969,10 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		s.glyphMaskPipeline.Destroy()
 		s.glyphMaskPipeline = nil
 	}
+	if s.depthClipPipeline != nil {
+		s.depthClipPipeline.Destroy()
+		s.depthClipPipeline = nil
+	}
 	for _, b := range s.stencilBufPool {
 		b.destroy()
 	}
@@ -1022,6 +1062,51 @@ func (s *GPURenderSession) ensurePipelines() error {
 		s.imageCache = NewImageCache(s.device, s.queue)
 	}
 
+	// Depth clip pipeline (GPU-CLIP-003a) — lazily created alongside others.
+	if s.depthClipPipeline == nil {
+		s.depthClipPipeline = NewDepthClipPipeline(s.device, s.queue)
+	}
+	if err := s.depthClipPipeline.ensurePipeline(); err != nil {
+		return fmt.Errorf("depth clip pipeline: %w", err)
+	}
+
+	return nil
+}
+
+// hasAnyDepthClip returns true if any group in the slice has depth clipping active.
+func (s *GPURenderSession) hasAnyDepthClip(grpRes []groupResources) bool {
+	for i := range grpRes {
+		if grpRes[i].hasDepthClip {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureDepthClipPipelineVariants creates the depth-clipped pipeline variant
+// for each renderer that participates in the render pass. These are created
+// lazily (only when at least one group uses depth clipping) to avoid
+// unnecessary GPU pipeline compilation for the common no-clip case.
+func (s *GPURenderSession) ensureDepthClipPipelineVariants() error {
+	if err := s.sdfPipeline.ensureDepthClipPipeline(); err != nil {
+		return fmt.Errorf("SDF depth clip pipeline: %w", err)
+	}
+	if err := s.convexRenderer.ensureDepthClipPipeline(); err != nil {
+		return fmt.Errorf("convex depth clip pipeline: %w", err)
+	}
+	if err := s.imagePipeline.ensureDepthClipPipeline(); err != nil {
+		return fmt.Errorf("image depth clip pipeline: %w", err)
+	}
+	if s.textPipeline != nil {
+		if err := s.textPipeline.ensureDepthClipPipeline(); err != nil {
+			return fmt.Errorf("MSDF text depth clip pipeline: %w", err)
+		}
+	}
+	if s.glyphMaskPipeline != nil {
+		if err := s.glyphMaskPipeline.ensureDepthClipPipeline(); err != nil {
+			return fmt.Errorf("glyph mask depth clip pipeline: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -2442,14 +2527,22 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 	// layout when calling vkCmdBindDescriptorSets.
 	clipBG := gr.clipBindGroup
 
+	// GPU-CLIP-003a: record depth clip draw BEFORE all content.
+	// This populates the depth buffer with Z=0.0 where the clip geometry
+	// exists. Content pipelines then use DepthCompare=GreaterEqual to
+	// restrict rendering to the clipped region.
+	if gr.hasDepthClip && gr.depthClipRes != nil {
+		s.depthClipPipeline.RecordDraw(rp, gr.depthClipRes)
+	}
+
 	// Tier 1: SDF shapes (no stencil interaction).
 	if gr.sdfRes != nil && len(gr.sdfShapes) > 0 {
-		s.sdfPipeline.RecordDraws(rp, gr.sdfRes, clipBG)
+		s.sdfPipeline.RecordDraws(rp, gr.sdfRes, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 2a: Convex polygon fast-path (no stencil interaction).
 	if gr.convexRes != nil {
-		s.convexRenderer.RecordDraws(rp, gr.convexRes, clipBG)
+		s.convexRenderer.RecordDraws(rp, gr.convexRes, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 2b: Stencil-then-cover paths.
@@ -2459,22 +2552,22 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 
 	// Tier 3: Textured quad images (CPU-uploaded).
 	if gr.imageRes != nil && len(gr.imageRes.drawCalls) > 0 {
-		s.imagePipeline.RecordDraws(rp, gr.imageRes, clipBG)
+		s.imagePipeline.RecordDraws(rp, gr.imageRes, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 3b: GPU texture compositing (pre-existing GPU texture, zero upload).
 	if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
-		s.imagePipeline.RecordDraws(rp, gr.gpuTexRes, clipBG)
+		s.imagePipeline.RecordDraws(rp, gr.gpuTexRes, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 4: MSDF text (rendered after shapes).
 	if gr.textRes != nil && len(gr.textRes.drawCalls) > 0 {
-		s.textPipeline.RecordDraws(rp, gr.textRes, clipBG)
+		s.textPipeline.RecordDraws(rp, gr.textRes, clipBG, gr.hasDepthClip)
 	}
 
 	// Tier 6: Glyph mask text (rendered last, on top of all other geometry).
 	if gr.glyphMaskRes != nil && len(gr.glyphMaskRes.drawCalls) > 0 {
-		s.glyphMaskPipeline.RecordDraws(rp, gr.glyphMaskRes, clipBG)
+		s.glyphMaskPipeline.RecordDraws(rp, gr.glyphMaskRes, clipBG, gr.hasDepthClip)
 	}
 }
 

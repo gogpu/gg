@@ -85,6 +85,9 @@ type MSDFTextPipeline struct {
 	// Stencil test is Always/Keep (text does not interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Depth-clipped pipeline variant (GPU-CLIP-003a).
+	pipelineWithDepthClip *wgpu.RenderPipeline
+
 	// Default sampler for MSDF textures (linear filtering).
 	sampler *wgpu.Sampler
 
@@ -292,18 +295,59 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error { // Ensure base re
 	return nil
 }
 
+// ensureDepthClipPipeline creates the depth-clipped pipeline variant if needed.
+func (p *MSDFTextPipeline) ensureDepthClipPipeline() error {
+	if p.pipelineWithDepthClip != nil {
+		return nil
+	}
+	if err := p.ensurePipelineWithStencil(); err != nil {
+		return err
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "msdf_text_pipeline_depth_clip",
+		Layout: p.pipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.shader,
+			EntryPoint: "vs_main",
+			Buffers:    textVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.shader,
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: depthClipDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create MSDF text pipeline with depth clip: %w", err)
+	}
+	p.pipelineWithDepthClip = pipeline
+	return nil
+}
+
 // RecordDraws records MSDF text draw commands into an existing render pass.
-// The render pass is owned by GPURenderSession. This method uses the
-// pipelineWithStencil variant because the session's render pass includes
-// a depth/stencil attachment.
-//
-// The resources parameter holds pre-built vertex/index buffers, uniform buffer,
-// and bind group for the current frame.
-func (p *MSDFTextPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *textFrameResources, clipBG *wgpu.BindGroup) {
+// When depthClipped is true (GPU-CLIP-003a), the depth-clipped pipeline
+// variant is used to test fragments against the depth clip buffer.
+func (p *MSDFTextPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *textFrameResources, clipBG *wgpu.BindGroup, depthClipped ...bool) {
 	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
-	rp.SetPipeline(p.pipelineWithStencil)
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && p.pipelineWithDepthClip != nil
+	if useDepthClip {
+		rp.SetPipeline(p.pipelineWithDepthClip)
+	} else {
+		rp.SetPipeline(p.pipelineWithStencil)
+	}
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
 	}
@@ -322,6 +366,10 @@ func (p *MSDFTextPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *te
 func (p *MSDFTextPipeline) destroyPipeline() {
 	if p.device == nil {
 		return
+	}
+	if p.pipelineWithDepthClip != nil {
+		p.pipelineWithDepthClip.Release()
+		p.pipelineWithDepthClip = nil
 	}
 	if p.pipelineWithStencil != nil {
 		p.pipelineWithStencil.Release()
