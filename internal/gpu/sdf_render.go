@@ -72,6 +72,11 @@ type SDFRenderPipeline struct {
 	// The stencil test is Always/Keep (SDF shapes don't interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Depth-clipped pipeline variant (GPU-CLIP-003a). Same as pipelineWithStencil
+	// but with DepthCompare=GreaterEqual to test against the depth clip buffer.
+	// Created on demand when a ScissorGroup has ClipPath set.
+	pipelineWithDepthClip *wgpu.RenderPipeline
+
 	// Clip bind group layout for @group(1). Set by the session before
 	// pipeline creation. When non-nil, included in the pipeline layout.
 	clipBindLayout *wgpu.BindGroupLayout
@@ -329,12 +334,12 @@ func (p *SDFRenderPipeline) createPipeline() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    sdfRenderVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -387,12 +392,12 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { // Ensure base r
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    sdfRenderVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -412,15 +417,68 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { // Ensure base r
 	return nil
 }
 
+// ensureDepthClipPipeline creates the depth-clipped pipeline variant if not
+// already created. This variant uses DepthCompare=GreaterEqual for depth-based
+// arbitrary path clipping (GPU-CLIP-003a).
+func (p *SDFRenderPipeline) ensureDepthClipPipeline() error {
+	if p.pipelineWithDepthClip != nil {
+		return nil
+	}
+	// Base resources (shader, layout) must exist.
+	if p.shader == nil || p.pipeLayout == nil {
+		if err := p.ensurePipelineWithStencil(); err != nil {
+			return err
+		}
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "sdf_render_pipeline_depth_clip",
+		Layout: p.pipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    sdfRenderVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: depthClipDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create SDF pipeline with depth clip: %w", err)
+	}
+	p.pipelineWithDepthClip = pipeline
+	return nil
+}
+
 // RecordDraws records SDF shape draws into an existing render pass.
 // The render pass is owned by GPURenderSession. This method uses the
 // pipelineWithStencil variant because the session's render pass includes
 // a depth/stencil attachment.
 //
+// When depthClipped is true (GPU-CLIP-003a), the depth-clipped pipeline
+// variant is used instead, which tests fragments against the depth clip buffer.
+//
 // The resources parameter holds pre-built vertex buffer, uniform buffer,
 // and bind group for the current frame.
-func (p *SDFRenderPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *sdfFrameResources, clipBG *wgpu.BindGroup) {
-	rp.SetPipeline(p.pipelineWithStencil)
+func (p *SDFRenderPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *sdfFrameResources, clipBG *wgpu.BindGroup, depthClipped ...bool) {
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && p.pipelineWithDepthClip != nil
+	if useDepthClip {
+		rp.SetPipeline(p.pipelineWithDepthClip)
+	} else {
+		rp.SetPipeline(p.pipelineWithStencil)
+	}
 	rp.SetBindGroup(0, resources.bindGroup, nil)
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
@@ -433,6 +491,10 @@ func (p *SDFRenderPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *s
 func (p *SDFRenderPipeline) destroyPipeline() {
 	if p.device == nil {
 		return
+	}
+	if p.pipelineWithDepthClip != nil {
+		p.pipelineWithDepthClip.Release()
+		p.pipelineWithDepthClip = nil
 	}
 	if p.pipelineWithStencil != nil {
 		p.pipelineWithStencil.Release()

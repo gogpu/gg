@@ -83,6 +83,10 @@ type TexturedQuadPipeline struct {
 	// interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Depth-clipped pipeline variant (GPU-CLIP-003a). Same as pipelineWithStencil
+	// but with DepthCompare=GreaterEqual to test against the depth clip buffer.
+	pipelineWithDepthClip *wgpu.RenderPipeline
+
 	// Non-MSAA blit pipeline for compositor fast path (ADR-016).
 	// SampleCount=1, no depth/stencil — used when the frame contains
 	// only textured quads (base layer + overlays) with no vector shapes.
@@ -141,12 +145,12 @@ func (p *TexturedQuadPipeline) ensurePipelineWithStencil() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    imageVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -163,6 +167,46 @@ func (p *TexturedQuadPipeline) ensurePipelineWithStencil() error {
 		return fmt.Errorf("create textured quad pipeline with stencil: %w", err)
 	}
 	p.pipelineWithStencil = pipeline
+	return nil
+}
+
+// ensureDepthClipPipeline creates the depth-clipped pipeline variant if needed.
+func (p *TexturedQuadPipeline) ensureDepthClipPipeline() error {
+	if p.pipelineWithDepthClip != nil {
+		return nil
+	}
+	if err := p.ensurePipelineWithStencil(); err != nil {
+		return err
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "textured_quad_pipeline_depth_clip",
+		Layout: p.pipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    imageVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: depthClipDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create textured quad pipeline with depth clip: %w", err)
+	}
+	p.pipelineWithDepthClip = pipeline
 	return nil
 }
 
@@ -197,12 +241,12 @@ func (p *TexturedQuadPipeline) ensureBlitPipeline() error {
 		Layout: p.blitLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    imageVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -324,8 +368,15 @@ func (p *TexturedQuadPipeline) ensureBase() error {
 
 // RecordDraws records image draw commands into an existing render pass.
 // Each draw call renders one textured quad with its own bind group (texture + uniform).
-func (p *TexturedQuadPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, res *imageFrameResources, clipBG *wgpu.BindGroup) {
-	rp.SetPipeline(p.pipelineWithStencil)
+// When depthClipped is true (GPU-CLIP-003a), the depth-clipped pipeline
+// variant is used to test fragments against the depth clip buffer.
+func (p *TexturedQuadPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, res *imageFrameResources, clipBG *wgpu.BindGroup, depthClipped ...bool) {
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && p.pipelineWithDepthClip != nil
+	if useDepthClip {
+		rp.SetPipeline(p.pipelineWithDepthClip)
+	} else {
+		rp.SetPipeline(p.pipelineWithStencil)
+	}
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
 	}
@@ -340,6 +391,10 @@ func (p *TexturedQuadPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, res *imag
 func (p *TexturedQuadPipeline) destroyPipeline() {
 	if p.device == nil {
 		return
+	}
+	if p.pipelineWithDepthClip != nil {
+		p.pipelineWithDepthClip.Release()
+		p.pipelineWithDepthClip = nil
 	}
 	if p.pipelineWithStencil != nil {
 		p.pipelineWithStencil.Release()

@@ -70,6 +70,14 @@ type StencilRenderer struct {
 	// nonZeroCoverPipeline draws the fill color where stencil != 0,
 	// then resets stencil to zero via PassOp. Shared by both fill rules.
 	nonZeroCoverPipeline *wgpu.RenderPipeline
+
+	// GPU-CLIP-003a: depth-clipped pipeline variants for depth-based clipping.
+	// These use DepthCompare=GreaterEqual to restrict stencil/cover rendering
+	// to only pixels where the depth clip geometry wrote Z=0.0.
+	// Created lazily by ensureDepthClipPipelines().
+	pipelineWithDepthClipNZ    *wgpu.RenderPipeline // non-zero stencil fill + depth test
+	pipelineWithDepthClipEO    *wgpu.RenderPipeline // even-odd stencil fill + depth test
+	pipelineWithDepthClipCover *wgpu.RenderPipeline // cover + depth test
 }
 
 // NewStencilRenderer creates a new StencilRenderer with the given device and queue.
@@ -464,11 +472,31 @@ func (sr *StencilRenderer) submitAndReadback(
 // The bufs parameter holds pre-built vertex buffers, uniform buffers, and
 // bind groups for the current path. The fill rule selects between non-zero
 // and even-odd stencil pipelines.
-func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilCoverBuffers, fillRule gg.FillRule, clipBG *wgpu.BindGroup) {
-	// Select stencil pipeline based on fill rule.
-	stencilPipeline := sr.nonZeroStencilPipeline
-	if fillRule == gg.FillRuleEvenOdd {
-		stencilPipeline = sr.evenOddStencilPipeline
+//
+// When depthClipped is true (GPU-CLIP-003a), depth-clipped pipeline variants
+// are used. These add DepthCompare=GreaterEqual to restrict both stencil
+// fill and cover passes to pixels where the clip geometry wrote depth=0.0.
+func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilCoverBuffers, fillRule gg.FillRule, clipBG *wgpu.BindGroup, depthClipped ...bool) {
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0]
+
+	// Select stencil pipeline based on fill rule and depth clip state.
+	var stencilPipeline *wgpu.RenderPipeline
+	var coverPipeline *wgpu.RenderPipeline
+
+	if useDepthClip && sr.pipelineWithDepthClipNZ != nil {
+		// Depth-clipped variants: DepthCompare=GreaterEqual restricts to clip region.
+		stencilPipeline = sr.pipelineWithDepthClipNZ
+		if fillRule == gg.FillRuleEvenOdd {
+			stencilPipeline = sr.pipelineWithDepthClipEO
+		}
+		coverPipeline = sr.pipelineWithDepthClipCover
+	} else {
+		// Normal path: DepthCompare=Always (no depth restriction).
+		stencilPipeline = sr.nonZeroStencilPipeline
+		if fillRule == gg.FillRuleEvenOdd {
+			stencilPipeline = sr.evenOddStencilPipeline
+		}
+		coverPipeline = sr.nonZeroCoverPipeline
 	}
 
 	// Pass 1: Stencil fill (clip not needed — only writes stencil buffer).
@@ -478,7 +506,7 @@ func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilC
 	rp.Draw(bufs.fanVertexCount, 1, 0, 0)
 
 	// Pass 2: Cover (clip applied here — writes color output).
-	rp.SetPipeline(sr.nonZeroCoverPipeline)
+	rp.SetPipeline(coverPipeline)
 	rp.SetBindGroup(0, bufs.coverBindGroup, nil)
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)

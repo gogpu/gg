@@ -82,7 +82,7 @@ linters:
       min-complexity: 4
 
     goconst:
-      min-occurrences: 4  # "Unknown" appears 3 times in enum String() methods
+      min-occurrences: 10  # enum String() methods share common names ("Auto", "None", "Size") across files
       ignore-string-values:
         - "Unknown"
 

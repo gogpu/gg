@@ -82,6 +82,11 @@ type GlyphMaskPipeline struct {
 	// Stencil test is Always/Keep (text does not interact with stencil).
 	pipelineWithStencil *wgpu.RenderPipeline
 
+	// Depth-clipped pipeline variant (GPU-CLIP-003a). Same as pipelineWithStencil
+	// but with DepthCompare=GreaterEqual to test against the depth clip buffer.
+	// Created on demand when a ScissorGroup has ClipPath set.
+	pipelineWithDepthClip *wgpu.RenderPipeline
+
 	// Default sampler for R8 atlas textures (linear filtering for smooth
 	// alpha interpolation at subpixel positions).
 	sampler *wgpu.Sampler
@@ -256,12 +261,12 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 		Layout: p.pipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.shader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    glyphMaskVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.shader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -281,22 +286,72 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 	return nil
 }
 
+// ensureDepthClipPipeline creates the depth-clipped pipeline variant if needed.
+// This variant uses DepthCompare=GreaterEqual for depth-based arbitrary path
+// clipping (GPU-CLIP-003a).
+func (p *GlyphMaskPipeline) ensureDepthClipPipeline() error {
+	if p.pipelineWithDepthClip != nil {
+		return nil
+	}
+	if err := p.ensurePipelineWithStencil(); err != nil {
+		return err
+	}
+
+	premulBlend := gputypes.BlendStatePremultiplied()
+	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "glyph_mask_pipeline_depth_clip",
+		Layout: p.pipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    glyphMaskVertexLayout(),
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     p.shader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: depthClipDepthStencil(),
+		Primitive:    triangleListPrimitive(),
+		Multisample:  defaultMultisample(),
+	})
+	if err != nil {
+		return fmt.Errorf("create glyph mask pipeline with depth clip: %w", err)
+	}
+	p.pipelineWithDepthClip = pipeline
+	return nil
+}
+
 // RecordDraws records glyph mask draw commands into an existing render pass.
 // The render pass is owned by GPURenderSession. This method uses the
 // pipelineWithStencil variant because the session's render pass includes
 // a depth/stencil attachment.
 //
+// When depthClipped is true (GPU-CLIP-003a), the depth-clipped pipeline
+// variant is used to test fragments against the depth clip buffer.
+//
 // The resources parameter holds pre-built vertex/index buffers, uniform buffer,
 // and bind group for the current frame. If isLCD is true and the LCD pipeline
 // is available, the LCD pipeline is used for per-channel alpha compositing.
-func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *glyphMaskFrameResources, clipBG *wgpu.BindGroup) {
+func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *glyphMaskFrameResources, clipBG *wgpu.BindGroup, depthClipped ...bool) {
 	if resources == nil || len(resources.drawCalls) == 0 {
 		return
 	}
 
-	// Select pipeline: LCD if available and batch is LCD, else grayscale.
+	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && p.pipelineWithDepthClip != nil
+
+	// Select pipeline: depth-clipped variant takes priority, then LCD, then grayscale.
 	selectedPipeline := p.pipelineWithStencil
-	if resources.isLCD && p.lcdPipelineWithStencil != nil {
+	switch {
+	case useDepthClip:
+		selectedPipeline = p.pipelineWithDepthClip
+	case resources.isLCD && p.lcdPipelineWithStencil != nil:
 		selectedPipeline = p.lcdPipelineWithStencil
 	}
 
@@ -401,12 +456,12 @@ func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
 		Layout: p.lcdPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     p.lcdShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    glyphMaskVertexLayout(),
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     p.lcdShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -430,6 +485,10 @@ func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
 func (p *GlyphMaskPipeline) destroyPipeline() {
 	if p.device == nil {
 		return
+	}
+	if p.pipelineWithDepthClip != nil {
+		p.pipelineWithDepthClip.Release()
+		p.pipelineWithDepthClip = nil
 	}
 	if p.pipelineWithStencil != nil {
 		p.pipelineWithStencil.Release()

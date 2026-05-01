@@ -141,12 +141,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -191,12 +191,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.stencilPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.stencilFillShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -242,12 +242,12 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		Layout: sr.coverPipeLayout,
 		Vertex: wgpu.VertexState{
 			Module:     sr.coverShader,
-			EntryPoint: "vs_main",
+			EntryPoint: shaderEntryVS,
 			Buffers:    vertexBufferLayout,
 		},
 		Fragment: &wgpu.FragmentState{
 			Module:     sr.coverShader,
-			EntryPoint: "fs_main",
+			EntryPoint: shaderEntryFS,
 			Targets: []gputypes.ColorTargetState{
 				{
 					Format:    gputypes.TextureFormatBGRA8Unorm,
@@ -286,12 +286,193 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	return nil
 }
 
+// ensureDepthClipPipelines creates the depth-clipped pipeline variants for
+// GPU-CLIP-003a. These are identical to the normal pipelines except they use
+// DepthCompare=GreaterEqual to restrict rendering to pixels where the depth
+// clip geometry previously wrote Z=0.0.
+//
+// Stencil fill variants: same stencil operations but with depth test. This
+// ensures the stencil buffer is only modified within the clip region.
+//
+// Cover variant: same stencil test + color write but with depth test. Only
+// pixels inside the clip AND with non-zero stencil receive fill color.
+//
+// Created lazily on first use to avoid unnecessary GPU compilation.
+func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen // GPU pipeline descriptors are inherently verbose
+	if sr.pipelineWithDepthClipNZ != nil {
+		return nil // already created
+	}
+	if sr.stencilFillShader == nil || sr.stencilPipeLayout == nil {
+		if err := sr.createPipelines(); err != nil {
+			return err
+		}
+	}
+
+	// Shared vertex buffer layout, primitive, multisample — same as base pipelines.
+	vertexBufferLayout := []gputypes.VertexBufferLayout{
+		{
+			ArrayStride: vertexStride,
+			StepMode:    gputypes.VertexStepModeVertex,
+			Attributes: []gputypes.VertexAttribute{
+				{
+					Format:         gputypes.VertexFormatFloat32x2,
+					Offset:         0,
+					ShaderLocation: 0,
+				},
+			},
+		},
+	}
+	multisample := gputypes.MultisampleState{Count: sampleCount, Mask: 0xFFFFFFFF}
+	primitive := gputypes.PrimitiveState{
+		Topology: gputypes.PrimitiveTopologyTriangleList,
+		CullMode: gputypes.CullModeNone,
+	}
+
+	// --- Non-zero stencil fill + depth clip ---
+	nzPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "stencil_fill_depth_clip_pipeline",
+		Layout: sr.stencilPipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    vertexBufferLayout,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{Format: gputypes.TextureFormatBGRA8Unorm, WriteMask: gputypes.ColorWriteMaskNone},
+			},
+		},
+		DepthStencil: &wgpu.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionGreaterEqual,
+			StencilFront: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationIncrementWrap,
+			},
+			StencilBack: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationDecrementWrap,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: multisample,
+		Primitive:   primitive,
+	})
+	if err != nil {
+		return fmt.Errorf("create stencil fill depth clip pipeline (NZ): %w", err)
+	}
+	sr.pipelineWithDepthClipNZ = nzPipeline
+
+	// --- Even-odd stencil fill + depth clip ---
+	eoPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "stencil_fill_even_odd_depth_clip_pipeline",
+		Layout: sr.stencilPipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    vertexBufferLayout,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     sr.stencilFillShader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{Format: gputypes.TextureFormatBGRA8Unorm, WriteMask: gputypes.ColorWriteMaskNone},
+			},
+		},
+		DepthStencil: &wgpu.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionGreaterEqual,
+			StencilFront: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationInvert,
+			},
+			StencilBack: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationInvert,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: multisample,
+		Primitive:   primitive,
+	})
+	if err != nil {
+		return fmt.Errorf("create stencil fill depth clip pipeline (EO): %w", err)
+	}
+	sr.pipelineWithDepthClipEO = eoPipeline
+
+	// --- Cover pipeline + depth clip ---
+	premulBlend := gputypes.BlendStatePremultiplied()
+	coverPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
+		Label:  "cover_depth_clip_pipeline",
+		Layout: sr.coverPipeLayout,
+		Vertex: wgpu.VertexState{
+			Module:     sr.coverShader,
+			EntryPoint: shaderEntryVS,
+			Buffers:    vertexBufferLayout,
+		},
+		Fragment: &wgpu.FragmentState{
+			Module:     sr.coverShader,
+			EntryPoint: shaderEntryFS,
+			Targets: []gputypes.ColorTargetState{
+				{
+					Format:    gputypes.TextureFormatBGRA8Unorm,
+					Blend:     &premulBlend,
+					WriteMask: gputypes.ColorWriteMaskAll,
+				},
+			},
+		},
+		DepthStencil: &wgpu.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionGreaterEqual,
+			StencilFront: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationZero,
+			},
+			StencilBack: wgpu.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual, FailOp: wgpu.StencilOperationKeep,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationZero,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: multisample,
+		Primitive:   primitive,
+	})
+	if err != nil {
+		return fmt.Errorf("create cover depth clip pipeline: %w", err)
+	}
+	sr.pipelineWithDepthClipCover = coverPipeline
+
+	return nil
+}
+
 // destroyPipelines releases all pipeline resources in reverse creation order.
 // Safe to call on a renderer with no pipelines or with partially created pipelines.
 func (sr *StencilRenderer) destroyPipelines() {
 	if sr.device == nil {
 		return
 	}
+	// Depth-clipped variants (GPU-CLIP-003a).
+	if sr.pipelineWithDepthClipCover != nil {
+		sr.pipelineWithDepthClipCover.Release()
+		sr.pipelineWithDepthClipCover = nil
+	}
+	if sr.pipelineWithDepthClipEO != nil {
+		sr.pipelineWithDepthClipEO.Release()
+		sr.pipelineWithDepthClipEO = nil
+	}
+	if sr.pipelineWithDepthClipNZ != nil {
+		sr.pipelineWithDepthClipNZ.Release()
+		sr.pipelineWithDepthClipNZ = nil
+	}
+	// Base pipelines.
 	if sr.nonZeroCoverPipeline != nil {
 		sr.nonZeroCoverPipeline.Release()
 		sr.nonZeroCoverPipeline = nil
