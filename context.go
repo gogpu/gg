@@ -1306,7 +1306,7 @@ func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height ui
 		c.warnGPUFallback("FlushGPUWithView")
 		return a.Flush(t)
 	}
-	return nil
+	return ErrFallbackToCPU
 }
 
 // FlushGPUWithViewDamage flushes pending GPU operations with damage-aware
