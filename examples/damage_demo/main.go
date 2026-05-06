@@ -14,8 +14,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
+	"os"
 	"time"
 
 	"github.com/gogpu/gg"
@@ -68,15 +70,18 @@ func main() {
 
 		if err := canvas.Draw(func(cc *gg.Context) {
 			cc.ResetFrameDamage()
+			if fp := findSystemFont(); fp != "" {
+				_ = cc.LoadFontFace(fp, 14)
+			}
 
 			// STATIC elements — redraw every frame (immediate mode) but
 			// reset damage after: these pixels don't change between frames.
 			drawStaticBackground(cc, w, h)
 			cc.ResetFrameDamage()
 
-			// ANIMATED element — only this contributes to damage.
-			// Single bouncing circle → small damage rect → green overlay only here.
+			// ANIMATED elements — each gets its own damage rect.
 			drawBouncingCircle(cc, w, h, t)
+			drawFrameCounter(cc, w, h, frameNum, time.Since(startTime), currentFPS)
 		}); err != nil {
 			log.Printf("Draw: %v", err)
 		}
@@ -148,6 +153,17 @@ func drawStaticBackground(cc *gg.Context, w, h int) {
 	cc.DrawStringAnchored("Only the bouncing circle triggers damage", float64(w)/2, float64(h)-10, 0.5, 0.5)
 }
 
+func drawFrameCounter(cc *gg.Context, w, h, frame int, elapsed time.Duration, fps float64) {
+	s := fmt.Sprintf("Frame %d | %.1fs | %.0f FPS", frame, elapsed.Seconds(), fps)
+	tw, _ := cc.MeasureString(s)
+	px, py := 10.0, float64(h)-18.0
+	cc.SetRGBA(0, 0, 0, 0.8)
+	cc.DrawRoundedRectangle(px-4, py-14, tw+8, 20, 4)
+	cc.Fill()
+	cc.SetRGBA(0.7, 1, 0.7, 1)
+	cc.DrawString(s, px, py)
+}
+
 func drawBouncingCircle(cc *gg.Context, w, h int, t float64) {
 	cx := float64(w)/2 + math.Sin(t*1.3)*150
 	cy := float64(h)/2 + math.Cos(t*0.9)*100
@@ -161,4 +177,21 @@ func drawBouncingCircle(cc *gg.Context, w, h int, t float64) {
 	cc.SetLineWidth(2)
 	cc.DrawCircle(cx, cy, radius)
 	cc.Stroke()
+}
+
+func findSystemFont() string {
+	for _, p := range []string{
+		"C:\\Windows\\Fonts\\arial.ttf",
+		"C:\\Windows\\Fonts\\segoeui.ttf",
+		"/Library/Fonts/Arial.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/usr/share/fonts/TTF/DejaVuSans.ttf",
+		"/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
