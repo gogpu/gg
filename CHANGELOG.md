@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.1] - 2026-05-06
+
+### Fixed
+
+- **ggcanvas: trail artifacts in normal mode** — `Draw()` now calls `MarkDirty()` (resets `dirtyRect`) instead of just `c.dirty = true`. Per-rect `PresentWithDamage` disabled for immediate mode — `FrameDamage()` captures only new positions, missing old positions where objects were. Full present correct for immediate mode. Per-rect present requires retained-mode `DamageTracker` (computes old+new bounds).
+
 ## [0.45.0] - 2026-05-06
 
 ### Added

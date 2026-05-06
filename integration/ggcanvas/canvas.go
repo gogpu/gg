@@ -298,7 +298,7 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	}
 	gg.BeginAcceleratorFrame()
 	fn(c.ctx)
-	c.dirty = true
+	c.MarkDirty()
 	return nil
 }
 
@@ -509,11 +509,11 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		}
 	}
 
-	// Collect per-frame damage rects from Context draw operations (ADR-021 Level 1).
+	// Collect per-frame damage rects for OS present (ADR-021 Level 4).
+	// In immediate mode, pixmap is fully redrawn each frame → full texture upload.
+	// Damage rects are passed ONLY to PresentWithDamage for per-rect OS blit.
+	// Do NOT call MarkDirtyRegion here — it would override the full upload from Draw().
 	damageRects := c.ctx.FrameDamage()
-	for _, dr := range damageRects {
-		c.MarkDirtyRegion(dr)
-	}
 	c.ctx.ResetFrameDamage()
 
 	// Debug damage overlay (ADR-021 Phase 6).
@@ -541,16 +541,17 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return err
 	}
 
-	// Pass damage rects to compositor (ADR-021 Level 3-4).
-	// In debug mode: nil rects = full present (erase previous overlay from window).
-	// In normal mode: individual rects → per-rect OS blit.
-	if dr, ok := dc.(DamageRectSetter); ok {
-		if debugMode {
-			dr.SetDamageRects(nil)
-		} else if len(damageRects) > 0 {
-			dr.SetDamageRects(damageRects)
-		}
-	}
+	// Damage rects for OS present (ADR-021 Level 4).
+	// In immediate mode (ggcanvas), FrameDamage captures only NEW positions —
+	// missing OLD positions where objects WERE. Per-rect present would leave
+	// old content in the window. Full present is correct for immediate mode.
+	//
+	// Per-rect present requires DamageTracker (retained mode) which computes
+	// BOTH old + new bounds for moved objects. TODO: integrate DamageTracker
+	// into ggcanvas for true per-rect present optimization.
+	//
+	// For now: damage rects are available via canvas.LastDamage() for consumers
+	// (ui compositor, debug overlay) but NOT passed to OS present.
 
 	return dc.PresentTexture(tex)
 }
