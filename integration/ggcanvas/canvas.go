@@ -519,8 +519,10 @@ func (c *Canvas) Render(dc RenderTarget) error {
 
 	// Debug damage overlay (ADR-021 Phase 6).
 	// Android SurfaceFlinger pattern: full recompose + flash on dirty regions.
-	// In debug mode we force full upload to erase previous overlay (no trail).
-	if isDebugDamageEnabled() && len(damageRects) > 0 {
+	// In debug mode: full upload + full present (no trail). Performance is not
+	// a concern in debug mode — correctness of visualization is.
+	debugMode := isDebugDamageEnabled() && len(damageRects) > 0
+	if debugMode {
 		c.MarkDirty()
 		for _, dr := range damageRects {
 			drawDamageOverlay(c.ctx.ResizeTarget(), dr)
@@ -540,10 +542,15 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return err
 	}
 
-	// Pass damage rects to compositor if available (ADR-021 Level 3-4).
-	// Individual rects → per-rect OS blit (BitBlt/XPutImage each).
-	if dr, ok := dc.(DamageRectSetter); ok && len(damageRects) > 0 {
-		dr.SetDamageRects(damageRects)
+	// Pass damage rects to compositor (ADR-021 Level 3-4).
+	// In debug mode: nil rects = full present (erase previous overlay from window).
+	// In normal mode: individual rects → per-rect OS blit.
+	if dr, ok := dc.(DamageRectSetter); ok {
+		if debugMode {
+			dr.SetDamageRects(nil)
+		} else if len(damageRects) > 0 {
+			dr.SetDamageRects(damageRects)
+		}
 	}
 
 	return dc.PresentTexture(tex)
