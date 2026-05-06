@@ -722,6 +722,45 @@ and can render directly to any texture view (surface or offscreen) via `GPURende
 (`gpucontext.TextureView`), eliminating the GPU->CPU->GPU round-trip. Target is per-pass
 (WebGPU spec pattern), enabling multi-context rendering (RepaintBoundary, offscreen export).
 
+## Four-Level Damage Pipeline (ADR-021, v0.45.0)
+
+Enterprise dirty region tracking — only changed screen areas are redrawn and presented:
+
+```
+Level 1: OBJECT DIFF (DamageTracker)
+    Per-object bounding box comparison between frames → []image.Rectangle
+         ↓
+Level 2: TILE DIRTY (DirtyRegion)
+    Damage rects → mark intersecting 64×64 tiles (atomic bitmap, lock-free)
+         ↓
+Level 3: GPU SCISSOR (FlushGPUWithViewDamage)
+    LoadOpLoad (preserve previous frame) + scissor clip to dirty region
+         ↓
+Level 4: OS PRESENT (PresentWithDamage)
+    Per-rect OS blit: BitBlt (Windows), XPutImage (Linux), VK_KHR_incremental_present
+```
+
+Key components:
+- **`scene/damage.go`** — `DamageTracker` for retained-mode scenes (frame-to-frame object diff)
+- **`Path.Bounds()`** — incremental bounding box during path construction (Skia `SkPathRef::fBounds` pattern, O(1) per verb)
+- **`Context.FrameDamage()`** — `[]image.Rectangle` list of per-operation damage rects for immediate-mode
+- **Threshold merge** — >16 rects merged to bounding box (Swiss cheese prevention, Wayland compositor pattern)
+- **`DamageRectSetter`** — ggcanvas passes per-rect damage to `gogpu.SetDamageRects()` → `wgpu.PresentWithDamage()`
+- **`GOGPU_DEBUG_DAMAGE=1`** — green overlay on damage regions (Android SurfaceFlinger pattern, full recompose per debug frame)
+
+### Render Mode (ADR-020)
+
+`GOGPU_RENDER_MODE` env var controls 2D rendering path:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | CPU rasterizer on software adapter, GPU on real hardware |
+| `cpu` | Force CPU rasterizer (benchmarking) |
+| `gpu` | Force GPU path even on software (shader testing via SPIR-V interpreter) |
+
+Implemented via `AdapterAware` interface on GPU accelerator + `AcceleratorCanRenderDirect()` check.
+References: Qt6 `QT_QUICK_BACKEND`, SDL3 `SDL_RENDER_DRIVER`.
+
 ## Recording System (v0.23.0)
 
 Command-based drawing recording for vector export (Cairo/Skia-inspired).
