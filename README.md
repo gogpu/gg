@@ -46,7 +46,7 @@
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
 | **Vector Export** | Recording system with PDF and SVG backends |
 | **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute), text-aware area-based routing |
-| **Performance** | Tile-based parallel rendering, LRU caching |
+| **Performance** | Tile-based parallel rendering, LRU caching, four-level damage pipeline (ADR-021: object diff → tile dirty → GPU scissor → OS present), incremental Path.Bounds (Skia pattern), `GOGPU_DEBUG_DAMAGE=1` overlay |
 
 ---
 

@@ -171,5 +171,10 @@ func (NullDeviceHandle) SurfaceFormat() gputypes.TextureFormat {
 	return gputypes.TextureFormatUndefined
 }
 
+// AdapterInfo returns unknown adapter info.
+func (NullDeviceHandle) AdapterInfo() gpucontext.AdapterInfo {
+	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
+}
+
 // Ensure NullDeviceHandle implements DeviceHandle.
 var _ DeviceHandle = NullDeviceHandle{}

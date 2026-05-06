@@ -51,6 +51,12 @@ type Context struct {
 	mask      *Mask   // Current alpha mask
 	maskStack []*Mask // Mask stack for Push/Pop
 
+	// Per-frame damage tracking (ADR-021 Level 1).
+	// List of per-operation bounding boxes — NOT a single union rect.
+	// Each Fill/Stroke adds its own rect. Passed as-is to PresentWithDamage
+	// for per-rect OS blit. Merged to bounding box if count exceeds threshold.
+	frameDamageRects []image.Rectangle
+
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode
 
@@ -437,6 +443,56 @@ func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
 }
 
+// maxDamageRects is the threshold above which individual rects are merged
+// into a single bounding box. Too many small rects = too many OS blit calls.
+// Wayland/Android compositors use similar thresholds.
+const maxDamageRects = 16
+
+// FrameDamage returns the list of damage rectangles from draw operations
+// this frame. Each rect corresponds to one or more Fill/Stroke operations.
+// Used by ggcanvas → SetDamageRects → PresentWithDamage for per-rect OS blit.
+// Returns nil if no drawing operations occurred.
+func (c *Context) FrameDamage() []image.Rectangle {
+	if len(c.frameDamageRects) == 0 {
+		return nil
+	}
+	return c.frameDamageRects
+}
+
+// FrameDamageUnion returns the bounding box of all damage rects this frame.
+// Convenience method for debug display or single-rect consumers.
+func (c *Context) FrameDamageUnion() image.Rectangle {
+	var r image.Rectangle
+	for _, dr := range c.frameDamageRects {
+		r = r.Union(dr)
+	}
+	return r
+}
+
+// ResetFrameDamage clears the per-frame damage accumulator.
+// Call at the start of each frame before drawing operations.
+func (c *Context) ResetFrameDamage() {
+	c.frameDamageRects = c.frameDamageRects[:0]
+}
+
+// trackDamage adds a damage rectangle for the current draw operation.
+// If rect count exceeds maxDamageRects, merges all into bounding box
+// (too many small rects = worse than one big rect for OS blit).
+func (c *Context) trackDamage(bounds image.Rectangle) {
+	if bounds.Empty() {
+		return
+	}
+	c.frameDamageRects = append(c.frameDamageRects, bounds)
+	if len(c.frameDamageRects) > maxDamageRects {
+		merged := c.frameDamageRects[0]
+		for _, r := range c.frameDamageRects[1:] {
+			merged = merged.Union(r)
+		}
+		c.frameDamageRects = c.frameDamageRects[:1]
+		c.frameDamageRects[0] = merged
+	}
+}
+
 // FillRectCPU fills a rectangle directly on the CPU pixmap without engaging
 // the GPU SDF accelerator. Coordinates are in user space (device scale applied
 // automatically). Pending GPU shapes are flushed first for correct z-ordering.
@@ -739,6 +795,7 @@ func (c *Context) NewSubPath() {
 // The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Fill() error {
+	c.trackDamage(c.path.Bounds())
 	err := c.doFill()
 	c.path.Clear()
 	return err
@@ -750,6 +807,7 @@ func (c *Context) Fill() error {
 // The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
+	c.trackDamage(c.path.Bounds())
 	err := c.doStroke()
 	c.path.Clear()
 	return err

@@ -255,6 +255,16 @@ func (c *Canvas) MarkDirty() {
 	c.dirtyRect = image.Rectangle{}
 }
 
+// LastDamage returns the damage rectangle (union) from the most recent frame.
+func (c *Canvas) LastDamage() image.Rectangle {
+	return c.dirtyRect
+}
+
+// LastDamageRects returns individual damage rectangles from the most recent frame.
+func (c *Canvas) LastDamageRects() []image.Rectangle {
+	return c.ctx.FrameDamage()
+}
+
 // MarkDirtyRegion flags a rectangular region of the canvas as dirty.
 // On the next Flush(), only the accumulated dirty region is uploaded
 // to the GPU (if the texture supports partial upload), which can be
@@ -459,6 +469,13 @@ type RenderTarget interface {
 	PresentTexture(tex any) error
 }
 
+// DamageRectSetter is an optional interface for RenderTargets that support
+// damage-aware presentation (ADR-021 Level 3-4). gogpu.ContextRenderTarget
+// implements this via Context.SetDamageRects().
+type DamageRectSetter interface {
+	SetDamageRects(rects []image.Rectangle)
+}
+
 // Render presents canvas content to the screen. Works on all backends.
 //
 // On GPU backends (Vulkan, DX12, Metal, GLES): renders directly to surface
@@ -492,6 +509,25 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		}
 	}
 
+	// Collect per-frame damage rects from Context draw operations (ADR-021 Level 1).
+	damageRects := c.ctx.FrameDamage()
+	for _, dr := range damageRects {
+		c.MarkDirtyRegion(dr)
+	}
+	c.ctx.ResetFrameDamage()
+
+	// Debug damage overlay (ADR-021 Phase 6).
+	// Android SurfaceFlinger pattern: full recompose + flash on dirty regions.
+	// In debug mode: full upload + full present (no trail). Performance is not
+	// a concern in debug mode — correctness of visualization is.
+	debugMode := isDebugDamageEnabled() && len(damageRects) > 0
+	if debugMode {
+		c.MarkDirty()
+		for _, dr := range damageRects {
+			drawDamageOverlay(c.ctx.ResizeTarget(), dr)
+		}
+	}
+
 	// Universal path: CPU rasterizer → pixmap → texture → present.
 	tex, err := c.Flush()
 	if err != nil {
@@ -503,6 +539,17 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	tex, err = c.promoteIfPending(tex, dc)
 	if err != nil {
 		return err
+	}
+
+	// Pass damage rects to compositor (ADR-021 Level 3-4).
+	// In debug mode: nil rects = full present (erase previous overlay from window).
+	// In normal mode: individual rects → per-rect OS blit.
+	if dr, ok := dc.(DamageRectSetter); ok {
+		if debugMode {
+			dr.SetDamageRects(nil)
+		} else if len(damageRects) > 0 {
+			dr.SetDamageRects(damageRects)
+		}
 	}
 
 	return dc.PresentTexture(tex)

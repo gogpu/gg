@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.43.7
+## Current State: v0.45.0
 
-✅ **Production-ready** with GPU-accelerated rendering, 81.5% test coverage:
+✅ **Production-ready** with GPU-accelerated rendering:
+- **Four-level damage pipeline** (ADR-021) — Object Diff → Tile Dirty → GPU Scissor → OS Present. Per-rect damage tracking, debug overlay (`GOGPU_DEBUG_DAMAGE=1`), incremental Path.Bounds (Skia pattern)
+- **Adapter-aware render mode** (`GOGPU_RENDER_MODE=auto|cpu|gpu`, ADR-020) — CPU rasterizer on software adapter, GPU on real hardware
+- **GPU depth clipping** — `dc.Clip()` with arbitrary paths routes to GPU depth buffer (ADR-019)
 - Canvas API, Text, Images, Clipping, Layers
 - **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
 - **Zero-readback compositor pipeline** (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, FillRectCPU, non-MSAA blit path (93% bandwidth reduction)

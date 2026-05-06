@@ -1,6 +1,9 @@
 package gg
 
-import "math"
+import (
+	"image"
+	"math"
+)
 
 // PathVerb represents a path construction command.
 type PathVerb byte
@@ -63,6 +66,12 @@ type Path struct {
 	start   Point // Starting point of current subpath
 	current Point // Current point
 
+	// Incremental bounding box (Skia pattern: updated on every MoveTo/LineTo/etc).
+	// O(1) per path operation, zero extra cost vs computing at Fill() time.
+	boundsMinX, boundsMinY float64
+	boundsMaxX, boundsMaxY float64
+	boundsValid            bool
+
 	// Embedded stack buffers for small paths (≤32 verbs, ≤10 cubics).
 	// Avoids heap allocation for typical shapes (rect=5, circle=7, icon≤20 verbs).
 	// Slices point to these buffers initially; grow to heap only if exceeded.
@@ -78,10 +87,48 @@ func NewPath() *Path {
 	return p
 }
 
+// expandBounds updates the incremental bounding box to include (x, y).
+func (p *Path) expandBounds(x, y float64) {
+	if !p.boundsValid {
+		p.boundsMinX, p.boundsMinY = x, y
+		p.boundsMaxX, p.boundsMaxY = x, y
+		p.boundsValid = true
+		return
+	}
+	if x < p.boundsMinX {
+		p.boundsMinX = x
+	}
+	if y < p.boundsMinY {
+		p.boundsMinY = y
+	}
+	if x > p.boundsMaxX {
+		p.boundsMaxX = x
+	}
+	if y > p.boundsMaxY {
+		p.boundsMaxY = y
+	}
+}
+
+// Bounds returns the axis-aligned bounding box of the path as image.Rectangle.
+// Computed incrementally during path construction (O(1) per operation).
+// Returns empty rectangle for empty paths.
+func (p *Path) Bounds() image.Rectangle {
+	if !p.boundsValid {
+		return image.Rectangle{}
+	}
+	return image.Rect(
+		int(math.Floor(p.boundsMinX)),
+		int(math.Floor(p.boundsMinY)),
+		int(math.Ceil(p.boundsMaxX)),
+		int(math.Ceil(p.boundsMaxY)),
+	)
+}
+
 // MoveTo moves to a point without drawing.
 func (p *Path) MoveTo(x, y float64) {
 	p.verbs = append(p.verbs, MoveTo)
 	p.coords = append(p.coords, x, y)
+	p.expandBounds(x, y)
 	p.start = Pt(x, y)
 	p.current = p.start
 }
@@ -90,6 +137,7 @@ func (p *Path) MoveTo(x, y float64) {
 func (p *Path) LineTo(x, y float64) {
 	p.verbs = append(p.verbs, LineTo)
 	p.coords = append(p.coords, x, y)
+	p.expandBounds(x, y)
 	p.current = Pt(x, y)
 }
 
@@ -97,6 +145,8 @@ func (p *Path) LineTo(x, y float64) {
 func (p *Path) QuadraticTo(cx, cy, x, y float64) {
 	p.verbs = append(p.verbs, QuadTo)
 	p.coords = append(p.coords, cx, cy, x, y)
+	p.expandBounds(cx, cy)
+	p.expandBounds(x, y)
 	p.current = Pt(x, y)
 }
 
@@ -104,6 +154,9 @@ func (p *Path) QuadraticTo(cx, cy, x, y float64) {
 func (p *Path) CubicTo(c1x, c1y, c2x, c2y, x, y float64) {
 	p.verbs = append(p.verbs, CubicTo)
 	p.coords = append(p.coords, c1x, c1y, c2x, c2y, x, y)
+	p.expandBounds(c1x, c1y)
+	p.expandBounds(c2x, c2y)
+	p.expandBounds(x, y)
 	p.current = Pt(x, y)
 }
 
@@ -119,6 +172,7 @@ func (p *Path) Clear() {
 	p.coords = p.coords[:0]
 	p.start = Point{}
 	p.current = Point{}
+	p.boundsValid = false
 }
 
 // Reset clears the path for reuse, keeping allocated capacity.

@@ -2,6 +2,7 @@ package scene
 
 import (
 	"fmt"
+	"image"
 	"math"
 
 	"github.com/gogpu/gg"
@@ -221,6 +222,19 @@ func (r Rect) IsEmpty() bool {
 	return r.MinX >= r.MaxX || r.MinY >= r.MaxY
 }
 
+// ImageRect converts to image.Rectangle (floor min, ceil max for pixel coverage).
+func (r Rect) ImageRect() image.Rectangle {
+	if r.IsEmpty() {
+		return image.Rectangle{}
+	}
+	return image.Rect(
+		int(math.Floor(float64(r.MinX))),
+		int(math.Floor(float64(r.MinY))),
+		int(math.Ceil(float64(r.MaxX))),
+		int(math.Ceil(float64(r.MaxY))),
+	)
+}
+
 // Union returns the smallest rectangle containing both r and other.
 func (r Rect) Union(other Rect) Rect {
 	return Rect{
@@ -365,6 +379,11 @@ type Encoding struct {
 	// brushes holds brush definitions referenced by draw commands
 	brushes []Brush
 
+	// commandBounds tracks per-draw-command bounding boxes (ADR-021).
+	// Parallel to shapeCount: commandBounds[i] = bounds of i-th shape command.
+	// Used by DamageTracker for frame-to-frame object diff.
+	commandBounds []Rect
+
 	// bounds tracks cumulative bounding box
 	bounds Rect
 
@@ -379,13 +398,14 @@ type Encoding struct {
 // NewEncoding creates a new empty encoding.
 func NewEncoding() *Encoding {
 	return &Encoding{
-		tags:       make([]Tag, 0, 64),
-		pathData:   make([]float32, 0, 256),
-		drawData:   make([]uint32, 0, 32),
-		transforms: make([]Affine, 0, 8),
-		brushes:    make([]Brush, 0, 16),
-		bounds:     EmptyRect(),
-		pathBounds: EmptyRect(),
+		tags:          make([]Tag, 0, 64),
+		pathData:      make([]float32, 0, 256),
+		drawData:      make([]uint32, 0, 32),
+		transforms:    make([]Affine, 0, 8),
+		brushes:       make([]Brush, 0, 16),
+		commandBounds: make([]Rect, 0, 32),
+		bounds:        EmptyRect(),
+		pathBounds:    EmptyRect(),
 	}
 }
 
@@ -397,6 +417,7 @@ func (e *Encoding) Reset() {
 	e.drawData = e.drawData[:0]
 	e.transforms = e.transforms[:0]
 	e.brushes = e.brushes[:0]
+	e.commandBounds = e.commandBounds[:0]
 	e.bounds = EmptyRect()
 	e.pathBounds = EmptyRect()
 	e.pathCount = 0
@@ -590,6 +611,27 @@ func (e *Encoding) Bounds() Rect {
 // uses correct post-transform coordinates.
 func (e *Encoding) UpdateBounds(bounds Rect) {
 	e.bounds = e.bounds.Union(bounds)
+}
+
+// RecordCommandBounds stores the bounding box for the current draw command.
+// Called by Scene after each Fill/Stroke/DrawImage with the transformed shape bounds.
+// Used by DamageTracker (ADR-021) for frame-to-frame object diff.
+func (e *Encoding) RecordCommandBounds(bounds Rect) {
+	e.commandBounds = append(e.commandBounds, bounds)
+}
+
+// CommandBounds returns per-draw-command bounding boxes as TaggedBounds.
+// The command index serves as a stable ID — valid when scene is built
+// in the same order each frame (standard immediate-mode pattern).
+func (e *Encoding) CommandBounds() []TaggedBounds {
+	result := make([]TaggedBounds, len(e.commandBounds))
+	for i, b := range e.commandBounds {
+		result[i] = TaggedBounds{
+			ID:   uint64(i),
+			Rect: b.ImageRect(),
+		}
+	}
+	return result
 }
 
 // Hash computes a 64-bit FNV-1a hash of the encoding for cache keys.

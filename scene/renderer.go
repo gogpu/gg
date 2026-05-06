@@ -2,6 +2,7 @@ package scene
 
 import (
 	"context"
+	"image"
 	"runtime"
 	"sync"
 	"time"
@@ -375,6 +376,55 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 // For cancellable rendering, use RenderDirtyWithContext.
 func (r *Renderer) RenderDirty(target *gg.Pixmap, scene *Scene, dirty *parallel.DirtyRegion) error {
 	return r.RenderDirtyWithContext(context.Background(), target, scene, dirty)
+}
+
+// RenderWithDamage uses a DamageTracker to compute the minimal dirty region
+// from frame-to-frame object changes, then renders only affected tiles.
+// This is Level 1-2 of the four-level damage pipeline (ADR-021).
+//
+// Returns the damage rect (in pixels) for downstream use by ggcanvas/gogpu
+// (Level 3-4: GPU scissor + OS present). Returns image.Rectangle{} if
+// nothing changed (caller can skip GPU upload + present entirely).
+//
+// On first frame, renders everything (full scene).
+func (r *Renderer) RenderWithDamage(target *gg.Pixmap, scene *Scene, tracker *DamageTracker) (
+	damageRect image.Rectangle, err error,
+) {
+	if target == nil || scene == nil {
+		return image.Rectangle{}, nil
+	}
+
+	objects := scene.TaggedBounds()
+	damage := tracker.ComputeDamage(objects)
+
+	if damage.Empty() && !tracker.IsFirstRender() {
+		return image.Rectangle{}, nil
+	}
+
+	// First render or actual damage — determine what to redraw
+	if tracker.IsFirstRender() {
+		tracker.MarkRendered()
+		r.dirty.MarkAll()
+		err = r.RenderDirty(target, scene, nil)
+		return scene.encoding.Bounds().ImageRect(), err
+	}
+
+	// Convert pixel damage rect to tile coordinates and mark dirty
+	tileW := r.tileSize
+	tileH := r.tileSize
+	tx0 := damage.Min.X / tileW
+	ty0 := damage.Min.Y / tileH
+	tx1 := (damage.Max.X + tileW - 1) / tileW
+	ty1 := (damage.Max.Y + tileH - 1) / tileH
+
+	for ty := ty0; ty < ty1; ty++ {
+		for tx := tx0; tx < tx1; tx++ {
+			r.dirty.Mark(tx, ty)
+		}
+	}
+
+	err = r.RenderDirty(target, scene, nil)
+	return damage, err
 }
 
 // RenderDirtyWithContext renders only the dirty regions of the scene with cancellation support.
