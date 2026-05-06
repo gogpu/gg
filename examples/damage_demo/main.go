@@ -35,12 +35,12 @@ func main() {
 		WithContinuousRender(false))
 
 	var (
-		canvas    *ggcanvas.Canvas
-		animToken *gogpu.AnimationToken
-		startTime = time.Now()
-		frameNum  int
-		fpsFrames int
-		lastFPS   time.Time
+		canvas     *ggcanvas.Canvas
+		animToken  *gogpu.AnimationToken
+		startTime  = time.Now()
+		frameNum   int
+		fpsFrames  int
+		lastFPS    time.Time
 		currentFPS float64
 	)
 

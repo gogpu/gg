@@ -59,8 +59,8 @@ func drawDamageOverlay(pm *gg.Pixmap, damage image.Rectangle) {
 				continue
 			}
 			pixels[idx+0] = blendByte(pixels[idx+0], 0, 60)   // R
-			pixels[idx+1] = blendByte(pixels[idx+1], 200, 60)  // G
-			pixels[idx+2] = blendByte(pixels[idx+2], 0, 60)    // B
+			pixels[idx+1] = blendByte(pixels[idx+1], 200, 60) // G
+			pixels[idx+2] = blendByte(pixels[idx+2], 0, 60)   // B
 		}
 	}
 
