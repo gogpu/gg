@@ -108,8 +108,8 @@ func TestPathBounds_IncrementalAccuracy(t *testing.T) {
 func TestContextFrameDamage_Empty(t *testing.T) {
 	dc := NewContext(100, 100)
 	defer dc.Close()
-	if d := dc.FrameDamage(); !d.Empty() {
-		t.Errorf("new context frameDamage should be empty, got %v", d)
+	if d := dc.FrameDamage(); len(d) != 0 {
+		t.Errorf("new context frameDamage should be nil, got %v", d)
 	}
 }
 
@@ -120,11 +120,12 @@ func TestContextFrameDamage_AfterFill(t *testing.T) {
 	dc.DrawCircle(50, 50, 20)
 	dc.Fill()
 
-	d := dc.FrameDamage()
-	if d.Empty() {
-		t.Fatal("frameDamage should not be empty after Fill")
+	rects := dc.FrameDamage()
+	if len(rects) == 0 {
+		t.Fatal("frameDamage should have rects after Fill")
 	}
 	// Circle at (50,50) r=20 → bounds ~(30,30)-(70,70)
+	d := rects[0]
 	if d.Min.X > 30 || d.Min.Y > 30 {
 		t.Errorf("damage min too large: %v, circle at (50,50) r=20", d)
 	}
@@ -133,7 +134,7 @@ func TestContextFrameDamage_AfterFill(t *testing.T) {
 	}
 }
 
-func TestContextFrameDamage_MultipleFillsUnion(t *testing.T) {
+func TestContextFrameDamage_MultipleFillsSeparateRects(t *testing.T) {
 	dc := NewContext(400, 400)
 	defer dc.Close()
 
@@ -141,17 +142,35 @@ func TestContextFrameDamage_MultipleFillsUnion(t *testing.T) {
 	dc.DrawRectangle(10, 10, 30, 30)
 	dc.Fill()
 
-	// Second fill: bottom-right
+	// Second fill: bottom-right (far away)
 	dc.DrawRectangle(300, 300, 50, 50)
 	dc.Fill()
 
-	d := dc.FrameDamage()
-	// Union should span from (10,10) to (350,350)
-	if d.Min.X > 10 || d.Min.Y > 10 {
-		t.Errorf("damage should start at (10,10), got min %v", d.Min)
+	rects := dc.FrameDamage()
+	if len(rects) < 2 {
+		t.Fatalf("expected at least 2 separate damage rects, got %d", len(rects))
 	}
-	if d.Max.X < 350 || d.Max.Y < 350 {
-		t.Errorf("damage should extend to (350,350), got max %v", d.Max)
+	// Rects should be SEPARATE, not one giant union
+	r0 := rects[0]
+	r1 := rects[1]
+	if r0.Overlaps(r1) {
+		t.Errorf("damage rects should be separate: %v overlaps %v", r0, r1)
+	}
+}
+
+func TestContextFrameDamage_MergesAboveThreshold(t *testing.T) {
+	dc := NewContext(1000, 1000)
+	defer dc.Close()
+
+	// Draw more than maxDamageRects shapes → should merge to bounding box
+	for i := 0; i < 20; i++ {
+		dc.DrawRectangle(float64(i*50), float64(i*50), 10, 10)
+		dc.Fill()
+	}
+
+	rects := dc.FrameDamage()
+	if len(rects) > maxDamageRects {
+		t.Errorf("expected merged rects (≤%d), got %d", maxDamageRects, len(rects))
 	}
 }
 
@@ -163,7 +182,7 @@ func TestContextFrameDamage_ResetClears(t *testing.T) {
 	dc.Fill()
 	dc.ResetFrameDamage()
 
-	if d := dc.FrameDamage(); !d.Empty() {
-		t.Errorf("after ResetFrameDamage, should be empty, got %v", d)
+	if d := dc.FrameDamage(); len(d) != 0 {
+		t.Errorf("after ResetFrameDamage, should be nil, got %v", d)
 	}
 }

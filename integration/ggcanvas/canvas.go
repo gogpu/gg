@@ -256,11 +256,14 @@ func (c *Canvas) MarkDirty() {
 	c.dirtyRect = image.Rectangle{}
 }
 
-// LastDamage returns the damage rectangle from the most recent frame.
-// This is the area that was actually updated — useful for logging,
-// debug display, or passing to external compositors.
+// LastDamage returns the damage rectangle (union) from the most recent frame.
 func (c *Canvas) LastDamage() image.Rectangle {
 	return c.dirtyRect
+}
+
+// LastDamageRects returns individual damage rectangles from the most recent frame.
+func (c *Canvas) LastDamageRects() []image.Rectangle {
+	return c.ctx.FrameDamage()
 }
 
 // MarkDirtyRegion flags a rectangular region of the canvas as dirty.
@@ -507,19 +510,21 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		}
 	}
 
-	// Collect per-frame damage from Context draw operations (ADR-021 Level 1).
-	if damage := c.ctx.FrameDamage(); !damage.Empty() {
-		c.MarkDirtyRegion(damage)
+	// Collect per-frame damage rects from Context draw operations (ADR-021 Level 1).
+	damageRects := c.ctx.FrameDamage()
+	for _, dr := range damageRects {
+		c.MarkDirtyRegion(dr)
 	}
 	c.ctx.ResetFrameDamage()
 
 	// Debug damage overlay (ADR-021 Phase 6).
-	// Android SurfaceFlinger pattern: full recompose + magenta flash on dirty region.
+	// Android SurfaceFlinger pattern: full recompose + flash on dirty regions.
 	// In debug mode we force full upload to erase previous overlay (no trail).
-	if isDebugDamageEnabled() {
-		debugDamage := c.dirtyRect
-		c.MarkDirty() // force full upload — erases previous overlay (Android pattern)
-		drawDamageOverlay(c.ctx.ResizeTarget(), debugDamage)
+	if isDebugDamageEnabled() && len(damageRects) > 0 {
+		c.MarkDirty()
+		for _, dr := range damageRects {
+			drawDamageOverlay(c.ctx.ResizeTarget(), dr)
+		}
 	}
 
 	// Universal path: CPU rasterizer → pixmap → texture → present.
@@ -536,8 +541,9 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	}
 
 	// Pass damage rects to compositor if available (ADR-021 Level 3-4).
-	if dr, ok := dc.(DamageRectSetter); ok && !c.dirtyRect.Empty() {
-		dr.SetDamageRects([]image.Rectangle{c.dirtyRect})
+	// Individual rects → per-rect OS blit (BitBlt/XPutImage each).
+	if dr, ok := dc.(DamageRectSetter); ok && len(damageRects) > 0 {
+		dr.SetDamageRects(damageRects)
 	}
 
 	return dc.PresentTexture(tex)

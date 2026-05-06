@@ -14,7 +14,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"time"
@@ -75,13 +74,9 @@ func main() {
 			drawStaticBackground(cc, w, h)
 			cc.ResetFrameDamage()
 
-			// ANIMATED elements — only these contribute to damage.
+			// ANIMATED element — only this contributes to damage.
+			// Single bouncing circle → small damage rect → green overlay only here.
 			drawBouncingCircle(cc, w, h, t)
-
-			// Frame counter (bottom-left) — changes every frame → part of damage.
-			elapsed := time.Since(startTime)
-			cc.SetRGBA(0.7, 1, 0.7, 0.9)
-			cc.DrawString(fmt.Sprintf("Frame %d | %.1fs | %.0f FPS", frameNum, elapsed.Seconds(), currentFPS), 10, float64(h)-10)
 		}); err != nil {
 			log.Printf("Draw: %v", err)
 		}

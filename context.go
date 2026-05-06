@@ -52,8 +52,10 @@ type Context struct {
 	maskStack []*Mask // Mask stack for Push/Pop
 
 	// Per-frame damage tracking (ADR-021 Level 1).
-	// Accumulates bounding boxes of all draw operations this frame.
-	frameDamage image.Rectangle
+	// List of per-operation bounding boxes — NOT a single union rect.
+	// Each Fill/Stroke adds its own rect. Passed as-is to PresentWithDamage
+	// for per-rect OS blit. Merged to bounding box if count exceeds threshold.
+	frameDamageRects []image.Rectangle
 
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode
@@ -441,27 +443,54 @@ func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
 }
 
-// FrameDamage returns the accumulated bounding box of all draw operations
-// performed this frame. Used by ggcanvas to determine which screen region
-// needs GPU upload and OS present (ADR-021 four-level damage pipeline).
-// Returns empty rectangle if no drawing operations occurred.
-func (c *Context) FrameDamage() image.Rectangle {
-	return c.frameDamage
+// maxDamageRects is the threshold above which individual rects are merged
+// into a single bounding box. Too many small rects = too many OS blit calls.
+// Wayland/Android compositors use similar thresholds.
+const maxDamageRects = 16
+
+// FrameDamage returns the list of damage rectangles from draw operations
+// this frame. Each rect corresponds to one or more Fill/Stroke operations.
+// Used by ggcanvas → SetDamageRects → PresentWithDamage for per-rect OS blit.
+// Returns nil if no drawing operations occurred.
+func (c *Context) FrameDamage() []image.Rectangle {
+	if len(c.frameDamageRects) == 0 {
+		return nil
+	}
+	return c.frameDamageRects
+}
+
+// FrameDamageUnion returns the bounding box of all damage rects this frame.
+// Convenience method for debug display or single-rect consumers.
+func (c *Context) FrameDamageUnion() image.Rectangle {
+	var r image.Rectangle
+	for _, dr := range c.frameDamageRects {
+		r = r.Union(dr)
+	}
+	return r
 }
 
 // ResetFrameDamage clears the per-frame damage accumulator.
 // Call at the start of each frame before drawing operations.
 func (c *Context) ResetFrameDamage() {
-	c.frameDamage = image.Rectangle{}
+	c.frameDamageRects = c.frameDamageRects[:0]
 }
 
-// trackDamage expands frameDamage to include the given path's bounding box
-// in device-space coordinates.
+// trackDamage adds a damage rectangle for the current draw operation.
+// If rect count exceeds maxDamageRects, merges all into bounding box
+// (too many small rects = worse than one big rect for OS blit).
 func (c *Context) trackDamage(bounds image.Rectangle) {
 	if bounds.Empty() {
 		return
 	}
-	c.frameDamage = c.frameDamage.Union(bounds)
+	c.frameDamageRects = append(c.frameDamageRects, bounds)
+	if len(c.frameDamageRects) > maxDamageRects {
+		merged := c.frameDamageRects[0]
+		for _, r := range c.frameDamageRects[1:] {
+			merged = merged.Union(r)
+		}
+		c.frameDamageRects = c.frameDamageRects[:1]
+		c.frameDamageRects[0] = merged
+	}
 }
 
 // FillRectCPU fills a rectangle directly on the CPU pixmap without engaging
