@@ -55,6 +55,7 @@ type GPUShared struct {
 	cpuFallback gg.SDFAccelerator
 
 	gpuReady       bool
+	softwareMode   bool // true when software/CPU adapter detected — prevents GPU init
 	externalDevice bool // true when using shared device (don't destroy on Close)
 }
 
@@ -72,15 +73,9 @@ func NewGPUShared() *GPUShared {
 // this shared resource holder. Each gg.Context should have its own
 // GPURenderContext for isolated pending command queues and frame tracking.
 func (s *GPUShared) NewRenderContext() *GPURenderContext {
-	// Ensure GPU is initialized before creating per-context state.
-	// Without this, standalone GPU (no DeviceProvider) stays uninitialized
-	// until first Flush, causing DrawText/FillShape to fall back to CPU.
-	s.mu.Lock()
-	if err := s.ensureGPU(); err != nil {
-		slogger().Warn("GPU init failed in NewRenderContext", "err", err)
-	}
-	s.mu.Unlock()
-
+	// GPU initialization is deferred to first Flush() or SetDeviceProvider().
+	// This avoids creating a standalone Vulkan instance before gogpu has a
+	// chance to provide its DeviceProvider (which may be software/CPU).
 	return &GPURenderContext{
 		shared: s,
 	}
@@ -133,6 +128,12 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 		if wgpuAdapter, ok := adapter.(*wgpu.Adapter); ok {
 			if wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
 				slogger().Info("gpu-shared: software adapter detected, GPU acceleration disabled")
+				s.mu.Lock()
+				s.softwareMode = true
+				s.device = nil
+				s.queue = nil
+				s.instance = nil
+				s.mu.Unlock()
 				return nil
 			}
 		}
@@ -259,6 +260,9 @@ func (s *GPUShared) Close() {
 func (s *GPUShared) ensureGPU() error {
 	if s.device != nil {
 		return nil
+	}
+	if s.softwareMode {
+		return fmt.Errorf("GPU disabled: software backend active")
 	}
 	return s.initGPU()
 }
