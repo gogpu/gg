@@ -505,6 +505,12 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	}
 	c.ctx.ResetFrameDamage()
 
+	// Debug damage overlay (ADR-021 Phase 6): draw colored rect on pixmap.
+	// Zero overhead when GOGPU_DEBUG_DAMAGE is not set.
+	if isDebugDamageEnabled() {
+		drawDamageOverlay(c.ctx.ResizeTarget(), c.dirtyRect)
+	}
+
 	// Universal path: CPU rasterizer → pixmap → texture → present.
 	tex, err := c.Flush()
 	if err != nil {
