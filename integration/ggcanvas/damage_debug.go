@@ -17,6 +17,9 @@ import (
 //   - Green semi-transparent fill: area that was redrawn this frame
 //   - Green border (2px): damage rect boundary
 //
+// Trail prevention follows Android SurfaceFlinger pattern: full recompose
+// each debug frame to erase previous overlay.
+//
 // Zero overhead when disabled — env var checked once at init.
 
 var (
@@ -48,20 +51,20 @@ func drawDamageOverlay(pm *gg.Pixmap, damage image.Rectangle) {
 		return
 	}
 
-	// Semi-transparent green fill (RGBA: 0, 200, 0, 60)
+	// Semi-transparent green fill
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			idx := (y*pmW + x) * 4
 			if idx+3 >= len(pixels) {
 				continue
 			}
-			// Alpha blend green overlay onto existing pixel
-			pixels[idx+1] = blendByte(pixels[idx+1], 200, 60) // G
-			pixels[idx+3] = clampByte(int(pixels[idx+3]) + 30) // A boost
+			pixels[idx+0] = blendByte(pixels[idx+0], 0, 60)   // R
+			pixels[idx+1] = blendByte(pixels[idx+1], 200, 60)  // G
+			pixels[idx+2] = blendByte(pixels[idx+2], 0, 60)    // B
 		}
 	}
 
-	// Green border (2px) — brighter for visibility
+	// Green border (2px)
 	drawBorderRect(pixels, pmW, pmH, r, 2, 0, 255, 0, 180)
 }
 

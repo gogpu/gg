@@ -55,6 +55,7 @@ type Canvas struct {
 	oldTexture  any             // Previous texture awaiting deferred destruction
 	dirty       bool            // Needs GPU upload
 	dirtyRect   image.Rectangle // Accumulated dirty region (zero = full upload)
+	prevDamage  image.Rectangle // Previous frame's damage — must be cleaned on next frame
 	regionBuf   []byte          // Reusable buffer for partial texture upload
 	sizeChanged bool            // Resize pending — texture must be recreated
 	width       int
@@ -253,6 +254,13 @@ func (c *Canvas) SetDeviceScale(scale float64) {
 func (c *Canvas) MarkDirty() {
 	c.dirty = true
 	c.dirtyRect = image.Rectangle{}
+}
+
+// LastDamage returns the damage rectangle from the most recent frame.
+// This is the area that was actually updated — useful for logging,
+// debug display, or passing to external compositors.
+func (c *Canvas) LastDamage() image.Rectangle {
+	return c.dirtyRect
 }
 
 // MarkDirtyRegion flags a rectangular region of the canvas as dirty.
@@ -505,10 +513,13 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	}
 	c.ctx.ResetFrameDamage()
 
-	// Debug damage overlay (ADR-021 Phase 6): draw colored rect on pixmap.
-	// Zero overhead when GOGPU_DEBUG_DAMAGE is not set.
+	// Debug damage overlay (ADR-021 Phase 6).
+	// Android SurfaceFlinger pattern: full recompose + magenta flash on dirty region.
+	// In debug mode we force full upload to erase previous overlay (no trail).
 	if isDebugDamageEnabled() {
-		drawDamageOverlay(c.ctx.ResizeTarget(), c.dirtyRect)
+		debugDamage := c.dirtyRect
+		c.MarkDirty() // force full upload — erases previous overlay (Android pattern)
+		drawDamageOverlay(c.ctx.ResizeTarget(), debugDamage)
 	}
 
 	// Universal path: CPU rasterizer → pixmap → texture → present.
