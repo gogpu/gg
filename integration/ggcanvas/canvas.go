@@ -499,6 +499,12 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		}
 	}
 
+	// Collect per-frame damage from Context draw operations (ADR-021 Level 1).
+	if damage := c.ctx.FrameDamage(); !damage.Empty() {
+		c.MarkDirtyRegion(damage)
+	}
+	c.ctx.ResetFrameDamage()
+
 	// Universal path: CPU rasterizer → pixmap → texture → present.
 	tex, err := c.Flush()
 	if err != nil {

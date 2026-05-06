@@ -51,6 +51,10 @@ type Context struct {
 	mask      *Mask   // Current alpha mask
 	maskStack []*Mask // Mask stack for Push/Pop
 
+	// Per-frame damage tracking (ADR-021 Level 1).
+	// Accumulates bounding boxes of all draw operations this frame.
+	frameDamage image.Rectangle
+
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode
 
@@ -437,6 +441,29 @@ func (c *Context) ClearWithColor(col RGBA) {
 	c.pixmap.Clear(col)
 }
 
+// FrameDamage returns the accumulated bounding box of all draw operations
+// performed this frame. Used by ggcanvas to determine which screen region
+// needs GPU upload and OS present (ADR-021 four-level damage pipeline).
+// Returns empty rectangle if no drawing operations occurred.
+func (c *Context) FrameDamage() image.Rectangle {
+	return c.frameDamage
+}
+
+// ResetFrameDamage clears the per-frame damage accumulator.
+// Call at the start of each frame before drawing operations.
+func (c *Context) ResetFrameDamage() {
+	c.frameDamage = image.Rectangle{}
+}
+
+// trackDamage expands frameDamage to include the given path's bounding box
+// in device-space coordinates.
+func (c *Context) trackDamage(bounds image.Rectangle) {
+	if bounds.Empty() {
+		return
+	}
+	c.frameDamage = c.frameDamage.Union(bounds)
+}
+
 // FillRectCPU fills a rectangle directly on the CPU pixmap without engaging
 // the GPU SDF accelerator. Coordinates are in user space (device scale applied
 // automatically). Pending GPU shapes are flushed first for correct z-ordering.
@@ -739,6 +766,7 @@ func (c *Context) NewSubPath() {
 // The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Fill() error {
+	c.trackDamage(c.path.Bounds())
 	err := c.doFill()
 	c.path.Clear()
 	return err
@@ -750,6 +778,7 @@ func (c *Context) Fill() error {
 // The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
+	c.trackDamage(c.path.Bounds())
 	err := c.doStroke()
 	c.path.Clear()
 	return err
