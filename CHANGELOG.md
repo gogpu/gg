@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Four-level damage pipeline** (ADR-021) — enterprise dirty region tracking: Object Diff → Tile Dirty → GPU Scissor → OS Present. `DamageTracker` computes frame-to-frame bounding box diff. `Renderer.RenderWithDamage()` renders only dirty tiles. Per-command bounds in scene `Encoding`. References: Android `SkRegion`, Wayland damage protocol, Flutter `RepaintBoundary`.
+- **Incremental `Path.Bounds()`** — bounding box computed during path construction (Skia `SkPathRef::fBounds` pattern). O(1) per MoveTo/LineTo/CubicTo. Zero extra cost vs computing at Fill() time.
+- **`Context.FrameDamage()`** — returns `[]image.Rectangle` list of per-operation damage rects. Individual rects passed to `PresentWithDamage` for per-rect OS blit. Threshold: >16 rects merged to bounding box (Swiss cheese prevention).
+- **`canvas.LastDamage()`** — public API for damage rect access on ggcanvas.
+- **`DamageRectSetter`** interface — ggcanvas passes damage rects to gogpu `SetDamageRects()` → wgpu `PresentWithDamage()`.
+- **`GOGPU_DEBUG_DAMAGE=1`** — debug overlay showing green semi-transparent rectangles on damage regions. Android SurfaceFlinger pattern: full recompose per debug frame, no trail. Zero overhead when disabled.
+- **`GOGPU_RENDER_MODE=auto|cpu|gpu`** — adapter-aware render mode (ADR-020). CPU rasterizer on software adapter (60 FPS vs 0.65 FPS), GPU on real hardware. `AdapterAware` interface.
+- **Damage demo example** — `examples/damage_demo/`: static rects + bouncing circle + frame counter. Two independent damage rects visible with debug overlay. 177 FPS on software backend.
+
+### Fixed
+
+- **Software backend GPU accelerator** — disable GPU accelerator on software/CPU adapter via `softwareMode` flag. Prevents SDF shader path from intercepting when CPU rasterizer is faster.
+
+### Changed
+
+- **deps:** wgpu v0.27.0 (SPIR-V interpreter, blit fix), naga v0.17.11, gpucontext v0.17.0 (AdapterInfo)
+
 ## [0.44.1] - 2026-05-02
 
 ### Added
