@@ -55,7 +55,6 @@ type Canvas struct {
 	oldTexture  any             // Previous texture awaiting deferred destruction
 	dirty       bool            // Needs GPU upload
 	dirtyRect   image.Rectangle // Accumulated dirty region (zero = full upload)
-	prevDamage  image.Rectangle // Previous frame's damage — must be cleaned on next frame
 	regionBuf   []byte          // Reusable buffer for partial texture upload
 	sizeChanged bool            // Resize pending — texture must be recreated
 	width       int
