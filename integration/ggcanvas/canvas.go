@@ -459,6 +459,13 @@ type RenderTarget interface {
 	PresentTexture(tex any) error
 }
 
+// DamageRectSetter is an optional interface for RenderTargets that support
+// damage-aware presentation (ADR-021 Level 3-4). gogpu.ContextRenderTarget
+// implements this via Context.SetDamageRects().
+type DamageRectSetter interface {
+	SetDamageRects(rects []image.Rectangle)
+}
+
 // Render presents canvas content to the screen. Works on all backends.
 //
 // On GPU backends (Vulkan, DX12, Metal, GLES): renders directly to surface
@@ -503,6 +510,11 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	tex, err = c.promoteIfPending(tex, dc)
 	if err != nil {
 		return err
+	}
+
+	// Pass damage rects to compositor if available (ADR-021 Level 3-4).
+	if dr, ok := dc.(DamageRectSetter); ok && !c.dirtyRect.Empty() {
+		dr.SetDamageRects([]image.Rectangle{c.dirtyRect})
 	}
 
 	return dc.PresentTexture(tex)

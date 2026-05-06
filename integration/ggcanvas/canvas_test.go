@@ -45,6 +45,9 @@ func (m *mockProvider) Device() gpucontext.Device             { return m.device 
 func (m *mockProvider) Queue() gpucontext.Queue               { return m.queue }
 func (m *mockProvider) Adapter() gpucontext.Adapter           { return m.adapter }
 func (m *mockProvider) SurfaceFormat() gputypes.TextureFormat { return m.format }
+func (m *mockProvider) AdapterInfo() gpucontext.AdapterInfo {
+	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
+}
 
 // regionUpdate records the parameters of a single UpdateRegion call.
 type regionUpdate struct {

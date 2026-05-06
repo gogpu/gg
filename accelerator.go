@@ -3,6 +3,8 @@ package gg
 import (
 	"errors"
 	"image"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/gogpu/gpucontext"
@@ -305,12 +307,37 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 // CPU-only adapter like llvmpipe), or the accelerator doesn't support
 // direct surface rendering.
 //
+// Respects GOGPU_RENDER_MODE environment variable (ADR-020):
+//   - auto (default): returns false for software adapters (CPU rasterizer is faster)
+//   - cpu: always returns false (force CPU rasterizer)
+//   - gpu: uses accelerator's own CanRenderDirect (force GPU path)
+//
 // Use this to decide whether to attempt RenderDirect or go straight to
 // the universal CPU→texture→present path.
 func AcceleratorCanRenderDirect() bool {
+	switch renderMode() {
+	case renderModeCPU:
+		return false
+	case renderModeGPU:
+		a := Accelerator()
+		if a == nil {
+			return false
+		}
+		if drc, ok := a.(DirectRenderCapable); ok {
+			return drc.CanRenderDirect()
+		}
+		return false
+	}
+
+	// Auto mode: check adapter type
 	a := Accelerator()
 	if a == nil {
 		return false
+	}
+	if aa, ok := a.(AdapterAware); ok {
+		if aa.IsSoftwareAdapter() {
+			return false
+		}
 	}
 	if drc, ok := a.(DirectRenderCapable); ok {
 		return drc.CanRenderDirect()
@@ -324,6 +351,34 @@ func AcceleratorCanRenderDirect() bool {
 // shaders should not run on CPU — the accelerator stays uninitialized.
 type DirectRenderCapable interface {
 	CanRenderDirect() bool
+}
+
+// AdapterAware is an optional interface for accelerators that know
+// whether they are running on a software (CPU) adapter.
+// Used by AcceleratorCanRenderDirect in auto mode (ADR-020).
+type AdapterAware interface {
+	IsSoftwareAdapter() bool
+}
+
+// renderModeType represents the 2D rendering path preference.
+type renderModeType int
+
+const (
+	renderModeAuto renderModeType = iota
+	renderModeCPU
+	renderModeGPU
+)
+
+// renderMode reads GOGPU_RENDER_MODE environment variable.
+func renderMode() renderModeType {
+	switch strings.ToLower(os.Getenv("GOGPU_RENDER_MODE")) {
+	case "cpu":
+		return renderModeCPU
+	case "gpu":
+		return renderModeGPU
+	default:
+		return renderModeAuto
+	}
 }
 
 // BeginAcceleratorFrame signals the start of a new rendering frame.

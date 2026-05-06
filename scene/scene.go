@@ -97,6 +97,7 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 		}
 		s.bounds = s.bounds.Union(shapeBounds)
 		enc.UpdateBounds(shapeBounds)
+		enc.RecordCommandBounds(shapeBounds)
 		s.layerStack.Top().UpdateBounds(shapeBounds)
 		s.version++
 		return
@@ -125,6 +126,7 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 	}
 	s.bounds = s.bounds.Union(shapeBounds)
 	enc.UpdateBounds(shapeBounds)
+	enc.RecordCommandBounds(shapeBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(shapeBounds)
@@ -176,6 +178,7 @@ func (s *Scene) Stroke(style *StrokeStyle, transform Affine, brush Brush, shape 
 	}
 	s.bounds = s.bounds.Union(shapeBounds)
 	enc.UpdateBounds(shapeBounds)
+	enc.RecordCommandBounds(shapeBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(shapeBounds)
@@ -214,6 +217,7 @@ func (s *Scene) DrawImage(img *Image, transform Affine) {
 	}
 	s.bounds = s.bounds.Union(imgBounds)
 	enc.UpdateBounds(imgBounds)
+	enc.RecordCommandBounds(imgBounds)
 
 	// Update layer bounds
 	s.layerStack.Top().UpdateBounds(imgBounds)
@@ -438,6 +442,12 @@ func (s *Scene) Bounds() Rect {
 // This is incremented on each modification and can be used for cache invalidation.
 func (s *Scene) Version() uint64 {
 	return s.version
+}
+
+// TaggedBounds returns per-draw-command bounding boxes with stable IDs.
+// Used by DamageTracker (ADR-021) for frame-to-frame object diff.
+func (s *Scene) TaggedBounds() []TaggedBounds {
+	return s.encoding.CommandBounds()
 }
 
 // IsEmpty returns true if the scene has no content.
