@@ -43,7 +43,7 @@ func NewGPUSceneRenderer(dc *gg.Context) *GPUSceneRenderer {
 // not accidentally pop the clip's saved state.
 //
 // Returns nil if the scene is empty.
-func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cyclop,funlen // tag dispatch across all scene command types
+func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cyclop,funlen,gocognit // tag dispatch across all scene command types
 	if scene == nil {
 		return nil
 	}
@@ -145,8 +145,15 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 		case TagStroke:
 			brush, style := dec.Stroke()
 			applySceneBrush(dc, brush)
-			if style != nil && style.Width > 0 {
-				dc.SetLineWidth(float64(style.Width))
+			if style != nil {
+				if style.Width > 0 {
+					dc.SetLineWidth(float64(style.Width))
+				}
+				dc.SetLineCap(gg.LineCap(style.Cap))
+				dc.SetLineJoin(gg.LineJoin(style.Join))
+				if style.MiterLimit > 0 {
+					dc.SetMiterLimit(float64(style.MiterLimit))
+				}
 			}
 			_ = dc.StrokePath(path)
 			path.Clear()
