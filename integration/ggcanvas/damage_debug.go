@@ -4,6 +4,7 @@ import (
 	"image"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gogpu/gg"
 )
@@ -32,6 +33,93 @@ func isDebugDamageEnabled() bool {
 		debugDamageEnabled = os.Getenv("GOGPU_DEBUG_DAMAGE") == "1"
 	})
 	return debugDamageEnabled
+}
+
+const damageFlashDuration = 400 * time.Millisecond
+
+type damageFlash struct {
+	rect image.Rectangle
+	time time.Time
+}
+
+// damageOverlayState tracks damage flashes with fade effect.
+// Android SurfaceFlinger doDebugFlashRegions pattern.
+type damageOverlayState struct {
+	flashes []damageFlash
+}
+
+func (s *damageOverlayState) update(rects []image.Rectangle) {
+	now := time.Now()
+	alive := s.flashes[:0]
+	for _, f := range s.flashes {
+		if now.Sub(f.time) < damageFlashDuration {
+			alive = append(alive, f)
+		}
+	}
+	s.flashes = alive
+	for _, r := range rects {
+		if !r.Empty() {
+			s.flashes = append(s.flashes, damageFlash{rect: r, time: now})
+		}
+	}
+}
+
+func (s *damageOverlayState) drawAll(pm *gg.Pixmap) {
+	now := time.Now()
+	for _, f := range s.flashes {
+		age := now.Sub(f.time)
+		if age >= damageFlashDuration {
+			continue
+		}
+		fade := 1.0 - float64(age)/float64(damageFlashDuration)
+		drawDamageOverlayFaded(pm, f.rect, fade)
+	}
+}
+
+func (s *damageOverlayState) needsAnimationFrame() bool {
+	if len(s.flashes) == 0 {
+		return false
+	}
+	now := time.Now()
+	for _, f := range s.flashes {
+		if now.Sub(f.time) < damageFlashDuration {
+			return true
+		}
+	}
+	return false
+}
+
+// drawDamageOverlayFaded draws damage rect with fade opacity.
+func drawDamageOverlayFaded(pm *gg.Pixmap, damage image.Rectangle, fade float64) {
+	if damage.Empty() || pm == nil || fade <= 0 {
+		return
+	}
+
+	pmW := pm.Width()
+	pmH := pm.Height()
+	pixels := pm.Data()
+
+	r := damage.Intersect(image.Rect(0, 0, pmW, pmH))
+	if r.Empty() {
+		return
+	}
+
+	alpha := byte(60.0 * fade)
+	borderAlpha := byte(180.0 * fade)
+
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			idx := (y*pmW + x) * 4
+			if idx+3 >= len(pixels) {
+				continue
+			}
+			pixels[idx+0] = blendByte(pixels[idx+0], 0, alpha)
+			pixels[idx+1] = blendByte(pixels[idx+1], 200, alpha)
+			pixels[idx+2] = blendByte(pixels[idx+2], 0, alpha)
+		}
+	}
+
+	drawBorderRect(pixels, pmW, pmH, r, 2, 0, 255, 0, borderAlpha)
 }
 
 // drawDamageOverlay draws a semi-transparent colored rectangle on the pixmap
