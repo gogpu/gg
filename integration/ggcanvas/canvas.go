@@ -523,13 +523,16 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	damageRects := c.ctx.FrameDamage()
 	c.ctx.ResetFrameDamage()
 
-	// Debug damage overlay (ADR-021 Phase 6).
+	// Debug damage overlay (ADR-021 Phase 6a).
 	// Android SurfaceFlinger pattern: flash-and-fade on dirty regions.
+	// Draws via gg.Context (all backends), damage suppressed to avoid self-inflation.
 	if isDebugDamageEnabled() {
 		c.damageFlashs.update(damageRects)
 		if len(c.damageFlashs.flashes) > 0 {
 			c.MarkDirty()
-			c.damageFlashs.drawAll(c.ctx.ResizeTarget())
+			c.ctx.SetDamageTracking(false)
+			c.damageFlashs.drawAll(c.ctx)
+			c.ctx.SetDamageTracking(true)
 		}
 	}
 
