@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/clip_path
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.45.2
+	github.com/gogpu/gg v0.45.3
 	github.com/gogpu/gogpu v0.32.2
 )
 
