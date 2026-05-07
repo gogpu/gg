@@ -36,6 +36,12 @@ func NewGPUSceneRenderer(dc *gg.Context) *GPUSceneRenderer {
 // The decoder walks the binary encoding tag-by-tag, building paths and
 // dispatching fill/stroke calls that route through the GPU accelerator.
 //
+// Transform handling: scene transforms are applied via dc.SetTransform()
+// (direct matrix replacement) instead of dc.Push()/Pop(). This avoids
+// corrupting the clip stack. Push/Pop is reserved for clip and layer
+// boundaries only, ensuring that TagTransform inside a clip region does
+// not accidentally pop the clip's saved state.
+//
 // Returns nil if the scene is empty.
 func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cyclop,funlen // tag dispatch across all scene command types
 	if scene == nil {
@@ -54,21 +60,32 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 
 	dc := r.dc
 	path := gg.NewPath()
-	transformDepth := 0
+
+	// Save the initial matrix so we can compose scene transforms correctly
+	// and restore the original state after rendering.
+	// Scene transforms use dc.SetTransform() (direct replacement) instead of
+	// dc.Push()/Pop() to avoid interfering with clip Push/Pop nesting.
+	baseMatrix := dc.GetTransform()
 
 	for dec.Next() {
 		switch dec.Tag() {
 		case TagTransform:
 			a := dec.Transform()
-			if transformDepth > 0 {
-				dc.Pop()
-			}
-			dc.Push()
-			transformDepth++
-			dc.Transform(gg.Matrix{
+			// Apply scene transform composed with the context's base matrix.
+			// Scene transforms are absolute (full accumulated affine from the
+			// encoder, e.g. currentTransform.Multiply(perDrawTransform)), so we
+			// compose with baseMatrix to preserve any parent context transform
+			// (e.g. dc.Translate() called before RenderScene).
+			//
+			// Using Push/Pop here would corrupt clip state when TagTransform
+			// appears inside a BeginClip/EndClip region: the transform's Pop
+			// would undo the clip's Push, removing the clip before content is
+			// drawn. SetTransform avoids this by not touching the state stack.
+			sceneMatrix := gg.Matrix{
 				A: float64(a.A), B: float64(a.B), C: float64(a.C),
 				D: float64(a.D), E: float64(a.E), F: float64(a.F),
-			})
+			}
+			dc.SetTransform(baseMatrix.Multiply(sceneMatrix))
 
 		case TagBeginPath:
 			path.Clear()
@@ -141,9 +158,11 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			dc.Pop()
 
 		case TagBeginClip:
-			// Push state before clip so EndClip can restore the previous clip level.
-			// Without Push/Pop, ResetClip destroys ALL clips (not just innermost),
-			// breaking nested clip regions (card → ListView → ScrollView).
+			// Push state before clip so EndClip can restore the previous clip
+			// level AND the transform that was active at clip time. Push/Pop
+			// here is correct: clips are strictly nested and each BeginClip
+			// has exactly one EndClip. No intermediate Pop can occur because
+			// TagTransform uses SetTransform (not Push/Pop).
 			dc.Push()
 			dc.DrawPath(path)
 			dc.Clip()
@@ -161,9 +180,9 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 		}
 	}
 
-	if transformDepth > 0 {
-		dc.Pop()
-	}
+	// Restore the original matrix. Unlike the previous Push/Pop approach,
+	// SetTransform is a direct replacement so we restore explicitly.
+	dc.SetTransform(baseMatrix)
 
 	return nil
 }
