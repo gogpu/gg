@@ -55,7 +55,8 @@ type Context struct {
 	// List of per-operation bounding boxes — NOT a single union rect.
 	// Each Fill/Stroke adds its own rect. Passed as-is to PresentWithDamage
 	// for per-rect OS blit. Merged to bounding box if count exceeds threshold.
-	frameDamageRects []image.Rectangle
+	frameDamageRects       []image.Rectangle
+	damageTrackingEnabled  bool
 
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode
@@ -157,18 +158,19 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 	}
 
 	return &Context{
-		width:          width,
-		height:         height,
-		deviceScale:    scale,
-		pixmap:         pixmap,
-		renderer:       renderer,
-		path:           NewPath(),
-		paint:          NewPaint(),
-		matrix:         Identity(),
-		deviceMatrix:   deviceMatrix,
-		stack:          make([]Matrix, 0, 8),
-		clipStackDepth: make([]int, 0, 8),
-		pipelineMode:   options.pipelineMode,
+		width:                 width,
+		height:                height,
+		deviceScale:           scale,
+		pixmap:                pixmap,
+		renderer:              renderer,
+		path:                  NewPath(),
+		paint:                 NewPaint(),
+		matrix:                Identity(),
+		deviceMatrix:          deviceMatrix,
+		stack:                 make([]Matrix, 0, 8),
+		clipStackDepth:        make([]int, 0, 8),
+		pipelineMode:          options.pipelineMode,
+		damageTrackingEnabled: true,
 	}
 }
 
@@ -475,11 +477,19 @@ func (c *Context) ResetFrameDamage() {
 	c.frameDamageRects = c.frameDamageRects[:0]
 }
 
+// SetDamageTracking enables or disables per-operation damage recording.
+// When disabled, Fill/Stroke do not append to FrameDamage.
+// Used by retained-mode compositors to suppress damage during replay
+// of cached (clean) scene content (ADR-021 false positive fix).
+func (c *Context) SetDamageTracking(enabled bool) {
+	c.damageTrackingEnabled = enabled
+}
+
 // trackDamage adds a damage rectangle for the current draw operation.
-// If rect count exceeds maxDamageRects, merges all into bounding box
-// (too many small rects = worse than one big rect for OS blit).
+// No-op when damage tracking is disabled (cached scene replay).
+// If rect count exceeds maxDamageRects, merges all into bounding box.
 func (c *Context) trackDamage(bounds image.Rectangle) {
-	if bounds.Empty() {
+	if !c.damageTrackingEnabled || bounds.Empty() {
 		return
 	}
 	c.frameDamageRects = append(c.frameDamageRects, bounds)
