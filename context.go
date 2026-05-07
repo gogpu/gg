@@ -55,8 +55,8 @@ type Context struct {
 	// List of per-operation bounding boxes — NOT a single union rect.
 	// Each Fill/Stroke adds its own rect. Passed as-is to PresentWithDamage
 	// for per-rect OS blit. Merged to bounding box if count exceeds threshold.
-	frameDamageRects       []image.Rectangle
-	damageTrackingEnabled  bool
+	frameDamageRects      []image.Rectangle
+	damageTrackingEnabled bool
 
 	// Pipeline mode
 	pipelineMode PipelineMode // GPU pipeline selection mode

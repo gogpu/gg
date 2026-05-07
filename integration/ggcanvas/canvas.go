@@ -60,7 +60,7 @@ type Canvas struct {
 	width        int
 	height       int
 	closed       bool
-	tracked      bool // true if auto-registered with a ResourceTracker
+	tracked      bool               // true if auto-registered with a ResourceTracker
 	damageFlashs damageOverlayState // debug overlay fade state
 }
 

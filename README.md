@@ -490,6 +490,26 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 | FillCircle r100 | 2ms | **0 allocs** (zero-alloc pipeline) |
 | Gradient ColorAt | 33ns | 0 allocs (pre-sorted stops) |
 
+## Debugging
+
+### Damage Overlay
+
+Visualize which regions are repainted each frame:
+
+```bash
+GOGPU_DEBUG_DAMAGE=1 go run ./examples/gogpu_integration
+```
+
+Green flash-and-fade overlay shows damaged (repainted) regions. Useful for verifying that damage tracking works correctly and only dirty areas are repainted.
+
+### Environment Variables
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `GOGPU_GRAPHICS_API` | `vulkan`, `dx12`, `metal`, `gles`, `software` | Force specific GPU backend |
+| `GOGPU_RENDER_MODE` | `auto`, `cpu`, `gpu` | Force CPU or GPU rasterizer (ADR-020) |
+| `GOGPU_DEBUG_DAMAGE` | `1` | Show damage region overlay (flash-and-fade) |
+
 ---
 
 ## Ecosystem
