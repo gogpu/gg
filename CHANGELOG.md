@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.2] - 2026-05-07
+
+### Added
+
+- **`SetDamageTracking()` API** — retained-mode damage suppression for scene-based
+  rendering (ADR-021). Enables per-object dirty tracking for efficient repaints.
+
+- **Flash-and-fade damage overlay** (`GOGPU_DEBUG_DAMAGE=1`) — visual debug overlay
+  for damage regions (ADR-021 Phase 6a).
+
+### Fixed
+
+- **GPU clip broken by transform Push/Pop inside clip region** (BUG-GG-GPU-SCENE-CLIP-001) —
+  GPUSceneRenderer used Push/Pop for BOTH transforms and clips. TagTransform inside
+  BeginClip/EndClip popped the clip's Push, destroying the clip. Fix: transforms use
+  SetTransform (direct matrix replacement), Push/Pop reserved for clip/layer boundaries.
+
+- **Rect clips → hardware scissor instead of depth clip** — GPUSceneRenderer used
+  dc.Clip() (PushPath) for rectangular clips → depth clip path. Fix: DetectShape()
+  detects rect → dc.ClipRect() → PushRect → hardware scissor (always works, zero overhead).
+
+- **Scene Append/AppendWithTranslation write to currentEncoding** — layer-aware
+  encoding for correct clip/content ordering.
+
+- **FlushGPUWithView returns ErrFallbackToCPU** when GPU unavailable (ADR-022).
+
+- **Damage overlay drawn before GPU-direct path** (all backends).
+
+- **Nested clip Push/Pop in GPUSceneRenderer** + GPU test skip.
+
+### Changed
+
+- **Dependencies:** examples updated to gogpu v0.32.2, wgpu v0.27.0, gpucontext v0.17.0,
+  naga v0.17.11
+- Green damage overlay via gg.Context instead of direct pixmap manipulation
+
 ## [0.45.1] - 2026-05-06
 
 ### Fixed

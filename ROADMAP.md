@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.45.0
+## Current State: v0.45.2
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Four-level damage pipeline** (ADR-021) — Object Diff → Tile Dirty → GPU Scissor → OS Present. Per-rect damage tracking, debug overlay (`GOGPU_DEBUG_DAMAGE=1`), incremental Path.Bounds (Skia pattern)
@@ -56,16 +56,22 @@
 
 ## Upcoming
 
-### v0.44.0 — In Progress
+### v0.45.2 — In Progress
+- [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
+- [x] Rect clips → hardware scissor in GPUSceneRenderer
+- [x] SetDamageTracking API (ADR-021)
+- [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=1)
+- [x] Scene Append layer-aware encoding
+- [x] FlushGPUWithView ErrFallbackToCPU (ADR-022)
+- [x] Software backend softwareMode flag (lazy GPU init)
+
+### v0.44.0–v0.45.1 ✅ Released
 - [x] GPU-CLIP-003a: Depth-based arbitrary path clipping (Impeller/Graphite pattern)
 - [x] GPU-CLIP-003b: Vello coarse.wgsl clip tag dispatch
-- [x] Dual-approach clip strategy research (3 agents, Skia/Flutter/Vello)
-- [x] Depth clip pipeline variants for all 6 renderers (SDF, convex, stencil, image, text, glyph)
-- [x] 8 enterprise depth clip tests
-- [ ] GPU-CLIP-003c: Stencil bit partition for dc.Clip() immediate-mode (#205)
-- [ ] GPU-CLIP-003d: Vello GPU clip_reduce + clip_leaf stages
-- [ ] GPU-LAYER-001: GPU render-to-texture layer compositing
-- [ ] Restore LCD ClearType in Tier 6 (Intel Vulkan compatible)
+- [x] dc.Clip() GPU bridge + stencil-then-cover-to-depth
+- [x] Four-level damage pipeline (ADR-021, ADR-020)
+- [x] Adapter-aware render mode (GOGPU_RENDER_MODE)
+- [x] clip_path + damage_demo examples
 
 ### v0.43.3–v0.43.7 ✅ Released
 - [x] Scene fixes (CTM, transform stack, LoadOp, image index, AppendWithTranslation)
