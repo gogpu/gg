@@ -504,6 +504,23 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return nil
 	}
 
+	// Collect per-frame damage rects BEFORE GPU-direct path attempt.
+	// Damage overlay needs these regardless of which present path is used.
+	damageRects := c.ctx.FrameDamage()
+	c.ctx.ResetFrameDamage()
+
+	// Debug damage overlay (ADR-021 Phase 6a).
+	// Draw overlay BEFORE present so it's visible on ALL backends.
+	// Android SurfaceFlinger pattern: flash-and-fade on dirty regions.
+	if isDebugDamageEnabled() {
+		c.damageFlashs.update(damageRects)
+		if len(c.damageFlashs.flashes) > 0 {
+			c.ctx.SetDamageTracking(false)
+			c.damageFlashs.drawAll(c.ctx)
+			c.ctx.SetDamageTracking(true)
+		}
+	}
+
 	// Try GPU-direct path (zero-copy surface rendering).
 	// Only attempt if the accelerator is actually capable — on CPU-only
 	// adapters (llvmpipe, SwiftShader) the accelerator stays uninitialized
@@ -513,26 +530,6 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		sw, sh := dc.SurfaceSize()
 		if err := c.RenderDirect(sv, sw, sh); err == nil {
 			return nil
-		}
-	}
-
-	// Collect per-frame damage rects for OS present (ADR-021 Level 4).
-	// In immediate mode, pixmap is fully redrawn each frame → full texture upload.
-	// Damage rects are passed ONLY to PresentWithDamage for per-rect OS blit.
-	// Do NOT call MarkDirtyRegion here — it would override the full upload from Draw().
-	damageRects := c.ctx.FrameDamage()
-	c.ctx.ResetFrameDamage()
-
-	// Debug damage overlay (ADR-021 Phase 6a).
-	// Android SurfaceFlinger pattern: flash-and-fade on dirty regions.
-	// Draws via gg.Context (all backends), damage suppressed to avoid self-inflation.
-	if isDebugDamageEnabled() {
-		c.damageFlashs.update(damageRects)
-		if len(c.damageFlashs.flashes) > 0 {
-			c.MarkDirty()
-			c.ctx.SetDamageTracking(false)
-			c.damageFlashs.drawAll(c.ctx)
-			c.ctx.SetDamageTracking(true)
 		}
 	}
 
