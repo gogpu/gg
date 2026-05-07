@@ -164,9 +164,21 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			// has exactly one EndClip. No intermediate Pop can occur because
 			// TagTransform uses SetTransform (not Push/Pop).
 			dc.Push()
-			dc.DrawPath(path)
-			dc.Clip()
-			dc.ClearPath()
+			// Detect rectangular clips → hardware scissor (ClipRect).
+			// Non-rect clips → general path clip (depth buffer on GPU).
+			// ClipRect uses PushRect → IsRectOnly()=true → hardware scissor.
+			// Clip() uses PushPath → IsRectOnly()=false → depth clip path
+			// which may not be available in all rendering contexts.
+			shape := gg.DetectShape(path)
+			if shape.Kind == gg.ShapeRect {
+				x := shape.CenterX - shape.Width/2
+				y := shape.CenterY - shape.Height/2
+				dc.ClipRect(x, y, shape.Width, shape.Height)
+			} else {
+				dc.DrawPath(path)
+				dc.Clip()
+				dc.ClearPath()
+			}
 			path.Clear()
 
 		case TagEndClip:
