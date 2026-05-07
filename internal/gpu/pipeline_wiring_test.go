@@ -6,6 +6,7 @@
 package gpu
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -154,6 +155,10 @@ func TestSDFAccelerator_ComputeMode_DelegatesToVello(t *testing.T) {
 
 	err := a.FillPath(target, path, paint)
 	if err != nil {
+		// CPU fallback is acceptable when no GPU device is available.
+		if errors.Is(err, gg.ErrFallbackToCPU) {
+			t.Skip("no GPU device available — CPU fallback is expected")
+		}
 		t.Fatalf("FillPath: %v", err)
 	}
 
@@ -226,8 +231,16 @@ func TestSDFAccelerator_FillShape_ComputeMode(t *testing.T) {
 	paint := gg.NewPaint()
 	paint.SetBrush(gg.Solid(gg.Green))
 
+	// Skip if no GPU device available — FillShape silently no-ops without GPU.
+	if !s.gpuReady {
+		t.Skip("no GPU device available — compute mode requires GPU")
+	}
+
 	err := a.FillShape(target, shape, paint)
 	if err != nil {
+		if errors.Is(err, gg.ErrFallbackToCPU) {
+			t.Skip("no GPU device available — CPU fallback is expected")
+		}
 		t.Fatalf("FillShape: %v", err)
 	}
 
