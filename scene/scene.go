@@ -471,7 +471,7 @@ func (s *Scene) Append(other *Scene) {
 	otherEnc := other.Encoding()
 	//nolint:gosec // image registry length is bounded
 	imageOffset := uint32(len(s.imageRegistry))
-	s.encoding.AppendWithImages(otherEnc, imageOffset)
+	s.currentEncoding().AppendWithImages(otherEnc, imageOffset)
 	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
 	s.bounds = s.bounds.Union(other.Bounds())
 	s.version++
@@ -490,7 +490,7 @@ func (s *Scene) AppendWithTranslation(other *Scene, dx, dy float32) {
 	otherEnc := other.Encoding()
 	//nolint:gosec // image registry length is bounded
 	imageOffset := uint32(len(s.imageRegistry))
-	s.encoding.AppendWithTranslation(otherEnc, dx, dy, imageOffset)
+	s.currentEncoding().AppendWithTranslation(otherEnc, dx, dy, imageOffset)
 	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
 
 	ob := other.Bounds()
