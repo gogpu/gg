@@ -180,6 +180,11 @@ type GPURenderSession struct {
 	gpuTexUniformBufs    []*wgpu.Buffer
 	gpuTexBindGroups     []*wgpu.BindGroup
 
+	// Bind groups pending release — deferred until after command buffer submit.
+	// WebGPU requires bind groups to be alive at submit time (wgpu-core track/mod.rs:631).
+	// Skia Graphite pattern: batch-release after GPU completion.
+	pendingBindGroupRelease []*wgpu.BindGroup
+
 	// Depth clip pipeline (GPU-CLIP-003a): fan-tessellated clip path rendered
 	// to depth buffer before content draws. Lazily created on first use.
 	depthClipPipeline *DepthClipPipeline
@@ -767,6 +772,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 
 	// GPU-CLIP-003a: release per-group depth clip buffers after frame encoding.
 	defer s.releaseDepthClipResources(grpRes)
+	defer s.releasePendingBindGroups()
 
 	if activeView == nil {
 		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
@@ -789,6 +795,17 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 }
 
 // releaseDepthClipResources frees per-group owned depth clip buffers.
+// releasePendingBindGroups frees bind groups that were deferred during
+// multi-pass rendering. Called after command buffer submit or at frame end.
+func (s *GPURenderSession) releasePendingBindGroups() {
+	for _, bg := range s.pendingBindGroupRelease {
+		if bg != nil {
+			bg.Release()
+		}
+	}
+	s.pendingBindGroupRelease = s.pendingBindGroupRelease[:0]
+}
+
 func (s *GPURenderSession) releaseDepthClipResources(grpRes []groupResources) {
 	for i := range grpRes {
 		if grpRes[i].depthClipRes != nil {
@@ -911,6 +928,8 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		}
 	}
 	s.gpuTexBindGroups = nil
+	s.releasePendingBindGroups()
+	s.pendingBindGroupRelease = nil
 	for _, buf := range s.gpuTexUniformBufs {
 		if buf != nil {
 			buf.Release()
@@ -1888,8 +1907,10 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 		}
 
 		// Bind group must be recreated each frame because the texture view changes.
+		// DON'T Release() here — shared command encoder may still reference it.
+		// Defer release until after submit (Skia Graphite/Rust wgpu pattern).
 		if s.gpuTexBindGroups[i] != nil {
-			s.gpuTexBindGroups[i].Release()
+			s.pendingBindGroupRelease = append(s.pendingBindGroupRelease, s.gpuTexBindGroups[i])
 		}
 		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
 			Label:  fmt.Sprintf("gpu_tex_bind_%d", i),
