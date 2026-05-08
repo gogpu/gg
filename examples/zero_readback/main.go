@@ -40,9 +40,11 @@ func main() {
 		fontFace = src.Face(14)
 	}
 
-	var canvas *ggcanvas.Canvas
-	var animToken *gogpu.AnimationToken
-	startTime := time.Now()
+	var (
+		canvas       *ggcanvas.Canvas
+		animTime     float64
+		lastDrawTime time.Time
+	)
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		w, h := dc.Width(), dc.Height()
@@ -59,13 +61,22 @@ func main() {
 			if canvas == nil {
 				return
 			}
-			animToken = app.StartAnimation()
 		} else {
 			_ = canvas.Resize(w, h)
 		}
 
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
+
 		_ = canvas.Draw(func(cc *gg.Context) {
-			elapsed := time.Since(startTime).Seconds()
+			elapsed := animTime
 
 			// FillRectCPU: CPU-only background fill.
 			// Bypasses GPU SDF accelerator — standard DrawRectangle+Fill
@@ -113,13 +124,11 @@ func main() {
 		// RenderDirect: single GPU render pass → swapchain surface.
 		// Zero CPU readback, zero pixmap upload. All content GPU-rendered.
 		_ = canvas.Render(dc.RenderTarget())
+
+		app.RequestRedraw()
 	})
 
-	app.OnClose(func() {
-		if animToken != nil {
-			animToken.Stop()
-		}
-	})
+	app.OnClose(func() {})
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)

@@ -18,7 +18,6 @@ import (
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gg/scene"
 	"github.com/gogpu/gogpu"
-	"github.com/gogpu/gpucontext"
 )
 
 func main() {
@@ -29,9 +28,11 @@ func main() {
 		WithSize(width, height).
 		WithContinuousRender(false))
 
-	var canvas *ggcanvas.Canvas
-	var animToken *gogpu.AnimationToken
-	startTime := time.Now()
+	var (
+		canvas       *ggcanvas.Canvas
+		animTime     float64
+		lastDrawTime time.Time
+	)
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		w, h := dc.Width(), dc.Height()
@@ -49,12 +50,21 @@ func main() {
 			if err != nil {
 				log.Fatalf("ggcanvas.New: %v", err)
 			}
-			animToken = app.StartAnimation()
 		} else {
 			_ = canvas.Resize(w, h)
 		}
 
-		t := time.Since(startTime).Seconds()
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
+
+		t := animTime
 		s := buildAnimatedScene(w, h, t)
 
 		if err := canvas.Draw(func(cc *gg.Context) {
@@ -71,16 +81,11 @@ func main() {
 		if err := canvas.Render(dc.RenderTarget()); err != nil {
 			log.Printf("Render: %v", err)
 		}
+
+		app.RequestRedraw()
 	})
 
-	app.EventSource().OnKeyPress(func(_ gpucontext.Key, _ gpucontext.Modifiers) {
-	})
-
-	app.OnClose(func() {
-		if animToken != nil {
-			animToken.Stop()
-		}
-	})
+	app.OnClose(func() {})
 
 	if err := app.Run(); err != nil {
 		log.Fatalf("app.Run: %v", err)

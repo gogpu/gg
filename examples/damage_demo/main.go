@@ -35,13 +35,14 @@ func main() {
 		WithContinuousRender(false))
 
 	var (
-		canvas     *ggcanvas.Canvas
-		animToken  *gogpu.AnimationToken
-		startTime  = time.Now()
-		frameNum   int
-		fpsFrames  int
-		lastFPS    time.Time
-		currentFPS float64
+		canvas       *ggcanvas.Canvas
+		animToken    *gogpu.AnimationToken
+		animTime     float64
+		lastDrawTime time.Time
+		frameNum     int
+		fpsFrames    int
+		lastFPS      time.Time
+		currentFPS   float64
 	)
 
 	app.OnDraw(func(dc *gogpu.Context) {
@@ -66,7 +67,16 @@ func main() {
 			_ = canvas.Resize(w, h)
 		}
 
-		t := time.Since(startTime).Seconds()
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
+		t := animTime
 
 		if err := canvas.Draw(func(cc *gg.Context) {
 			cc.ResetFrameDamage()
@@ -81,7 +91,7 @@ func main() {
 
 			// ANIMATED elements — each gets its own damage rect.
 			drawBouncingCircle(cc, w, h, t)
-			drawFrameCounter(cc, w, h, frameNum, time.Since(startTime), currentFPS)
+			drawFrameCounter(cc, w, h, frameNum, time.Duration(animTime*float64(time.Second)), currentFPS)
 		}); err != nil {
 			log.Printf("Draw: %v", err)
 		}
@@ -106,6 +116,7 @@ func main() {
 			fpsFrames = 0
 			lastFPS = time.Now()
 		}
+		app.RequestRedraw()
 	})
 
 	app.EventSource().OnKeyPress(func(_ gpucontext.Key, _ gpucontext.Modifiers) {})

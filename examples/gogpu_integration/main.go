@@ -61,15 +61,26 @@ func main() {
 	var animToken *gogpu.AnimationToken
 	var frame int
 	paused := false
-	startTime := time.Now()
+	var animTime float64
+	var lastDrawTime time.Time
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		if frame == 0 {
 			log.Printf("Backend: %s", dc.Backend())
-			// Start animation — renders at VSync while token is alive.
 			animToken = app.StartAnimation()
 			log.Printf("Animation started (Space to pause/resume)")
 		}
+
+		// Accumulate animation time (clamped after pause to prevent jump)
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
 
 		w, h := dc.Width(), dc.Height()
 		if w <= 0 || h <= 0 {
@@ -98,7 +109,7 @@ func main() {
 			cw, ch = w, h
 		}
 
-		elapsed := time.Since(startTime).Seconds()
+		elapsed := animTime
 		faces := [4]text.Face{fontFace, face28, face18, face14}
 		if err := canvas.Draw(func(cc *gg.Context) {
 			renderFrame(cc, elapsed, cw, ch, faces, frame)
@@ -111,6 +122,12 @@ func main() {
 			log.Printf("Frame %d: Render error: %v", frame, err)
 		}
 		frame++
+
+		// Self-sustaining animation: request next frame from within OnDraw.
+		// Pause breaks the chain → no more OnDraw → zero frame generation.
+		if !paused {
+			app.RequestRedraw()
+		}
 	})
 
 	// Space toggles animation pause/resume — demonstrates three-state model.
@@ -127,6 +144,7 @@ func main() {
 			log.Printf("Paused (0%% CPU idle, press Space to resume)")
 		} else {
 			animToken = app.StartAnimation()
+			app.RequestRedraw()
 			log.Printf("Resumed")
 		}
 	})
