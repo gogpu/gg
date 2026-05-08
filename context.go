@@ -1325,6 +1325,14 @@ func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height ui
 // the damaged pixels are re-composited. When damageRect is empty, behaves
 // identically to FlushGPUWithView (full compositor pass).
 //
+// IMPORTANT: damage-aware rendering (LoadOpLoad + scissor) works only on the
+// blit-only compositor path (frames with only DrawGPUTextureBase/DrawGPUTexture
+// calls, no vector shapes). When the frame contains Fill/Stroke operations,
+// the MSAA render path is used which always does LoadOpClear — damageRect is
+// ignored and a warning is logged. This matches enterprise practice: Chrome,
+// Flutter, and Skia all re-render dirty layers fully via MSAA and composite
+// incrementally via blit-only path. See ADR-021.
+//
 // This enables sub-region compositing: a 48×48 spinner updates only 9KB
 // instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
 func (c *Context) FlushGPUWithViewDamage(view gpucontext.TextureView, width, height uint32, damageRect image.Rectangle) error {

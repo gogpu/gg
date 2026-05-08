@@ -827,6 +827,15 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 
 	blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
 
+	// ADR-021: DamageRect (LoadOpLoad + scissor) is only supported on the
+	// blit-only compositor path. MSAA render passes cannot use LoadOpLoad
+	// because multisampled content is discarded after resolve (StoreOp=DontCare).
+	// No enterprise framework (Chrome, Flutter, Skia) uses LoadOpLoad on MSAA.
+	// Warn if caller passed damageRect but MSAA path will be used.
+	if !blitOnly && !target.DamageRect.Empty() {
+		slogger().Warn("damageRect ignored: MSAA render path requires full LoadOpClear; use blit-only compositor for damage-aware rendering (ADR-021)")
+	}
+
 	// ADR-017: shared encoder → record render pass without submit.
 	if sharedEncoder != nil {
 		if blitOnly {
