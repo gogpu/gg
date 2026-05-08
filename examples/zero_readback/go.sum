@@ -14,10 +14,10 @@ github.com/gogpu/gpucontext v0.17.0 h1:ptwrnCfZn0fMJa7yZU0FHy4CXNsmb6bdYJRFo0SFN
 github.com/gogpu/gpucontext v0.17.0/go.mod h1:6zwdmYXH5GQltoiHbb3WXVS/UJ5bFsCux0mXCVqGlzY=
 github.com/gogpu/gputypes v0.5.0 h1:i2ED/9w6m6yLxf8XJT69/NIMSNTLO2y5F1LqvugCKIE=
 github.com/gogpu/gputypes v0.5.0/go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=
-github.com/gogpu/naga v0.17.11 h1:BndN5LLj3BKSdfjJxrDibs3jdx4YstrkvYTgEoJhsWI=
-github.com/gogpu/naga v0.17.11/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
-github.com/gogpu/wgpu v0.27.0 h1:KpQa7REbdr21PmlJcpDNPHPsyHD5lPWHauy2qPEIRcc=
-github.com/gogpu/wgpu v0.27.0/go.mod h1:b08BKjZLYMNzF918kMnjvgKoSGUR9dTTjvrdSRjPCqk=
+github.com/gogpu/naga v0.17.13 h1:VlponVgD1fEfNotx0874M4n7tnfum8YlMEB3pBdd2Ps=
+github.com/gogpu/naga v0.17.13/go.mod h1:15sQaHKkbqXcwTN+hHYGLsA0WBBnkmYzne/eF5p5WEg=
+github.com/gogpu/wgpu v0.27.1 h1:uEiZTj6EFNZ2VWVSB9q7+Gqc+f9zsYuCe1Giu7ECKro=
+github.com/gogpu/wgpu v0.27.1/go.mod h1:LordcEpJM76P0Ispw3r+3F2fAhd8khbBL7PgUa2iW/A=
 golang.org/x/image v0.39.0 h1:skVYidAEVKgn8lZ602XO75asgXBgLj9G/FE3RbuPFww=
 golang.org/x/image v0.39.0/go.mod h1:sIbmppfU+xFLPIG0FoVUTvyBMmgng1/XAMhQ2ft0hpA=
 golang.org/x/sys v0.43.0 h1:Rlag2XtaFTxp19wS8MXlJwTvoh8ArU6ezoyFsMyCTNI=
