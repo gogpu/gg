@@ -196,9 +196,15 @@ type GPURenderSession struct {
 	sdfVertexStaging    []byte
 	convexVertexStaging []byte
 
-	// In-flight command buffer from the previous surface frame. Freed at
-	// the start of the next frame, when VSync guarantees the GPU is done.
-	prevCmdBuf *wgpu.CommandBuffer
+	// In-flight command buffers from the previous frame. Freed at the
+	// start of the next frame, when VSync guarantees the GPU is done.
+	// A slice is used instead of a single pointer because multiple
+	// FlushGPUWithView calls per frame (e.g., render to offscreen then
+	// composite to swapchain) each produce a separate command buffer.
+	// Freeing a command buffer while the GPU is still executing it causes
+	// vkResetCommandPool on an in-flight pool — undefined behavior that
+	// manifests as trail artifacts (stale MSAA resolve content).
+	prevCmdBufs []*wgpu.CommandBuffer
 
 	// frameRendered tracks whether at least one render pass has been
 	// submitted to the surface in the current frame. When true, subsequent
@@ -263,10 +269,14 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 	if modeChanged || sizeChanged {
 		// Drain the GPU before destroying textures — an in-flight command
 		// buffer may still reference framebuffers built from these views.
-		if s.prevCmdBuf != nil {
+		if len(s.prevCmdBufs) > 0 {
 			s.drainQueue()
-			s.device.FreeCommandBuffer(s.prevCmdBuf)
-			s.prevCmdBuf = nil
+			for _, cb := range s.prevCmdBufs {
+				if cb != nil {
+					s.device.FreeCommandBuffer(cb)
+				}
+			}
+			s.prevCmdBufs = s.prevCmdBufs[:0]
 		}
 		s.textures.destroyTextures()
 	}
@@ -304,6 +314,21 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 // For offscreen mode this is a no-op — offscreen readback composites via
 // Porter-Duff "over", so LoadOpClear is always safe there.
 func (s *GPURenderSession) BeginFrame() {
+	// Free all command buffers from the previous frame. By now, VSync (or
+	// the equivalent present barrier) guarantees the GPU is done with them.
+	// This MUST happen at frame boundaries — not mid-frame — because
+	// multiple FlushGPUWithView calls within a single frame produce
+	// separate command buffers that may still be in-flight when the next
+	// flush begins. Freeing them mid-frame would vkResetCommandPool on an
+	// in-flight pool, causing undefined behavior (trail artifacts from
+	// incomplete MSAA resolve).
+	for _, cb := range s.prevCmdBufs {
+		if cb != nil {
+			s.device.FreeCommandBuffer(cb)
+		}
+	}
+	s.prevCmdBufs = s.prevCmdBufs[:0]
+
 	s.frameRendered = false
 	s.lastView = nil
 }
@@ -370,7 +395,29 @@ func (s *GPURenderSession) effectiveDimensions(target gg.GPURenderTarget, active
 // the active render target. In surface/view mode only MSAA and stencil are
 // created (the view itself is the resolve target). In offscreen mode a
 // resolve texture is also created for CPU readback.
+//
+// When the dimensions change (e.g., switching from a 100x100 offscreen target
+// to a 700x500 swapchain within the same frame), old textures must be
+// destroyed. If there are in-flight command buffers from earlier flushes in
+// the same frame, we must drain the GPU first — otherwise destroying MSAA
+// textures referenced by in-flight render passes is undefined behavior.
 func (s *GPURenderSession) ensureTexturesForView(activeView *wgpu.TextureView, w, h uint32) error {
+	// If dimensions are changing and there are in-flight command buffers
+	// from earlier flushes in this frame, drain the GPU before destroying
+	// the old textures. Without this, the earlier flush's render pass
+	// would reference destroyed MSAA textures.
+	if s.textures.msaaTex != nil && (s.textures.width != w || s.textures.height != h) {
+		if len(s.prevCmdBufs) > 0 {
+			s.drainQueue()
+			for _, cb := range s.prevCmdBufs {
+				if cb != nil {
+					s.device.FreeCommandBuffer(cb)
+				}
+			}
+			s.prevCmdBufs = s.prevCmdBufs[:0]
+		}
+	}
+
 	if activeView != nil {
 		return s.textures.ensureSurfaceTextures(s.device, w, h, "session")
 	}
@@ -842,12 +889,15 @@ func (s *GPURenderSession) Size() (uint32, uint32) {
 // The surface view is not destroyed -- it is owned by the caller.
 func (s *GPURenderSession) Destroy() {
 	// Drain the GPU queue before freeing any in-flight resources.
-	// Submit a no-op command buffer with a fence — the queue is FIFO,
-	// so when the fence signals, all prior submissions are complete.
-	if s.prevCmdBuf != nil {
+	// WaitIdle guarantees all prior submissions are complete (FIFO queue).
+	if len(s.prevCmdBufs) > 0 {
 		s.drainQueue()
-		s.device.FreeCommandBuffer(s.prevCmdBuf)
-		s.prevCmdBuf = nil
+		for _, cb := range s.prevCmdBufs {
+			if cb != nil {
+				s.device.FreeCommandBuffer(cb)
+			}
+		}
+		s.prevCmdBufs = s.prevCmdBufs[:0]
 	}
 	s.destroyPersistentBuffers()
 	s.textures.destroyTextures()
@@ -2534,24 +2584,22 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	}
 	encoderConsumed = true
 
-	// Free the previous frame's command buffer. By now VSync has
-	// guaranteed the GPU finished with it.
-	if s.prevCmdBuf != nil {
-		s.device.FreeCommandBuffer(s.prevCmdBuf)
-	}
-
-	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
-	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
+	// Submit the command buffer. Do NOT free any previous command buffers
+	// here — multiple FlushGPUWithView calls per frame each produce a
+	// command buffer. Freeing one mid-frame would vkResetCommandPool on a
+	// pool whose command buffer is still in-flight (undefined behavior,
+	// manifests as trail artifacts from incomplete MSAA resolve).
+	// All command buffers are freed at the start of the NEXT frame
+	// (BeginFrame) when VSync guarantees the GPU is done.
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
 		// submitted. Without this, the Vulkan command pool entry leaks.
 		s.device.FreeCommandBuffer(cmdBuf)
-		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
 
 	// Keep reference so next frame can free it after GPU is done.
-	s.prevCmdBuf = cmdBuf
+	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
 
 	// Mark that at least one render pass has been submitted this frame.
 	// Subsequent mid-frame flushes will use LoadOpLoad to preserve content.
@@ -2890,16 +2938,12 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	}
 	encoderConsumed = true
 
-	if s.prevCmdBuf != nil {
-		s.device.FreeCommandBuffer(s.prevCmdBuf)
-	}
-
+	// Do NOT free previous command buffers mid-frame — see encodeSubmitSurface.
 	if _, submitErr := s.queue.Submit(cmdBuf); submitErr != nil {
 		s.device.FreeCommandBuffer(cmdBuf)
-		s.prevCmdBuf = nil
 		return fmt.Errorf("submit blit: %w", submitErr)
 	}
-	s.prevCmdBuf = cmdBuf
+	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
 	s.frameRendered = true
 	s.lastView = view
 
@@ -3002,24 +3046,16 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	}
 	encoderConsumed = true
 
-	// Free the previous frame's command buffer. By now VSync has
-	// guaranteed the GPU finished with it.
-	if s.prevCmdBuf != nil {
-		s.device.FreeCommandBuffer(s.prevCmdBuf)
-	}
-
-	// Async submit — command buffer stays alive for deferred free (prevCmdBuf).
-	// wgpu.Queue.Submit() is sync (waits+frees) which would cause double-free.
+	// Do NOT free previous command buffers mid-frame — see encodeSubmitSurface.
 	if _, err := s.queue.Submit(cmdBuf); err != nil {
 		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
 		// submitted. Without this, the Vulkan command pool entry leaks.
 		s.device.FreeCommandBuffer(cmdBuf)
-		s.prevCmdBuf = nil
 		return fmt.Errorf("submit: %w", err)
 	}
 
 	// Keep reference so next frame can free it after GPU is done.
-	s.prevCmdBuf = cmdBuf
+	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
 
 	// Mark that at least one render pass has been submitted this frame.
 	s.frameRendered = true

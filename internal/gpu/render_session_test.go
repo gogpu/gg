@@ -1082,7 +1082,7 @@ func TestRenderSession_EncoderLifecycleSurface(t *testing.T) {
 	}
 
 	// Rapid consecutive surface renders. Each call produces a command buffer
-	// via encoder.Finish(), submits it, and stores prevCmdBuf. The defer
+	// via encoder.Finish(), submits it, and appends to prevCmdBufs. The defer
 	// safety net ensures no leaked encoder even if submit fails.
 	for i := 0; i < 10; i++ {
 		if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
