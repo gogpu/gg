@@ -1588,6 +1588,16 @@ func (c *Context) doFill() error {
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
 
+	// Set clip/mask coverage BEFORE GPU attempt so that CPU SDF fallback
+	// (SDFAccelerator.FillShape) can apply per-pixel clip+mask coverage.
+	// The GPU render-pass path ignores paint.ClipCoverage (uses shader-based
+	// clipping), so setting it early is harmless for the GPU path.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
+
 	// Transform path to device-space for rendering.
 	// At scale=1.0 this is a zero-copy no-op.
 	devicePath := c.deviceSpacePath()
@@ -1609,14 +1619,6 @@ func (c *Context) doFill() error {
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
 
-	// Set clip coverage function on paint so the renderer can apply clipping.
-	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
-
-	// Set mask coverage function on paint so the renderer can apply alpha masking.
-	c.applyMaskToPaint()
-	defer func() { c.paint.MaskCoverage = nil }()
-
 	return c.renderer.Fill(c.pixmap, devicePath, c.paint)
 }
 
@@ -1627,6 +1629,14 @@ func (c *Context) doStroke() error {
 
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
+
+	// Set clip/mask coverage BEFORE GPU attempt so that CPU SDF fallback
+	// (SDFAccelerator.StrokeShape) can apply per-pixel clip+mask coverage.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
 
 	// Transform path to device-space for rendering.
 	devicePath := c.deviceSpacePath()
@@ -1645,14 +1655,6 @@ func (c *Context) doStroke() error {
 		sr.rasterizerMode = cpuMode
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
-
-	// Set clip coverage function on paint so the renderer can apply clipping.
-	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
-
-	// Set mask coverage function on paint so the renderer can apply alpha masking.
-	c.applyMaskToPaint()
-	defer func() { c.paint.MaskCoverage = nil }()
 
 	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)
 }

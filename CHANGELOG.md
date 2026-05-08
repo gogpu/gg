@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.4] - 2026-05-08
+
+### Fixed
+
+- **Multi-flush offscreen texture trails** (BUG-GG-MULTI-FLUSH-001) — two bugs:
+  premature command buffer free mid-frame (`prevCmdBuf` → `prevCmdBufs[]`, deferred
+  to next BeginFrame) + MSAA textures destroyed while in-flight (GPU drain on size
+  change). Per-boundary GPU texture compositing now works correctly.
+
+- **ClipRoundRect not applied on software backend** (BUG-CLIP-001) — `applyClipToPaint()`
+  called after `tryGPUFill()`, so CPU clip path skipped when SDF fallback succeeded.
+  Fix: moved clip/mask setup before GPU attempt. Also: `sdf_accelerator.blendPixel()`
+  now modulates coverage by clip + mask SDF per-pixel. 7 new tests.
+
+- **Bind group released before submit with shared encoder** (BUG-GG-BINDGROUP-LIFETIME-001) —
+  `buildGPUTextureResources()` released old bind groups immediately. With shared
+  command encoder, pending command buffer still referenced them. Fix: deferred release
+  via `pendingBindGroupRelease` + `releasePendingBindGroups()` after submit.
+
+- **MarkDirty() returned empty damage rect** (BUG-GG-LASTDAMAGE-001) — set `dirtyRect`
+  to empty instead of full canvas dimensions. `LastDamage()` returned 0×0.
+  Fix: `image.Rect(0, 0, width, height)`.
+
 ## [0.45.3] - 2026-05-07
 
 ### Fixed

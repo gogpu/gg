@@ -56,13 +56,20 @@
 
 ## Upcoming
 
-### v0.45.2 — In Progress
+### v0.45.4 — In Progress
+- [x] Multi-flush offscreen texture fix (deferred cmd buffer free + MSAA drain)
+- [x] ClipRoundRect on software backend (applyClipToPaint before GPU + blendPixel clip)
+- [x] Bind group deferred release for shared encoder
+- [x] MarkDirty full canvas rect fix
+- [x] Per-boundary GPU texture compositing validated (no trails)
+
+### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
 - [x] Rect clips → hardware scissor in GPUSceneRenderer
 - [x] SetDamageTracking API (ADR-021)
 - [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=1)
 - [x] Scene Append layer-aware encoding
-- [x] FlushGPUWithView ErrFallbackToCPU (ADR-022)
+- [x] TagStroke LineCap/LineJoin/MiterLimit fix
 - [x] Software backend softwareMode flag (lazy GPU init)
 
 ### v0.44.0–v0.45.1 ✅ Released
