@@ -531,8 +531,8 @@ func TestIsBlitOnly_VectorShapesRejectsBlit(t *testing.T) {
 	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
 
 	tests := []struct {
-		name    string
-		grpRes  []groupResources
+		name   string
+		grpRes []groupResources
 	}{
 		{"SDF shapes", []groupResources{{sdfRes: &sdfFrameResources{vertCount: 6}}}},
 		{"convex shapes", []groupResources{{convexRes: &convexFrameResources{vertCount: 3}}}},

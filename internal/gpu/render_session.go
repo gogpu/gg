@@ -5,11 +5,11 @@ package gpu
 import (
 	"context"
 	"fmt"
-	"image"
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"image"
 )
 
 // ScissorGroup holds a subset of draw commands that share the same scissor
