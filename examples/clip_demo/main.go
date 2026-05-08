@@ -57,7 +57,8 @@ func main() {
 	var animToken *gogpu.AnimationToken
 	var frame int
 	paused := false
-	startTime := time.Now()
+	var animTime float64
+	var lastDrawTime time.Time
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		if frame == 0 {
@@ -65,6 +66,16 @@ func main() {
 			animToken = app.StartAnimation()
 			log.Printf("Animation started (Space to pause/resume)")
 		}
+
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
 
 		w, h := dc.Width(), dc.Height()
 		if w <= 0 || h <= 0 {
@@ -92,7 +103,7 @@ func main() {
 			cw, ch = w, h
 		}
 
-		elapsed := time.Since(startTime).Seconds()
+		elapsed := animTime
 		if err := canvas.Draw(func(cc *gg.Context) {
 			renderFrame(cc, elapsed, cw, ch, face20, face14, frame)
 		}); err != nil {
@@ -103,6 +114,10 @@ func main() {
 			log.Printf("Frame %d: Render error: %v", frame, err)
 		}
 		frame++
+
+		if !paused {
+			app.RequestRedraw()
+		}
 	})
 
 	// Space toggles animation pause/resume.
@@ -119,6 +134,7 @@ func main() {
 			log.Printf("Paused (0%% CPU idle, press Space to resume)")
 		} else {
 			animToken = app.StartAnimation()
+			app.RequestRedraw()
 			log.Printf("Resumed")
 		}
 	})

@@ -40,7 +40,8 @@ func main() {
 
 	var canvas *ggcanvas.Canvas
 	var animToken *gogpu.AnimationToken
-	start := time.Now()
+	var animTime float64
+	var lastDrawTime time.Time
 	frame := 0
 
 	app.OnDraw(func(dc *gogpu.Context) {
@@ -49,6 +50,16 @@ func main() {
 			animToken = app.StartAnimation()
 			_ = animToken
 		}
+
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
 
 		w, h := dc.Size()
 		if canvas == nil {
@@ -65,7 +76,7 @@ func main() {
 		}
 
 		cw, ch := w, h
-		t := time.Since(start).Seconds()
+		t := animTime
 
 		if err := canvas.Draw(func(cc *gg.Context) {
 			renderFrame(cc, t, float64(cw), float64(ch), face16, face12, frame)
@@ -77,6 +88,7 @@ func main() {
 			log.Printf("Render error: %v", err)
 		}
 		frame++
+		app.RequestRedraw()
 	})
 
 	app.OnResize(func(w, h int) {

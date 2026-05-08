@@ -35,9 +35,11 @@ func main() {
 		WithSize(width, height).
 		WithContinuousRender(false))
 
-	var canvas *ggcanvas.Canvas
-	var animToken *gogpu.AnimationToken
-	startTime := time.Now()
+	var (
+		canvas       *ggcanvas.Canvas
+		animTime     float64
+		lastDrawTime time.Time
+	)
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		w, h := dc.Width(), dc.Height()
@@ -54,13 +56,22 @@ func main() {
 			if canvas == nil {
 				return
 			}
-			animToken = app.StartAnimation()
 		} else {
 			_ = canvas.Resize(w, h)
 		}
 
+		now := time.Now()
+		if !lastDrawTime.IsZero() {
+			dt := now.Sub(lastDrawTime).Seconds()
+			if dt > 0.1 {
+				dt = 1.0 / 60.0
+			}
+			animTime += dt
+		}
+		lastDrawTime = now
+
 		cc := canvas.Context()
-		elapsed := time.Since(startTime).Seconds()
+		elapsed := animTime
 
 		// ── CPU-ONLY content (NO GPU SDF, NO GPU text) ──
 
@@ -116,13 +127,11 @@ func main() {
 		if err := cc.FlushGPUWithView(sv, sw, sh); err != nil {
 			log.Printf("FlushGPUWithView: %v", err)
 		}
+
+		app.RequestRedraw()
 	})
 
-	app.OnClose(func() {
-		if animToken != nil {
-			animToken.Stop()
-		}
-	})
+	app.OnClose(func() {})
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
