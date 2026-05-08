@@ -62,6 +62,7 @@
 - [x] Bind group deferred release for shared encoder
 - [x] MarkDirty full canvas rect fix
 - [x] Per-boundary GPU texture compositing validated (no trails)
+- [x] Damage-aware present: SetPresentDamage API + forwardDamageRects (ADR-021 Phase 4)
 
 ### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)

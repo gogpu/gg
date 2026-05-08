@@ -1080,6 +1080,174 @@ func TestPixmapTextureView_PromotedTexture(t *testing.T) {
 	}
 }
 
+// mockRenderTarget implements RenderTarget + DamageRectSetter for testing damage forwarding.
+type mockRenderTarget struct {
+	surfaceView    gpucontext.TextureView
+	surfaceW       uint32
+	surfaceH       uint32
+	presentedTex   any
+	damageRects    []image.Rectangle
+	damageSetCount int
+}
+
+func (m *mockRenderTarget) SurfaceView() gpucontext.TextureView { return m.surfaceView }
+func (m *mockRenderTarget) SurfaceSize() (uint32, uint32)       { return m.surfaceW, m.surfaceH }
+func (m *mockRenderTarget) PresentTexture(tex any) error {
+	m.presentedTex = tex
+	return nil
+}
+func (m *mockRenderTarget) SetDamageRects(rects []image.Rectangle) {
+	m.damageRects = rects
+	m.damageSetCount++
+}
+
+// mockRenderTargetNoDamage implements RenderTarget WITHOUT DamageRectSetter.
+type mockRenderTargetNoDamage struct {
+	surfaceView  gpucontext.TextureView
+	surfaceW     uint32
+	surfaceH     uint32
+	presentedTex any
+}
+
+func (m *mockRenderTargetNoDamage) SurfaceView() gpucontext.TextureView { return m.surfaceView }
+func (m *mockRenderTargetNoDamage) SurfaceSize() (uint32, uint32)       { return m.surfaceW, m.surfaceH }
+func (m *mockRenderTargetNoDamage) PresentTexture(tex any) error {
+	m.presentedTex = tex
+	return nil
+}
+
+func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	rects := []image.Rectangle{
+		image.Rect(10, 10, 30, 30),
+		image.Rect(40, 0, 50, 20),
+	}
+	c.SetPresentDamage(rects)
+
+	dc := &mockRenderTarget{}
+	c.forwardDamageRects(dc, nil)
+
+	if dc.damageSetCount != 1 {
+		t.Errorf("SetDamageRects called %d times, want 1", dc.damageSetCount)
+	}
+	if len(dc.damageRects) != 2 {
+		t.Fatalf("damageRects len = %d, want 2", len(dc.damageRects))
+	}
+	if dc.damageRects[0] != rects[0] || dc.damageRects[1] != rects[1] {
+		t.Errorf("damageRects = %v, want %v", dc.damageRects, rects)
+	}
+
+	// After forward, presentDamageRects must be cleared.
+	if c.presentDamageRects != nil {
+		t.Error("presentDamageRects not cleared after forward")
+	}
+}
+
+func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
+	dc := &mockRenderTarget{}
+	c.forwardDamageRects(dc, frameDamage)
+
+	if dc.damageSetCount != 1 {
+		t.Errorf("SetDamageRects called %d times, want 1", dc.damageSetCount)
+	}
+	if len(dc.damageRects) != 1 || dc.damageRects[0] != frameDamage[0] {
+		t.Errorf("damageRects = %v, want %v", dc.damageRects, frameDamage)
+	}
+}
+
+func TestSetPresentDamage_ExplicitOverridesFrameDamage(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	explicit := []image.Rectangle{image.Rect(20, 20, 40, 40)}
+	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
+
+	c.SetPresentDamage(explicit)
+	dc := &mockRenderTarget{}
+	c.forwardDamageRects(dc, frameDamage)
+
+	if len(dc.damageRects) != 1 || dc.damageRects[0] != explicit[0] {
+		t.Errorf("damageRects = %v, want explicit %v", dc.damageRects, explicit)
+	}
+}
+
+func TestSetPresentDamage_NilRectsNoCall(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	dc := &mockRenderTarget{}
+	c.forwardDamageRects(dc, nil)
+
+	if dc.damageSetCount != 0 {
+		t.Errorf("SetDamageRects called %d times, want 0 for nil rects", dc.damageSetCount)
+	}
+}
+
+func TestSetPresentDamage_NoDamageSetterInterface(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	explicit := []image.Rectangle{image.Rect(10, 10, 30, 30)}
+	c.SetPresentDamage(explicit)
+
+	dc := &mockRenderTargetNoDamage{}
+	c.forwardDamageRects(dc, nil)
+
+	// No panic, presentDamageRects cleared even without setter.
+	if c.presentDamageRects != nil {
+		t.Error("presentDamageRects not cleared when setter unavailable")
+	}
+}
+
+func TestSetPresentDamage_ClearedAfterForward(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	c.SetPresentDamage([]image.Rectangle{image.Rect(0, 0, 50, 50)})
+	dc := &mockRenderTarget{}
+
+	c.forwardDamageRects(dc, nil)
+	if dc.damageSetCount != 1 {
+		t.Fatalf("first forward: want 1 call, got %d", dc.damageSetCount)
+	}
+
+	// Second forward: no rects → no SetDamageRects call.
+	c.forwardDamageRects(dc, nil)
+	if dc.damageSetCount != 1 {
+		t.Errorf("second forward: want still 1 call, got %d", dc.damageSetCount)
+	}
+}
+
 // TestPixmapTextureView_ClosedCanvas returns nil on closed canvas.
 func TestPixmapTextureView_ClosedCanvas(t *testing.T) {
 	provider := newMockProvider()

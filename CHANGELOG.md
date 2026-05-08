@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to empty instead of full canvas dimensions. `LastDamage()` returned 0×0.
   Fix: `image.Rect(0, 0, width, height)`.
 
+### Added
+
+- **Damage-aware present** (ADR-021 Phase 4) — `Canvas.SetPresentDamage()` accepts
+  damage rects from retained-mode callers (ui widget tree). `forwardDamageRects()`
+  forwards to gogpu `SetDamageRects()` → wgpu `PresentWithDamage()` → OS compositor
+  (VK_KHR_incremental_present, DX12 Present1, eglSwapBuffersWithDamage). Falls back
+  to immediate-mode `FrameDamage()` when explicit rects not provided. Both GPU-direct
+  and universal present paths covered. 6 new tests.
+
 ## [0.45.3] - 2026-05-07
 
 ### Fixed
