@@ -65,6 +65,7 @@
 - [x] Damage-aware present: SetPresentDamage API + forwardDamageRects (ADR-021 Phase 4)
 - [x] FlushGPUWithViewDamage: MSAA path warning + godoc blit-only limitation
 - [x] LoadOpLoad on offscreen blit-only compositor verified (Chrome/Flutter pattern)
+- [x] Overlay-only blit path fix (BUG-GG-OVERLAY-ONLY-BLIT-001, unblocks L3 damage)
 
 ### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)

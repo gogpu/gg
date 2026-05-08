@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"image"
-
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
@@ -593,7 +592,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	totalItems := 0
 	for i := range groups {
 		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
-			len(groups[i].ImageCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
+			len(groups[i].ImageCommands) + len(groups[i].GPUTextureCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
 	}
 	if totalItems == 0 && baseLayer == nil {
 		return nil
@@ -2851,11 +2850,12 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 }
 
 // isBlitOnly returns true when the frame contains only textured quads (base
-// layer + overlay GPU textures) with zero vector shapes that need MSAA.
+// layer and/or overlay GPU textures) with zero vector shapes that need MSAA.
+// Allows overlay-only frames (no base layer) for damage-aware compositing:
+// LoadOpLoad preserves previous content, overlays blit only the changed region.
 func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *imageFrameResources) bool {
-	if baseLayerRes == nil || len(baseLayerRes.drawCalls) == 0 {
-		return false
-	}
+	hasBase := baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0
+	hasOverlay := false
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if (gr.sdfRes != nil && gr.sdfRes.vertCount > 0) ||
@@ -2869,8 +2869,11 @@ func (s *GPURenderSession) isBlitOnly(grpRes []groupResources, baseLayerRes *ima
 		// gpuTexRes (GPU texture overlays from RepaintBoundary) are textured
 		// quads — same shader as base layer, no MSAA needed. Allow them in
 		// the blit-only fast path.
+		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+			hasOverlay = true
+		}
 	}
-	return true
+	return hasBase || hasOverlay
 }
 
 // encodeBlitOnlyPass renders textured quads directly to the swapchain surface

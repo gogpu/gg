@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to immediate-mode `FrameDamage()` when explicit rects not provided. Both GPU-direct
   and universal present paths covered. 6 new tests.
 
+- **Overlay-only blit path** (BUG-GG-OVERLAY-ONLY-BLIT-001) — `DrawGPUTexture` without
+  `DrawGPUTextureBase` silently produced no output. Two bugs: (1) `GPUTextureCommands`
+  missing from `totalItems` check → overlay-only frame skipped as "empty"; (2) `isBlitOnly`
+  required base layer → overlay-only fell through to MSAA path. Unblocks L3 damage
+  pipeline: compositor LoadOpLoad + scissor + overlay-only = preserved base + new overlay.
+
 - **FlushGPUWithViewDamage MSAA path warning** (ADR-021) — `damageRect` was silently
   ignored when MSAA render path was used (vector shapes via Fill/Stroke). Now logs
   warning: "damageRect ignored: MSAA render path requires full LoadOpClear". Updated
