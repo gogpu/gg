@@ -624,9 +624,9 @@ func TestMarkDirtyRegion(t *testing.T) {
 	}
 }
 
-// TestMarkDirtyClearsDirtyRect verifies that MarkDirty (full invalidation)
-// resets the dirty rect so Flush falls back to full upload.
-func TestMarkDirtyClearsDirtyRect(t *testing.T) {
+// TestMarkDirtySetsFullCanvasRect verifies that MarkDirty (full invalidation)
+// sets dirtyRect to the full canvas dimensions so LastDamage() returns correct bounds.
+func TestMarkDirtySetsFullCanvasRect(t *testing.T) {
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -643,8 +643,9 @@ func TestMarkDirtyClearsDirtyRect(t *testing.T) {
 	}
 
 	c.MarkDirty()
-	if !c.dirtyRect.Empty() {
-		t.Errorf("dirtyRect should be empty after MarkDirty, got %v", c.dirtyRect)
+	expected := image.Rect(0, 0, 100, 100)
+	if c.dirtyRect != expected {
+		t.Errorf("dirtyRect after MarkDirty = %v, want %v (full canvas)", c.dirtyRect, expected)
 	}
 }
 
