@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/damage_demo
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.45.3
+	github.com/gogpu/gg v0.45.4
 	github.com/gogpu/gogpu v0.32.3
 	github.com/gogpu/gpucontext v0.17.0
 )
