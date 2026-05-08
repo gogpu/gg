@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   godoc to document blit-only limitation. LoadOpLoad + scissor verified working on
   offscreen blit-only compositor path (Chrome/Flutter pattern).
 
+### Changed
+
+- **Dependencies** — examples updated to gogpu v0.32.3 (D2 demand-driven rendering,
+  ADR-023 three-mode frame scheduling).
+
 ## [0.45.3] - 2026-05-07
 
 ### Fixed
