@@ -663,3 +663,98 @@ func TestClipPathDeviceSpace(t *testing.T) {
 		t.Errorf("device-space path too small: w=%.1f h=%.1f (expected ~100x100)", w, h)
 	}
 }
+
+// TestClipRoundRectFillSDF verifies that ClipRoundRect clips CPU SDF-rendered
+// shapes (circles, rrects). This is a regression test for BUG-CLIP-001 where
+// the CPU SDF fallback (SDFAccelerator) rendered shapes without applying the
+// ClipStack per-pixel coverage — content was visible outside the clip boundary
+// on the software backend.
+func TestClipRoundRectFillSDF(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+
+	// Clip to a rounded rect in the center.
+	dc.Push()
+	dc.ClipRoundRect(50, 50, 100, 100, 10)
+
+	// Draw a large red circle centered in the canvas.
+	// The circle extends beyond the clip in all directions.
+	dc.SetRGB(1, 0, 0)
+	dc.DrawCircle(100, 100, 80)
+	dc.Fill()
+
+	dc.Pop()
+
+	// Inside clip (100, 100) should be red — circle center, well inside clip.
+	inside := dc.pixmap.GetPixel(100, 100)
+	if inside.R < 0.9 || inside.G > 0.1 || inside.B > 0.1 {
+		t.Errorf("Inside clip (100,100): expected red, got R=%.2f G=%.2f B=%.2f",
+			inside.R, inside.G, inside.B)
+	}
+
+	// Inside clip (60, 100) should also be red — left edge area of clip.
+	insideLeft := dc.pixmap.GetPixel(60, 100)
+	if insideLeft.R < 0.9 || insideLeft.G > 0.1 || insideLeft.B > 0.1 {
+		t.Errorf("Inside clip (60,100): expected red, got R=%.2f G=%.2f B=%.2f",
+			insideLeft.R, insideLeft.G, insideLeft.B)
+	}
+
+	// Outside clip (10, 100) should be white — left of clip, within circle's
+	// rendering area. BUG-CLIP-001 caused this pixel to be red.
+	outsideLeft := dc.pixmap.GetPixel(10, 100)
+	if outsideLeft.R < 0.9 || outsideLeft.G < 0.9 || outsideLeft.B < 0.9 {
+		t.Errorf("Outside clip (10,100): expected white, got R=%.2f G=%.2f B=%.2f (BUG-CLIP-001)",
+			outsideLeft.R, outsideLeft.G, outsideLeft.B)
+	}
+
+	// Outside clip (100, 10) should be white — above clip.
+	outsideTop := dc.pixmap.GetPixel(100, 10)
+	if outsideTop.R < 0.9 || outsideTop.G < 0.9 || outsideTop.B < 0.9 {
+		t.Errorf("Outside clip (100,10): expected white, got R=%.2f G=%.2f B=%.2f (BUG-CLIP-001)",
+			outsideTop.R, outsideTop.G, outsideTop.B)
+	}
+
+	// Far corner (190, 190) should be white — outside both clip and circle.
+	corner := dc.pixmap.GetPixel(190, 190)
+	if corner.R < 0.9 || corner.G < 0.9 || corner.B < 0.9 {
+		t.Errorf("Outside clip (190,190): expected white, got R=%.2f G=%.2f B=%.2f",
+			corner.R, corner.G, corner.B)
+	}
+}
+
+// TestClipRoundRectFillPath verifies that ClipRoundRect clips non-SDF content
+// (arbitrary paths rendered via the software AnalyticFiller). This ensures the
+// clip fix for BUG-CLIP-001 did not regress the existing path-based clipping.
+func TestClipRoundRectFillPath(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.ClearWithColor(White)
+
+	// Clip to a rounded rect in the center.
+	dc.Push()
+	dc.ClipRoundRect(50, 50, 100, 100, 10)
+
+	// Draw a large rotated square (not circle/rrect, so SDF won't handle it).
+	dc.SetRGB(0, 0, 1)
+	dc.MoveTo(100, 0)
+	dc.LineTo(200, 100)
+	dc.LineTo(100, 200)
+	dc.LineTo(0, 100)
+	dc.ClosePath()
+	dc.Fill()
+
+	dc.Pop()
+
+	// Inside clip (100, 100) should be blue.
+	inside := dc.pixmap.GetPixel(100, 100)
+	if inside.B < 0.9 || inside.R > 0.1 || inside.G > 0.1 {
+		t.Errorf("Inside clip (100,100): expected blue, got R=%.2f G=%.2f B=%.2f",
+			inside.R, inside.G, inside.B)
+	}
+
+	// Outside clip (10, 100) should be white — inside the diamond but outside clip.
+	outsideLeft := dc.pixmap.GetPixel(10, 100)
+	if outsideLeft.R < 0.9 || outsideLeft.G < 0.9 || outsideLeft.B < 0.9 {
+		t.Errorf("Outside clip (10,100): expected white, got R=%.2f G=%.2f B=%.2f",
+			outsideLeft.R, outsideLeft.G, outsideLeft.B)
+	}
+}

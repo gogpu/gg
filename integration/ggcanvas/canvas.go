@@ -62,6 +62,11 @@ type Canvas struct {
 	closed       bool
 	tracked      bool               // true if auto-registered with a ResourceTracker
 	damageFlashs damageOverlayState // debug overlay fade state
+
+	// presentDamageRects holds damage rects for the next present call (ADR-021 Phase 4).
+	// Set by caller (e.g. ui retained tree) via SetPresentDamage().
+	// Consumed and cleared by Render() after forwarding to SetDamageRects().
+	presentDamageRects []image.Rectangle
 }
 
 // New creates a Canvas for integrated mode.
@@ -253,7 +258,7 @@ func (c *Canvas) SetDeviceScale(scale float64) {
 // use MarkDirtyRegion to upload only the changed region.
 func (c *Canvas) MarkDirty() {
 	c.dirty = true
-	c.dirtyRect = image.Rectangle{}
+	c.dirtyRect = image.Rect(0, 0, c.ctx.Width(), c.ctx.Height())
 }
 
 // LastDamage returns the damage rectangle (union) from the most recent frame.
@@ -270,6 +275,42 @@ func (c *Canvas) LastDamageRects() []image.Rectangle {
 // for debug overlay fade animation. Caller should RequestRedraw if true.
 func (c *Canvas) NeedsAnimationFrame() bool {
 	return c.damageFlashs.needsAnimationFrame()
+}
+
+// SetPresentDamage sets damage rectangles for the next present call (ADR-021 Level 4).
+// Rects are in physical pixels with top-left origin. They are forwarded to
+// gogpu SetDamageRects() → wgpu PresentWithDamage() → OS compositor hint
+// (VK_KHR_incremental_present, DX12 Present1, eglSwapBuffersWithDamage).
+//
+// Callers with retained-mode knowledge (e.g. ui widget tree) should provide
+// BOTH old and new bounds of moved/resized objects. Immediate-mode callers
+// can pass FrameDamage() rects (new positions only) when old positions are
+// covered by full-surface redraw.
+//
+// Rects are consumed after one present and do not persist across frames.
+// When nil or empty, the full surface is presented (backward compatible).
+func (c *Canvas) SetPresentDamage(rects []image.Rectangle) {
+	c.presentDamageRects = rects
+}
+
+// forwardDamageRects sends damage rects to the OS compositor via SetDamageRects
+// (ADR-021 Level 4). Uses explicit rects from SetPresentDamage if available,
+// otherwise falls back to immediate-mode FrameDamage rects.
+// Clears presentDamageRects after forwarding (one-shot per frame).
+func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectangle) {
+	setter, ok := dc.(DamageRectSetter)
+	if !ok {
+		c.presentDamageRects = nil
+		return
+	}
+	rects := c.presentDamageRects
+	if len(rects) == 0 {
+		rects = frameDamage
+	}
+	if len(rects) > 0 {
+		setter.SetDamageRects(rects)
+	}
+	c.presentDamageRects = nil
 }
 
 // MarkDirtyRegion flags a rectangular region of the canvas as dirty.
@@ -529,6 +570,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	if !sv.IsNil() && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
 		if err := c.RenderDirect(sv, sw, sh); err == nil {
+			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}
 	}
@@ -546,17 +588,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return err
 	}
 
-	// Damage rects for OS present (ADR-021 Level 4).
-	// In immediate mode (ggcanvas), FrameDamage captures only NEW positions —
-	// missing OLD positions where objects WERE. Per-rect present would leave
-	// old content in the window. Full present is correct for immediate mode.
-	//
-	// Per-rect present requires DamageTracker (retained mode) which computes
-	// BOTH old + new bounds for moved objects. TODO: integrate DamageTracker
-	// into ggcanvas for true per-rect present optimization.
-	//
-	// For now: damage rects are available via canvas.LastDamage() for consumers
-	// (ui compositor, debug overlay) but NOT passed to OS present.
+	c.forwardDamageRects(dc, damageRects)
 
 	return dc.PresentTexture(tex)
 }

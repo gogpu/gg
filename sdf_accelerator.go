@@ -140,7 +140,7 @@ func (a *SDFAccelerator) fillCircleSDF(target GPURenderTarget, shape DetectedSha
 		for px := minX; px <= maxX; px++ {
 			coverage := SDFFilledCircleCoverage(float64(px)+0.5, float64(py)+0.5, cx, cy, r)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -164,7 +164,7 @@ func (a *SDFAccelerator) strokeCircleSDF(target GPURenderTarget, shape DetectedS
 		for px := minX; px <= maxX; px++ {
 			coverage := SDFCircleCoverage(float64(px)+0.5, float64(py)+0.5, cx, cy, r, halfW)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -191,7 +191,7 @@ func (a *SDFAccelerator) fillEllipseSDF(target GPURenderTarget, shape DetectedSh
 			dist := math.Sqrt(dx*dx+dy*dy)*math.Min(rx, ry) - math.Min(rx, ry)
 			coverage := smoothstepCoverage(dist)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -219,7 +219,7 @@ func (a *SDFAccelerator) strokeEllipseSDF(target GPURenderTarget, shape Detected
 			sdf := math.Abs(dist) - halfW
 			coverage := smoothstepCoverage(sdf)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -243,7 +243,7 @@ func (a *SDFAccelerator) fillRRectSDF(target GPURenderTarget, shape DetectedShap
 		for px := minX; px <= maxX; px++ {
 			coverage := SDFFilledRRectCoverage(float64(px)+0.5, float64(py)+0.5, cx, cy, halfW, halfH, cr)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -268,7 +268,7 @@ func (a *SDFAccelerator) strokeRRectSDF(target GPURenderTarget, shape DetectedSh
 		for px := minX; px <= maxX; px++ {
 			coverage := SDFRRectCoverage(float64(px)+0.5, float64(py)+0.5, cx, cy, halfW, halfH, cr, halfStroke)
 			if coverage > 0 {
-				blendPixel(target, px, py, color, coverage)
+				blendPixel(target, px, py, color, coverage, paint)
 			}
 		}
 	}
@@ -291,9 +291,29 @@ func getColorFromPaint(paint *Paint) RGBA {
 }
 
 // blendPixel performs premultiplied source-over compositing of a single pixel.
-func blendPixel(target GPURenderTarget, x, y int, color RGBA, coverage float64) {
+// If the paint has ClipCoverage or MaskCoverage set, coverage is modulated
+// per-pixel so that CPU SDF rendering respects clip and mask regions.
+func blendPixel(target GPURenderTarget, x, y int, color RGBA, coverage float64, paint *Paint) {
 	if x < 0 || x >= target.Width || y < 0 || y >= target.Height {
 		return
+	}
+
+	// Apply clip coverage (per-pixel SDF clip from ClipStack).
+	if paint != nil && paint.ClipCoverage != nil {
+		cc := paint.ClipCoverage(float64(x)+0.5, float64(y)+0.5)
+		if cc == 0 {
+			return
+		}
+		coverage *= float64(cc) / 255.0
+	}
+
+	// Apply mask coverage (per-pixel alpha mask).
+	if paint != nil && paint.MaskCoverage != nil {
+		mc := paint.MaskCoverage(x, y)
+		if mc == 0 {
+			return
+		}
+		coverage *= float64(mc) / 255.0
 	}
 
 	idx := y*target.Stride + x*4

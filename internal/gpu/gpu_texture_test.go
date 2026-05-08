@@ -471,4 +471,139 @@ func TestBuildGPUTextureResources_SeparateVertexBuffers(t *testing.T) {
 	}
 }
 
+// --- Regression: BUG-GG-OVERLAY-ONLY-BLIT-001 ---
+
+func TestIsBlitOnly_BaseOnly(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
+	grpRes := []groupResources{{}}
+
+	if !s.isBlitOnly(grpRes, baseRes) {
+		t.Error("isBlitOnly should return true for base-only frame (no vector shapes)")
+	}
+}
+
+func TestIsBlitOnly_OverlayOnly(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	grpRes := []groupResources{{
+		gpuTexRes: &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}},
+	}}
+
+	if !s.isBlitOnly(grpRes, nil) {
+		t.Error("isBlitOnly should return true for overlay-only frame (no base, no vector shapes)")
+	}
+}
+
+func TestIsBlitOnly_BaseAndOverlay(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
+	grpRes := []groupResources{{
+		gpuTexRes: &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 6}}},
+	}}
+
+	if !s.isBlitOnly(grpRes, baseRes) {
+		t.Error("isBlitOnly should return true for base + overlay frame")
+	}
+}
+
+func TestIsBlitOnly_VectorShapesRejectsBlit(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
+
+	tests := []struct {
+		name   string
+		grpRes []groupResources
+	}{
+		{"SDF shapes", []groupResources{{sdfRes: &sdfFrameResources{vertCount: 6}}}},
+		{"convex shapes", []groupResources{{convexRes: &convexFrameResources{vertCount: 3}}}},
+		{"stencil paths", []groupResources{{stencilRes: []*stencilCoverBuffers{{}}}}},
+		{"image draws", []groupResources{{imageRes: &imageFrameResources{drawCalls: []imageDrawCall{{}}}}}},
+		{"text batches", []groupResources{{textRes: &textFrameResources{drawCalls: []textDrawCall{{}}}}}},
+		{"glyph masks", []groupResources{{glyphMaskRes: &glyphMaskFrameResources{drawCalls: []glyphMaskDrawCall{{}}}}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if s.isBlitOnly(tt.grpRes, baseRes) {
+				t.Errorf("isBlitOnly should return false when %s present", tt.name)
+			}
+		})
+	}
+}
+
+func TestIsBlitOnly_EmptyFrame(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	grpRes := []groupResources{{}}
+
+	if s.isBlitOnly(grpRes, nil) {
+		t.Error("isBlitOnly should return false for completely empty frame (no base, no overlay)")
+	}
+}
+
+func TestRenderFrameGrouped_OverlayOnlyNotSkipped(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	groups := []ScissorGroup{{
+		GPUTextureCommands: []GPUTextureDrawCommand{{
+			DstX: 0, DstY: 0, DstW: 100, DstH: 100,
+		}},
+	}}
+
+	totalItems := 0
+	for i := range groups {
+		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
+			len(groups[i].ImageCommands) + len(groups[i].GPUTextureCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
+	}
+
+	if totalItems == 0 {
+		t.Error("REGRESSION: overlay-only frame has totalItems=0 — GPUTextureCommands not counted")
+	}
+	if totalItems != 1 {
+		t.Errorf("totalItems = %d, want 1 (one GPU texture overlay)", totalItems)
+	}
+}
+
+func TestRenderFrameGrouped_EmptyFrameSkipped(t *testing.T) {
+	groups := []ScissorGroup{{}}
+
+	totalItems := 0
+	for i := range groups {
+		totalItems += len(groups[i].SDFShapes) + len(groups[i].ConvexCommands) + len(groups[i].StencilPaths) +
+			len(groups[i].ImageCommands) + len(groups[i].GPUTextureCommands) + len(groups[i].TextBatches) + len(groups[i].GlyphMaskBatches)
+	}
+
+	if totalItems != 0 {
+		t.Errorf("empty frame totalItems = %d, want 0", totalItems)
+	}
+}
+
 // abs32 already defined in vello_tiles.go

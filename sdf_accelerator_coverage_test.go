@@ -387,9 +387,207 @@ func TestBlendPixelBoundsCheck(t *testing.T) {
 		Height: 10,
 		Stride: 40,
 	}
-	// Out of bounds should not panic
-	blendPixel(target, -1, 5, Red, 1.0)
-	blendPixel(target, 10, 5, Red, 1.0)
-	blendPixel(target, 5, -1, Red, 1.0)
-	blendPixel(target, 5, 10, Red, 1.0)
+	// Out of bounds should not panic (nil paint = no clip/mask)
+	blendPixel(target, -1, 5, Red, 1.0, nil)
+	blendPixel(target, 10, 5, Red, 1.0, nil)
+	blendPixel(target, 5, -1, Red, 1.0, nil)
+	blendPixel(target, 5, 10, Red, 1.0, nil)
+}
+
+// --- BUG-CLIP-001: ClipCoverage in CPU SDF path ---
+
+// TestBlendPixelClipCoverage verifies that blendPixel respects paint.ClipCoverage.
+func TestBlendPixelClipCoverage(t *testing.T) {
+	const w, h = 20, 20
+	stride := w * 4
+	target := GPURenderTarget{
+		Data:   make([]uint8, w*h*4),
+		Width:  w,
+		Height: h,
+		Stride: stride,
+	}
+
+	// Clip: only left half (x < 10) has coverage.
+	paint := NewPaint()
+	paint.ClipCoverage = func(x, _ float64) byte {
+		if x < 10 {
+			return 255
+		}
+		return 0
+	}
+
+	// Draw red at (5, 5) — inside clip.
+	blendPixel(target, 5, 5, Red, 1.0, paint)
+	idx := 5*stride + 5*4
+	if target.Data[idx+0] == 0 {
+		t.Error("pixel at (5,5) should be drawn (inside clip)")
+	}
+
+	// Draw red at (15, 5) — outside clip.
+	blendPixel(target, 15, 5, Red, 1.0, paint)
+	idx = 5*stride + 15*4
+	if target.Data[idx+0] != 0 || target.Data[idx+3] != 0 {
+		t.Error("pixel at (15,5) should NOT be drawn (outside clip)")
+	}
+}
+
+// TestBlendPixelMaskCoverage verifies that blendPixel respects paint.MaskCoverage.
+func TestBlendPixelMaskCoverage(t *testing.T) {
+	const w, h = 20, 20
+	stride := w * 4
+	target := GPURenderTarget{
+		Data:   make([]uint8, w*h*4),
+		Width:  w,
+		Height: h,
+		Stride: stride,
+	}
+
+	// Mask: only top half (y < 10) has coverage.
+	paint := NewPaint()
+	paint.MaskCoverage = func(_, y int) uint8 {
+		if y < 10 {
+			return 255
+		}
+		return 0
+	}
+
+	// Draw red at (5, 5) — inside mask.
+	blendPixel(target, 5, 5, Red, 1.0, paint)
+	idx := 5*stride + 5*4
+	if target.Data[idx+0] == 0 {
+		t.Error("pixel at (5,5) should be drawn (inside mask)")
+	}
+
+	// Draw red at (5, 15) — outside mask.
+	blendPixel(target, 5, 15, Red, 1.0, paint)
+	idx = 15*stride + 5*4
+	if target.Data[idx+0] != 0 || target.Data[idx+3] != 0 {
+		t.Error("pixel at (5,15) should NOT be drawn (outside mask)")
+	}
+}
+
+// TestBlendPixelPartialClip verifies that partial clip coverage attenuates the pixel.
+func TestBlendPixelPartialClip(t *testing.T) {
+	const w, h = 10, 10
+	stride := w * 4
+	target := GPURenderTarget{
+		Data:   make([]uint8, w*h*4),
+		Width:  w,
+		Height: h,
+		Stride: stride,
+	}
+
+	// 50% clip coverage everywhere.
+	paint := NewPaint()
+	paint.ClipCoverage = func(_, _ float64) byte {
+		return 128
+	}
+
+	// Draw fully opaque red.
+	blendPixel(target, 5, 5, RGBA{R: 1, G: 0, B: 0, A: 1}, 1.0, paint)
+	idx := 5*stride + 5*4
+	alpha := target.Data[idx+3]
+
+	// With 50% clip, alpha should be roughly 128 (not 255).
+	if alpha > 140 || alpha < 116 {
+		t.Errorf("pixel alpha = %d, want ~128 (50%% clip)", alpha)
+	}
+}
+
+// TestSDFCircleFillClipped verifies that CPU SDF circle rendering is clipped.
+// This is the core regression test for BUG-CLIP-001.
+func TestSDFCircleFillClipped(t *testing.T) {
+	const w, h = 100, 100
+	stride := w * 4
+	target := GPURenderTarget{
+		Data:   make([]uint8, w*h*4),
+		Width:  w,
+		Height: h,
+		Stride: stride,
+	}
+
+	// Clip to left half only (x < 50).
+	paint := NewPaint()
+	paint.Brush = Solid(Red)
+	paint.ClipCoverage = func(x, _ float64) byte {
+		if x < 50 {
+			return 255
+		}
+		return 0
+	}
+
+	// Draw a circle centered at (50, 50) with radius 30.
+	// It should be clipped at x=50, so only the left half is visible.
+	shape := DetectedShape{
+		Kind:    ShapeCircle,
+		CenterX: 50,
+		CenterY: 50,
+		RadiusX: 30,
+	}
+
+	a := &SDFAccelerator{}
+	if err := a.FillShape(target, shape, paint); err != nil {
+		t.Fatalf("FillShape: %v", err)
+	}
+
+	// Check: pixel at (30, 50) should be drawn (inside circle, inside clip).
+	idx := 50*stride + 30*4
+	if target.Data[idx+3] == 0 {
+		t.Error("pixel at (30,50) should be drawn (inside circle + clip)")
+	}
+
+	// Check: pixel at (70, 50) should NOT be drawn (inside circle, outside clip).
+	idx = 50*stride + 70*4
+	if target.Data[idx+3] != 0 {
+		t.Error("pixel at (70,50) should NOT be drawn (outside clip)")
+	}
+}
+
+// TestSDFRRectFillClipped verifies that CPU SDF rounded rectangle rendering is clipped.
+func TestSDFRRectFillClipped(t *testing.T) {
+	const w, h = 100, 100
+	stride := w * 4
+	target := GPURenderTarget{
+		Data:   make([]uint8, w*h*4),
+		Width:  w,
+		Height: h,
+		Stride: stride,
+	}
+
+	// Clip to top half only (y < 50).
+	paint := NewPaint()
+	paint.Brush = Solid(RGBA{R: 0, G: 0, B: 1, A: 1})
+	paint.ClipCoverage = func(_, y float64) byte {
+		if y < 50 {
+			return 255
+		}
+		return 0
+	}
+
+	// Rounded rect centered at (50, 50), 60x60, corner radius 5.
+	shape := DetectedShape{
+		Kind:         ShapeRRect,
+		CenterX:      50,
+		CenterY:      50,
+		Width:        60,
+		Height:       60,
+		CornerRadius: 5,
+	}
+
+	a := &SDFAccelerator{}
+	if err := a.FillShape(target, shape, paint); err != nil {
+		t.Fatalf("FillShape: %v", err)
+	}
+
+	// Check: pixel at (50, 30) should be drawn (inside rrect, inside clip).
+	idx := 30*stride + 50*4
+	if target.Data[idx+3] == 0 {
+		t.Error("pixel at (50,30) should be drawn (inside rrect + clip)")
+	}
+
+	// Check: pixel at (50, 70) should NOT be drawn (inside rrect, outside clip).
+	idx = 70*stride + 50*4
+	if target.Data[idx+3] != 0 {
+		t.Error("pixel at (50,70) should NOT be drawn (outside clip)")
+	}
 }

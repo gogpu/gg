@@ -1325,6 +1325,14 @@ func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height ui
 // the damaged pixels are re-composited. When damageRect is empty, behaves
 // identically to FlushGPUWithView (full compositor pass).
 //
+// IMPORTANT: damage-aware rendering (LoadOpLoad + scissor) works only on the
+// blit-only compositor path (frames with only DrawGPUTextureBase/DrawGPUTexture
+// calls, no vector shapes). When the frame contains Fill/Stroke operations,
+// the MSAA render path is used which always does LoadOpClear — damageRect is
+// ignored and a warning is logged. This matches enterprise practice: Chrome,
+// Flutter, and Skia all re-render dirty layers fully via MSAA and composite
+// incrementally via blit-only path. See ADR-021.
+//
 // This enables sub-region compositing: a 48×48 spinner updates only 9KB
 // instead of the full surface (8MB at 1080p). See ADR-016 Phase 2.
 func (c *Context) FlushGPUWithViewDamage(view gpucontext.TextureView, width, height uint32, damageRect image.Rectangle) error {
@@ -1588,6 +1596,16 @@ func (c *Context) doFill() error {
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
 
+	// Set clip/mask coverage BEFORE GPU attempt so that CPU SDF fallback
+	// (SDFAccelerator.FillShape) can apply per-pixel clip+mask coverage.
+	// The GPU render-pass path ignores paint.ClipCoverage (uses shader-based
+	// clipping), so setting it early is harmless for the GPU path.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
+
 	// Transform path to device-space for rendering.
 	// At scale=1.0 this is a zero-copy no-op.
 	devicePath := c.deviceSpacePath()
@@ -1609,14 +1627,6 @@ func (c *Context) doFill() error {
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
 
-	// Set clip coverage function on paint so the renderer can apply clipping.
-	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
-
-	// Set mask coverage function on paint so the renderer can apply alpha masking.
-	c.applyMaskToPaint()
-	defer func() { c.paint.MaskCoverage = nil }()
-
 	return c.renderer.Fill(c.pixmap, devicePath, c.paint)
 }
 
@@ -1627,6 +1637,14 @@ func (c *Context) doStroke() error {
 
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
+
+	// Set clip/mask coverage BEFORE GPU attempt so that CPU SDF fallback
+	// (SDFAccelerator.StrokeShape) can apply per-pixel clip+mask coverage.
+	c.applyClipToPaint()
+	defer func() { c.paint.ClipCoverage = nil }()
+
+	c.applyMaskToPaint()
+	defer func() { c.paint.MaskCoverage = nil }()
 
 	// Transform path to device-space for rendering.
 	devicePath := c.deviceSpacePath()
@@ -1645,14 +1663,6 @@ func (c *Context) doStroke() error {
 		sr.rasterizerMode = cpuMode
 		defer func() { sr.rasterizerMode = RasterizerAuto }()
 	}
-
-	// Set clip coverage function on paint so the renderer can apply clipping.
-	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
-
-	// Set mask coverage function on paint so the renderer can apply alpha masking.
-	c.applyMaskToPaint()
-	defer func() { c.paint.MaskCoverage = nil }()
 
 	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)
 }
