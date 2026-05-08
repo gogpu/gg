@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to immediate-mode `FrameDamage()` when explicit rects not provided. Both GPU-direct
   and universal present paths covered. 6 new tests.
 
+- **FlushGPUWithViewDamage MSAA path warning** (ADR-021) — `damageRect` was silently
+  ignored when MSAA render path was used (vector shapes via Fill/Stroke). Now logs
+  warning: "damageRect ignored: MSAA render path requires full LoadOpClear". Updated
+  godoc to document blit-only limitation. LoadOpLoad + scissor verified working on
+  offscreen blit-only compositor path (Chrome/Flutter pattern).
+
 ## [0.45.3] - 2026-05-07
 
 ### Fixed

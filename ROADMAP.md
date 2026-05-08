@@ -63,6 +63,8 @@
 - [x] MarkDirty full canvas rect fix
 - [x] Per-boundary GPU texture compositing validated (no trails)
 - [x] Damage-aware present: SetPresentDamage API + forwardDamageRects (ADR-021 Phase 4)
+- [x] FlushGPUWithViewDamage: MSAA path warning + godoc blit-only limitation
+- [x] LoadOpLoad on offscreen blit-only compositor verified (Chrome/Flutter pattern)
 
 ### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
