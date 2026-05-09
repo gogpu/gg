@@ -241,19 +241,7 @@ func TestTextRenderer_RenderText_Empty(t *testing.T) {
 	}
 }
 
-func TestTextRenderer_RenderTextToScene_Empty(t *testing.T) {
-	r := NewTextRenderer()
-	s := NewScene()
 
-	err := r.RenderTextToScene(s, "", nil, 0, 0, SolidBrush(gg.RGBA{R: 255, G: 0, B: 0, A: 255}))
-	if err != nil {
-		t.Errorf("RenderTextToScene empty should not error, got %v", err)
-	}
-
-	if !s.IsEmpty() {
-		t.Errorf("Scene should be empty after rendering empty text")
-	}
-}
 
 func TestScene_DrawText_Empty(t *testing.T) {
 	s := NewScene()

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/parallel"
+	"github.com/gogpu/gg/text"
 )
 
 // tilePool manages pooled resources for per-tile rendering.
@@ -162,6 +163,9 @@ type Renderer struct {
 	// Configuration
 	tileSize int
 	workers  int
+
+	// Font registry for TagText resolution (set per-render from Scene).
+	fontRegistry map[uint64]*text.FontSource
 
 	// Statistics
 	stats     RenderStats
@@ -322,10 +326,11 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 	// Mark all tiles dirty for full render
 	r.dirty.MarkAll()
 
-	// Get the flattened encoding and image registry
+	// Get the flattened encoding, image registry, and font registry.
 	startEncode := time.Now()
 	enc := scene.Encoding()
 	images := scene.Images()
+	r.fontRegistry = scene.FontRegistry()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -456,10 +461,11 @@ func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap
 		dirtyRegion = r.dirty
 	}
 
-	// Get the flattened encoding and image registry
+	// Get the flattened encoding, image registry, and font registry.
 	startEncode := time.Now()
 	enc := scene.Encoding()
 	images := scene.Images()
+	r.fontRegistry = scene.FontRegistry()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -772,11 +778,8 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			}
 
 		case TagText:
-			// CPU tile renderer skips TagText — text is rendered by
-			// GPUSceneRenderer via dc.DrawString (Tier 6/4 atlas).
-			// CPU fallback would need font registry access + outline
-			// extraction per-tile, deferred to Phase 3 (TASK-GG-SCENE-TEXT-001).
-			_, _, _, _ = dec.Text()
+			run, _, str, brush := dec.Text()
+			r.renderTextOnTile(run, str, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
 
 		case TagBrush:
 			// Brush definition - skip for now
@@ -877,6 +880,91 @@ func compositePixmaps(dst, src *gg.Pixmap) {
 // ---------------------------------------------------------------------------
 // Path and Paint Conversion (scene types -> gg types)
 // ---------------------------------------------------------------------------
+
+// renderTextOnTile renders a TagText glyph run on a CPU tile by extracting
+// glyph outlines and rendering each as a filled path. This is the CPU fallback
+// for text rendering (software backend, headless). GPU path uses dc.DrawString.
+func (r *Renderer) renderTextOnTile(
+	run GlyphRunData, str string, brush Brush,
+	transform Affine, tileX, tileY int,
+	pm *gg.Pixmap, sr *gg.SoftwareRenderer, fillPaint *gg.Paint,
+) {
+	if str == "" || run.GlyphCount == 0 {
+		return
+	}
+
+	source := r.fontRegistry[run.FontSourceID]
+	if source == nil {
+		return
+	}
+
+	face := source.Face(float64(run.FontSize))
+	shaped := text.Shape(str, face)
+	if len(shaped) == 0 {
+		return
+	}
+
+	textRenderer := NewTextRenderer()
+	rendered, err := textRenderer.RenderGlyphs(shaped, face)
+	if err != nil || len(rendered) == 0 {
+		return
+	}
+
+	ggPath := r.pool.getGGPath()
+	defer r.pool.putGGPath(ggPath)
+
+	for _, rg := range rendered {
+		if rg.Path == nil || rg.Path.IsEmpty() {
+			continue
+		}
+
+		// Apply text origin offset: glyph positions are relative to (0,0),
+		// the run origin (OriginX, OriginY) shifts the entire text block.
+		offsetPath := rg.Path.Transform(TranslateAffine(run.OriginX, run.OriginY))
+
+		// Apply scene transform.
+		if !transform.IsIdentity() {
+			transformedPath := NewPath()
+			for _, verb := range offsetPath.Verbs() {
+				_ = verb // path iteration handled below
+			}
+			// Transform each point through the scene transform.
+			pointIdx := 0
+			pts := offsetPath.Points()
+			verbs := offsetPath.Verbs()
+			for _, verb := range verbs {
+				switch verb {
+				case MoveTo:
+					tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+					transformedPath.MoveTo(tx, ty)
+					pointIdx += 2
+				case LineTo:
+					tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+					transformedPath.LineTo(tx, ty)
+					pointIdx += 2
+				case QuadTo:
+					tcx, tcy := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+					tx, ty := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+					transformedPath.QuadTo(tcx, tcy, tx, ty)
+					pointIdx += 4
+				case CubicTo:
+					tc1x, tc1y := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+					tc2x, tc2y := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+					tx, ty := transform.TransformPoint(pts[pointIdx+4], pts[pointIdx+5])
+					transformedPath.CubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty)
+					pointIdx += 6
+				case Close:
+					transformedPath.Close()
+				}
+			}
+			offsetPath = transformedPath
+		}
+
+		convertPathInto(offsetPath, tileX, tileY, ggPath)
+		resetFillPaint(fillPaint, brush, FillNonZero)
+		_ = sr.Fill(pm, ggPath, fillPaint)
+	}
+}
 
 // renderFillRoundRect renders a filled rounded rectangle using SDF per-pixel
 // evaluation directly onto the pixmap, bypassing the path pipeline entirely.

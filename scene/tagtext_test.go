@@ -351,3 +351,97 @@ func TestTextFlags(t *testing.T) {
 		t.Errorf("TextFlagHinting = %d, want 1", TextFlagHinting)
 	}
 }
+
+// --- Append tests with TagText ---
+
+func TestEncoding_AppendWithImages_TagText_BrushOffset(t *testing.T) {
+	enc1 := NewEncoding()
+	enc1.brushes = append(enc1.brushes, SolidBrush(gg.RGBA{R: 1}), SolidBrush(gg.RGBA{G: 1}))
+
+	enc2 := NewEncoding()
+	enc2.brushes = append(enc2.brushes, SolidBrush(gg.RGBA{B: 1}))
+	run := GlyphRunData{GlyphCount: 1, TextLen: 1, BrushIndex: 0, FontSize: 12}
+	enc2.EncodeText(run, []GlyphEntry{{GlyphID: 42}}, "X")
+
+	enc1.AppendWithImages(enc2, 0)
+
+	dec := NewDecoder(enc1)
+	dec.Next()
+	gotRun, _, _, gotBrush := dec.Text()
+	// enc1 had 2 brushes before append → brush 0 in enc2 → brush 2 in enc1
+	if gotRun.BrushIndex != 2 {
+		t.Errorf("BrushIndex = %d, want 2 (offset by 2)", gotRun.BrushIndex)
+	}
+	if gotBrush.Color.B != 1 {
+		t.Errorf("Brush color B = %f, want 1 (blue)", gotBrush.Color.B)
+	}
+}
+
+func TestEncoding_AppendWithTranslation_TagText_OriginOffset(t *testing.T) {
+	enc1 := NewEncoding()
+	enc2 := NewEncoding()
+
+	enc2.brushes = append(enc2.brushes, SolidBrush(gg.White))
+	run := GlyphRunData{
+		GlyphCount: 1, TextLen: 2, FontSize: 14,
+		OriginX: 10, OriginY: 20, BrushIndex: 0,
+	}
+	enc2.EncodeText(run, []GlyphEntry{{GlyphID: 1, X: 0, Y: 0}}, "AB")
+
+	enc1.AppendWithTranslation(enc2, 100, 200, 0)
+
+	dec := NewDecoder(enc1)
+	dec.Next()
+	gotRun, gotGlyphs, gotStr, _ := dec.Text()
+
+	if gotRun.OriginX != 110 {
+		t.Errorf("OriginX = %f, want 110 (10 + 100)", gotRun.OriginX)
+	}
+	if gotRun.OriginY != 220 {
+		t.Errorf("OriginY = %f, want 220 (20 + 200)", gotRun.OriginY)
+	}
+	if gotStr != "AB" {
+		t.Errorf("str = %q, want %q", gotStr, "AB")
+	}
+	if len(gotGlyphs) != 1 || gotGlyphs[0].GlyphID != 1 {
+		t.Errorf("glyphs not preserved: %+v", gotGlyphs)
+	}
+}
+
+func TestEncoding_AppendWithTranslation_TagText_Mixed(t *testing.T) {
+	enc1 := NewEncoding()
+	enc2 := NewEncoding()
+
+	// enc2 has a fill + text
+	enc2.encodeMoveTo(5, 5)
+	enc2.encodeLineTo(10, 10)
+	enc2.brushes = append(enc2.brushes, SolidBrush(gg.Red), SolidBrush(gg.Blue))
+	run := GlyphRunData{GlyphCount: 1, TextLen: 1, FontSize: 12, OriginX: 0, OriginY: 0, BrushIndex: 1}
+	enc2.EncodeText(run, []GlyphEntry{{GlyphID: 65}}, "A")
+
+	enc1.AppendWithTranslation(enc2, 50, 50, 0)
+
+	// Verify path data was offset.
+	dec := NewDecoder(enc1)
+	dec.Next() // MoveTo
+	x, y := dec.MoveTo()
+	if x != 55 || y != 55 {
+		t.Errorf("MoveTo = (%f, %f), want (55, 55)", x, y)
+	}
+
+	dec.Next() // LineTo
+	x, y = dec.LineTo()
+	if x != 60 || y != 60 {
+		t.Errorf("LineTo = (%f, %f), want (60, 60)", x, y)
+	}
+
+	// Find TagText
+	dec.Next() // TagText
+	gotRun, _, _, _ := dec.Text() //nolint:dogsled // only need run header for origin check
+	if gotRun.OriginX != 50 {
+		t.Errorf("text OriginX = %f, want 50", gotRun.OriginX)
+	}
+	if gotRun.OriginY != 50 {
+		t.Errorf("text OriginY = %f, want 50", gotRun.OriginY)
+	}
+}
