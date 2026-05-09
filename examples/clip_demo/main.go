@@ -153,11 +153,14 @@ func main() {
 
 // renderFrame draws the animated clip demo scene.
 func renderFrame(cc *gg.Context, elapsed float64, width, height int, face20, face14 text.Face, frame int) {
-	// Dark background.
-	cc.ClearWithColor(gg.RGBA{R: 0.10, G: 0.10, B: 0.12, A: 1})
-
 	fw := float64(width)
 	fh := float64(height)
+
+	// Dark background (GPU fill, not CPU Clear — required for GPU-direct mode).
+	cc.SetRGBA(0.10, 0.10, 0.12, 1)
+	cc.DrawRectangle(0, 0, fw, fh)
+	_ = cc.Fill()
+
 	t := elapsed * 0.8
 
 	// =============================================

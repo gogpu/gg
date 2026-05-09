@@ -74,7 +74,8 @@ func main() {
 
 		if err := canvas.Draw(func(cc *gg.Context) {
 			cc.SetRGBA(0.06, 0.06, 0.1, 1)
-			cc.Clear()
+			cc.DrawRectangle(0, 0, float64(w), float64(h))
+			_ = cc.Fill()
 
 			// Scene → GPU: decode scene commands through this Context's GPU pipeline.
 			gpuR := scene.NewGPUSceneRenderer(cc)

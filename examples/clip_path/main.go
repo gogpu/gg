@@ -104,7 +104,8 @@ func main() {
 
 func renderFrame(cc *gg.Context, t, w, h float64, face16, face12 text.Face, frame int) {
 	cc.SetRGBA(0.1, 0.1, 0.15, 1)
-	cc.Clear()
+	cc.DrawRectangle(0, 0, w, h)
+	_ = cc.Fill()
 
 	// === Section 1: Circle clip (arbitrary path) ===
 	cx1 := w * 0.2

@@ -171,7 +171,10 @@ func main() {
 func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]text.Face, frame int) {
 	face28, face18, face14 := faces[1], faces[2], faces[3]
 
-	cc.Clear()
+	// Dark background (GPU fill for GPU-direct mode).
+	cc.SetRGBA(0.05, 0.05, 0.08, 1)
+	cc.DrawRectangle(0, 0, float64(width), float64(height))
+	_ = cc.Fill()
 
 	t := elapsed * 0.8
 	cx, cy := float64(width)/2, float64(height)/2

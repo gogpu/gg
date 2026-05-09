@@ -710,7 +710,7 @@ The `integration/ggcanvas/` package bridges gg with gogpu for windowed rendering
 import "github.com/gogpu/gg/integration/ggcanvas"
 
 canvas := ggcanvas.New(provider, width, height)
-// canvas auto-registers with App.TrackResource() — no manual Close needed
+// Auto-configures: device scale, LCD ClearType (ADR-024), resource tracking
 
 // Draw() marks canvas dirty atomically — recommended pattern:
 canvas.Draw(func(dc *gg.Context) {
@@ -868,6 +868,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
 | **Per-Pass Render Target** | WebGPU spec, Skia GrContext | GPURenderTarget.View for per-pass target (surface or offscreen) |
+| **LCD Auto-Detection** | Skia/Chrome, Qt6 | Platform subpixel detection (ADR-024): Windows SPI+registry, macOS None, Linux Xft/Wayland. Auto-enabled via PlatformProvider. |
 
 ## See Also
 

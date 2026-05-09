@@ -141,6 +141,18 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		dirty:    true, // Mark dirty so first Flush creates texture
 	}
 
+	// Auto-detect LCD subpixel layout from platform (ADR-024).
+	// PlatformProvider exposes OS-level display properties; SubpixelLayout
+	// enables ClearType rendering matching native Windows DirectWrite quality.
+	if pp, ok := provider.(gpucontext.PlatformProvider); ok {
+		switch pp.SubpixelLayout() {
+		case gpucontext.SubpixelRGB:
+			c.ctx.SetLCDLayout(gg.LCDLayoutRGB)
+		case gpucontext.SubpixelBGR:
+			c.ctx.SetLCDLayout(gg.LCDLayoutBGR)
+		}
+	}
+
 	// Auto-register with ResourceTracker if the provider supports it.
 	// This enables automatic cleanup on application shutdown without
 	// requiring manual OnClose callbacks.

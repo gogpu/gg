@@ -1,6 +1,7 @@
 // Example: LCD ClearType subpixel text rendering
 //
 // Demonstrates LCD subpixel text via GPU Tier 6 glyph mask pipeline.
+// ClearType is auto-detected from the OS via PlatformProvider (ADR-024).
 package main
 
 import (
@@ -9,18 +10,25 @@ import (
 	"os"
 
 	"github.com/gogpu/gg"
-	_ "github.com/gogpu/gg/gpu"
+	_ "github.com/gogpu/gg/gpu" // GPU accelerator: text goes through Tier 6 glyph mask
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
 )
 
 func main() {
-	app := gogpu.NewApp(gogpu.DefaultConfig().
-		WithTitle("LCD ClearType Text Demo").
-		WithSize(700, 500))
-
 	fontSource := loadFont()
+	if fontSource != nil {
+		log.Printf("Font loaded: %s", fontSource.Name())
+	} else {
+		log.Println("WARNING: No font loaded")
+	}
+
+	app := gogpu.NewApp(gogpu.DefaultConfig().
+		WithTitle("LCD ClearType Text — ADR-024").
+		WithSize(700, 400).
+		WithContinuousRender(false))
+
 	var canvas *ggcanvas.Canvas
 
 	app.OnDraw(func(dc *gogpu.Context) {
@@ -37,61 +45,51 @@ func main() {
 			var err error
 			canvas, err = ggcanvas.New(provider, w, h)
 			if err != nil {
-				log.Fatalf("ggcanvas: %v", err)
+				log.Fatalf("ggcanvas.New: %v", err)
 			}
-		}
-
-		cw, ch := canvas.Size()
-		if cw != w || ch != h {
+		} else {
 			_ = canvas.Resize(w, h)
 		}
 
-		_ = canvas.Draw(func(cc *gg.Context) {
-			// White background
-			cc.SetRGB(1, 1, 1)
+		if err := canvas.Draw(func(cc *gg.Context) {
+			// White background via GPU fill (CPU Clear() is invisible in GPU-direct mode).
+			cc.SetRGBA(0.97, 0.97, 0.97, 1)
 			cc.DrawRectangle(0, 0, float64(w), float64(h))
 			_ = cc.Fill()
 
-			// Enable LCD subpixel rendering
-			cc.SetLCDLayout(gg.LCDLayoutRGB)
-
-			cc.SetRGB(0, 0, 0)
-
-			if fontSource != nil {
-				log.Println("font loaded, drawing text with LCD")
-				sizes := []float64{12, 16, 20, 24, 32}
-				y := 40.0
-				for _, size := range sizes {
-					face := fontSource.Face(size)
-					cc.SetFont(face)
-					cc.DrawString(fmt.Sprintf("%.0fpx: The quick brown fox jumps", size), 20, y)
-					y += size*1.5 + 4
-				}
-			} else {
-				log.Println("NO font - drawing shapes only")
-				cc.DrawCircle(200, 200, 50)
-				_ = cc.Fill()
+			if fontSource == nil {
+				return
 			}
-		})
+
+			cc.SetRGB(0.1, 0.1, 0.1)
+			sizes := []float64{12, 14, 16, 20, 24, 32}
+			y := 40.0
+			for _, size := range sizes {
+				cc.SetFont(fontSource.Face(size))
+				cc.DrawString(fmt.Sprintf("%.0fpx: The quick brown fox jumps over the lazy dog", size), 20, y)
+				y += size*1.5 + 6
+			}
+		}); err != nil {
+			log.Printf("Draw: %v", err)
+		}
 
 		if err := canvas.Render(dc.RenderTarget()); err != nil {
-			log.Printf("render: %v", err)
+			log.Printf("Render: %v", err)
 		}
+		app.RequestRedraw()
 	})
 
-	app.OnClose(func() {
-		gg.CloseAccelerator()
-	})
+	app.OnClose(func() {})
 
 	if err := app.Run(); err != nil {
-		log.Fatal(err)
+		log.Fatalf("app.Run: %v", err)
 	}
 }
 
 func loadFont() *text.FontSource {
 	paths := []string{
-		`C:/Windows/Fonts/segoeui.ttf`,
-		`C:WindowsFontsrial.ttf`,
+		`C:\Windows\Fonts\segoeui.ttf`,
+		`C:\Windows\Fonts\arial.ttf`,
 		"/System/Library/Fonts/Supplemental/Arial.ttf",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 	}

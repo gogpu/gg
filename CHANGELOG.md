@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.2] - 2026-05-09
+
+### Added
+
+- **ClearType LCD auto-detection** (ADR-024) — ggcanvas automatically detects display
+  subpixel layout via `gpucontext.PlatformProvider.SubpixelLayout()` and enables LCD
+  text rendering. Windows: `SystemParametersInfoW` + registry (RGB/BGR). macOS: grayscale
+  (subpixel killed in Mojave 10.14). Linux: `Xft.rgba` / `wl_output.subpixel`. Text
+  quality now matches native Windows DirectWrite / Chrome ClearType. Zero configuration
+  required — works automatically when using gogpu windowing.
+
+### Fixed
+
+- **Examples GPU-direct background** — replaced CPU `Clear()` with GPU `Fill()` in 6
+  examples (lcd_text, scene_gpu_visual, clip_path, clip_demo, damage_demo,
+  gogpu_integration). CPU Clear is invisible in GPU-direct render mode because
+  `RenderDirect` only presents GPU commands, not the CPU pixmap.
+
+### Changed
+
+- **Dependencies** — gpucontext v0.17.0 → v0.18.0 (PlatformProvider.SubpixelLayout),
+  gogpu v0.32.3 → v0.33.0 (SubpixelLayout platform detection).
+
 ## [0.46.1] - 2026-05-09
 
 ### Fixed
