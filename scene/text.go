@@ -282,7 +282,6 @@ func (r *TextRenderer) RenderText(str string, face text.Face) ([]*RenderedGlyph,
 	return r.RenderGlyphs(shaped, face)
 }
 
-
 // outlineToPath converts a text.GlyphOutline to a scene.Path with positioning.
 func (r *TextRenderer) outlineToPath(outline *text.GlyphOutline, x, y float32, config TextRendererConfig) *Path {
 	if outline == nil || outline.SegmentCount() == 0 {

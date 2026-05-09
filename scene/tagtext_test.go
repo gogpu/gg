@@ -436,7 +436,7 @@ func TestEncoding_AppendWithTranslation_TagText_Mixed(t *testing.T) {
 	}
 
 	// Find TagText
-	dec.Next() // TagText
+	dec.Next()                    // TagText
 	gotRun, _, _, _ := dec.Text() //nolint:dogsled // only need run header for origin check
 	if gotRun.OriginX != 50 {
 		t.Errorf("text OriginX = %f, want 50", gotRun.OriginX)

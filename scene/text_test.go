@@ -241,8 +241,6 @@ func TestTextRenderer_RenderText_Empty(t *testing.T) {
 	}
 }
 
-
-
 func TestScene_DrawText_Empty(t *testing.T) {
 	s := NewScene()
 
