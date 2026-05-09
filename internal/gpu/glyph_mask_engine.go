@@ -97,7 +97,7 @@ func (e *GlyphMaskEngine) LCDLayout() text.LCDLayout {
 // The returned GlyphMaskBatch contains quads in user-space coordinates. The
 // Transform field is set to CTM x ortho_projection so the vertex shader
 // transforms positions from user space to clip space.
-func (e *GlyphMaskEngine) LayoutText(
+func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas pressure detection
 	face text.Face,
 	s string,
 	x, y float64,
@@ -149,7 +149,12 @@ func (e *GlyphMaskEngine) LayoutText(
 		fracX := absX - math.Floor(absX)
 		fracY := absY - math.Floor(absY)
 
-		key := text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
+		var key text.GlyphMaskKey
+		if e.atlas.UnderPressure() {
+			key = text.MakeGlyphMaskKeyBucketed(fontID, glyph.GID, fontSize, fracX, fracY)
+		} else {
+			key = text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
+		}
 
 		var region text.GlyphMaskRegion
 		var rErr error
