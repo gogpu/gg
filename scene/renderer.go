@@ -714,11 +714,11 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			pathActive = false
 
 		case TagPushLayer:
-			// Layer management - skip for now
-			_, _ = dec.PushLayer()
+			_, alpha := dec.PushLayer()
+			_ = alpha // CPU tile renderer: layer alpha applied during compositing (TODO: implement per-layer alpha blending)
 
 		case TagPopLayer:
-			// Layer pop - skip for now
+			// CPU tile renderer: layer compositing (TODO: implement proper layer pop with alpha)
 
 		case TagBeginClip:
 			tileW := activePM.Width()
@@ -782,8 +782,10 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			r.renderTextOnTile(run, glyphs, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
 
 		case TagBrush:
-			// Brush definition - skip for now
-			_, _, _, _ = dec.Brush()
+			// Brush definitions are stored in the brushes array and referenced
+			// by index from Fill/Stroke/Text commands. The TagBrush tag encodes
+			// inline RGBA data in pathData — advance the decoder past it.
+			dec.Brush()
 		}
 	}
 
