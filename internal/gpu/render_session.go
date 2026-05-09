@@ -129,6 +129,11 @@ type GPURenderSession struct {
 	surfaceWidth  uint32
 	surfaceHeight uint32
 
+	// Effective render target dimensions for the current frame (ADR-025).
+	// Set at flush time from effectiveDimensions(). Used by text pipelines
+	// (Tier 4/6) to compute ortho projection at flush time, not draw time.
+	frameW, frameH int
+
 	// Persistent per-frame GPU buffers (survive across frames).
 	// Grow-only: reallocated only when data exceeds current capacity.
 	sdfVertBuf       *wgpu.Buffer
@@ -603,6 +608,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	activeView := s.resolveActiveView(target)
 
 	w, h := s.effectiveDimensions(target, activeView)
+	s.frameW, s.frameH = int(w), int(h)
 	if err := s.ensureTexturesForView(activeView, w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
@@ -1628,8 +1634,13 @@ func (s *GPURenderSession) buildTextResources(batches []TextBatch) (*textFrameRe
 			continue
 		}
 
-		// Write uniform data for this batch.
-		uniformData := makeTextUniform(batch.Color, batch.Transform, batch.PxRange, batch.AtlasSize)
+		// Compose ortho projection at flush time (ADR-025, Skia sk_RTAdjust).
+		ortho := gg.Matrix{
+			A: 2.0 / float64(s.frameW), B: 0, C: -1.0,
+			D: 0, E: -2.0 / float64(s.frameH), F: 1.0,
+		}
+		finalTransform := ortho.Multiply(batch.Transform)
+		uniformData := makeTextUniform(batch.Color, finalTransform, batch.PxRange, batch.AtlasSize)
 		if err := s.queue.WriteBuffer(s.textUniformBufs[i], 0, uniformData); err != nil {
 			return nil, fmt.Errorf("write text uniform[%d]: %w", i, err)
 		}
@@ -2117,7 +2128,7 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 	s.ensureGlyphMaskBatchPools(len(batches), glyphMaskLCDUniformSize)
 
 	// Build per-batch draw calls.
-	drawCalls, err := s.buildGlyphMaskDrawCalls(batches)
+	drawCalls, err := s.buildGlyphMaskDrawCalls(batches, s.frameW, s.frameH)
 	if err != nil {
 		return nil, err
 	}
@@ -2141,9 +2152,18 @@ func hasLCDBatches(batches []GlyphMaskBatch) bool {
 }
 
 // buildGlyphMaskDrawCalls creates per-batch draw calls with uniform data upload.
-func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch) ([]glyphMaskDrawCall, error) {
+func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch, viewportW, viewportH int) ([]glyphMaskDrawCall, error) {
 	drawCalls := make([]glyphMaskDrawCall, 0, len(batches))
 	quadOffset := 0
+
+	// Ortho projection from actual render target dimensions (ADR-025, Skia sk_RTAdjust).
+	// Applied at flush time, not draw time, so offscreen textures get correct projection.
+	vw := float64(viewportW)
+	vh := float64(viewportH)
+	ortho := gg.Matrix{
+		A: 2.0 / vw, B: 0, C: -1.0,
+		D: 0, E: -2.0 / vh, F: 1.0,
+	}
 
 	for i, batch := range batches {
 		nQuads := len(batch.Quads)
@@ -2151,12 +2171,15 @@ func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch) ([]
 			continue
 		}
 
+		// Compose ortho with device-space CTM at flush time.
+		finalTransform := ortho.Multiply(batch.Transform)
+
 		// Write uniform data for this batch.
 		var uniformData []byte
 		if batch.IsLCD {
-			uniformData = makeGlyphMaskLCDUniform(batch.Transform, batch.Color, batch.AtlasWidth, batch.AtlasHeight)
+			uniformData = makeGlyphMaskLCDUniform(finalTransform, batch.Color, batch.AtlasWidth, batch.AtlasHeight)
 		} else {
-			uniformData = makeGlyphMaskUniform(batch.Transform, batch.Color)
+			uniformData = makeGlyphMaskUniform(finalTransform, batch.Color)
 		}
 		if err := s.queue.WriteBuffer(s.glyphMaskUniformBufs[i], 0, uniformData); err != nil {
 			return nil, fmt.Errorf("write glyph mask uniform[%d]: %w", i, err)

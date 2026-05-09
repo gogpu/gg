@@ -89,7 +89,6 @@ func (e *GPUTextEngine) LayoutText(
 	s string,
 	x, y float64,
 	color gg.RGBA,
-	viewportW, viewportH int,
 	matrix gg.Matrix,
 	deviceScale float64,
 ) (TextBatch, error) {
@@ -172,8 +171,7 @@ func (e *GPUTextEngine) LayoutText(
 	slogger().Info("LayoutText result",
 		"text", s, "glyphs", glyphCount,
 		"quads", len(quads),
-		"outlineSkip", outlineSkip, "atlasSkip", atlasSkip, "boundsSkip", boundsSkip,
-		"viewport", fmt.Sprintf("%dx%d", viewportW, viewportH))
+		"outlineSkip", outlineSkip, "atlasSkip", atlasSkip, "boundsSkip", boundsSkip)
 
 	if len(quads) == 0 {
 		return TextBatch{}, nil
@@ -196,19 +194,13 @@ func (e *GPUTextEngine) LayoutText(
 	// The fragment shader's fwidth() automatically adapts to the composed
 	// transform, producing correct screenPxRange for anti-aliasing at any
 	// scale/rotation.
-	vw := float64(viewportW)
-	vh := float64(viewportH)
-	ortho := gg.Matrix{
-		A: 2.0 / vw, B: 0, C: -1.0,
-		D: 0, E: -2.0 / vh, F: 1.0,
-	}
-	// Compose: ortho * CTM (CTM applied first to vertex, then ortho).
-	transform := ortho.Multiply(matrix)
+	// Store device-space CTM only — ortho projection deferred to flush time
+	// when actual render target dimensions are known (ADR-025).
 
 	return TextBatch{
 		Quads:      quads,
 		Color:      color,
-		Transform:  transform,
+		Transform:  matrix,
 		AtlasIndex: 0, // Currently single atlas support.
 		PxRange:    e.pxRange,
 		AtlasSize:  float32(atlasConfig.Size),

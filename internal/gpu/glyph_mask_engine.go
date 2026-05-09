@@ -102,7 +102,6 @@ func (e *GlyphMaskEngine) LayoutText(
 	s string,
 	x, y float64,
 	color gg.RGBA,
-	viewportW, viewportH int,
 	matrix gg.Matrix,
 	deviceScale float64,
 ) (GlyphMaskBatch, error) {
@@ -145,7 +144,7 @@ func (e *GlyphMaskEngine) LayoutText(
 		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
 	}
 
-	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale), nil
 }
 
 // LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
@@ -156,7 +155,6 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	glyphs []text.ShapedGlyph,
 	x, y float64,
 	color gg.RGBA,
-	viewportW, viewportH int,
 	matrix gg.Matrix,
 	deviceScale float64,
 ) (GlyphMaskBatch, error) {
@@ -184,7 +182,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	}
 
 	lcdFilter := e.lcdFilter
-	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale), nil
 }
 
 // layoutGlyphs is the common implementation for LayoutText and LayoutShapedGlyphs.
@@ -200,7 +198,6 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	lcdLayout text.LCDLayout,
 	lcdFilter *text.LCDFilter,
 	batchColor [4]float32,
-	viewportW, viewportH int,
 	matrix gg.Matrix,
 	deviceScale float64,
 ) GlyphMaskBatch {
@@ -296,17 +293,9 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 		return GlyphMaskBatch{}
 	}
 
-	// Build the composed transform: CTM x ortho_projection.
-	// The ortho projection maps pixel coordinates to NDC [-1, 1]:
-	//   ndc_x = x / w * 2 - 1
-	//   ndc_y = 1 - y / h * 2
-	vw := float64(viewportW)
-	vh := float64(viewportH)
-	ortho := gg.Matrix{
-		A: 2.0 / vw, B: 0, C: -1.0,
-		D: 0, E: -2.0 / vh, F: 1.0,
-	}
-	transform := ortho.Multiply(matrix)
+	// Store device-space CTM only — ortho projection is deferred to flush time
+	// when the actual render target dimensions are known (ADR-025, Skia sk_RTAdjust pattern).
+	// This enables correct rendering to offscreen textures of any size.
 
 	// Atlas dimensions for the LCD shader's texel stepping.
 	atlasConfig := e.atlas.Config()
@@ -314,7 +303,7 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 
 	return GlyphMaskBatch{
 		Quads:          quads,
-		Transform:      transform,
+		Transform:      matrix,
 		Color:          batchColor,
 		IsLCD:          batchIsLCD,
 		AtlasWidth:     atlasSize,
