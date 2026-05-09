@@ -133,9 +133,10 @@ func main() {
 }
 
 func drawStaticBackground(cc *gg.Context, w, h int) {
-	// Dark background
+	// Dark background (GPU fill for GPU-direct mode).
 	cc.SetRGBA(0.08, 0.08, 0.12, 1)
-	cc.Clear()
+	cc.DrawRectangle(0, 0, float64(w), float64(h))
+	_ = cc.Fill()
 
 	// Static colored rectangles
 	rects := []struct {
