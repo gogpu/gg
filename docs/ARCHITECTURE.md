@@ -89,6 +89,10 @@ Auto-selection routes horizontal text ≤48px to Tier 6 (pixel-perfect with font
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 
+All tiers compute ortho projection at **flush time** from actual render target dimensions
+(ADR-025, Skia `sk_RTAdjust` pattern). This enables correct rendering to offscreen
+textures of any size (RepaintBoundary compositing).
+
 Key design:
 - `RegisterAccelerator()` for opt-in GPU
 - `ErrFallbackToCPU` sentinel error for graceful degradation
@@ -869,6 +873,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
 | **Per-Pass Render Target** | WebGPU spec, Skia GrContext | GPURenderTarget.View for per-pass target (surface or offscreen) |
 | **LCD Auto-Detection** | Skia/Chrome, Qt6 | Platform subpixel detection (ADR-024): Windows SPI+registry, macOS None, Linux Xft/Wayland. Auto-enabled via PlatformProvider. |
+| **Deferred Ortho Projection** | Skia `sk_RTAdjust`, Vello | Ortho computed at flush time from render target dimensions, not draw time (ADR-025). Enables correct offscreen rendering. |
 
 ## See Also
 

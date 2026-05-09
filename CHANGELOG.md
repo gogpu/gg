@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `effectiveDimensions()`, matching SDF/Convex/Stencil/Image tiers and Skia/Vello
   enterprise pattern. CPU-side fix, zero shader changes.
 
+- **Scissor groups applied to GPU texture overlays in blit-only path** — `encodeBlitOnlyPass`
+  had scissor group infrastructure but was not applying it to GPU texture overlay draws.
+  RepaintBoundary textures (e.g., ListView items) rendered outside their parent viewport
+  when composited via the non-MSAA blit path.
+
 ## [0.46.3] - 2026-05-09
 
 ### Added

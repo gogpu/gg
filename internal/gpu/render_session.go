@@ -2956,9 +2956,11 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 
 	// Draw GPU texture overlays (e.g., RepaintBoundary cached textures).
 	// These are textured quads using the same blit pipeline — no MSAA needed.
+	// Per-group scissor applied for compositor clipping (ScrollView viewport).
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
+			s.applyGroupScissor(rp, gr.scissorRect, w, h)
 			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
 		}
 	}
