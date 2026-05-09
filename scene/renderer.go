@@ -612,7 +612,7 @@ type tileClipState struct {
 // rasterization to gg.SoftwareRenderer for analytic anti-aliased output.
 //
 //nolint:gocyclo,cyclop,gocognit,funlen // Command interpreter with multiple cases is inherently complex
-func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer, images []*Image) {
+func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer, images []*Image) { //nolint:maintidx // tag dispatch across all scene command types
 	// Reusable scene.Path for the decode loop — reset per TagBeginPath instead of allocating.
 	currentPath := r.pool.getScenePath()
 	defer r.pool.putScenePath(currentPath)
@@ -770,6 +770,13 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 					blitImageToTile(img, imgTransform, tileX, tileY, activePM)
 				}
 			}
+
+		case TagText:
+			// CPU tile renderer skips TagText — text is rendered by
+			// GPUSceneRenderer via dc.DrawString (Tier 6/4 atlas).
+			// CPU fallback would need font registry access + outline
+			// extraction per-tile, deferred to Phase 3 (TASK-GG-SCENE-TEXT-001).
+			_, _, _, _ = dec.Text()
 
 		case TagBrush:
 			// Brush definition - skip for now

@@ -95,6 +95,12 @@ const (
 	// TagImage references an image resource.
 	// Data: 1 uint32 for image index, 6 float32 for transform
 	TagImage Tag = 0x51
+
+	// TagText encodes a pre-shaped text run as a late-bound glyph reference.
+	// Data: textData stream containing GlyphRunData header + GlyphEntry array.
+	// Resolution to pixels (atlas, outline, text op) is deferred to render time.
+	// See ADR-022.
+	TagText Tag = 0x60
 )
 
 // String returns a human-readable name for the tag.
@@ -134,6 +140,8 @@ func (t Tag) String() string {
 		return "Brush"
 	case TagImage:
 		return "Image"
+	case TagText:
+		return "Text"
 	default:
 		return unknownStr
 	}
@@ -144,9 +152,9 @@ func (t Tag) IsPathCommand() bool {
 	return t >= TagBeginPath && t <= TagEndPath
 }
 
-// IsDrawCommand returns true if the tag is a draw command (fill/stroke).
+// IsDrawCommand returns true if the tag is a draw command (fill/stroke/text).
 func (t Tag) IsDrawCommand() bool {
-	return t == TagFill || t == TagFillRoundRect || t == TagStroke
+	return t == TagFill || t == TagFillRoundRect || t == TagStroke || t == TagText
 }
 
 // IsLayerCommand returns true if the tag is a layer command.

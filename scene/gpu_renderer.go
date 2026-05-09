@@ -191,6 +191,10 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 		case TagEndClip:
 			dc.Pop()
 
+		case TagText:
+			run, _, str, brush := dec.Text()
+			r.resolveText(scene, run, str, brush)
+
 		case TagImage:
 			_, _ = dec.Image()
 
@@ -204,6 +208,31 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 	dc.SetTransform(baseMatrix)
 
 	return nil
+}
+
+// resolveText resolves a TagText glyph run through dc.DrawString, which
+// routes through the existing Tier 6 (glyph mask) / Tier 4 (MSDF) auto-selection.
+// This produces hinted, atlas-batched, DPI-aware text — matching immediate mode quality.
+func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, str string, brush Brush) {
+	if str == "" {
+		return
+	}
+
+	source := scene.fontRegistry[run.FontSourceID]
+	if source == nil {
+		return
+	}
+
+	dc := r.dc
+	applySceneBrush(dc, brush)
+
+	// Save and restore face — scene text may use a different font/size than
+	// whatever the dc currently has set.
+	prevFace := dc.Font()
+	face := source.Face(float64(run.FontSize))
+	dc.SetFont(face)
+	dc.DrawString(str, float64(run.OriginX), float64(run.OriginY))
+	dc.SetFont(prevFace)
 }
 
 // applySceneBrush sets the gg.Context color from a scene.Brush.

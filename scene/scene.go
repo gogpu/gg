@@ -1,5 +1,7 @@
 package scene
 
+import "github.com/gogpu/gg/text"
+
 // Scene is the main retained mode container for accumulating drawing operations.
 // It builds an Encoding that can be efficiently rendered or cached.
 //
@@ -40,6 +42,10 @@ type Scene struct {
 	// imageRegistry maps image handles to indices
 	imageRegistry []*Image
 
+	// fontRegistry maps FontSourceID → *text.FontSource for TagText resolution.
+	// Populated at scene recording time, consumed at render/playback time.
+	fontRegistry map[uint64]*text.FontSource
+
 	// pathPool reuses Path objects to avoid per-shape allocations in Fill/Stroke.
 	// Each shape.ToPath() creates a new Path; pooling eliminates this overhead.
 	pathPool PathPool
@@ -56,6 +62,7 @@ func NewScene() *Scene {
 		bounds:           EmptyRect(),
 		currentTransform: IdentityAffine(),
 		imageRegistry:    make([]*Image, 0, 8),
+		fontRegistry:     make(map[uint64]*text.FontSource, 4),
 	}
 }
 
@@ -69,6 +76,7 @@ func (s *Scene) Reset() {
 	s.bounds = EmptyRect()
 	s.currentTransform = IdentityAffine()
 	s.imageRegistry = s.imageRegistry[:0]
+	clear(s.fontRegistry)
 }
 
 // Fill fills a shape with the given style, transform, and brush.
@@ -473,6 +481,9 @@ func (s *Scene) Append(other *Scene) {
 	imageOffset := uint32(len(s.imageRegistry))
 	s.currentEncoding().AppendWithImages(otherEnc, imageOffset)
 	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
+	for id, src := range other.fontRegistry {
+		s.fontRegistry[id] = src
+	}
 	s.bounds = s.bounds.Union(other.Bounds())
 	s.version++
 }
@@ -492,6 +503,9 @@ func (s *Scene) AppendWithTranslation(other *Scene, dx, dy float32) {
 	imageOffset := uint32(len(s.imageRegistry))
 	s.currentEncoding().AppendWithTranslation(otherEnc, dx, dy, imageOffset)
 	s.imageRegistry = append(s.imageRegistry, other.imageRegistry...)
+	for id, src := range other.fontRegistry {
+		s.fontRegistry[id] = src
+	}
 
 	ob := other.Bounds()
 	ob.MinX += dx
@@ -627,6 +641,19 @@ func (s *Scene) shapeToPath(shape Shape) *Path {
 		return p
 	}
 	return shape.ToPath()
+}
+
+// RegisterFont registers a FontSource in the scene's font registry.
+// Returns the FontSourceID used to reference this font in TagText commands.
+func (s *Scene) RegisterFont(source *text.FontSource) uint64 {
+	id := computeSceneTextFontID(source)
+	s.fontRegistry[id] = source
+	return id
+}
+
+// FontRegistry returns the scene's font registry for render-time font lookup.
+func (s *Scene) FontRegistry() map[uint64]*text.FontSource {
+	return s.fontRegistry
 }
 
 // registerImage adds an image to the registry and returns its index.

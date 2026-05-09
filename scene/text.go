@@ -520,17 +520,96 @@ func (p *TextRendererPool) Put(r *TextRenderer) {
 	}
 }
 
-// DrawText is a convenience method on Scene to draw text directly.
-// It creates a temporary TextRenderer, renders the text, and adds it to the scene.
+// DrawText shapes text and records it as a TagText glyph run in the scene.
+// Shaping (HarfBuzz) is performed once at recording time. Resolution to pixels
+// (atlas, outline, text op) is deferred to render/playback time via the renderer's
+// text resolution capability. See ADR-022.
+//
+// Breaking change from v0.45: previously converted glyphs to vector paths
+// (one Fill per glyph, no hinting). Now stores compact glyph references
+// that renderers resolve at playback time with full hinting and atlas batching.
 func (s *Scene) DrawText(str string, face text.Face, x, y float32, brush Brush) error {
-	renderer := NewTextRenderer()
-	return renderer.RenderTextToScene(s, str, face, x, y, brush)
+	if str == "" {
+		return nil
+	}
+	if face == nil {
+		return &text.FontError{Reason: "face is nil"}
+	}
+
+	shaped := text.Shape(str, face)
+	if len(shaped) == 0 {
+		return nil
+	}
+
+	return s.encodeTextRun(str, shaped, face, x, y, brush)
 }
 
-// DrawGlyphs draws pre-shaped glyphs directly to the scene.
-func (s *Scene) DrawGlyphs(glyphs []text.ShapedGlyph, face text.Face, brush Brush) error {
-	renderer := NewTextRenderer()
-	return renderer.RenderToScene(s, glyphs, face, brush)
+// DrawGlyphs draws pre-shaped glyphs to the scene as a TagText glyph run.
+// Like DrawText but skips shaping — use when glyphs are already shaped.
+// The original text string is required for GPU renderer's DrawString path.
+func (s *Scene) DrawGlyphs(str string, glyphs []text.ShapedGlyph, face text.Face, x, y float32, brush Brush) error {
+	if len(glyphs) == 0 {
+		return nil
+	}
+	if face == nil {
+		return &text.FontError{Reason: "face is nil"}
+	}
+
+	return s.encodeTextRun(str, glyphs, face, x, y, brush)
+}
+
+// encodeTextRun encodes pre-shaped glyphs as a TagText command.
+func (s *Scene) encodeTextRun(str string, glyphs []text.ShapedGlyph, face text.Face, x, y float32, brush Brush) error {
+	source := face.Source()
+	if source == nil {
+		return &text.FontError{Reason: "face has no font source"}
+	}
+
+	fontID := s.RegisterFont(source)
+	enc := s.currentEncoding()
+
+	// Encode transform if not identity.
+	combinedTransform := s.currentTransform
+	if !combinedTransform.IsIdentity() {
+		enc.EncodeTransform(combinedTransform)
+	}
+
+	// Register brush.
+	brushIdx := len(enc.brushes)
+	enc.brushes = append(enc.brushes, brush)
+
+	// Build glyph entries.
+	entries := make([]GlyphEntry, len(glyphs))
+	for i, g := range glyphs {
+		entries[i] = GlyphEntry{
+			GlyphID: g.GID,
+			X:       float32(g.X),
+			Y:       float32(g.Y),
+		}
+	}
+
+	// Truncate string to uint16 max.
+	textStr := str
+	if len(textStr) > 65535 {
+		textStr = textStr[:65535]
+	}
+
+	//nolint:gosec // slice lengths are bounded, textStr truncated above
+	run := GlyphRunData{
+		FontSourceID: fontID,
+		FontSize:     float32(face.Size()),
+		GlyphCount:   uint16(len(glyphs)),
+		Flags:        TextFlagHinting,
+		OriginX:      x,
+		OriginY:      y,
+		BrushIndex:   uint32(brushIdx),
+		TextLen:      uint16(len(textStr)),
+	}
+
+	enc.EncodeText(run, entries, textStr)
+
+	s.version++
+	return nil
 }
 
 // TextShape represents a shaped text string as a scene Shape.
