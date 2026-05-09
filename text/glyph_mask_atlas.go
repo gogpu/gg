@@ -372,6 +372,11 @@ type GlyphMaskAtlas struct {
 	// Current frame counter for frame-based access tracking
 	currentFrame atomic.Uint64
 
+	// bucketedMode is a sticky flag for size bucket quantization.
+	// Enter at 50% capacity, exit at 25% — hysteresis prevents oscillation
+	// between bucketed and fine-grained modes during smooth zoom.
+	bucketedMode bool
+
 	// Statistics
 	hits   atomic.Uint64
 	misses atomic.Uint64
@@ -792,13 +797,23 @@ func (a *GlyphMaskAtlas) Stats() (hits, misses uint64, entryCount, pageCount int
 	return
 }
 
-// UnderPressure returns true when the atlas has used more than half its
-// entry capacity. Callers should switch to MakeGlyphMaskKeyBucketed to
-// reduce the number of unique entries (zoom resilience).
+// UnderPressure returns true when callers should use MakeGlyphMaskKeyBucketed
+// to reduce unique entries. Uses hysteresis to prevent oscillation:
+// enters bucketed mode at 50% capacity, exits at 25%.
 func (a *GlyphMaskAtlas) UnderPressure() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.lookup) >= a.config.MaxEntries/2
+	entries := len(a.lookup)
+	if a.bucketedMode {
+		if entries < a.config.MaxEntries/4 {
+			a.bucketedMode = false
+		}
+	} else {
+		if entries >= a.config.MaxEntries/2 {
+			a.bucketedMode = true
+		}
+	}
+	return a.bucketedMode
 }
 
 // Config returns the atlas configuration.

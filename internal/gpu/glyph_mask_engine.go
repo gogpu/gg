@@ -149,9 +149,18 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		fracX := absX - math.Floor(absX)
 		fracY := absY - math.Floor(absY)
 
+		// Size bucket quantization (Skia pattern): under atlas pressure,
+		// rasterize at a coarse bucket size and scale quads to actual size.
+		// This reduces unique atlas entries from ~57K to ~416 during zoom.
+		rasterSize := fontSize
+		bucketScale := 1.0
 		var key text.GlyphMaskKey
 		if e.atlas.UnderPressure() {
 			key = text.MakeGlyphMaskKeyBucketed(fontID, glyph.GID, fontSize, fracX, fracY)
+			rasterSize = float64(key.SizeQ4) / 16.0
+			if rasterSize > 0 {
+				bucketScale = fontSize / rasterSize
+			}
 		} else {
 			key = text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
 		}
@@ -160,12 +169,10 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		var rErr error
 
 		if useLCD {
-			// LCD path: rasterize at 3x width, store RGB coverage in R8 atlas.
-			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, fontSize, fracX, fracY, hinting, lcdFilter, lcdLayout)
+			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, lcdFilter, lcdLayout)
 		} else {
-			// Grayscale path: standard R8 alpha mask.
 			region, rErr = e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, fontSize, fracX, fracY, hinting)
+				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, rasterSize, fracX, fracY, hinting)
 				if err2 != nil {
 					return nil, 0, 0, 0, 0, err2
 				}
@@ -189,10 +196,12 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		// BearingX: offset from glyph origin to left edge of mask.
 		// BearingY: offset from baseline to top edge of mask (positive = above).
 		//
-		// The mask was rasterized at deviceScale * fontSize. We need to
-		// convert mask pixel coordinates back to user-space coordinates
-		// by dividing by deviceScale.
-		scale := 1.0 / deviceScale
+		// The mask was rasterized at deviceScale * rasterSize. We convert
+		// mask pixel coordinates to user space by dividing by deviceScale,
+		// then scale by bucketScale to match the actual display size.
+		// In normal mode bucketScale=1.0 (no-op). In bucketed mode
+		// bucketScale = actualSize/bucketSize (Skia strikeToSourceScale).
+		scale := bucketScale / deviceScale
 
 		// For LCD glyphs, the atlas region.Width is 3x the logical pixel width.
 		// The screen quad width must use the logical width (region.Width / 3).
