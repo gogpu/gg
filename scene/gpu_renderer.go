@@ -1,6 +1,8 @@
 package scene
 
 import (
+	"image"
+
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
 )
@@ -160,10 +162,11 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			path.Clear()
 
 		case TagPushLayer:
-			dc.Push()
+			blend, alpha := dec.PushLayer()
+			dc.PushLayer(gg.BlendMode(blend), float64(alpha))
 
 		case TagPopLayer:
-			dc.Pop()
+			dc.PopLayer()
 
 		case TagBeginClip:
 			// Push state before clip so EndClip can restore the previous clip
@@ -197,7 +200,8 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			r.resolveText(scene, run, glyphs, str, brush)
 
 		case TagImage:
-			_, _ = dec.Image()
+			imageIndex, imgTransform := dec.Image()
+			r.resolveImage(scene, imageIndex, imgTransform)
 
 		default:
 			// Unknown tags are skipped by the decoder advancing tagIdx.
@@ -241,6 +245,28 @@ func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, glyphs []
 	}
 
 	dc.SetFont(prevFace)
+}
+
+// resolveImage renders a scene image through dc.DrawImage.
+func (r *GPUSceneRenderer) resolveImage(scene *Scene, imageIndex uint32, transform Affine) {
+	images := scene.Images()
+	if int(imageIndex) >= len(images) {
+		return
+	}
+	img := images[imageIndex]
+	if img == nil || img.Width <= 0 || img.Height <= 0 || len(img.Data) < img.Width*img.Height*4 {
+		return
+	}
+
+	rgba := &image.RGBA{
+		Pix:    img.Data,
+		Stride: img.Width * 4,
+		Rect:   image.Rect(0, 0, img.Width, img.Height),
+	}
+	buf := gg.ImageBufFromImage(rgba)
+
+	dc := r.dc
+	dc.DrawImage(buf, float64(transform.C), float64(transform.F))
 }
 
 // applySceneBrush sets the gg.Context color from a scene.Brush.
