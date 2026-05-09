@@ -307,6 +307,14 @@ func IdentityAffine() Affine {
 	return Affine{A: 1, B: 0, C: 0, D: 0, E: 1, F: 0}
 }
 
+// NewAffine creates an affine transformation from individual matrix components.
+//
+//	| a  b  c |
+//	| d  e  f |
+func NewAffine(a, b, c, d, e, f float32) Affine {
+	return Affine{A: a, B: b, C: c, D: d, E: e, F: f}
+}
+
 // TranslateAffine creates a translation transformation.
 func TranslateAffine(x, y float32) Affine {
 	return Affine{A: 1, B: 0, C: x, D: 0, E: 1, F: y}

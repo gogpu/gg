@@ -1,6 +1,10 @@
 package scene
 
-import "math"
+import (
+	"math"
+
+	"github.com/gogpu/gg"
+)
 
 // Shape is the interface for geometric shapes that can be converted to paths.
 // All shapes must be able to provide a path representation and their bounds.
@@ -325,6 +329,30 @@ type PathShape struct {
 // NewPathShape creates a new path shape.
 func NewPathShape(path *Path) *PathShape {
 	return &PathShape{path: path}
+}
+
+// NewGGPathShape creates a PathShape from a gg.Path (float64 → float32 conversion).
+// Use this when working with paths from gg APIs (e.g., gg.ParseSVGPath).
+func NewGGPathShape(ggPath *gg.Path) *PathShape {
+	if ggPath == nil || ggPath.NumVerbs() == 0 {
+		return &PathShape{path: NewPath()}
+	}
+	p := NewPath()
+	ggPath.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.MoveTo:
+			p.MoveTo(float32(coords[0]), float32(coords[1]))
+		case gg.LineTo:
+			p.LineTo(float32(coords[0]), float32(coords[1]))
+		case gg.QuadTo:
+			p.QuadTo(float32(coords[0]), float32(coords[1]), float32(coords[2]), float32(coords[3]))
+		case gg.CubicTo:
+			p.CubicTo(float32(coords[0]), float32(coords[1]), float32(coords[2]), float32(coords[3]), float32(coords[4]), float32(coords[5]))
+		case gg.Close:
+			p.Close()
+		}
+	})
+	return &PathShape{path: p}
 }
 
 // ToPath returns the underlying path.
