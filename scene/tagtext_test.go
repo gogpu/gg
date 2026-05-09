@@ -445,3 +445,53 @@ func TestEncoding_AppendWithTranslation_TagText_Mixed(t *testing.T) {
 		t.Errorf("text OriginY = %f, want 50", gotRun.OriginY)
 	}
 }
+
+// --- Benchmarks ---
+
+func BenchmarkEncodeText_10Glyphs(b *testing.B) {
+	enc := NewEncoding()
+	enc.brushes = append(enc.brushes, SolidBrush(gg.White))
+	glyphs := make([]GlyphEntry, 10)
+	for i := range glyphs {
+		glyphs[i] = GlyphEntry{GlyphID: text.GlyphID(65 + i), X: float32(i) * 7.5, Y: 0}
+	}
+	run := GlyphRunData{
+		FontSourceID: 12345, FontSize: 14, GlyphCount: 10,
+		Flags: TextFlagHinting, OriginX: 0, OriginY: 0,
+		BrushIndex: 0, TextLen: 10,
+	}
+	str := "Hello Wrld"
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		enc.tags = enc.tags[:0]
+		enc.textData = enc.textData[:0]
+		enc.EncodeText(run, glyphs, str)
+	}
+}
+
+func BenchmarkDecodeText_10Glyphs(b *testing.B) {
+	enc := NewEncoding()
+	enc.brushes = append(enc.brushes, SolidBrush(gg.White))
+	glyphs := make([]GlyphEntry, 10)
+	for i := range glyphs {
+		glyphs[i] = GlyphEntry{GlyphID: text.GlyphID(65 + i), X: float32(i) * 7.5, Y: 0}
+	}
+	run := GlyphRunData{
+		FontSourceID: 12345, FontSize: 14, GlyphCount: 10,
+		Flags: TextFlagHinting, OriginX: 10, OriginY: 20,
+		BrushIndex: 0, TextLen: 10,
+	}
+	enc.EncodeText(run, glyphs, "Hello Wrld")
+
+	dec := NewDecoder(enc)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		dec.tagIdx = 0
+		dec.textIdx = 0
+		dec.Next()
+		dec.Text()
+	}
+}

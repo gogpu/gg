@@ -508,8 +508,13 @@ gg/
 │   └── filter/             # Blur, shadow, color matrix
 │
 ├── scene/                 # Retained-mode scene graph
-│   ├── scene.go           # Scene encoding (draw commands → byte stream)
-│   ├── renderer.go        # Tile-parallel renderer (delegates to SoftwareRenderer)
+│   ├── scene.go           # Scene encoding + font registry for TagText
+│   ├── tag.go             # Tag constants (incl. TagText 0x60)
+│   ├── encoding.go        # Dual-stream encoding (path/draw/text data)
+│   ├── decoder.go         # Sequential decoder for all tag types
+│   ├── text.go            # TagText: DrawText/DrawGlyphs (glyph references, ADR-022)
+│   ├── gpu_renderer.go    # GPU scene renderer (resolveText → DrawShapedGlyphs)
+│   ├── renderer.go        # CPU tile-parallel renderer (incl. TagText fallback)
 │   ├── builder.go         # Scene builder API
 │   ├── path.go            # Scene path type (float32)
 │   └── tile.go            # Tile grid and dirty region tracking
@@ -534,7 +539,7 @@ gg/
 │   ├── glyph_run.go        # GlyphRunBuilder for batching
 │   ├── glyph_outline.go    # Outline extraction + grid-fit hinting
 │   ├── glyph_mask_rasterizer.go # CPU rasterization (grayscale + LCD/ClearType)
-│   ├── glyph_mask_atlas.go # R8 alpha atlas (shelf packing, LRU, LCD 3x support)
+│   ├── glyph_mask_atlas.go # R8 alpha atlas (shelf packing, LRU, LCD 3x, size buckets, frame-based compact)
 │   ├── lcd_filter.go       # ClearType 5-tap FIR filter, LCDLayout (RGB/BGR)
 │   ├── msdf/               # MSDF text rendering
 │   └── emoji/              # Color emoji support
@@ -548,24 +553,40 @@ Retained-mode scene graph with tile-based parallel rendering. The `scene.Rendere
 handles orchestration (tile grid, worker pool, dirty regions, layer cache) while
 delegating pixel rendering to `gg.SoftwareRenderer`.
 
+### Scene Text (ADR-022, v0.46.0)
+
+Scene text uses TagText glyph references instead of vector paths. Text is shaped
+once at recording time (`Scene.DrawText`), stored as compact `GlyphRunData` headers
+(30 bytes) + `GlyphEntry` arrays (10 bytes/glyph), and resolved at render time:
+
+```
+Recording:                          Rendering:
+
+text.Shape(str, face)                GPU Scene Renderer (resolveText)
+    ↓                                  → dc.DrawShapedGlyphs
+GlyphRunData + GlyphEntry[]              → Tier 6/4 auto-selection
+    ↓                                    → hinted, atlas-batched
+scene.EncodeText(TagText)
+    ↓                                CPU Tile Renderer (renderTextOnTile)
+textData stream (compact)               → outline extraction from stored glyphs
+                                        → per-glyph Fill (fallback)
+```
+
+Font registry (`Scene.fontRegistry`) maps FontSourceID → `*text.FontSource` for
+cross-context font sharing. Merged in `Scene.Append`/`AppendWithTranslation`.
+
 ### Architecture
 
 ```
-scene.Scene (encoded draw commands)
+scene.Scene (encoded draw commands + font registry)
        │
-       ▼
-scene.Renderer (orchestration)
+       ├──── GPU path (GPUSceneRenderer)
+       │        ↓
+       │     resolveText → dc.DrawShapedGlyphs → Tier 6/4
        │
-       ├── TileGrid (64x64 tiles)
-       ├── DirtyRegion tracking
-       ├── WorkerPool (parallel tiles)
-       └── LayerCache (inter-frame reuse)
-              │
-              ▼ (per-tile)
-       gg.SoftwareRenderer  ◄── delegation (v0.29.4)
-              │
-              ▼
-       internal/raster (analytic AA)
+       └──── CPU path (Renderer, tile-parallel)
+                ↓
+             renderTextOnTile → outline extraction → SoftwareRenderer.Fill
 ```
 
 ### Delegation Pattern (v0.29.4)
@@ -836,6 +857,11 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Adaptive Threshold** | gg | `2048/sqrt(bboxArea)` — scales threshold with shape size |
 | **CoverageFiller Registration** | accelerator.go pattern | Tile rasterizer registration via `RegisterCoverageFiller()` |
 | **Hybrid Text Transform** | Skia/Cairo/Vello | 3-tier decision tree: bitmap → scaled bitmap → outline paths |
+| **Scene TagText** | Skia TextBlob/Vello GlyphRun | Shape once at recording, resolve at render (glyph references, not vector paths) |
+| **DrawShapedGlyphs** | Skia drawTextBlob | Pre-shaped glyph rendering without re-shaping (ADR-022) |
+| **Atlas Size Buckets** | Skia SubRunControl | 4 discrete sizes absorb zoom without atlas overflow (16/24/32/48px) |
+| **Atlas Compact** | Skia GrDrawOpAtlas | Frame-based page eviction (32-frame stale threshold) |
+| **Pressure Hysteresis** | Skia/Chrome | Enter bucketed mode at 50%, exit at 25% — prevents oscillation |
 | **Font Hinting** | FreeType auto-hinter | Grid-fit outline Y/X coordinates for crisp stems at small sizes |
 | **ClearType LCD** | FreeType/Microsoft | 3× horizontal oversampling + 5-tap FIR filter for per-channel RGB alpha |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |

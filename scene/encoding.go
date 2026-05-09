@@ -646,9 +646,12 @@ func (e *Encoding) EncodeImage(imageIndex uint32, transform Affine) {
 func (e *Encoding) EncodeText(run GlyphRunData, glyphs []GlyphEntry, str string) {
 	e.tags = append(e.tags, TagText)
 
-	textBytes := []byte(str)
-	totalSize := glyphRunDataSize + len(glyphs)*glyphEntrySize + len(textBytes)
-	buf := make([]byte, totalSize)
+	totalSize := glyphRunDataSize + len(glyphs)*glyphEntrySize + len(str)
+
+	// Grow textData in one allocation, then write directly into the tail.
+	base := len(e.textData)
+	e.textData = append(e.textData, make([]byte, totalSize)...)
+	buf := e.textData[base:]
 	off := 0
 
 	// Header
@@ -666,7 +669,6 @@ func (e *Encoding) EncodeText(run GlyphRunData, glyphs []GlyphEntry, str string)
 	off += 4
 	binary.LittleEndian.PutUint32(buf[off:], run.BrushIndex)
 	off += 4
-	//nolint:gosec // string length is bounded by uint16 max (checked below)
 	binary.LittleEndian.PutUint16(buf[off:], run.TextLen)
 	off += 2
 
@@ -681,9 +683,8 @@ func (e *Encoding) EncodeText(run GlyphRunData, glyphs []GlyphEntry, str string)
 	}
 
 	// Text bytes
-	copy(buf[off:], textBytes)
+	copy(buf[off:], str)
 
-	e.textData = append(e.textData, buf...)
 	e.shapeCount++
 }
 
