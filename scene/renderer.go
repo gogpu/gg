@@ -778,8 +778,8 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			}
 
 		case TagText:
-			run, _, str, brush := dec.Text()
-			r.renderTextOnTile(run, str, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
+			run, glyphs, _, brush := dec.Text()
+			r.renderTextOnTile(run, glyphs, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
 
 		case TagBrush:
 			// Brush definition - skip for now
@@ -882,14 +882,14 @@ func compositePixmaps(dst, src *gg.Pixmap) {
 // ---------------------------------------------------------------------------
 
 // renderTextOnTile renders a TagText glyph run on a CPU tile by extracting
-// glyph outlines and rendering each as a filled path. This is the CPU fallback
-// for text rendering (software backend, headless). GPU path uses dc.DrawString.
+// glyph outlines and rendering each as a filled path. Uses pre-shaped glyphs
+// from the scene encoding — no re-shaping needed (ADR-022: shape once).
 func (r *Renderer) renderTextOnTile(
-	run GlyphRunData, str string, brush Brush,
+	run GlyphRunData, glyphs []GlyphEntry, brush Brush,
 	transform Affine, tileX, tileY int,
 	pm *gg.Pixmap, sr *gg.SoftwareRenderer, fillPaint *gg.Paint,
 ) {
-	if str == "" || run.GlyphCount == 0 {
+	if len(glyphs) == 0 || run.GlyphCount == 0 {
 		return
 	}
 
@@ -899,9 +899,15 @@ func (r *Renderer) renderTextOnTile(
 	}
 
 	face := source.Face(float64(run.FontSize))
-	shaped := text.Shape(str, face)
-	if len(shaped) == 0 {
-		return
+
+	// Convert stored GlyphEntry → ShapedGlyph (no re-shaping).
+	shaped := make([]text.ShapedGlyph, len(glyphs))
+	for i, g := range glyphs {
+		shaped[i] = text.ShapedGlyph{
+			GID: g.GlyphID,
+			X:   float64(g.X),
+			Y:   float64(g.Y),
+		}
 	}
 
 	textRenderer := NewTextRenderer()
@@ -918,52 +924,49 @@ func (r *Renderer) renderTextOnTile(
 			continue
 		}
 
-		// Apply text origin offset: glyph positions are relative to (0,0),
-		// the run origin (OriginX, OriginY) shifts the entire text block.
-		offsetPath := rg.Path.Transform(TranslateAffine(run.OriginX, run.OriginY))
-
-		// Apply scene transform.
+		// Apply text origin offset and scene transform.
+		finalPath := rg.Path.Transform(TranslateAffine(run.OriginX, run.OriginY))
 		if !transform.IsIdentity() {
-			transformedPath := NewPath()
-			for _, verb := range offsetPath.Verbs() {
-				_ = verb // path iteration handled below
-			}
-			// Transform each point through the scene transform.
-			pointIdx := 0
-			pts := offsetPath.Points()
-			verbs := offsetPath.Verbs()
-			for _, verb := range verbs {
-				switch verb {
-				case MoveTo:
-					tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
-					transformedPath.MoveTo(tx, ty)
-					pointIdx += 2
-				case LineTo:
-					tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
-					transformedPath.LineTo(tx, ty)
-					pointIdx += 2
-				case QuadTo:
-					tcx, tcy := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
-					tx, ty := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
-					transformedPath.QuadTo(tcx, tcy, tx, ty)
-					pointIdx += 4
-				case CubicTo:
-					tc1x, tc1y := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
-					tc2x, tc2y := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
-					tx, ty := transform.TransformPoint(pts[pointIdx+4], pts[pointIdx+5])
-					transformedPath.CubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty)
-					pointIdx += 6
-				case Close:
-					transformedPath.Close()
-				}
-			}
-			offsetPath = transformedPath
+			finalPath = transformScenePath(finalPath, transform)
 		}
 
-		convertPathInto(offsetPath, tileX, tileY, ggPath)
+		convertPathInto(finalPath, tileX, tileY, ggPath)
 		resetFillPaint(fillPaint, brush, FillNonZero)
 		_ = sr.Fill(pm, ggPath, fillPaint)
 	}
+}
+
+// transformScenePath applies an affine transform to all points in a scene path.
+func transformScenePath(p *Path, transform Affine) *Path {
+	result := NewPath()
+	pointIdx := 0
+	pts := p.Points()
+	for _, verb := range p.Verbs() {
+		switch verb {
+		case MoveTo:
+			tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			result.MoveTo(tx, ty)
+			pointIdx += 2
+		case LineTo:
+			tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			result.LineTo(tx, ty)
+			pointIdx += 2
+		case QuadTo:
+			tcx, tcy := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			tx, ty := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+			result.QuadTo(tcx, tcy, tx, ty)
+			pointIdx += 4
+		case CubicTo:
+			tc1x, tc1y := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			tc2x, tc2y := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+			tx, ty := transform.TransformPoint(pts[pointIdx+4], pts[pointIdx+5])
+			result.CubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty)
+			pointIdx += 6
+		case Close:
+			result.Close()
+		}
+	}
+	return result
 }
 
 // renderFillRoundRect renders a filled rounded rectangle using SDF per-pixel

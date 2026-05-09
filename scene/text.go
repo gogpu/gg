@@ -93,8 +93,9 @@ func computeSceneTextFontID(source *text.FontSource) uint64 {
 	if source == nil {
 		return 0
 	}
+	p := source.Parsed()
 	h := fnv.New64a()
-	_, _ = fmt.Fprintf(h, "%s:%d", source.Name(), source.Parsed().NumGlyphs())
+	_, _ = fmt.Fprintf(h, "%s:%s:%d:%d", source.Name(), p.FullName(), p.NumGlyphs(), p.UnitsPerEm())
 	return h.Sum64()
 }
 
@@ -511,13 +512,11 @@ func (s *Scene) encodeTextRun(str string, glyphs []text.ShapedGlyph, face text.F
 		}
 	}
 
-	// Truncate string to uint16 max.
-	textStr := str
-	if len(textStr) > 65535 {
-		textStr = textStr[:65535]
+	if len(str) > 65535 {
+		return &text.FontError{Reason: "text string exceeds 65535 bytes (TagText TextLen is uint16)"}
 	}
 
-	//nolint:gosec // slice lengths are bounded, textStr truncated above
+	//nolint:gosec // slice lengths bounded by uint16 check above
 	run := GlyphRunData{
 		FontSourceID: fontID,
 		FontSize:     float32(face.Size()),
@@ -526,10 +525,10 @@ func (s *Scene) encodeTextRun(str string, glyphs []text.ShapedGlyph, face text.F
 		OriginX:      x,
 		OriginY:      y,
 		BrushIndex:   uint32(brushIdx),
-		TextLen:      uint16(len(textStr)),
+		TextLen:      uint16(len(str)),
 	}
 
-	enc.EncodeText(run, entries, textStr)
+	enc.EncodeText(run, entries, str)
 
 	s.version++
 	return nil
