@@ -1,11 +1,13 @@
 package scene
 
 import (
+	"encoding/binary"
 	"fmt"
 	"image"
 	"math"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/text"
 )
 
 // BlendMode represents a compositing blend mode.
@@ -357,6 +359,39 @@ func AffineFromMatrix(m gg.Matrix) Affine {
 	}
 }
 
+// TextFlags controls text rendering behavior.
+type TextFlags uint16
+
+const (
+	TextFlagHinting TextFlags = 1 << iota
+)
+
+// GlyphRunData is the header for a TagText scene encoding element.
+// Followed by GlyphCount × GlyphEntry, then TextLen bytes of UTF-8 text.
+type GlyphRunData struct {
+	FontSourceID uint64
+	FontSize     float32
+	GlyphCount   uint16
+	Flags        TextFlags
+	OriginX      float32
+	OriginY      float32
+	BrushIndex   uint32
+	TextLen      uint16
+}
+
+// glyphRunDataSize is the byte size of a serialized GlyphRunData header.
+const glyphRunDataSize = 8 + 4 + 2 + 2 + 4 + 4 + 4 + 2 // = 30 bytes
+
+// GlyphEntry is a single positioned glyph in a text run (10 bytes).
+type GlyphEntry struct {
+	GlyphID text.GlyphID // uint16
+	X       float32
+	Y       float32
+}
+
+// glyphEntrySize is the byte size of a serialized GlyphEntry.
+const glyphEntrySize = 2 + 4 + 4 // = 10 bytes
+
 // Encoding holds the dual-stream encoded representation of drawing commands.
 // It uses separate streams for tags (1 byte each), path data, draw data,
 // and transforms to maximize cache efficiency and GPU compatibility.
@@ -375,6 +410,10 @@ type Encoding struct {
 
 	// transforms holds affine transformation matrices
 	transforms []Affine
+
+	// textData holds serialized GlyphRunData + GlyphEntry arrays for TagText commands.
+	// Separate stream from pathData — text data has different layout and lifetime.
+	textData []byte
 
 	// brushes holds brush definitions referenced by draw commands
 	brushes []Brush
@@ -402,6 +441,7 @@ func NewEncoding() *Encoding {
 		pathData:      make([]float32, 0, 256),
 		drawData:      make([]uint32, 0, 32),
 		transforms:    make([]Affine, 0, 8),
+		textData:      make([]byte, 0, 256),
 		brushes:       make([]Brush, 0, 16),
 		commandBounds: make([]Rect, 0, 32),
 		bounds:        EmptyRect(),
@@ -416,6 +456,7 @@ func (e *Encoding) Reset() {
 	e.pathData = e.pathData[:0]
 	e.drawData = e.drawData[:0]
 	e.transforms = e.transforms[:0]
+	e.textData = e.textData[:0]
 	e.brushes = e.brushes[:0]
 	e.commandBounds = e.commandBounds[:0]
 	e.bounds = EmptyRect()
@@ -600,6 +641,58 @@ func (e *Encoding) EncodeImage(imageIndex uint32, transform Affine) {
 	e.transforms = append(e.transforms, transform)
 }
 
+// EncodeText encodes a pre-shaped text run as a TagText command.
+// The glyph run header, glyph entries, and original text are serialized into the textData stream.
+func (e *Encoding) EncodeText(run GlyphRunData, glyphs []GlyphEntry, str string) {
+	e.tags = append(e.tags, TagText)
+
+	totalSize := glyphRunDataSize + len(glyphs)*glyphEntrySize + len(str)
+
+	// Grow textData in one allocation, then write directly into the tail.
+	base := len(e.textData)
+	e.textData = append(e.textData, make([]byte, totalSize)...)
+	buf := e.textData[base:]
+	off := 0
+
+	// Header
+	binary.LittleEndian.PutUint64(buf[off:], run.FontSourceID)
+	off += 8
+	binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(run.FontSize))
+	off += 4
+	binary.LittleEndian.PutUint16(buf[off:], run.GlyphCount)
+	off += 2
+	binary.LittleEndian.PutUint16(buf[off:], uint16(run.Flags))
+	off += 2
+	binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(run.OriginX))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(run.OriginY))
+	off += 4
+	binary.LittleEndian.PutUint32(buf[off:], run.BrushIndex)
+	off += 4
+	binary.LittleEndian.PutUint16(buf[off:], run.TextLen)
+	off += 2
+
+	// Glyph entries
+	for _, g := range glyphs {
+		binary.LittleEndian.PutUint16(buf[off:], uint16(g.GlyphID))
+		off += 2
+		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(g.X))
+		off += 4
+		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(g.Y))
+		off += 4
+	}
+
+	// Text bytes
+	copy(buf[off:], str)
+
+	e.shapeCount++
+}
+
+// TextData returns the text data stream.
+func (e *Encoding) TextData() []byte {
+	return e.textData
+}
+
 // Bounds returns the cumulative bounding box of all encoded content.
 func (e *Encoding) Bounds() Rect {
 	return e.bounds
@@ -663,6 +756,12 @@ func (e *Encoding) Hash() uint64 {
 		hash *= fnvPrime
 	}
 
+	// Hash text data
+	for _, b := range e.textData {
+		hash ^= uint64(b)
+		hash *= fnvPrime
+	}
+
 	// Hash transforms
 	for _, t := range e.transforms {
 		hash ^= uint64(math.Float32bits(t.A))
@@ -715,37 +814,46 @@ func (e *Encoding) AppendWithImages(other *Encoding, imageOffset uint32) {
 	drawDataStart := len(e.drawData)
 	e.drawData = append(e.drawData, other.drawData...)
 
-	// Adjust brush indices in the appended draw data
-	// This requires walking through the other's tags to find Fill/Stroke commands
+	// Adjust brush indices in the appended draw data.
+	// Also adjust brush indices embedded in textData for TagText commands.
 	drawIdx := 0
+	textDataStart := len(e.textData)
+	e.textData = append(e.textData, other.textData...)
+	textOff := 0
 	for _, tag := range other.tags {
 		switch tag {
 		case TagFill:
-			// Fill has brush index at drawIdx, fill style at drawIdx+1
 			if drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += brushOffset
 			}
 			drawIdx += 2
 		case TagFillRoundRect:
-			// FillRoundRect has brush index at drawIdx, fill style at drawIdx+1
-			// Path data (rect coords + radii) is in pathData stream, no adjustment needed
 			if drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += brushOffset
 			}
 			drawIdx += 2
 		case TagStroke:
-			// Stroke has brush index at drawIdx, then style params
 			if drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += brushOffset
 			}
-			drawIdx += 5 // brush + width + miterLimit + cap + join
+			drawIdx += 5
 		case TagPushLayer:
-			drawIdx += 2 // blend mode + alpha
+			drawIdx += 2
 		case TagImage:
 			if imageOffset > 0 && drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += imageOffset
 			}
 			drawIdx++
+		case TagText:
+			if textOff+glyphRunDataSize <= len(other.textData) {
+				glyphCount := int(binary.LittleEndian.Uint16(other.textData[textOff+12:]))
+				textLen := int(binary.LittleEndian.Uint16(other.textData[textOff+28:]))
+				// Adjust brush index (at offset 24 in GlyphRunData)
+				brushIdxOff := textDataStart + textOff + 24
+				oldBrush := binary.LittleEndian.Uint32(e.textData[brushIdxOff:])
+				binary.LittleEndian.PutUint32(e.textData[brushIdxOff:], oldBrush+brushOffset)
+				textOff += glyphRunDataSize + glyphCount*glyphEntrySize + textLen
+			}
 		}
 	}
 
@@ -886,6 +994,9 @@ func (e *Encoding) AppendWithTranslation(other *Encoding, dx, dy float32, imageO
 			}
 			drawIdx++ // image index only; transform is in transforms stream
 
+		case TagText:
+			// Text data is in the textData stream. Handled in a second pass below.
+
 		// --- Marker/structural tags: zero pathData, zero drawData ---
 
 		case TagTransform:
@@ -900,6 +1011,8 @@ func (e *Encoding) AppendWithTranslation(other *Encoding, dx, dy float32, imageO
 			panic(fmt.Sprintf("scene.AppendWithTranslation: unhandled tag 0x%02X (%s) — update switch to handle pathData/drawData layout for this tag", byte(tag), tag))
 		}
 	}
+
+	e.appendTextDataWithTranslation(other, brushOffset, dx, dy)
 
 	// Transforms copied verbatim — see architecture note above.
 	e.transforms = append(e.transforms, other.transforms...)
@@ -917,6 +1030,35 @@ func (e *Encoding) AppendWithTranslation(other *Encoding, dx, dy float32, imageO
 	e.shapeCount += other.shapeCount
 }
 
+// appendTextDataWithTranslation appends other's textData, offsetting origins by (dx, dy)
+// and adjusting brush indices by brushOffset.
+func (e *Encoding) appendTextDataWithTranslation(other *Encoding, brushOffset uint32, dx, dy float32) {
+	if len(other.textData) == 0 {
+		return
+	}
+	textDataStart := len(e.textData)
+	e.textData = append(e.textData, other.textData...)
+	textOff := 0
+	for _, tag := range other.tags {
+		if tag != TagText {
+			continue
+		}
+		if textOff+glyphRunDataSize > len(other.textData) {
+			break
+		}
+		absOff := textDataStart + textOff
+		oxBits := binary.LittleEndian.Uint32(e.textData[absOff+16:])
+		oyBits := binary.LittleEndian.Uint32(e.textData[absOff+20:])
+		binary.LittleEndian.PutUint32(e.textData[absOff+16:], math.Float32bits(math.Float32frombits(oxBits)+dx))
+		binary.LittleEndian.PutUint32(e.textData[absOff+20:], math.Float32bits(math.Float32frombits(oyBits)+dy))
+		oldBrush := binary.LittleEndian.Uint32(e.textData[absOff+24:])
+		binary.LittleEndian.PutUint32(e.textData[absOff+24:], oldBrush+brushOffset)
+		glyphCount := int(binary.LittleEndian.Uint16(other.textData[textOff+12:]))
+		textLen := int(binary.LittleEndian.Uint16(other.textData[textOff+28:]))
+		textOff += glyphRunDataSize + glyphCount*glyphEntrySize + textLen
+	}
+}
+
 // Clone creates a deep copy of the encoding.
 func (e *Encoding) Clone() *Encoding {
 	clone := NewEncoding()
@@ -932,6 +1074,9 @@ func (e *Encoding) Clone() *Encoding {
 
 	clone.transforms = make([]Affine, len(e.transforms))
 	copy(clone.transforms, e.transforms)
+
+	clone.textData = make([]byte, len(e.textData))
+	copy(clone.textData, e.textData)
 
 	clone.brushes = make([]Brush, len(e.brushes))
 	copy(clone.brushes, e.brushes)
@@ -989,6 +1134,7 @@ func (e *Encoding) Size() int {
 	return len(e.tags) +
 		len(e.pathData)*4 +
 		len(e.drawData)*4 +
+		len(e.textData) +
 		len(e.transforms)*24 + // 6 float32 per Affine
 		len(e.brushes)*20 // approximate brush size
 }
@@ -998,6 +1144,7 @@ func (e *Encoding) Capacity() int {
 	return cap(e.tags) +
 		cap(e.pathData)*4 +
 		cap(e.drawData)*4 +
+		cap(e.textData) +
 		cap(e.transforms)*24 +
 		cap(e.brushes)*20
 }

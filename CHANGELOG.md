@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] - 2026-05-09
+
+### Added
+
+- **Scene text via TagText glyph references** (ADR-022) — scene retained-mode text
+  now stores compact glyph references (10 bytes/glyph) instead of full vector paths
+  (~300 bytes/glyph). Shaping happens once at recording time; resolution deferred to
+  render time. GPU scene renderer routes through `DrawShapedGlyphs` → Tier 6/4
+  auto-selection for hinted, atlas-batched, DPI-aware text. CPU tile renderer extracts
+  outlines from stored glyphs as fallback. 30× smaller scene encoding for text-heavy
+  content. Breaking change: `Scene.DrawGlyphs()` signature updated.
+
+- **`DrawShapedGlyphs` on Context** — new public method for rendering pre-shaped glyphs
+  without re-shaping. Implements the ADR-022 "shape once, render anywhere" guarantee.
+  `GPUShapedTextAccelerator` optional interface (composition pattern). Matches Skia
+  `drawTextBlob`, Vello `draw_glyphs`, Flutter `drawParagraph` enterprise pattern.
+
+- **Font registry on Scene** — `Scene.RegisterFont()` / `Scene.FontRegistry()` maps
+  FontSourceID → `*text.FontSource` for cross-context font sharing. Merged correctly
+  in `Scene.Append` / `Scene.AppendWithTranslation`.
+
+### Fixed
+
+- **Glyph mask atlas zoom resilience** (ui#94) — three-mechanism atlas protection
+  (Skia/Chrome pattern): (1) size bucket quantization — under atlas pressure, snap to
+  4 discrete sizes (16/24/32/48px), reducing entries from ~57K to ~416 during zoom;
+  (2) page-level reclamation — `evictTail()` resets pages when all entries evicted,
+  reclaiming shelf allocator space; (3) frame-based `Compact()` — pages unused for 32+
+  frames are reset automatically (Skia `kPlotRecentlyUsedCount` pattern). Atlas
+  self-heals after zoom. Hysteresis prevents oscillation (enter bucketed at 50%, exit
+  at 25%).
+
+- **Bucketed mode quad scaling** — glyphs rasterized at bucket size with scale factor
+  (`actualSize/bucketSize`) applied to quad positioning. Matches Skia
+  `strikeToSourceScale` pattern from `SubRunControl.cpp`.
+
+- **FontSourceID hash strengthened** — now includes `FullName` + `UnitsPerEm` (was
+  `Name` + `NumGlyphs` only). Reduces collision risk for fonts with similar metadata.
+
+- **CPU tile renderer TagText fallback** — uses stored glyph positions from scene
+  encoding instead of re-shaping. Extracted `transformScenePath` helper.
+
+- **TextLen overflow** — `Scene.DrawText` returns error for strings >65535 bytes
+  (was silent truncation).
+
+### Removed
+
+- **`TextRenderer.RenderToScene` / `RenderTextToScene`** — replaced by TagText
+  encoding. `TextRenderer.RenderGlyphs` / `RenderText` remain for direct outline use.
+
 ## [0.45.4] - 2026-05-08
 
 ### Fixed

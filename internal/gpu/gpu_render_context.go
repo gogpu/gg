@@ -402,6 +402,42 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 	return nil
 }
 
+// DrawShapedGlyphMaskText renders pre-shaped glyphs through the glyph mask pipeline.
+// Same as DrawGlyphMaskText but skips shaping — uses stored glyph positions directly.
+func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	textFace, ok := face.(text.Face)
+	if !ok || textFace == nil {
+		return gg.ErrFallbackToCPU
+	}
+
+	rc.sceneStats.TextCount++
+
+	if !rc.shared.gpuReady {
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
+	}
+
+	rc.shared.mu.Lock()
+	rc.shared.ensureGlyphMaskEngine()
+	engine := rc.shared.glyphMaskEngine
+	rc.shared.mu.Unlock()
+
+	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, target.Width, target.Height, matrix, deviceScale)
+	if err != nil {
+		return gg.ErrFallbackToCPU
+	}
+	if len(batch.Quads) == 0 {
+		return nil
+	}
+
+	rc.QueueGlyphMask(target, batch)
+	return nil
+}
+
 // FillPath queues a filled path for GPU rendering.
 func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	if !rc.shared.gpuReady {

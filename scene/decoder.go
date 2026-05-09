@@ -1,6 +1,11 @@
 package scene
 
-import "math"
+import (
+	"encoding/binary"
+	"math"
+
+	"github.com/gogpu/gg/text"
+)
 
 // Decoder provides sequential decoding of an Encoding's command stream.
 // It tracks position indices across all data streams (tags, paths, draws, transforms)
@@ -33,6 +38,7 @@ type Decoder struct {
 	pathIdx  int
 	drawIdx  int
 	transIdx int
+	textIdx  int
 
 	// Current tag being processed
 	currentTag Tag
@@ -57,6 +63,7 @@ func (d *Decoder) Reset(enc *Encoding) {
 	d.pathIdx = 0
 	d.drawIdx = 0
 	d.transIdx = 0
+	d.textIdx = 0
 	d.currentTag = 0
 }
 
@@ -326,6 +333,66 @@ func (d *Decoder) Brush() (r, g, b, a float32) {
 	a = d.enc.pathData[d.pathIdx+3]
 	d.pathIdx += 4
 	return r, g, b, a
+}
+
+// ---------------------------------------------------------------------------
+// Text Command Decoder
+// ---------------------------------------------------------------------------
+
+// Text reads the current TagText command data.
+// Returns the glyph run header, glyph entries, original text string, and the brush.
+// Only valid when Tag() == TagText.
+func (d *Decoder) Text() (run GlyphRunData, glyphs []GlyphEntry, str string, brush Brush) {
+	td := d.enc.textData
+	if d.textIdx+glyphRunDataSize > len(td) {
+		return GlyphRunData{}, nil, "", Brush{}
+	}
+
+	off := d.textIdx
+	run.FontSourceID = binary.LittleEndian.Uint64(td[off:])
+	off += 8
+	run.FontSize = math.Float32frombits(binary.LittleEndian.Uint32(td[off:]))
+	off += 4
+	run.GlyphCount = binary.LittleEndian.Uint16(td[off:])
+	off += 2
+	run.Flags = TextFlags(binary.LittleEndian.Uint16(td[off:]))
+	off += 2
+	run.OriginX = math.Float32frombits(binary.LittleEndian.Uint32(td[off:]))
+	off += 4
+	run.OriginY = math.Float32frombits(binary.LittleEndian.Uint32(td[off:]))
+	off += 4
+	run.BrushIndex = binary.LittleEndian.Uint32(td[off:])
+	off += 4
+	run.TextLen = binary.LittleEndian.Uint16(td[off:])
+	off += 2
+
+	n := int(run.GlyphCount)
+	if off+n*glyphEntrySize > len(td) {
+		d.textIdx = off
+		return run, nil, "", Brush{}
+	}
+
+	glyphs = make([]GlyphEntry, n)
+	for i := range n {
+		glyphs[i].GlyphID = text.GlyphID(binary.LittleEndian.Uint16(td[off:]))
+		off += 2
+		glyphs[i].X = math.Float32frombits(binary.LittleEndian.Uint32(td[off:]))
+		off += 4
+		glyphs[i].Y = math.Float32frombits(binary.LittleEndian.Uint32(td[off:]))
+		off += 4
+	}
+
+	textLen := int(run.TextLen)
+	if off+textLen <= len(td) {
+		str = string(td[off : off+textLen])
+		off += textLen
+	}
+	d.textIdx = off
+
+	if int(run.BrushIndex) < len(d.enc.brushes) {
+		brush = d.enc.brushes[run.BrushIndex]
+	}
+	return run, glyphs, str, brush
 }
 
 // ---------------------------------------------------------------------------

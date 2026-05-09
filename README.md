@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping |
+| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, ClearType LCD subpixel rendering, font hinting (auto-hinter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, damage-aware sub-region updates) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
@@ -191,6 +191,8 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
    Immediate Mode       Retained Mode        Resources
    (Context API)        (Scene Graph)     (Images, Fonts)
          │                   │                   │
+         │              TagText (ADR-022)        │
+         │          shape once → glyph refs      │
          └───────────────────┼───────────────────┘
                              │
               ┌──────────────┴──────────────┐
@@ -201,7 +203,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
     internal/raster              ┌──────────┼──────────┐
                                  │          │          │
                            Render Pass   MSDF Text   Compute
-                         (Tiers 1-4,6)  (Tier 4)   (Tier 5)
+                         (Tiers 1-4,6)  (Tier 4,6) (Tier 5)
 ```
 
 ### Rendering Structure
@@ -211,6 +213,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 | **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
 | **GPU Accelerator** | `internal/gpu` | Seven-tier GPU pipeline (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask) |
+| **Scene Text** | `scene/` | TagText glyph references (ADR-022): shape once at recording, resolve at render via DrawShapedGlyphs → Tier 6/4. Atlas zoom resilience (Skia size buckets). |
 | **GPU + Tiles** | `gpu/` | Opt-in via `import _ "github.com/gogpu/gg/gpu"` (GPU + tile rasterizers) |
 | **Tiles Only** | `raster/` | Opt-in via `import _ "github.com/gogpu/gg/raster"` (CPU-only tiles) |
 | **Software** | Root `gg` package | Default CPU renderer with smart algorithm selection |
@@ -265,24 +268,32 @@ dc.Fill()
 
 ### Retained Mode (Scene Graph)
 
-GPU-optimized scene graph for complex applications:
+GPU-optimized scene graph with compact encoding. Text uses TagText glyph references
+(ADR-022) — shaped once at recording time, resolved at render time with full hinting
+and atlas batching:
 
 ```go
-import "github.com/gogpu/gg/render"
+import (
+    "github.com/gogpu/gg"
+    "github.com/gogpu/gg/scene"
+    "github.com/gogpu/gg/text"
+)
 
-s := render.NewScene()
+s := scene.NewScene()
 
-s.SetFillColor(color.RGBA{R: 255, A: 200})
-s.Circle(150, 200, 100)
-s.Fill()
+// Shapes — encoded as compact binary commands
+s.Fill(scene.FillNonZero, scene.IdentityAffine(),
+    scene.SolidBrush(gg.RGBA{R: 1, A: 0.8}),
+    scene.NewCircleShape(150, 200, 100))
 
-s.SetFillColor(color.RGBA{B: 255, A: 200})
-s.Circle(250, 200, 100)
-s.Fill()
+// Text — stored as glyph references (10 bytes/glyph, not vector paths)
+source, _ := text.NewFontSourceFromFile("Roboto.ttf")
+face := source.Face(16)
+s.DrawText("Hello Scene", face, 50, 50, scene.SolidBrush(gg.White))
 
-renderer := render.NewSoftwareRenderer()
-target := render.NewPixmapTarget(800, 600)
-renderer.Render(target, s)
+// Render through GPU scene renderer (Tier 6/4 text, SDF shapes)
+gpuR := scene.NewGPUSceneRenderer(dc)
+gpuR.RenderScene(s)
 ```
 
 ### Text Rendering

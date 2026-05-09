@@ -139,28 +139,105 @@ func (e *GlyphMaskEngine) LayoutText(
 		float32(premul.B), float32(premul.A),
 	}
 
+	// Shape text → collect glyphs, then delegate to common layout.
+	var shaped []text.ShapedGlyph
+	for glyph := range face.Glyphs(s) {
+		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
+	}
+
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+}
+
+// LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
+// Same as LayoutText but skips shaping — uses stored glyph IDs and positions.
+// This implements the ADR-022 "shape once" guarantee for the GPU scene path.
+func (e *GlyphMaskEngine) LayoutShapedGlyphs(
+	face text.Face,
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	color gg.RGBA,
+	viewportW, viewportH int,
+	matrix gg.Matrix,
+	deviceScale float64,
+) (GlyphMaskBatch, error) {
+	if face == nil || len(glyphs) == 0 {
+		return GlyphMaskBatch{}, nil
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	fontSize := face.Size() * deviceScale
+	if fontSize <= 0 {
+		fontSize = face.Size()
+	}
+	fontSource := face.Source()
+	fontID := computeGlyphMaskFontID(fontSource)
+	parsed := fontSource.Parsed()
+	hinting := selectGlyphMaskHinting(fontSize, matrix)
+	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
+
+	premul := color.Premultiply()
+	batchColor := [4]float32{
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
+	}
+
+	lcdFilter := e.lcdFilter
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+}
+
+// layoutGlyphs is the common implementation for LayoutText and LayoutShapedGlyphs.
+// Must be called with e.mu held.
+func (e *GlyphMaskEngine) layoutGlyphs(
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	fontSize float64,
+	fontID uint64,
+	parsed text.ParsedFont,
+	hinting text.Hinting,
+	useLCD bool,
+	lcdLayout text.LCDLayout,
+	lcdFilter *text.LCDFilter,
+	batchColor [4]float32,
+	viewportW, viewportH int,
+	matrix gg.Matrix,
+	deviceScale float64,
+) GlyphMaskBatch {
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
 
-	for glyph := range face.Glyphs(s) {
+	for _, glyph := range glyphs {
 		// Compute subpixel position (fractional part of absolute position).
 		absX := x + glyph.X
 		absY := y + glyph.Y
 		fracX := absX - math.Floor(absX)
 		fracY := absY - math.Floor(absY)
 
-		key := text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
+		// Size bucket quantization (Skia pattern): under atlas pressure,
+		// rasterize at a coarse bucket size and scale quads to actual size.
+		// This reduces unique atlas entries from ~57K to ~416 during zoom.
+		rasterSize := fontSize
+		bucketScale := 1.0
+		var key text.GlyphMaskKey
+		if e.atlas.UnderPressure() {
+			key = text.MakeGlyphMaskKeyBucketed(fontID, glyph.GID, fontSize, fracX, fracY)
+			rasterSize = float64(key.SizeQ4) / 16.0
+			if rasterSize > 0 {
+				bucketScale = fontSize / rasterSize
+			}
+		} else {
+			key = text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
+		}
 
 		var region text.GlyphMaskRegion
 		var rErr error
 
 		if useLCD {
-			// LCD path: rasterize at 3x width, store RGB coverage in R8 atlas.
-			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, fontSize, fracX, fracY, hinting, lcdFilter, lcdLayout)
+			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, *lcdFilter, lcdLayout)
 		} else {
-			// Grayscale path: standard R8 alpha mask.
 			region, rErr = e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, fontSize, fracX, fracY, hinting)
+				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, rasterSize, fracX, fracY, hinting)
 				if err2 != nil {
 					return nil, 0, 0, 0, 0, err2
 				}
@@ -184,10 +261,12 @@ func (e *GlyphMaskEngine) LayoutText(
 		// BearingX: offset from glyph origin to left edge of mask.
 		// BearingY: offset from baseline to top edge of mask (positive = above).
 		//
-		// The mask was rasterized at deviceScale * fontSize. We need to
-		// convert mask pixel coordinates back to user-space coordinates
-		// by dividing by deviceScale.
-		scale := 1.0 / deviceScale
+		// The mask was rasterized at deviceScale * rasterSize. We convert
+		// mask pixel coordinates to user space by dividing by deviceScale,
+		// then scale by bucketScale to match the actual display size.
+		// In normal mode bucketScale=1.0 (no-op). In bucketed mode
+		// bucketScale = actualSize/bucketSize (Skia strikeToSourceScale).
+		scale := bucketScale / deviceScale
 
 		// For LCD glyphs, the atlas region.Width is 3x the logical pixel width.
 		// The screen quad width must use the logical width (region.Width / 3).
@@ -214,7 +293,7 @@ func (e *GlyphMaskEngine) LayoutText(
 	}
 
 	if len(quads) == 0 {
-		return GlyphMaskBatch{}, nil
+		return GlyphMaskBatch{}
 	}
 
 	// Build the composed transform: CTM x ortho_projection.
@@ -241,7 +320,7 @@ func (e *GlyphMaskEngine) LayoutText(
 		AtlasWidth:     atlasSize,
 		AtlasHeight:    atlasSize,
 		AtlasPageIndex: 0, // Currently single page support (first page).
-	}, nil
+	}
 }
 
 // SyncAtlasTextures uploads dirty atlas pages to the GPU as R8 textures.

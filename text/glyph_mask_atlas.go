@@ -62,6 +62,29 @@ func MakeGlyphMaskKey(fontID uint64, glyphID GlyphID, size float64, subpixelX, s
 	}
 }
 
+// sizeBuckets defines discrete rasterization sizes for zoom resilience (Skia pattern).
+// During zoom, fractional sizes snap to the nearest bucket instead of creating
+// a new atlas entry per 1/16px increment. Without buckets: 14px→15px = 16 sizes.
+// With buckets: 14px→48px = 4 sizes total. Eliminates atlas overflow under zoom.
+//
+// Reference: Skia SubRunControl.cpp:28-35 (kSmallDFFontLimit/kMediumDFFontLimit/kLargeDFFontLimit)
+var sizeBuckets = [...]float64{16, 24, 32, 48}
+
+// MakeGlyphMaskKeyBucketed creates a GlyphMaskKey with size snapped to discrete
+// buckets. Use this when atlas pressure is detected (zoom scenarios with many
+// unique sizes). The GPU scales the rasterized glyph from bucket size to actual
+// size — quality loss is negligible (Skia uses this for all SDF text in Chrome).
+func MakeGlyphMaskKeyBucketed(fontID uint64, glyphID GlyphID, size float64, subpixelX, subpixelY float64) GlyphMaskKey {
+	bucketSize := sizeBuckets[len(sizeBuckets)-1]
+	for _, b := range sizeBuckets {
+		if size <= b {
+			bucketSize = b
+			break
+		}
+	}
+	return MakeGlyphMaskKey(fontID, glyphID, bucketSize, subpixelX, subpixelY)
+}
+
 // GlyphMaskRegion describes a glyph mask's location and metrics in the atlas.
 type GlyphMaskRegion struct {
 	// AtlasIndex indicates which atlas page this glyph is in.
@@ -161,6 +184,13 @@ type glyphMaskPage struct {
 
 	// index is the page index in the manager.
 	index int
+
+	// lastUsedFrame is the frame when this page was last written to.
+	// Used by Compact() for frame-based page eviction (Skia pattern).
+	lastUsedFrame uint64
+
+	// entryCount tracks how many live entries reference this page.
+	entryCount int
 }
 
 // newGlyphMaskPage creates a new atlas page.
@@ -342,6 +372,11 @@ type GlyphMaskAtlas struct {
 	// Current frame counter for frame-based access tracking
 	currentFrame atomic.Uint64
 
+	// bucketedMode is a sticky flag for size bucket quantization.
+	// Enter at 50% capacity, exit at 25% — hysteresis prevents oscillation
+	// between bucketed and fine-grained modes during smooth zoom.
+	bucketedMode bool
+
 	// Statistics
 	hits   atomic.Uint64
 	misses atomic.Uint64
@@ -426,6 +461,10 @@ func (a *GlyphMaskAtlas) Put(key GlyphMaskKey, mask []byte, maskW, maskH int, be
 	// Copy mask data into the page
 	page.copyMask(mask, maskW, maskH, x, y)
 
+	frame := a.currentFrame.Load()
+	page.lastUsedFrame = frame
+	page.entryCount++
+
 	// Compute UV coordinates with half-texel inset
 	atlasSize := float32(a.config.Size)
 	halfTexel := float32(0.5) / atlasSize
@@ -448,7 +487,7 @@ func (a *GlyphMaskAtlas) Put(key GlyphMaskKey, mask []byte, maskW, maskH int, be
 	entry := &glyphMaskEntry{
 		key:             key,
 		region:          region,
-		lastAccessFrame: a.currentFrame.Load(),
+		lastAccessFrame: frame,
 	}
 	a.lookup[key] = entry
 	a.addToFront(entry)
@@ -498,6 +537,10 @@ func (a *GlyphMaskAtlas) PutLCD(key GlyphMaskKey, rgbMask []byte, logicalW, mask
 	// Copy the RGB data row by row into the R8 atlas at 3x width.
 	page.copyMask(rgbMask, atlasW, maskH, x, y)
 
+	frame := a.currentFrame.Load()
+	page.lastUsedFrame = frame
+	page.entryCount++
+
 	atlasSize := float32(a.config.Size)
 	halfTexel := float32(0.5) / atlasSize
 
@@ -519,7 +562,7 @@ func (a *GlyphMaskAtlas) PutLCD(key GlyphMaskKey, rgbMask []byte, logicalW, mask
 	entry := &glyphMaskEntry{
 		key:             key,
 		region:          region,
-		lastAccessFrame: a.currentFrame.Load(),
+		lastAccessFrame: frame,
 	}
 	a.lookup[key] = entry
 	a.addToFront(entry)
@@ -579,16 +622,35 @@ func (a *GlyphMaskAtlas) findOrCreatePage(w, h int) (*glyphMaskPage, error) {
 }
 
 // evictTail removes the least recently used entry.
+// When a page loses all its entries, the page is reset (shelf allocator cleared,
+// pixel data zeroed) — reclaiming atlas space for new allocations.
 // Must be called with a.mu held.
 func (a *GlyphMaskAtlas) evictTail() {
 	if a.tail == nil {
 		return
 	}
 	entry := a.tail
+	pageIdx := entry.region.AtlasIndex
 	a.removeFromList(entry)
 	delete(a.lookup, entry.key)
-	// Note: we do NOT reclaim atlas space. The shelf allocator does not support
-	// freeing individual allocations. Pages are only fully reset when compacted.
+
+	if pageIdx >= 0 && pageIdx < len(a.pages) {
+		page := a.pages[pageIdx]
+		page.entryCount--
+		if page.entryCount <= 0 {
+			a.resetPage(page)
+		}
+	}
+}
+
+// resetPage clears a page's allocator and pixel data, making it available
+// for new allocations. Entries referencing this page must already be removed.
+// Must be called with a.mu held.
+func (a *GlyphMaskAtlas) resetPage(page *glyphMaskPage) {
+	page.allocator.Reset()
+	clear(page.Data)
+	page.dirty = true
+	page.entryCount = 0
 }
 
 // LRU list operations. Must be called with a.mu held.
@@ -628,10 +690,48 @@ func (a *GlyphMaskAtlas) removeFromList(entry *glyphMaskEntry) {
 	entry.next = nil
 }
 
-// AdvanceFrame increments the frame counter. Call once per frame for
-// frame-based access tracking.
+// compactStaleFrames is the number of frames a page must be unused before
+// Compact() resets it. Matches Skia's kPlotRecentlyUsedCount = 32.
+const compactStaleFrames = 32
+
+// AdvanceFrame increments the frame counter and runs compaction.
+// Call once per frame (e.g., from GPU flush). This is the primary
+// self-healing mechanism: pages unused for 32+ frames are reset,
+// reclaiming atlas space after zoom or font size changes.
+//
+// Reference: Skia GrAtlasManager::postFlush() calls compact() every flush.
 func (a *GlyphMaskAtlas) AdvanceFrame() {
-	a.currentFrame.Add(1)
+	frame := a.currentFrame.Add(1)
+	a.compact(frame)
+}
+
+// compact resets atlas pages that have not been used for compactStaleFrames.
+// Entries on stale pages are removed from the lookup map, and the page's
+// shelf allocator is cleared — making the space available for new glyphs.
+// Must NOT be called with a.mu held (acquires lock internally).
+func (a *GlyphMaskAtlas) compact(currentFrame uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if currentFrame < compactStaleFrames {
+		return
+	}
+	threshold := currentFrame - compactStaleFrames
+
+	for _, page := range a.pages {
+		if page.entryCount == 0 || page.lastUsedFrame > threshold {
+			continue
+		}
+
+		// Page is stale — remove all entries referencing it.
+		for key, entry := range a.lookup {
+			if entry.region.AtlasIndex == page.index {
+				a.removeFromList(entry)
+				delete(a.lookup, key)
+			}
+		}
+		a.resetPage(page)
+	}
 }
 
 // DirtyPages returns indices of pages that have been modified since
@@ -695,6 +795,25 @@ func (a *GlyphMaskAtlas) Stats() (hits, misses uint64, entryCount, pageCount int
 	hits = a.hits.Load()
 	misses = a.misses.Load()
 	return
+}
+
+// UnderPressure returns true when callers should use MakeGlyphMaskKeyBucketed
+// to reduce unique entries. Uses hysteresis to prevent oscillation:
+// enters bucketed mode at 50% capacity, exits at 25%.
+func (a *GlyphMaskAtlas) UnderPressure() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	entries := len(a.lookup)
+	if a.bucketedMode {
+		if entries < a.config.MaxEntries/4 {
+			a.bucketedMode = false
+		}
+	} else {
+		if entries >= a.config.MaxEntries/2 {
+			a.bucketedMode = true
+		}
+	}
+	return a.bucketedMode
 }
 
 // Config returns the atlas configuration.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/internal/parallel"
+	"github.com/gogpu/gg/text"
 )
 
 // tilePool manages pooled resources for per-tile rendering.
@@ -162,6 +163,9 @@ type Renderer struct {
 	// Configuration
 	tileSize int
 	workers  int
+
+	// Font registry for TagText resolution (set per-render from Scene).
+	fontRegistry map[uint64]*text.FontSource
 
 	// Statistics
 	stats     RenderStats
@@ -322,10 +326,11 @@ func (r *Renderer) RenderWithContext(ctx context.Context, target *gg.Pixmap, sce
 	// Mark all tiles dirty for full render
 	r.dirty.MarkAll()
 
-	// Get the flattened encoding and image registry
+	// Get the flattened encoding, image registry, and font registry.
 	startEncode := time.Now()
 	enc := scene.Encoding()
 	images := scene.Images()
+	r.fontRegistry = scene.FontRegistry()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -456,10 +461,11 @@ func (r *Renderer) RenderDirtyWithContext(ctx context.Context, target *gg.Pixmap
 		dirtyRegion = r.dirty
 	}
 
-	// Get the flattened encoding and image registry
+	// Get the flattened encoding, image registry, and font registry.
 	startEncode := time.Now()
 	enc := scene.Encoding()
 	images := scene.Images()
+	r.fontRegistry = scene.FontRegistry()
 	encodeTime := time.Since(startEncode)
 
 	// Check for cancellation after encoding
@@ -612,7 +618,7 @@ type tileClipState struct {
 // rasterization to gg.SoftwareRenderer for analytic anti-aliased output.
 //
 //nolint:gocyclo,cyclop,gocognit,funlen // Command interpreter with multiple cases is inherently complex
-func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer, images []*Image) {
+func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *gg.Pixmap, sr *gg.SoftwareRenderer, images []*Image) { //nolint:maintidx // tag dispatch across all scene command types
 	// Reusable scene.Path for the decode loop — reset per TagBeginPath instead of allocating.
 	currentPath := r.pool.getScenePath()
 	defer r.pool.putScenePath(currentPath)
@@ -771,6 +777,10 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 				}
 			}
 
+		case TagText:
+			run, glyphs, _, brush := dec.Text()
+			r.renderTextOnTile(run, glyphs, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
+
 		case TagBrush:
 			// Brush definition - skip for now
 			_, _, _, _ = dec.Brush()
@@ -870,6 +880,94 @@ func compositePixmaps(dst, src *gg.Pixmap) {
 // ---------------------------------------------------------------------------
 // Path and Paint Conversion (scene types -> gg types)
 // ---------------------------------------------------------------------------
+
+// renderTextOnTile renders a TagText glyph run on a CPU tile by extracting
+// glyph outlines and rendering each as a filled path. Uses pre-shaped glyphs
+// from the scene encoding — no re-shaping needed (ADR-022: shape once).
+func (r *Renderer) renderTextOnTile(
+	run GlyphRunData, glyphs []GlyphEntry, brush Brush,
+	transform Affine, tileX, tileY int,
+	pm *gg.Pixmap, sr *gg.SoftwareRenderer, fillPaint *gg.Paint,
+) {
+	if len(glyphs) == 0 || run.GlyphCount == 0 {
+		return
+	}
+
+	source := r.fontRegistry[run.FontSourceID]
+	if source == nil {
+		return
+	}
+
+	face := source.Face(float64(run.FontSize))
+
+	// Convert stored GlyphEntry → ShapedGlyph (no re-shaping).
+	shaped := make([]text.ShapedGlyph, len(glyphs))
+	for i, g := range glyphs {
+		shaped[i] = text.ShapedGlyph{
+			GID: g.GlyphID,
+			X:   float64(g.X),
+			Y:   float64(g.Y),
+		}
+	}
+
+	textRenderer := NewTextRenderer()
+	rendered, err := textRenderer.RenderGlyphs(shaped, face)
+	if err != nil || len(rendered) == 0 {
+		return
+	}
+
+	ggPath := r.pool.getGGPath()
+	defer r.pool.putGGPath(ggPath)
+
+	for _, rg := range rendered {
+		if rg.Path == nil || rg.Path.IsEmpty() {
+			continue
+		}
+
+		// Apply text origin offset and scene transform.
+		finalPath := rg.Path.Transform(TranslateAffine(run.OriginX, run.OriginY))
+		if !transform.IsIdentity() {
+			finalPath = transformScenePath(finalPath, transform)
+		}
+
+		convertPathInto(finalPath, tileX, tileY, ggPath)
+		resetFillPaint(fillPaint, brush, FillNonZero)
+		_ = sr.Fill(pm, ggPath, fillPaint)
+	}
+}
+
+// transformScenePath applies an affine transform to all points in a scene path.
+func transformScenePath(p *Path, transform Affine) *Path {
+	result := NewPath()
+	pointIdx := 0
+	pts := p.Points()
+	for _, verb := range p.Verbs() {
+		switch verb {
+		case MoveTo:
+			tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			result.MoveTo(tx, ty)
+			pointIdx += 2
+		case LineTo:
+			tx, ty := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			result.LineTo(tx, ty)
+			pointIdx += 2
+		case QuadTo:
+			tcx, tcy := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			tx, ty := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+			result.QuadTo(tcx, tcy, tx, ty)
+			pointIdx += 4
+		case CubicTo:
+			tc1x, tc1y := transform.TransformPoint(pts[pointIdx], pts[pointIdx+1])
+			tc2x, tc2y := transform.TransformPoint(pts[pointIdx+2], pts[pointIdx+3])
+			tx, ty := transform.TransformPoint(pts[pointIdx+4], pts[pointIdx+5])
+			result.CubicTo(tc1x, tc1y, tc2x, tc2y, tx, ty)
+			pointIdx += 6
+		case Close:
+			result.Close()
+		}
+	}
+	return result
+}
 
 // renderFillRoundRect renders a filled rounded rectangle using SDF per-pixel
 // evaluation directly onto the pixmap, bypassing the path pipeline entirely.
