@@ -9,19 +9,24 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math"
+	"os"
 	"time"
 
 	"github.com/gogpu/gg"
 	_ "github.com/gogpu/gg/gpu"
 	"github.com/gogpu/gg/integration/ggcanvas"
 	"github.com/gogpu/gg/scene"
+	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
 )
 
 func main() {
 	const width, height = 600, 600
+
+	loadFont()
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Scene GPU Rendering — ARCH-GG-001").
@@ -92,6 +97,26 @@ func main() {
 	}
 }
 
+var fontSource *text.FontSource
+
+func loadFont() {
+	candidates := []string{
+		`C:\Windows\Fonts\segoeui.ttf`,
+		`C:\Windows\Fonts\arial.ttf`,
+		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+		"/System/Library/Fonts/Supplemental/Arial.ttf",
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			src, err := text.NewFontSourceFromFile(p)
+			if err == nil {
+				fontSource = src
+				return
+			}
+		}
+	}
+}
+
 func buildAnimatedScene(w, h int, t float64) *scene.Scene {
 	b := scene.NewSceneBuilder()
 	cx, cy := float32(w)/2, float32(h)/2
@@ -114,12 +139,19 @@ func buildAnimatedScene(w, h int, t float64) *scene.Scene {
 	b.StrokeCircle(cx, cy, 50,
 		scene.SolidBrush(gg.RGBA{R: 0.3, G: 0.4, B: 0.8, A: 1}), 2)
 
-	b.Fill(scene.NewRoundedRectShape(15, 15, 60, 60, 10),
-		scene.SolidBrush(gg.RGBA{R: 0.8, G: 0.2, B: 0.2, A: 0.6}))
-	b.Fill(scene.NewRoundedRectShape(float32(w)-75, 15, 60, 60, 10),
-		scene.SolidBrush(gg.RGBA{R: 0.2, G: 0.8, B: 0.2, A: 0.6}))
+	s := b.Build()
+	if fontSource != nil {
+		white := scene.SolidBrush(gg.RGBA{R: 1, G: 1, B: 1, A: 1})
+		light := scene.SolidBrush(gg.RGBA{R: 0.7, G: 0.7, B: 0.8, A: 1})
 
-	return b.Build()
+		face13 := fontSource.Face(13)
+		face16 := fontSource.Face(16)
+
+		_ = s.DrawText("Scene Text — TagText (ADR-022)", face16, 16, float32(h)-50, white)
+		_ = s.DrawText("Hinted · Atlas-batched · DPI-aware", face13, 16, float32(h)-30, light)
+		_ = s.DrawText(fmt.Sprintf("t = %.1fs", t), face13, float32(w)-90, float32(h)-30, light)
+	}
+	return s
 }
 
 func hueToRGBA(h float64) gg.RGBA {
