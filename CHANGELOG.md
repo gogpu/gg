@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.3] - 2026-05-09
+
+### Added
+
+- **`scene.NewAffine(a, b, c, d, e, f)`** — general-purpose affine constructor for
+  arbitrary transforms (scale + translate for SVG icon rendering).
+
+- **`scene.NewGGPathShape(*gg.Path)`** — bridge from `gg.Path` (float64) to scene
+  `PathShape` (float32). Enables direct use of `gg.ParseSVGPath` results in scene
+  `Fill` operations without manual conversion.
+
+### Changed
+
+- **Dependencies** — gogpu v0.33.0 → v0.34.0.
+
 ## [0.46.2] - 2026-05-09
 
 ### Added

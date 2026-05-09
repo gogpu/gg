@@ -15,6 +15,6 @@ require (
 require (
 	github.com/go-webgpu/goffi v0.5.0 // indirect
 	github.com/go-webgpu/webgpu v0.4.3 // indirect
-	github.com/gogpu/gogpu v0.33.0 // indirect
+	github.com/gogpu/gogpu v0.34.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 )
