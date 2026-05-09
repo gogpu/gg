@@ -2,6 +2,7 @@ package scene
 
 import (
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/text"
 )
 
 // GPUSceneRenderer provides GPU-accelerated scene rendering by decoding
@@ -192,8 +193,8 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 			dc.Pop()
 
 		case TagText:
-			run, _, str, brush := dec.Text()
-			r.resolveText(scene, run, str, brush)
+			run, glyphs, str, brush := dec.Text()
+			r.resolveText(scene, run, glyphs, str, brush)
 
 		case TagImage:
 			_, _ = dec.Image()
@@ -210,11 +211,10 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 	return nil
 }
 
-// resolveText resolves a TagText glyph run through dc.DrawString, which
-// routes through the existing Tier 6 (glyph mask) / Tier 4 (MSDF) auto-selection.
-// This produces hinted, atlas-batched, DPI-aware text — matching immediate mode quality.
-func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, str string, brush Brush) {
-	if str == "" {
+// resolveText resolves a TagText glyph run. Prefers DrawShapedGlyphs (no re-shaping)
+// with DrawString as fallback. Produces hinted, atlas-batched, DPI-aware text.
+func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, glyphs []GlyphEntry, str string, brush Brush) {
+	if run.GlyphCount == 0 {
 		return
 	}
 
@@ -226,12 +226,20 @@ func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, str strin
 	dc := r.dc
 	applySceneBrush(dc, brush)
 
-	// Save and restore face — scene text may use a different font/size than
-	// whatever the dc currently has set.
 	prevFace := dc.Font()
 	face := source.Face(float64(run.FontSize))
 	dc.SetFont(face)
-	dc.DrawString(str, float64(run.OriginX), float64(run.OriginY))
+
+	if len(glyphs) > 0 {
+		shaped := make([]text.ShapedGlyph, len(glyphs))
+		for i, g := range glyphs {
+			shaped[i] = text.ShapedGlyph{GID: g.GlyphID, X: float64(g.X), Y: float64(g.Y)}
+		}
+		dc.DrawShapedGlyphs(shaped, face, float64(run.OriginX), float64(run.OriginY))
+	} else if str != "" {
+		dc.DrawString(str, float64(run.OriginX), float64(run.OriginY))
+	}
+
 	dc.SetFont(prevFace)
 }
 

@@ -95,6 +95,86 @@ func (c *Context) DrawString(s string, x, y float64) {
 	}
 }
 
+// DrawShapedGlyphs renders pre-shaped glyphs through the GPU text pipeline
+// without re-shaping. This implements the ADR-022 "shape once" guarantee:
+// glyphs are shaped at scene recording time, then rendered here with stored
+// positions. Falls back to DrawString (re-shaping) if the GPU accelerator
+// doesn't implement GPUShapedTextAccelerator.
+//
+// Enterprise pattern: matches Skia drawTextBlob, Vello draw_glyphs.
+func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
+	if face == nil || len(glyphs) == 0 {
+		return
+	}
+
+	defer c.setGPUClipRect()()
+
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+
+	if rc := c.gpuCtxOps(); rc != nil {
+		if sta, ok := rc.(GPUShapedTextAccelerator); ok {
+			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+				return
+			}
+		}
+	}
+
+	a := Accelerator()
+	if a != nil {
+		if sta, ok := a.(GPUShapedTextAccelerator); ok {
+			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+				return
+			}
+		}
+	}
+
+	// Fallback: reconstruct string is not possible from glyphs,
+	// so render each glyph outline through the fill pipeline.
+	c.drawShapedGlyphsAsOutlines(glyphs, face, x, y)
+}
+
+// drawShapedGlyphsAsOutlines renders pre-shaped glyphs as vector outlines.
+// CPU fallback when GPU shaped text is unavailable.
+func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
+	source := face.Source()
+	if source == nil {
+		return
+	}
+	parsed := source.Parsed()
+	extractor := text.NewOutlineExtractor()
+
+	for _, glyph := range glyphs {
+		outline, err := extractor.ExtractOutline(parsed, glyph.GID, face.Size())
+		if err != nil || outline == nil || outline.IsEmpty() {
+			continue
+		}
+
+		glyphX := x + glyph.X
+		glyphY := y + glyph.Y
+		path := NewPath()
+		for _, seg := range outline.Segments {
+			switch seg.Op {
+			case text.OutlineOpMoveTo:
+				path.MoveTo(glyphX+float64(seg.Points[0].X), glyphY+float64(seg.Points[0].Y))
+			case text.OutlineOpLineTo:
+				path.LineTo(glyphX+float64(seg.Points[0].X), glyphY+float64(seg.Points[0].Y))
+			case text.OutlineOpQuadTo:
+				path.QuadraticTo(
+					glyphX+float64(seg.Points[0].X), glyphY+float64(seg.Points[0].Y),
+					glyphX+float64(seg.Points[1].X), glyphY+float64(seg.Points[1].Y))
+			case text.OutlineOpCubicTo:
+				path.CubicTo(
+					glyphX+float64(seg.Points[0].X), glyphY+float64(seg.Points[0].Y),
+					glyphX+float64(seg.Points[1].X), glyphY+float64(seg.Points[1].Y),
+					glyphX+float64(seg.Points[2].X), glyphY+float64(seg.Points[2].Y))
+			}
+		}
+		c.SetFillRule(FillRuleNonZero)
+		_ = c.FillPath(path)
+	}
+}
+
 // tryGPUText attempts to render text via the GPU MSDF pipeline.
 // The x, y coordinates are in user space (not pre-transformed by the CTM).
 // The CTM is passed to the GPU pipeline so it can apply the full transform

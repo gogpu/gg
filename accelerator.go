@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -215,6 +216,16 @@ type GPUGlyphMaskAccelerator interface {
 	//
 	// Returns ErrFallbackToCPU if glyph mask rendering is not available.
 	DrawGlyphMaskText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+}
+
+// GPUShapedTextAccelerator extends GPUGlyphMaskAccelerator with support for
+// pre-shaped glyph rendering. This eliminates re-shaping at render time —
+// the scene's stored glyph IDs and positions are used directly.
+//
+// Implements the ADR-022 "shape once, render anywhere" guarantee.
+// Enterprise pattern: Skia drawTextBlob, Vello draw_glyphs, Flutter drawParagraph.
+type GPUShapedTextAccelerator interface {
+	DrawShapedGlyphMaskText(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
 var (

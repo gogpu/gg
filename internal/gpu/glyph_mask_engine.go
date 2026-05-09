@@ -97,7 +97,7 @@ func (e *GlyphMaskEngine) LCDLayout() text.LCDLayout {
 // The returned GlyphMaskBatch contains quads in user-space coordinates. The
 // Transform field is set to CTM x ortho_projection so the vertex shader
 // transforms positions from user space to clip space.
-func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas pressure detection
+func (e *GlyphMaskEngine) LayoutText(
 	face text.Face,
 	s string,
 	x, y float64,
@@ -139,10 +139,75 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		float32(premul.B), float32(premul.A),
 	}
 
+	// Shape text → collect glyphs, then delegate to common layout.
+	var shaped []text.ShapedGlyph
+	for glyph := range face.Glyphs(s) {
+		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
+	}
+
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+}
+
+// LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
+// Same as LayoutText but skips shaping — uses stored glyph IDs and positions.
+// This implements the ADR-022 "shape once" guarantee for the GPU scene path.
+func (e *GlyphMaskEngine) LayoutShapedGlyphs(
+	face text.Face,
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	color gg.RGBA,
+	viewportW, viewportH int,
+	matrix gg.Matrix,
+	deviceScale float64,
+) (GlyphMaskBatch, error) {
+	if face == nil || len(glyphs) == 0 {
+		return GlyphMaskBatch{}, nil
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	fontSize := face.Size() * deviceScale
+	if fontSize <= 0 {
+		fontSize = face.Size()
+	}
+	fontSource := face.Source()
+	fontID := computeGlyphMaskFontID(fontSource)
+	parsed := fontSource.Parsed()
+	hinting := selectGlyphMaskHinting(fontSize, matrix)
+	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
+
+	premul := color.Premultiply()
+	batchColor := [4]float32{
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
+	}
+
+	lcdFilter := e.lcdFilter
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, viewportW, viewportH, matrix, deviceScale), nil
+}
+
+// layoutGlyphs is the common implementation for LayoutText and LayoutShapedGlyphs.
+// Must be called with e.mu held.
+func (e *GlyphMaskEngine) layoutGlyphs(
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	fontSize float64,
+	fontID uint64,
+	parsed text.ParsedFont,
+	hinting text.Hinting,
+	useLCD bool,
+	lcdLayout text.LCDLayout,
+	lcdFilter *text.LCDFilter,
+	batchColor [4]float32,
+	viewportW, viewportH int,
+	matrix gg.Matrix,
+	deviceScale float64,
+) GlyphMaskBatch {
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
 
-	for glyph := range face.Glyphs(s) {
+	for _, glyph := range glyphs {
 		// Compute subpixel position (fractional part of absolute position).
 		absX := x + glyph.X
 		absY := y + glyph.Y
@@ -169,7 +234,7 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		var rErr error
 
 		if useLCD {
-			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, lcdFilter, lcdLayout)
+			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, *lcdFilter, lcdLayout)
 		} else {
 			region, rErr = e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
 				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, rasterSize, fracX, fracY, hinting)
@@ -228,7 +293,7 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 	}
 
 	if len(quads) == 0 {
-		return GlyphMaskBatch{}, nil
+		return GlyphMaskBatch{}
 	}
 
 	// Build the composed transform: CTM x ortho_projection.
@@ -255,7 +320,7 @@ func (e *GlyphMaskEngine) LayoutText( //nolint:funlen // text layout with atlas 
 		AtlasWidth:     atlasSize,
 		AtlasHeight:    atlasSize,
 		AtlasPageIndex: 0, // Currently single page support (first page).
-	}, nil
+	}
 }
 
 // SyncAtlasTextures uploads dirty atlas pages to the GPU as R8 textures.
