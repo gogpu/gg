@@ -27,11 +27,13 @@ import (
 type GPUTextEngine struct {
 	mu sync.Mutex
 
-	atlasManager *msdf.AtlasManager
-	extractor    *text.OutlineExtractor
+	atlasManager    *msdf.AtlasManager
+	cjkAtlasManager *msdf.AtlasManager // ADR-027: separate atlas for CJK (128px reference)
+	extractor       *text.OutlineExtractor
 
 	// msdfSize is the MSDF texture size per glyph cell (in pixels).
-	msdfSize int
+	msdfSize    int
+	msdfSizeCJK int // ADR-027: 128px for CJK display text
 
 	// pxRange is the MSDF distance range in pixels (typically 4.0).
 	pxRange float32
@@ -40,22 +42,35 @@ type GPUTextEngine struct {
 // NewGPUTextEngine creates a new GPU text engine with default configuration.
 func NewGPUTextEngine() *GPUTextEngine {
 	const glyphSize = 64
+	const glyphSizeCJK = 128 // ADR-027: 2x for dense CJK strokes (MapLibre pattern)
 	const pxRange = 4.0
 
 	cfg := msdf.DefaultAtlasConfig()
 	cfg.GlyphSize = glyphSize
 	mgr, _ := msdf.NewAtlasManager(cfg)
-
-	// Update generator range to match our pxRange.
 	genCfg := mgr.Generator().Config()
 	genCfg.Range = pxRange
 	mgr.Generator().SetConfig(genCfg)
 
+	// ADR-027: CJK display text uses 128px reference with 2048 texture.
+	// Single atlas manager with larger reference — CJK glyphs that reach MSDF
+	// (>64px display text) are rare and benefit from 2x resolution.
+	// Body text CJK (≤64px) routes to Tier 6 bitmap, never reaches here.
+	cjkCfg := msdf.DefaultAtlasConfig()
+	cjkCfg.GlyphSize = glyphSizeCJK
+	cjkCfg.Size = 2048
+	cjkMgr, _ := msdf.NewAtlasManager(cjkCfg)
+	cjkGenCfg := cjkMgr.Generator().Config()
+	cjkGenCfg.Range = pxRange
+	cjkMgr.Generator().SetConfig(cjkGenCfg)
+
 	return &GPUTextEngine{
-		atlasManager: mgr,
-		extractor:    text.NewOutlineExtractor(),
-		msdfSize:     glyphSize,
-		pxRange:      pxRange,
+		atlasManager:    mgr,
+		cjkAtlasManager: cjkMgr,
+		extractor:       text.NewOutlineExtractor(),
+		msdfSize:        glyphSize,
+		msdfSizeCJK:     glyphSizeCJK,
+		pxRange:         pxRange,
 	}
 }
 
@@ -105,7 +120,20 @@ func (e *GPUTextEngine) LayoutText(
 	}
 	fontSource := face.Source()
 	fontID := computeFontID(fontSource)
-	atlasConfig := e.atlasManager.Config()
+
+	// ADR-027: detect CJK from first rune → select appropriate atlas.
+	isCJK := false
+	for _, r := range s {
+		isCJK = text.IsCJKRune(r)
+		break
+	}
+	activeAtlas := e.atlasManager
+	atlasIndex := 0
+	if isCJK {
+		activeAtlas = e.cjkAtlasManager
+		atlasIndex = cjkAtlasOffset
+	}
+	atlasConfig := activeAtlas.Config()
 
 	var quads []TextQuad
 	var glyphCount, outlineSkip, atlasSkip, boundsSkip int
@@ -116,28 +144,37 @@ func (e *GPUTextEngine) LayoutText(
 	// already handles device scaling — quads must be in logical user-space coords.
 	// (BUG-MSDF-RETINA-001: was fontSize/refSize which doubled positions on Retina)
 	refSize := float64(e.msdfSize)
-	ratio := logicalSize / refSize
+	refSizeCJK := float64(e.msdfSizeCJK)
+	var ratio float64
 
 	for glyph := range face.Glyphs(s) {
 		glyphCount++
 
-		// Extract outline at the REFERENCE size (msdfSize), NOT the rendering
-		// fontSize. This ensures the outline bounds EXACTLY match what the MSDF
-		// generator uses, regardless of which fontSize first triggered generation.
-		// The MSDF is resolution-independent; its cache key is (font, glyph, msdfSize).
-		outline, err := e.extractor.ExtractOutline(fontSource.Parsed(), glyph.GID, refSize)
+		// ADR-027: CJK display text uses 128px reference for dense strokes.
+		glyphRefSize := refSize
+		glyphAtlas := activeAtlas
+		glyphMsdfSize := e.msdfSize
+		if text.IsCJKRune(glyph.Rune) {
+			glyphRefSize = refSizeCJK
+			glyphAtlas = e.cjkAtlasManager
+			glyphMsdfSize = e.msdfSizeCJK
+			ratio = logicalSize / refSizeCJK
+		} else {
+			ratio = logicalSize / refSize
+		}
+
+		outline, err := e.extractor.ExtractOutline(fontSource.Parsed(), glyph.GID, glyphRefSize)
 		if err != nil || outline == nil || outline.IsEmpty() {
 			outlineSkip++
 			continue
 		}
 
-		// Get or generate MSDF in atlas.
 		key := msdf.GlyphKey{
 			FontID:  fontID,
-			GlyphID: uint16(glyph.GID), //nolint:gosec // GlyphID is uint16
-			Size:    int16(e.msdfSize), //nolint:gosec // msdfSize fits int16
+			GlyphID: uint16(glyph.GID),  //nolint:gosec // GlyphID is uint16
+			Size:    int16(glyphMsdfSize), //nolint:gosec // msdfSize fits int16
 		}
-		region, err := e.atlasManager.Get(key, outline)
+		region, err := glyphAtlas.Get(key, outline)
 		if err != nil {
 			slogger().Warn("MSDF atlas get failed", "gid", glyph.GID, "err", err)
 			atlasSkip++
@@ -201,27 +238,40 @@ func (e *GPUTextEngine) LayoutText(
 		Quads:      quads,
 		Color:      color,
 		Transform:  matrix,
-		AtlasIndex: 0, // Currently single atlas support.
+		AtlasIndex: atlasIndex,
 		PxRange:    e.pxRange,
 		AtlasSize:  float32(atlasConfig.Size),
 	}, nil
 }
 
+// cjkAtlasOffset is the index offset for CJK atlas pages.
+// Latin atlas pages: 0..N-1, CJK atlas pages: cjkAtlasOffset..cjkAtlasOffset+M-1.
+const cjkAtlasOffset = 100
+
 // DirtyAtlases returns indices of atlases that have been modified since
-// the last MarkClean call and need GPU upload.
+// the last MarkClean call and need GPU upload. Includes both Latin and CJK atlases.
 func (e *GPUTextEngine) DirtyAtlases() []int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.atlasManager.DirtyAtlases()
+	dirty := e.atlasManager.DirtyAtlases()
+	for _, idx := range e.cjkAtlasManager.DirtyAtlases() {
+		dirty = append(dirty, idx+cjkAtlasOffset)
+	}
+	return dirty
 }
 
 // AtlasRGBAData returns the atlas pixel data converted from RGB (3 bytes/pixel)
 // to RGBA (4 bytes/pixel) suitable for GPU texture upload. Also returns the
-// atlas dimensions.
+// atlas dimensions. Indices ≥ cjkAtlasOffset refer to CJK atlas pages.
 func (e *GPUTextEngine) AtlasRGBAData(index int) (data []byte, width, height int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	atlas := e.atlasManager.GetAtlas(index)
+	var atlas *msdf.Atlas
+	if index >= cjkAtlasOffset {
+		atlas = e.cjkAtlasManager.GetAtlas(index - cjkAtlasOffset)
+	} else {
+		atlas = e.atlasManager.GetAtlas(index)
+	}
 	if atlas == nil {
 		return nil, 0, 0
 	}
@@ -233,7 +283,11 @@ func (e *GPUTextEngine) AtlasRGBAData(index int) (data []byte, width, height int
 func (e *GPUTextEngine) MarkClean(index int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.atlasManager.MarkClean(index)
+	if index >= cjkAtlasOffset {
+		e.cjkAtlasManager.MarkClean(index - cjkAtlasOffset)
+	} else {
+		e.atlasManager.MarkClean(index)
+	}
 }
 
 // AtlasSize returns the atlas texture size (width = height).
