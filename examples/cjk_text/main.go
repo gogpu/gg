@@ -16,6 +16,8 @@ import (
 	"github.com/gogpu/gg"
 )
 
+var fontPath string
+
 func main() {
 	const W, H = 800, 600
 	dc := gg.NewContext(W, H)
@@ -30,24 +32,25 @@ func main() {
 	// On macOS: PingFang SC, Hiragino Sans
 	// On Linux: Noto Sans CJK, WenQuanYi
 	fonts := []string{
-		"C:/Windows/Fonts/msyh.ttc",       // Microsoft YaHei (Windows)
-		"C:/Windows/Fonts/simsun.ttc",      // SimSun (Windows)
-		"/System/Library/Fonts/PingFang.ttc", // PingFang (macOS)
+		"C:/Windows/Fonts/msyh.ttc",        // Microsoft YaHei (Windows, .ttc collection)
+		"C:/Windows/Fonts/simsun.ttc",      // SimSun (Windows, .ttc collection)
+		"C:/Windows/Fonts/malgun.ttf",      // Malgun Gothic (Windows, Korean)
+		"/System/Library/Fonts/PingFang.ttc", // PingFang (macOS, .ttc collection)
 		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", // Noto (Linux)
 	}
 
-	var fontLoaded bool
-	for _, fontPath := range fonts {
-		if err := dc.LoadFontFace(fontPath, 14); err == nil {
-			fontLoaded = true
-			log.Printf("Font loaded: %s", fontPath)
+	for _, fp := range fonts {
+		err := dc.LoadFontFace(fp, 14)
+		if err == nil {
+			fontPath = fp
+			log.Printf("Font loaded: %s", fp)
 			break
 		}
+		log.Printf("Tried %s: %v", fp, err)
 	}
 
-	if !fontLoaded {
-		log.Println("No CJK font found — using default font. CJK characters may show as boxes.")
-		dc.LoadFontFace("", 14)
+	if fontPath == "" {
+		log.Fatal("No CJK font found. Install Noto Sans CJK or Microsoft YaHei.")
 	}
 
 	dc.SetRGB(0, 0, 0)
@@ -59,7 +62,7 @@ func main() {
 
 	bodySizes := []float64{12, 14, 16, 18, 20, 24}
 	for _, size := range bodySizes {
-		dc.LoadFontFace(currentFont(dc), size)
+		dc.LoadFontFace(fontPath, size)
 		label := fmt.Sprintf("%gpx: 中文测试 日本語テスト 한국어 — The quick brown fox", size)
 		dc.DrawString(label, 20, y)
 		y += size + 8
@@ -73,7 +76,7 @@ func main() {
 
 	displaySizes := []float64{36, 48, 64, 72}
 	for _, size := range displaySizes {
-		dc.LoadFontFace(currentFont(dc), size)
+		dc.LoadFontFace(fontPath, size)
 		dc.DrawString("中文大标题", 20, y)
 		y += size + 10
 	}
@@ -82,7 +85,7 @@ func main() {
 	y = 30
 	title(dc, "Mixed Script", 500, y)
 	y += 25
-	dc.LoadFontFace(currentFont(dc), 16)
+	dc.LoadFontFace(fontPath, 16)
 	dc.DrawString("Hello 世界!", 500, y)
 	y += 24
 	dc.DrawString("Go言語 is 素晴らしい", 500, y)
@@ -90,20 +93,16 @@ func main() {
 	dc.DrawString("1234 가나다라", 500, y)
 
 	// Save.
-	if err := dc.SavePNG("tmp/cjk_text_validation.png"); err != nil {
+	outPath := "../../tmp/cjk_text_validation.png"
+	if err := dc.SavePNG(outPath); err != nil {
 		log.Fatalf("SavePNG: %v", err)
 	}
-	log.Println("Saved: tmp/cjk_text_validation.png")
+	log.Printf("Saved: %s", outPath)
 }
 
 func title(dc *gg.Context, s string, x, y float64) {
 	dc.SetRGB(0.2, 0.2, 0.8)
-	dc.LoadFontFace(currentFont(dc), 13)
+	dc.LoadFontFace(fontPath, 13)
 	dc.DrawString(s, x, y)
 	dc.SetRGB(0, 0, 0)
-}
-
-func currentFont(dc *gg.Context) string {
-	// Return empty to keep current font.
-	return ""
 }
