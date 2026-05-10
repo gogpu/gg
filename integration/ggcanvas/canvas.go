@@ -520,6 +520,30 @@ func (c *Canvas) RenderDirect(surfaceView gpucontext.TextureView, width, height 
 	return err
 }
 
+// RenderDirectWithDamage renders canvas content to a surface view with a damage
+// rect hint. Only the damaged region is re-rendered; the rest preserves the
+// previous frame (LoadOpLoad + scissor). This enables per-boundary incremental
+// updates without full-frame re-render.
+//
+// Use when only a subset of GPU content changed (e.g., a single RepaintBoundary
+// item in a compositor). Pass image.Rectangle{} for full-frame render.
+func (c *Canvas) RenderDirectWithDamage(surfaceView gpucontext.TextureView, width, height uint32, damage image.Rectangle) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	if surfaceView.IsNil() {
+		return nil
+	}
+	if !c.dirty {
+		return nil
+	}
+
+	err := c.ctx.FlushGPUWithViewDamage(surfaceView, width, height, damage)
+	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
+	return err
+}
+
 // RenderTarget is the interface for presenting canvas content on screen.
 // Implement this on your application context. *gogpu.Context satisfies this
 // via the gogpu.RenderTarget() adapter.

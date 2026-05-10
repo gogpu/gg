@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.5] - 2026-05-10
+
+### Added
+
+- **`Canvas.RenderDirectWithDamage(surfaceView, w, h, damage)`** — damage-aware surface
+  compositing. Uses `LoadOpLoad + SetScissorRect` to preserve previous frame content outside
+  the damage rect. Enables per-boundary incremental updates (99.5% bandwidth reduction for
+  48×48 spinner on 800×600 surface).
+
+- **`Context.TrackDamageRect(rect)`** — public API for compositors to report damage from
+  retained-mode operations (DrawGPUTexture overlay blits). Enterprise pattern matching
+  Chrome Viz DamageTracker and Flutter DiffContext — compositor reports damage, renderer
+  consumes it.
+
+- **`computeDamageScissor`** — pure function for scissor-damage intersection with surface
+  clamping. 10 table-driven tests, CI-ready without GPU hardware.
+
+- **E2E damage blit tests via software backend** — pixel-exact verification of LoadOpLoad +
+  scissor through wgpu software backend. `createSoftwareDevice()` helper for headless CI.
+
+### Fixed
+
+- **Debug overlay feedback loop** — `GOGPU_DEBUG_DAMAGE=1` created infinite 30fps render
+  loop when combined with `TrackDamageRect`: same rect every frame → new flash → fade →
+  NeedsAnimationFrame → RequestRedraw → loop. Fixed via refresh-on-match: active flash
+  for same rect refreshes timestamp instead of creating duplicate. Region stays highlighted
+  while updating, fade begins when updates stop. Android SurfaceFlinger pattern.
+
+- **Overlay scissor reset corrupted LoadOpLoad content** — `applyGroupScissor(nil)` reset
+  scissor to full surface, drawing overlays outside damage rect. Fixed via
+  `applyGroupScissorWithDamage` which intersects group clip with damage rect. Returns false
+  on empty intersection (Vulkan VUID-vkCmdSetScissor-x-00595 compliant — no zero-size scissor).
+
+- **`encodeBlitToEncoder` (ADR-017) missing overlay damage scissor** — shared encoder path
+  had same overlay loop without any scissor for overlays. Same fix applied.
+
+- **Base layer scissor clamped to surface bounds** — `encodeBlitOnlyPass` and
+  `encodeBlitToEncoder` now use `computeDamageScissor` for proper surface clamping.
+
 ## [0.46.4] - 2026-05-09
 
 ### Fixed

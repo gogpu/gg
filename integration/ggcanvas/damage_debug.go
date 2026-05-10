@@ -53,8 +53,26 @@ func (s *damageOverlayState) update(rects []image.Rectangle) {
 		}
 	}
 	s.flashes = alive
+
 	for _, r := range rects {
-		if !r.Empty() {
+		if r.Empty() {
+			continue
+		}
+		// Refresh-or-create: if an active flash already covers the same rect,
+		// refresh its timestamp instead of creating a new one. This prevents
+		// feedback loops (TrackDamageRect same rect every frame) while keeping
+		// continuously animated regions green until they stop updating.
+		// Android SurfaceFlinger pattern: region stays highlighted while dirty,
+		// fade begins only when updates stop.
+		refreshed := false
+		for i := range s.flashes {
+			if s.flashes[i].rect == r {
+				s.flashes[i].time = now
+				refreshed = true
+				break
+			}
+		}
+		if !refreshed {
 			s.flashes = append(s.flashes, damageFlash{rect: r, time: now})
 		}
 	}

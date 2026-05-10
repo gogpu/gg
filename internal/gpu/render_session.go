@@ -2703,6 +2703,26 @@ func (s *GPURenderSession) applyGroupScissor(rp *wgpu.RenderPassEncoder, rect *[
 	}
 }
 
+// applyGroupScissorWithDamage sets the scissor for a group, intersected with
+// the frame damage rect. When damage is empty (full-frame render), behaves
+// identically to applyGroupScissor. When damage is non-empty, the effective
+// scissor is the intersection of group clip and damage — preventing draws
+// outside the damage region that would corrupt LoadOpLoad preserved content.
+// Returns false when intersection is empty (caller should skip the draw).
+func (s *GPURenderSession) applyGroupScissorWithDamage(rp *wgpu.RenderPassEncoder, rect *[4]uint32, w, h uint32, damage image.Rectangle) bool {
+	if damage.Empty() {
+		s.applyGroupScissor(rp, rect, w, h)
+		return true
+	}
+
+	x, y, dw, dh, valid := computeDamageScissor(rect, w, h, damage)
+	if !valid {
+		return false
+	}
+	rp.SetScissorRect(x, y, dw, dh)
+	return true
+}
+
 // sliceConvexResources creates a convexFrameResources referencing a sub-range
 // of the combined vertex buffer. Convex commands have variable vertex counts,
 // so firstVertex is computed by summing vertices of all commands before cmdStart.
@@ -2945,23 +2965,25 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	if !damageRect.Empty() {
-		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
-		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
-		dw := uint32(damageRect.Dx())          //nolint:gosec // positive by Empty check
-		dh := uint32(damageRect.Dy())          //nolint:gosec // positive by Empty check
-		rp.SetScissorRect(dx, dy, dw, dh)
+		// Clamp damage rect to surface bounds (Vulkan requires scissor within surface).
+		dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, damageRect)
+		if valid {
+			rp.SetScissorRect(dx, dy, dw, dh)
+		}
 	}
 
 	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 
 	// Draw GPU texture overlays (e.g., RepaintBoundary cached textures).
 	// These are textured quads using the same blit pipeline — no MSAA needed.
-	// Per-group scissor applied for compositor clipping (ScrollView viewport).
+	// Per-group scissor intersected with damage rect to prevent overlay draws
+	// outside the preserved region (LoadOpLoad content corruption).
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
-			s.applyGroupScissor(rp, gr.scissorRect, w, h)
-			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageRect) {
+				s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+			}
 		}
 	}
 
@@ -3201,19 +3223,21 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
 	if !damageRect.Empty() {
-		dx := uint32(max(0, damageRect.Min.X)) //nolint:gosec // clamped
-		dy := uint32(max(0, damageRect.Min.Y)) //nolint:gosec // clamped
-		dw := uint32(damageRect.Dx())          //nolint:gosec // positive
-		dh := uint32(damageRect.Dy())          //nolint:gosec // positive
-		rp.SetScissorRect(dx, dy, dw, dh)
+		dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, damageRect)
+		if valid {
+			rp.SetScissorRect(dx, dy, dw, dh)
+		}
 	}
 
 	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 
+	// Overlay scissor must be intersected with damage rect (same as encodeBlitOnlyPass).
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
-			s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageRect) {
+				s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
+			}
 		}
 	}
 
