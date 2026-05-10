@@ -29,9 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Debug overlay feedback loop** — `GOGPU_DEBUG_DAMAGE=1` created infinite 30fps render
   loop when combined with `TrackDamageRect`: same rect every frame → new flash → fade →
-  NeedsAnimationFrame → RequestRedraw → loop. Fixed via rect deduplication: active flash
-  for same rect skips creation. Enterprise pattern matching Chrome DevTools Paint Flashing
-  (per-layer dedup) and Android SurfaceFlinger (post-composition overlay).
+  NeedsAnimationFrame → RequestRedraw → loop. Fixed via refresh-on-match: active flash
+  for same rect refreshes timestamp instead of creating duplicate. Region stays highlighted
+  while updating, fade begins when updates stop. Android SurfaceFlinger pattern.
 
 - **Overlay scissor reset corrupted LoadOpLoad content** — `applyGroupScissor(nil)` reset
   scissor to full surface, drawing overlays outside damage rect. Fixed via
