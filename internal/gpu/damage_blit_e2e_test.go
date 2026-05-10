@@ -134,8 +134,7 @@ func TestDamageBlit_ScissorClampsOverlay(t *testing.T) {
 
 	// Overlay covers top-left quadrant — no overlap with damage.
 	groupClip := &[4]uint32{0, 0, 4, 4}
-	_, _, _, _, valid := computeDamageScissor(groupClip, 8, 8, damage)
-	if valid {
+	if _, _, _, _, valid := computeDamageScissor(groupClip, 8, 8, damage); valid {
 		t.Error("overlay (0,0)-(4,4) should NOT intersect damage (4,4)-(8,8)")
 	}
 

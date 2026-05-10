@@ -485,6 +485,18 @@ func (c *Context) SetDamageTracking(enabled bool) {
 	c.damageTrackingEnabled = enabled
 }
 
+// TrackDamageRect registers an external damage rectangle on the surface.
+// Use this for compositor operations that modify the surface but don't use
+// Fill/Stroke (e.g., DrawGPUTexture for dirty RepaintBoundary overlays).
+// No-op when damage tracking is disabled or rect is empty.
+//
+// Callers with retained-mode knowledge (e.g., ui widget tree) should call
+// this for each dirty boundary after compositing, so that FrameDamage()
+// accurately reflects which surface regions changed this frame.
+func (c *Context) TrackDamageRect(bounds image.Rectangle) {
+	c.trackDamage(bounds)
+}
+
 // trackDamage adds a damage rectangle for the current draw operation.
 // No-op when damage tracking is disabled (cached scene replay).
 // If rect count exceeds maxDamageRects, merges all into bounding box.
