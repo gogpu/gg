@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/blit_only
 go 1.25.5
 
 require (
-	github.com/gogpu/gg v0.46.4
+	github.com/gogpu/gg v0.46.5
 	github.com/gogpu/gogpu v0.34.0
 )
 
