@@ -141,7 +141,7 @@ func DefaultGlyphMaskAtlasConfig() GlyphMaskAtlasConfig {
 		Size:       1024,
 		Padding:    1,
 		MaxAtlases: 4,
-		MaxEntries: 8192,
+		MaxEntries: 16384, // ADR-027: increased for CJK (20K+ glyphs × subpixel variants)
 	}
 }
 
