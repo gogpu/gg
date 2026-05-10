@@ -353,7 +353,7 @@ func (rc *GPURenderContext) DrawText(target gg.GPURenderTarget, face any, s stri
 	engine := rc.shared.textEngine
 	rc.shared.mu.Unlock()
 
-	batch, err := engine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
+	batch, err := engine.LayoutText(textFace, s, x, y, color, matrix, deviceScale)
 	if err != nil {
 		slogger().Debug("DrawText: LayoutText failed", "err", err, "text", s)
 		return gg.ErrFallbackToCPU
@@ -389,7 +389,7 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 	engine := rc.shared.glyphMaskEngine
 	rc.shared.mu.Unlock()
 
-	batch, err := engine.LayoutText(textFace, s, x, y, color, target.Width, target.Height, matrix, deviceScale)
+	batch, err := engine.LayoutText(textFace, s, x, y, color, matrix, deviceScale)
 	if err != nil {
 		slogger().Debug("DrawGlyphMaskText: LayoutText failed", "err", err, "text", s, "w", target.Width, "h", target.Height)
 		return gg.ErrFallbackToCPU
@@ -426,7 +426,7 @@ func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, f
 	engine := rc.shared.glyphMaskEngine
 	rc.shared.mu.Unlock()
 
-	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, target.Width, target.Height, matrix, deviceScale)
+	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, matrix, deviceScale)
 	if err != nil {
 		return gg.ErrFallbackToCPU
 	}

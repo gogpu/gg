@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.4] - 2026-05-09
+
+### Fixed
+
+- **Text ortho projection deferred to flush time** (ADR-025, Skia `sk_RTAdjust` pattern) —
+  Tier 4 (MSDF) and Tier 6 (GlyphMask) previously baked ortho projection at draw time
+  using context pixmap dimensions. When `FlushGPUWithView` rendered to offscreen textures
+  (RepaintBoundary), text was squished/mispositioned. Now ortho is computed at flush time
+  from `effectiveDimensions()`, matching SDF/Convex/Stencil/Image tiers and Skia/Vello
+  enterprise pattern. CPU-side fix, zero shader changes.
+
+- **Scissor groups applied to GPU texture overlays in blit-only path** — `encodeBlitOnlyPass`
+  had scissor group infrastructure but was not applying it to GPU texture overlay draws.
+  RepaintBoundary textures (e.g., ListView items) rendered outside their parent viewport
+  when composited via the non-MSAA blit path.
+
 ## [0.46.3] - 2026-05-09
 
 ### Added

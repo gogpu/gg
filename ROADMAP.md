@@ -19,15 +19,19 @@
 
 ---
 
-## Current State: v0.45.2
+## Current State: v0.46.4
 
 ✅ **Production-ready** with GPU-accelerated rendering:
-- **Four-level damage pipeline** (ADR-021) — Object Diff → Tile Dirty → GPU Scissor → OS Present. Per-rect damage tracking, debug overlay (`GOGPU_DEBUG_DAMAGE=1`), incremental Path.Bounds (Skia pattern)
-- **Adapter-aware render mode** (`GOGPU_RENDER_MODE=auto|cpu|gpu`, ADR-020) — CPU rasterizer on software adapter, GPU on real hardware
-- **GPU depth clipping** — `dc.Clip()` with arbitrary paths routes to GPU depth buffer (ADR-019)
+- **Scene text TagText** (ADR-022) — glyph references, shape-once, DrawShapedGlyphs (Skia drawTextBlob)
+- **Atlas zoom resilience** — Skia size buckets, page reclamation, frame-based compact (ui#94)
+- **ClearType LCD auto-detection** (ADR-024) — Windows SPI, macOS None, Linux Xft/Wayland
+- **Deferred ortho projection** (ADR-025) — Skia sk_RTAdjust, correct offscreen text
+- **Four-level damage pipeline** (ADR-021) — Object Diff → Tile Dirty → GPU Scissor → OS Present
+- **Adapter-aware render mode** (`GOGPU_RENDER_MODE=auto|cpu|gpu`, ADR-020)
 - Canvas API, Text, Images, Clipping, Layers
 - **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
-- **Zero-readback compositor pipeline** (ADR-015/016) — FlushPixmap, DrawGPUTextureBase, BeginGPUFrame, FillRectCPU, non-MSAA blit path (93% bandwidth reduction)
+- **Zero-readback compositor pipeline** (ADR-015/016)
+- All 5 backends: Vulkan, DX12, DX12+DXIL, GLES, Software
 - **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SetSharedEncoder + SubmitSharedEncoder for multi-context frames
 - **GPU-to-GPU texture compositing** — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern, zero readback)
 - **Bullet-proof encoder lifecycle** — defer-based safety, no silently swallowed errors
