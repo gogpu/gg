@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestDamageOverlay_DedupSameRect(t *testing.T) {
+func TestDamageOverlay_RefreshSameRect(t *testing.T) {
 	var s damageOverlayState
 
 	r := image.Rect(170, 410, 218, 458)
@@ -15,12 +15,17 @@ func TestDamageOverlay_DedupSameRect(t *testing.T) {
 	if len(s.flashes) != 1 {
 		t.Fatalf("first update: want 1 flash, got %d", len(s.flashes))
 	}
+	firstTime := s.flashes[0].time
 
-	// Same rect again — should NOT create a new flash (dedup).
+	// Same rect again — should refresh time, NOT create new flash.
+	time.Sleep(time.Millisecond)
 	s.update([]image.Rectangle{r})
 
 	if len(s.flashes) != 1 {
-		t.Errorf("second update same rect: want 1 flash (dedup), got %d", len(s.flashes))
+		t.Errorf("second update same rect: want 1 flash (refreshed), got %d", len(s.flashes))
+	}
+	if !s.flashes[0].time.After(firstTime) {
+		t.Error("flash time should be refreshed (newer than first)")
 	}
 }
 
@@ -80,8 +85,8 @@ func TestDamageOverlay_NeedsAnimationFrameFalseAfterExpiry(t *testing.T) {
 func TestDamageOverlay_FeedbackLoopBroken(t *testing.T) {
 	// Simulates the feedback loop scenario:
 	// Frame 1: TrackDamageRect(spinner) → update → flash
-	// Frame 2: TrackDamageRect(spinner) again → update → dedup → NO new flash
-	// Flash fades → needsAnimationFrame=false → loop broken
+	// Frames 2-10: TrackDamageRect(spinner) again → refresh time → 1 flash (not 10)
+	// Spinner stops → no more updates → flash expires → NeedsAnimationFrame=false
 
 	var s damageOverlayState
 	spinner := image.Rect(170, 410, 218, 458)
@@ -97,16 +102,22 @@ func TestDamageOverlay_FeedbackLoopBroken(t *testing.T) {
 		s.update([]image.Rectangle{spinner})
 	}
 
-	// Still only 1 flash (deduped)
+	// Still only 1 flash (refreshed, not duplicated)
 	if len(s.flashes) != 1 {
-		t.Errorf("after 10 frames: want 1 flash (dedup), got %d", len(s.flashes))
+		t.Errorf("after 10 frames: want 1 flash (refreshed), got %d", len(s.flashes))
 	}
 
-	// Expire the flash
+	// While spinner animates, flash stays alive (time refreshed each frame).
+	// NeedsAnimationFrame=true — but this is correct, loop doesn't grow.
+	if !s.needsAnimationFrame() {
+		t.Error("during animation: should need frame (flash still active)")
+	}
+
+	// Spinner stops — no more updates. Flash expires after 400ms.
 	s.flashes[0].time = time.Now().Add(-damageFlashDuration - time.Millisecond)
 
 	if s.needsAnimationFrame() {
-		t.Error("after flash expired: needsAnimationFrame should be false — loop broken")
+		t.Error("after spinner stopped + flash expired: loop should be broken")
 	}
 }
 
