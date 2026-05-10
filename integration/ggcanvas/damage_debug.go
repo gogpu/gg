@@ -53,8 +53,24 @@ func (s *damageOverlayState) update(rects []image.Rectangle) {
 		}
 	}
 	s.flashes = alive
+
 	for _, r := range rects {
-		if !r.Empty() {
+		if r.Empty() {
+			continue
+		}
+		// Dedup: don't create a new flash if an active flash already covers
+		// the same rect. This prevents feedback loops when TrackDamageRect
+		// reports the same dirty boundary every frame (e.g., animated spinner).
+		// Enterprise pattern: Chrome DevTools Paint Flashing deduplicates
+		// paint rects per-layer, Android SurfaceFlinger draws post-composition.
+		dup := false
+		for i := range s.flashes {
+			if s.flashes[i].rect == r {
+				dup = true
+				break
+			}
+		}
+		if !dup {
 			s.flashes = append(s.flashes, damageFlash{rect: r, time: now})
 		}
 	}
