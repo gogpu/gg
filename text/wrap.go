@@ -70,7 +70,7 @@ func classifyRune(r rune) BreakClass {
 		return class
 	}
 	// Check character categories
-	if isCJKRune(r) {
+	if IsCJKRune(r) {
 		return breakIdeographic
 	}
 	return breakOther
@@ -94,8 +94,10 @@ func classifySpecificRune(r rune) (BreakClass, bool) {
 	}
 }
 
-// isCJKRune returns true if the rune is a CJK character that allows breaking.
-func isCJKRune(r rune) bool {
+// IsCJKRune returns true if the rune is a CJK character.
+// Used for script-aware text rendering (ADR-027: CJK hinting, bucket bypass)
+// and line break opportunities.
+func IsCJKRune(r rune) bool {
 	return (r >= 0x4E00 && r <= 0x9FFF) || // CJK Unified Ideographs
 		(r >= 0x3400 && r <= 0x4DBF) || // CJK Extension A
 		(r >= 0x20000 && r <= 0x2A6DF) || // CJK Extension B

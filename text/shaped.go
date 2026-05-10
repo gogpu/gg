@@ -11,6 +11,11 @@ type ShapedGlyph struct {
 	// Used for hit testing and cursor positioning.
 	Cluster int
 
+	// IsCJK indicates that this glyph belongs to a CJK script (Han, Hiragana,
+	// Katakana, Hangul). Used for script-aware rendering: CJK glyphs use
+	// reduced hinting and bypass bucket quantization (ADR-027).
+	IsCJK bool
+
 	// X is the horizontal position relative to the text origin.
 	X float64
 
