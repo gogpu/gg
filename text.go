@@ -88,6 +88,13 @@ func (c *Context) DrawString(s string, x, y float64) {
 		c.flushGPUAccelerator()
 		c.drawStringCPU(s, x, y)
 	default: // TextModeAuto — current behavior
+		// ADR-027: CJK ≤64px → prefer Tier 6 (bitmap) over MSDF.
+		// MSDF at 64px reference produces stroke fusion on dense CJK characters.
+		if c.isCJKText(s) && c.glyphMaskDeviceSize() <= glyphMaskMaxSizeCJK {
+			if c.tryGPUGlyphMaskText(s, x, y) {
+				return
+			}
+		}
 		if c.tryGPUText(s, x, y) {
 			return
 		}
@@ -206,6 +213,12 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 // Above this threshold, MSDF provides better quality per atlas byte.
 const glyphMaskMaxSize = 48.0
 
+// glyphMaskMaxSizeCJK is the extended threshold for CJK text (ADR-027).
+// CJK glyphs use bitmap (Tier 6) up to 64px because MSDF at 64px reference
+// produces stroke fusion on dense characters. No production engine uses
+// MSDF for CJK body text (Skia, Vello, Flutter all use bitmap/vector).
+const glyphMaskMaxSizeCJK = 64.0
+
 // tryGPUGlyphMaskText attempts to render text via the GPU glyph mask pipeline
 // (Tier 6). Glyphs are CPU-rasterized at the exact device pixel size into an
 // R8 alpha atlas, then drawn as textured quads by the GPU.
@@ -271,6 +284,14 @@ func (c *Context) shouldUseGlyphMask() bool {
 	}
 
 	return c.glyphMaskDeviceSize() <= glyphMaskMaxSize
+}
+
+// isCJKText checks the first rune of text for CJK script (ADR-027).
+func (c *Context) isCJKText(s string) bool {
+	for _, r := range s {
+		return text.IsCJKRune(r)
+	}
+	return false
 }
 
 // glyphMaskDeviceSize returns the effective font size in device pixels,

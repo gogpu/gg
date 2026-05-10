@@ -19,9 +19,11 @@
 
 ---
 
-## Current State: v0.46.4
+## Current State: v0.46.6
 
 ✅ **Production-ready** with GPU-accelerated rendering:
+- **CJK text rendering** (ADR-027) — script-aware hinting, exact-size rasterization, dual MSDF atlas 64/128px, TTC collection support. Enterprise patterns: Skia, FreeType, DirectWrite, Core Text
+- **Damage-aware compositing** (ADR-026) — LoadOpLoad + scissor, TrackDamageRect, debug overlay dedup. Enterprise patterns: Chrome Viz, Flutter Impeller, Android SurfaceFlinger
 - **Scene text TagText** (ADR-022) — glyph references, shape-once, DrawShapedGlyphs (Skia drawTextBlob)
 - **Atlas zoom resilience** — Skia size buckets, page reclamation, frame-based compact (ui#94)
 - **ClearType LCD auto-detection** (ADR-024) — Windows SPI, macOS None, Linux Xft/Wayland
@@ -60,16 +62,23 @@
 
 ## Upcoming
 
-### v0.45.4 — In Progress
-- [x] Multi-flush offscreen texture fix (deferred cmd buffer free + MSAA drain)
-- [x] ClipRoundRect on software backend (applyClipToPaint before GPU + blendPixel clip)
-- [x] Bind group deferred release for shared encoder
-- [x] MarkDirty full canvas rect fix
-- [x] Per-boundary GPU texture compositing validated (no trails)
-- [x] Damage-aware present: SetPresentDamage API + forwardDamageRects (ADR-021 Phase 4)
-- [x] FlushGPUWithViewDamage: MSAA path warning + godoc blit-only limitation
-- [x] LoadOpLoad on offscreen blit-only compositor verified (Chrome/Flutter pattern)
-- [x] Overlay-only blit path fix (BUG-GG-OVERLAY-ONLY-BLIT-001, unblocks L3 damage)
+### v0.47.0 — Next
+- [ ] Gradient support — BrushLinearGradient/BrushRadialGradient in scene
+- [ ] MSDF reference size increase for CJK display text validation (visual QA)
+- [ ] Integration test: full damage blit pipeline via software backend (CI)
+- [ ] HiDPI damage coordinate validation (DeviceScale != 1.0)
+
+### v0.46.5–v0.46.6 ✅ Released
+- [x] **Damage-aware compositing** (ADR-026) — RenderDirectWithDamage, LoadOpLoad + scissor
+- [x] **TrackDamageRect** — compositor damage reporting (Chrome Viz / Flutter DiffContext pattern)
+- [x] **Damage scissor intersection** — applyGroupScissorWithDamage, both encode paths
+- [x] **Debug overlay feedback loop fix** — refresh-on-match dedup (Android SurfaceFlinger)
+- [x] **CJK text rendering** (ADR-027) — script-aware hinting, bucket bypass, Tier 6 force, dual MSDF 128px
+- [x] **TTC collection support** — automatic .ttc/.otc detection, WithCollectionIndex option
+- [x] **E2E software backend tests** — pixel-exact LoadOpLoad + scissor verification
+- [x] **computeDamageScissor** — pure function, 10 table-driven tests, CI-ready without GPU
+
+### v0.46.0–v0.46.4 ✅ Released
 
 ### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)

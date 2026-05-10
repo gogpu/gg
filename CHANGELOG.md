@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.6] - 2026-05-10
+
+### Added
+
+- **CJK text rendering strategy** (ADR-027) — enterprise-level CJK font quality matching
+  Skia/FreeType/DirectWrite/Core Text patterns. Five changes:
+  1. **Script-aware hinting** — CJK glyphs use `HintingVertical` at 1x scale (FreeType
+     `afcjk` pattern) or `HintingNone` at 2x+ (macOS Core Text). Full grid-fitting
+     collapsed thin CJK parallel strokes.
+  2. **CJK bucket bypass** — CJK glyphs always rasterize at exact requested size, never
+     bucket-quantized. Skia DirectMask never buckets bitmap glyphs.
+  3. **Force Tier 6 for CJK ≤64px** — CJK body text routes to bitmap (Tier 6) instead of
+     MSDF (Tier 4). No production engine uses MSDF for CJK body text.
+  4. **Dual MSDF atlas** — separate 128px/2048×2048 atlas for CJK display text (>64px).
+     MapLibre 2x resolution pattern. Per-glyph routing via `IsCJKRune`.
+  5. **Atlas MaxEntries 16384** — doubled for CJK workloads (20K+ glyphs × subpixel variants).
+
+- **`text.IsCJKRune(r)`** — exported CJK script detection for cross-package use.
+
+- **`ShapedGlyph.IsCJK`** — carries CJK script flag through the GPU text pipeline for
+  per-glyph rendering decisions without re-scanning text.
+
+- **TrueType Collection (.ttc/.otc) support** — font parser automatically detects
+  collections and extracts font by index. `WithCollectionIndex(i)` option for explicit
+  selection. Most CJK system fonts are collections (msyh.ttc, simsun.ttc, PingFang.ttc).
+
+- **`cjk_text` example** — visual validation of CJK text at body + display sizes.
+
+### Changed
+
+- **Dependencies** — wgpu v0.27.1 → v0.27.2.
+
+### Research
+
+- `CJK-TEXT-RENDERING-ENTERPRISE-RESEARCH.md` — Skia, FreeType, DirectWrite, Core Text,
+  Vello, MapLibre analysis. Key finding: no production engine uses MSDF for CJK body text.
+
 ## [0.46.5] - 2026-05-10
 
 ### Added

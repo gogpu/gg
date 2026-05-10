@@ -426,7 +426,8 @@ func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, f
 	engine := rc.shared.glyphMaskEngine
 	rc.shared.mu.Unlock()
 
-	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, matrix, deviceScale)
+	isCJK := len(glyphs) > 0 && glyphs[0].IsCJK
+	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, matrix, deviceScale, isCJK)
 	if err != nil {
 		return gg.ErrFallbackToCPU
 	}

@@ -5,8 +5,9 @@ type SourceOption func(*sourceConfig)
 
 // sourceConfig holds configuration for FontSource.
 type sourceConfig struct {
-	cacheLimit int
-	parserName string
+	cacheLimit      int
+	parserName      string
+	collectionIndex int // Font index within .ttc/.otc collection (default 0)
 }
 
 // defaultSourceConfig returns the default source configuration.
@@ -22,6 +23,16 @@ func defaultSourceConfig() sourceConfig {
 func WithCacheLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
 		c.cacheLimit = n
+	}
+}
+
+// WithCollectionIndex selects a font within a TrueType/OpenType collection
+// (.ttc/.otc). Index 0 is the first font (default). Ignored for single fonts.
+//
+// Example: msyh.ttc contains Microsoft YaHei (0) and Microsoft YaHei UI (1).
+func WithCollectionIndex(index int) SourceOption {
+	return func(c *sourceConfig) {
+		c.collectionIndex = index
 	}
 }
 

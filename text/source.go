@@ -51,9 +51,18 @@ func NewFontSource(data []byte, opts ...SourceOption) (*FontSource, error) {
 		opt(&config)
 	}
 
-	// Get parser and parse the font
+	// Get parser and parse the font.
+	// If collection index is set (or data is a .ttc/.otc), use ParseIndex.
 	parser := getParser(config.parserName)
-	parsed, err := parser.Parse(data)
+	var parsed ParsedFont
+	var err error
+	if indexer, ok := parser.(interface {
+		ParseIndex([]byte, int) (ParsedFont, error)
+	}); ok {
+		parsed, err = indexer.ParseIndex(data, config.collectionIndex)
+	} else {
+		parsed, err = parser.Parse(data)
+	}
 	if err != nil {
 		return nil, err
 	}

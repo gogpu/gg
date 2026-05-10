@@ -14,11 +14,34 @@ type ximageParser struct{}
 
 // Parse implements FontParser.Parse.
 func (p *ximageParser) Parse(data []byte) (ParsedFont, error) {
+	return p.ParseIndex(data, 0)
+}
+
+// ParseIndex parses a font at the given index within a collection.
+// For single fonts (.ttf/.otf), index is ignored. For collections
+// (.ttc/.otc), index selects which font to use (0 = first).
+func (p *ximageParser) ParseIndex(data []byte, index int) (ParsedFont, error) {
+	// Try single font first (most common case).
 	f, err := opentype.Parse(data)
-	if err != nil {
+	if err == nil {
+		return &ximageParsedFont{font: f}, nil
+	}
+
+	// Single parse failed — try as collection (.ttc/.otc).
+	coll, collErr := opentype.ParseCollection(data)
+	if collErr != nil {
 		return nil, fmt.Errorf("text: failed to parse font: %w", err)
 	}
-	return &ximageParsedFont{font: f}, nil
+
+	if index >= coll.NumFonts() {
+		return nil, fmt.Errorf("text: collection index %d out of range (collection has %d fonts)", index, coll.NumFonts())
+	}
+
+	cf, cfErr := coll.Font(index)
+	if cfErr != nil {
+		return nil, fmt.Errorf("text: failed to get font %d from collection: %w", index, cfErr)
+	}
+	return &ximageParsedFont{font: cf}, nil
 }
 
 // ximageParsedFont implements ParsedFont using sfnt.Font.

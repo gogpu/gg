@@ -90,9 +90,9 @@ func TestIsCJKRune(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isCJKRune(tt.r)
+			got := IsCJKRune(tt.r)
 			if got != tt.want {
-				t.Errorf("isCJKRune(%q) = %v, want %v", tt.r, got, tt.want)
+				t.Errorf("IsCJKRune(%q) = %v, want %v", tt.r, got, tt.want)
 			}
 		})
 	}

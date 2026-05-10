@@ -120,36 +120,37 @@ func (e *GlyphMaskEngine) LayoutText(
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 
-	// Auto-select hinting: enable for small text (≤48px) on axis-aligned
-	// matrices. Hinting grid-fits outlines to pixel boundaries, which only
-	// makes sense when the pixel grid is axis-aligned (no rotation/skew).
-	hinting := selectGlyphMaskHinting(fontSize, matrix)
+	// Detect CJK script from first rune (ADR-027). CJK text uses reduced
+	// hinting to avoid stroke collapse on dense parallel strokes.
+	isCJK := false
+	for _, r := range s {
+		isCJK = text.IsCJKRune(r)
+		break
+	}
+	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
 
-	// Determine LCD mode: use ClearType for small axis-aligned text
-	// (same conditions as hinting).
 	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
 	lcdLayout := e.lcdLayout
 	lcdFilter := e.lcdFilter
 
-	// Premultiply color for batch-level uniform.
 	premul := color.Premultiply()
 	batchColor := [4]float32{
 		float32(premul.R), float32(premul.G),
 		float32(premul.B), float32(premul.A),
 	}
 
-	// Shape text → collect glyphs, then delegate to common layout.
 	var shaped []text.ShapedGlyph
 	for glyph := range face.Glyphs(s) {
 		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
 	}
 
-	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale), nil
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK), nil
 }
 
 // LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
 // Same as LayoutText but skips shaping — uses stored glyph IDs and positions.
 // This implements the ADR-022 "shape once" guarantee for the GPU scene path.
+// isCJK indicates whether the text contains CJK characters (ADR-027).
 func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	face text.Face,
 	glyphs []text.ShapedGlyph,
@@ -157,6 +158,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	color gg.RGBA,
 	matrix gg.Matrix,
 	deviceScale float64,
+	isCJK bool,
 ) (GlyphMaskBatch, error) {
 	if face == nil || len(glyphs) == 0 {
 		return GlyphMaskBatch{}, nil
@@ -172,7 +174,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	fontSource := face.Source()
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
-	hinting := selectGlyphMaskHinting(fontSize, matrix)
+	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
 	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
 
 	premul := color.Premultiply()
@@ -182,7 +184,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	}
 
 	lcdFilter := e.lcdFilter
-	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale), nil
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK), nil
 }
 
 // layoutGlyphs is the common implementation for LayoutText and LayoutShapedGlyphs.
@@ -200,6 +202,7 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	batchColor [4]float32,
 	matrix gg.Matrix,
 	deviceScale float64,
+	isCJK bool,
 ) GlyphMaskBatch {
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
@@ -213,11 +216,12 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 
 		// Size bucket quantization (Skia pattern): under atlas pressure,
 		// rasterize at a coarse bucket size and scale quads to actual size.
-		// This reduces unique atlas entries from ~57K to ~416 during zoom.
+		// ADR-027: CJK glyphs always rasterize at exact size — bucket scaling
+		// is visible on dense CJK strokes. Skia never buckets DirectMask glyphs.
 		rasterSize := fontSize
 		bucketScale := 1.0
 		var key text.GlyphMaskKey
-		if e.atlas.UnderPressure() {
+		if e.atlas.UnderPressure() && !isCJK {
 			key = text.MakeGlyphMaskKeyBucketed(fontID, glyph.GID, fontSize, fracX, fracY)
 			rasterSize = float64(key.SizeQ4) / 16.0
 			if rasterSize > 0 {
@@ -466,18 +470,26 @@ const glyphMaskHintingMaxSize = 48.0
 // selectGlyphMaskHinting returns the hinting mode for glyph mask rendering.
 // Hinting is enabled for small text (≤48px) when the CTM is axis-aligned
 // (no rotation or skew), since grid-fitting requires an aligned pixel grid.
-func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix) text.Hinting {
-	// Rotated/skewed text: pixel grid is not axis-aligned, hinting would distort.
+//
+// CJK text uses reduced hinting (ADR-027): full grid-fitting collapses thin
+// CJK strokes. FreeType afcjk module applies Y-direction only; DirectWrite
+// uses NATURAL_SYMMETRIC for unhinted CJK fonts; macOS ignores hinting entirely.
+func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix, isCJK bool, deviceScale float64) text.Hinting {
 	if matrix.B != 0 || matrix.D != 0 {
 		return text.HintingNone
 	}
 
-	// Large text: smooth enough without hinting.
 	if fontSize > glyphMaskHintingMaxSize {
 		return text.HintingNone
 	}
 
-	// Small axis-aligned text: full hinting for crisp stems and baselines.
+	if isCJK {
+		if deviceScale >= 2.0 {
+			return text.HintingNone
+		}
+		return text.HintingVertical
+	}
+
 	return text.HintingFull
 }
 
