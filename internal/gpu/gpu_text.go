@@ -171,7 +171,7 @@ func (e *GPUTextEngine) LayoutText(
 
 		key := msdf.GlyphKey{
 			FontID:  fontID,
-			GlyphID: uint16(glyph.GID),  //nolint:gosec // GlyphID is uint16
+			GlyphID: uint16(glyph.GID),    //nolint:gosec // GlyphID is uint16
 			Size:    int16(glyphMsdfSize), //nolint:gosec // msdfSize fits int16
 		}
 		region, err := glyphAtlas.Get(key, outline)

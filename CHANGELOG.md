@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ShapedGlyph.IsCJK`** — carries CJK script flag through the GPU text pipeline for
   per-glyph rendering decisions without re-scanning text.
 
+- **TrueType Collection (.ttc/.otc) support** — font parser automatically detects
+  collections and extracts font by index. `WithCollectionIndex(i)` option for explicit
+  selection. Most CJK system fonts are collections (msyh.ttc, simsun.ttc, PingFang.ttc).
+
+- **`cjk_text` example** — visual validation of CJK text at body + display sizes.
+
+### Changed
+
+- **Dependencies** — wgpu v0.27.1 → v0.27.2.
+
 ### Research
 
 - `CJK-TEXT-RENDERING-ENTERPRISE-RESEARCH.md` — Skia, FreeType, DirectWrite, Core Text,

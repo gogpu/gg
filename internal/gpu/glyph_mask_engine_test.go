@@ -128,7 +128,7 @@ func TestSelectGlyphMaskHinting(t *testing.T) {
 		{
 			name: "latin_small_translation", fontSize: 16,
 			matrix: gg.Matrix{A: 1, B: 0, C: 50, D: 0, E: 1, F: 30},
-			want: text.HintingFull,
+			want:   text.HintingFull,
 		},
 		{
 			name: "latin_threshold_48px", fontSize: 48, matrix: gg.Identity(),
@@ -145,17 +145,17 @@ func TestSelectGlyphMaskHinting(t *testing.T) {
 		{
 			name: "rotated_small", fontSize: 12,
 			matrix: gg.Matrix{A: 0.707, B: -0.707, C: 0, D: 0.707, E: 0.707, F: 0},
-			want: text.HintingNone,
+			want:   text.HintingNone,
 		},
 		{
 			name: "skewed", fontSize: 14,
 			matrix: gg.Matrix{A: 1, B: 0.3, C: 0, D: 0, E: 1, F: 0},
-			want: text.HintingNone,
+			want:   text.HintingNone,
 		},
 		{
 			name: "latin_uniform_scale", fontSize: 12,
 			matrix: gg.Matrix{A: 2, B: 0, C: 0, D: 0, E: 2, F: 0},
-			want: text.HintingFull,
+			want:   text.HintingFull,
 		},
 		// ADR-027: CJK script-aware hinting
 		{
@@ -176,7 +176,7 @@ func TestSelectGlyphMaskHinting(t *testing.T) {
 		{
 			name: "cjk_rotated_none", fontSize: 14,
 			matrix: gg.Matrix{A: 0.707, B: -0.707, C: 0, D: 0.707, E: 0.707, F: 0},
-			isCJK: true, deviceScale: 1.0,
+			isCJK:  true, deviceScale: 1.0,
 			want: text.HintingNone,
 		},
 	}

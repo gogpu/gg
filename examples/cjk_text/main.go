@@ -32,10 +32,10 @@ func main() {
 	// On macOS: PingFang SC, Hiragino Sans
 	// On Linux: Noto Sans CJK, WenQuanYi
 	fonts := []string{
-		"C:/Windows/Fonts/msyh.ttc",        // Microsoft YaHei (Windows, .ttc collection)
-		"C:/Windows/Fonts/simsun.ttc",      // SimSun (Windows, .ttc collection)
-		"C:/Windows/Fonts/malgun.ttf",      // Malgun Gothic (Windows, Korean)
-		"/System/Library/Fonts/PingFang.ttc", // PingFang (macOS, .ttc collection)
+		"C:/Windows/Fonts/msyh.ttc",                              // Microsoft YaHei (Windows, .ttc collection)
+		"C:/Windows/Fonts/simsun.ttc",                            // SimSun (Windows, .ttc collection)
+		"C:/Windows/Fonts/malgun.ttf",                            // Malgun Gothic (Windows, Korean)
+		"/System/Library/Fonts/PingFang.ttc",                     // PingFang (macOS, .ttc collection)
 		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", // Noto (Linux)
 	}
 
