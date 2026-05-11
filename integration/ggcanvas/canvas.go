@@ -544,6 +544,26 @@ func (c *Canvas) RenderDirectWithDamage(surfaceView gpucontext.TextureView, widt
 	return err
 }
 
+// RenderDirectWithDamageRects renders with multiple damage rects (ADR-028).
+// Each rect gets its own scissor — per-draw dynamic scissor for distant dirty
+// regions. Falls back to single-rect behavior when len(rects) <= 1.
+func (c *Canvas) RenderDirectWithDamageRects(surfaceView gpucontext.TextureView, width, height uint32, rects []image.Rectangle) error {
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	if surfaceView.IsNil() {
+		return nil
+	}
+	if !c.dirty {
+		return nil
+	}
+
+	err := c.ctx.FlushGPUWithViewDamageRects(surfaceView, width, height, rects)
+	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
+	return err
+}
+
 // RenderTarget is the interface for presenting canvas content on screen.
 // Implement this on your application context. *gogpu.Context satisfies this
 // via the gogpu.RenderTarget() adapter.

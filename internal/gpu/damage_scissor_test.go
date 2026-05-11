@@ -113,3 +113,36 @@ func TestComputeDamageScissor(t *testing.T) {
 		})
 	}
 }
+
+func TestDamageRectsUnion(t *testing.T) {
+	tests := []struct {
+		name  string
+		rects []image.Rectangle
+		want  image.Rectangle
+	}{
+		{"empty", nil, image.Rectangle{}},
+		{"single", []image.Rectangle{image.Rect(10, 20, 50, 60)}, image.Rect(10, 20, 50, 60)},
+		{
+			"two_distant",
+			[]image.Rectangle{image.Rect(10, 10, 58, 58), image.Rect(500, 50, 600, 82)},
+			image.Rect(10, 10, 600, 82),
+		},
+		{
+			"three_overlapping",
+			[]image.Rectangle{
+				image.Rect(10, 10, 100, 100),
+				image.Rect(50, 50, 200, 200),
+				image.Rect(150, 150, 300, 300),
+			},
+			image.Rect(10, 10, 300, 300),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := damageRectsUnion(tt.rects)
+			if got != tt.want {
+				t.Errorf("damageRectsUnion = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -1355,13 +1355,36 @@ func (c *Context) FlushGPUWithViewDamage(view gpucontext.TextureView, width, hei
 		t.ViewHeight = height
 	}
 	if !damageRect.Empty() {
-		t.DamageRect = damageRect
+		t.DamageRects = []image.Rectangle{damageRect}
 	}
 	if rc := c.gpuCtxOps(); rc != nil {
 		return rc.Flush(t)
 	}
 	if a := Accelerator(); a != nil {
 		c.warnGPUFallback("FlushGPUWithViewDamage")
+		return a.Flush(t)
+	}
+	return nil
+}
+
+// FlushGPUWithViewDamageRects renders to a surface view with multiple damage rects
+// (ADR-028). Each overlay gets its own scissor from the closest damage rect,
+// enabling per-draw dynamic scissor for distant dirty regions.
+func (c *Context) FlushGPUWithViewDamageRects(view gpucontext.TextureView, width, height uint32, rects []image.Rectangle) error {
+	t := c.gpuRenderTarget()
+	if !view.IsNil() {
+		t.View = view
+		t.ViewWidth = width
+		t.ViewHeight = height
+	}
+	if len(rects) > 0 {
+		t.DamageRects = rects
+	}
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.Flush(t)
+	}
+	if a := Accelerator(); a != nil {
+		c.warnGPUFallback("FlushGPUWithViewDamageRects")
 		return a.Flush(t)
 	}
 	return nil
