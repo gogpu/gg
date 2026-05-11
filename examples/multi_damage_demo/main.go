@@ -108,7 +108,7 @@ func main() {
 		} else {
 			// Multi-rect damage: two small scissors at opposite corners.
 			rects := []image.Rectangle{
-				image.Rect(20, 20, 120, 120),       // top-left spinner
+				image.Rect(20, 20, 120, 120),                                 // top-left spinner
 				image.Rect(int(sw)-120, int(sh)-120, int(sw)-20, int(sh)-20), // bottom-right pulse
 			}
 			canvas.MarkDirty()
