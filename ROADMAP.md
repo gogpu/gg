@@ -68,6 +68,11 @@
 - [ ] Integration test: full damage blit pipeline via software backend (CI)
 - [ ] HiDPI damage coordinate validation (DeviceScale != 1.0)
 
+### v0.46.7 ✅ Released
+- [x] **Multi-rect damage** (ADR-028) — per-draw dynamic scissor, 97% tile savings for distant widgets
+- [x] **multi_damage_demo example** — visual validation of per-draw scissor
+- [x] Dependencies: wgpu v0.27.3, gogpu v0.34.3
+
 ### v0.46.5–v0.46.6 ✅ Released
 - [x] **Damage-aware compositing** (ADR-026) — RenderDirectWithDamage, LoadOpLoad + scissor
 - [x] **TrackDamageRect** — compositor damage reporting (Chrome Viz / Flutter DiffContext pattern)

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.7] - 2026-05-11
+
+### Added
+
+- **Multi-rect damage** (ADR-028) — per-draw dynamic scissor for distant dirty regions.
+  Base layer drawn once per damage rect instead of one union rect. Distant widgets:
+  97% fewer tiles loaded (200K → 5.5K pixels on TBDR GPUs).
+  - `FlushGPUWithViewDamageRects(view, w, h, rects []image.Rectangle)`
+  - `RenderDirectWithDamageRects(sv, w, h, rects []image.Rectangle)`
+  - `GPURenderTarget.DamageRects` replaces `DamageRect` (backward compatible)
+  - Both `encodeBlitOnlyPass` and `encodeBlitToEncoder` updated
+
+- **`multi_damage_demo` example** — two animated elements at opposite corners,
+  visualizes per-draw dynamic scissor with `GOGPU_DEBUG_DAMAGE=1`.
+
+### Changed
+
+- **Dependencies** — wgpu v0.27.2 → v0.27.3, gogpu v0.34.0 → v0.34.3.
+
 ## [0.46.6] - 2026-05-10
 
 ### Added

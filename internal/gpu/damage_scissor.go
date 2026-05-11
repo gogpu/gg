@@ -31,3 +31,16 @@ func computeDamageScissor(groupClip *[4]uint32, surfaceW, surfaceH uint32, damag
 	}
 	return uint32(sx), uint32(sy), uint32(sx2 - sx), uint32(sy2 - sy), true //nolint:gosec // clamped above
 }
+
+// damageRectsUnion returns the bounding box of all damage rects.
+// Returns empty rect if slice is empty.
+func damageRectsUnion(rects []image.Rectangle) image.Rectangle {
+	if len(rects) == 0 {
+		return image.Rectangle{}
+	}
+	u := rects[0]
+	for _, r := range rects[1:] {
+		u = u.Union(r)
+	}
+	return u
+}

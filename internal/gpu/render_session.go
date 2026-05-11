@@ -837,20 +837,20 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	// because multisampled content is discarded after resolve (StoreOp=DontCare).
 	// No enterprise framework (Chrome, Flutter, Skia) uses LoadOpLoad on MSAA.
 	// Warn if caller passed damageRect but MSAA path will be used.
-	if !blitOnly && !target.DamageRect.Empty() {
-		slogger().Warn("damageRect ignored: MSAA render path requires full LoadOpClear; use blit-only compositor for damage-aware rendering (ADR-021)")
+	if !blitOnly && len(target.DamageRects) > 0 {
+		slogger().Warn("damageRects ignored: MSAA render path requires full LoadOpClear; use blit-only compositor for damage-aware rendering (ADR-021)")
 	}
 
 	// ADR-017: shared encoder → record render pass without submit.
 	if sharedEncoder != nil {
 		if blitOnly {
-			return s.encodeBlitToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+			return s.encodeBlitToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes, target.DamageRects)
 		}
 		return s.encodeToEncoder(sharedEncoder, activeView, w, h, grpRes, baseLayerRes)
 	}
 
 	if blitOnly {
-		return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRect)
+		return s.encodeBlitOnlyPass(activeView, w, h, grpRes, baseLayerRes, target.DamageRects)
 	}
 	return s.encodeSubmitSurfaceGrouped(activeView, w, h, grpRes, baseLayerRes)
 }
@@ -2926,7 +2926,7 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	view *wgpu.TextureView, w, h uint32,
 	grpRes []groupResources,
 	baseLayerRes *imageFrameResources,
-	damageRect image.Rectangle,
+	damageRects []image.Rectangle,
 ) error {
 	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
 		return fmt.Errorf("ensure blit pipeline: %w", err)
@@ -2946,7 +2946,8 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	}()
 
 	loadOp := gputypes.LoadOpClear
-	if !damageRect.Empty() {
+	hasDamage := len(damageRects) > 0
+	if hasDamage {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -2964,24 +2965,28 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
-	if !damageRect.Empty() {
-		// Clamp damage rect to surface bounds (Vulkan requires scissor within surface).
-		dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, damageRect)
-		if valid {
-			rp.SetScissorRect(dx, dy, dw, dh)
+	// ADR-028: base layer drawn once per damage rect (per-draw dynamic scissor).
+	// Multi-rect: N small scissors. Single rect: 1 scissor. No rects: full surface.
+	if hasDamage {
+		for _, dr := range damageRects {
+			dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, dr)
+			if valid {
+				rp.SetScissorRect(dx, dy, dw, dh)
+				s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+			}
 		}
+	} else {
+		s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 	}
 
-	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
-
 	// Draw GPU texture overlays (e.g., RepaintBoundary cached textures).
-	// These are textured quads using the same blit pipeline — no MSAA needed.
-	// Per-group scissor intersected with damage rect to prevent overlay draws
-	// outside the preserved region (LoadOpLoad content corruption).
+	// ADR-028: per-overlay scissor from best-matching damage rect.
+	// Each overlay intersects with the tightest enclosing damage rect.
+	damageUnion := damageRectsUnion(damageRects)
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
-			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageRect) {
+			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageUnion) {
 				s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
 			}
 		}
@@ -3197,14 +3202,15 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	w, h uint32,
 	grpRes []groupResources,
 	baseLayerRes *imageFrameResources,
-	damageRect image.Rectangle,
+	damageRects []image.Rectangle,
 ) error {
 	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
 		return fmt.Errorf("ensure blit pipeline: %w", err)
 	}
 
+	hasDamage := len(damageRects) > 0
 	loadOp := gputypes.LoadOpClear
-	if !damageRect.Empty() {
+	if hasDamage {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -3222,20 +3228,25 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 
-	if !damageRect.Empty() {
-		dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, damageRect)
-		if valid {
-			rp.SetScissorRect(dx, dy, dw, dh)
+	// ADR-028: base layer per-rect scissor (same as encodeBlitOnlyPass).
+	if hasDamage {
+		for _, dr := range damageRects {
+			dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, dr)
+			if valid {
+				rp.SetScissorRect(dx, dy, dw, dh)
+				s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
+			}
 		}
+	} else {
+		s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 	}
 
-	s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
-
-	// Overlay scissor must be intersected with damage rect (same as encodeBlitOnlyPass).
+	// Overlay scissor intersected with damage union (same as encodeBlitOnlyPass).
+	damageUnion := damageRectsUnion(damageRects)
 	for i := range grpRes {
 		gr := &grpRes[i]
 		if gr.gpuTexRes != nil && len(gr.gpuTexRes.drawCalls) > 0 {
-			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageRect) {
+			if s.applyGroupScissorWithDamage(rp, gr.scissorRect, w, h, damageUnion) {
 				s.imagePipeline.RecordBlitDraws(rp, gr.gpuTexRes)
 			}
 		}

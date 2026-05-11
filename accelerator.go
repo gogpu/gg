@@ -66,9 +66,11 @@ type GPURenderTarget struct {
 	ViewWidth  uint32
 	ViewHeight uint32
 
-	// Damage-aware compositing (ADR-016 Phase 2): when non-empty, compositor
-	// uses LoadOpLoad (preserve previous frame) and scissor-clips to this rect.
-	DamageRect image.Rectangle
+	// Damage-aware compositing (ADR-026/028): when non-empty, compositor
+	// uses LoadOpLoad (preserve previous frame) and per-rect scissor.
+	// Single rect: one scissor for entire pass.
+	// Multiple rects: per-draw dynamic scissor (ADR-028).
+	DamageRects []image.Rectangle
 
 	// CPU readback path.
 	Data          []uint8
