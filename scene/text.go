@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/gogpu/gg/text"
 )
@@ -516,12 +517,18 @@ func (s *Scene) encodeTextRun(str string, glyphs []text.ShapedGlyph, face text.F
 		return &text.FontError{Reason: "text string exceeds 65535 bytes (TagText TextLen is uint16)"}
 	}
 
+	// Detect CJK from first rune (ADR-027).
+	flags := TextFlagHinting
+	if r, _ := utf8.DecodeRuneInString(str); r != utf8.RuneError && text.IsCJKRune(r) {
+		flags |= TextFlagCJK
+	}
+
 	//nolint:gosec // slice lengths bounded by uint16 check above
 	run := GlyphRunData{
 		FontSourceID: fontID,
 		FontSize:     float32(face.Size()),
 		GlyphCount:   uint16(len(glyphs)),
-		Flags:        TextFlagHinting,
+		Flags:        flags,
 		OriginX:      x,
 		OriginY:      y,
 		BrushIndex:   uint32(brushIdx),

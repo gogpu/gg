@@ -560,7 +560,7 @@ func TestGoTextShaper_FixedPointConversion(t *testing.T) {
 
 // TestGoTextShaper_ConvertGlyphsEmpty tests convertGlyphs with empty input.
 func TestGoTextShaper_ConvertGlyphsEmpty(t *testing.T) {
-	result := convertGlyphs(nil, 0)
+	result := convertGlyphs(nil, 0, "")
 	if result != nil {
 		t.Errorf("convertGlyphs(nil) = %v, want nil", result)
 	}

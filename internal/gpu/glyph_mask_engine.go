@@ -141,7 +141,7 @@ func (e *GlyphMaskEngine) LayoutText(
 
 	var shaped []text.ShapedGlyph
 	for glyph := range face.Glyphs(s) {
-		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
+		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y, IsCJK: text.IsCJKRune(glyph.Rune)})
 	}
 
 	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK), nil

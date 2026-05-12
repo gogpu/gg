@@ -903,12 +903,14 @@ func (r *Renderer) renderTextOnTile(
 	face := source.Face(float64(run.FontSize))
 
 	// Convert stored GlyphEntry → ShapedGlyph (no re-shaping).
+	isCJK := run.Flags&TextFlagCJK != 0
 	shaped := make([]text.ShapedGlyph, len(glyphs))
 	for i, g := range glyphs {
 		shaped[i] = text.ShapedGlyph{
-			GID: g.GlyphID,
-			X:   float64(g.X),
-			Y:   float64(g.Y),
+			GID:   g.GlyphID,
+			X:     float64(g.X),
+			Y:     float64(g.Y),
+			IsCJK: isCJK,
 		}
 	}
 

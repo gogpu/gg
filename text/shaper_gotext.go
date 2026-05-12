@@ -114,7 +114,7 @@ func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 	s.shaperPool.Put(hbShaper)
 
 	// Convert go-text glyphs to our ShapedGlyph format.
-	result := convertGlyphs(output.Glyphs, dir)
+	result := convertGlyphs(output.Glyphs, dir, text)
 
 	// Post-process: fix tab characters that HarfBuzz mapped to notdef (GID=0).
 	// Replace with space GID and proper tab-stop advance.
@@ -212,26 +212,32 @@ func fixedToFloat(v fixed.Int26_6) float64 {
 }
 
 // convertGlyphs converts go-text/typesetting output glyphs to our ShapedGlyph slice.
-func convertGlyphs(glyphs []shaping.Glyph, dir di.Direction) []ShapedGlyph {
+func convertGlyphs(glyphs []shaping.Glyph, dir di.Direction, sourceText string) []ShapedGlyph {
 	if len(glyphs) == 0 {
 		return nil
 	}
 
 	result := make([]ShapedGlyph, len(glyphs))
+	runes := []rune(sourceText)
 
 	var x, y float64
 
 	for i, g := range glyphs {
-		// XOffset and YOffset represent fine-grained positioning adjustments
-		// applied on top of the current pen position.
 		xOff := fixedToFloat(g.XOffset)
 		yOff := fixedToFloat(g.YOffset)
 
+		cluster := g.TextIndex()
+		var cjk bool
+		if cluster >= 0 && cluster < len(runes) {
+			cjk = IsCJKRune(runes[cluster])
+		}
+
 		result[i] = ShapedGlyph{
 			GID:     GlyphID(uint16(g.GlyphID)), //nolint:gosec // GlyphID is uint16 by design; overflow is handled by font subsetting
-			Cluster: g.TextIndex(),
+			Cluster: cluster,
 			X:       x + xOff,
 			Y:       y + yOff,
+			IsCJK:   cjk,
 		}
 
 		// Advance the pen position.
