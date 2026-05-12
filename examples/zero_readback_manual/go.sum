@@ -6,8 +6,8 @@ github.com/go-webgpu/goffi v0.5.0 h1:EuvVRiRn9qAfCkYYXbHs9gz8NY+zv2/OA1N7gi56UVE
 github.com/go-webgpu/goffi v0.5.0/go.mod h1:wfoxNsJkU+5RFbV1kNN1kunhc1lFHuJKK3zpgx08/uM=
 github.com/go-webgpu/webgpu v0.4.3 h1:dIBf7WgO/7VL2Cj7IFcq151rWqvSknsFe6k/+ZEEXEE=
 github.com/go-webgpu/webgpu v0.4.3/go.mod h1:HNIBiaMJNdPeQd6hmHdQsXg4t4R99xVQybnoDGOShe0=
-github.com/gogpu/gg v0.46.7 h1:0zTgUFA8C+BYjJ/EHPJHi/Yi8lqZf/VFFXfVbhQ8Sd8=
-github.com/gogpu/gg v0.46.7/go.mod h1:NsQZ0v/wR4yjc8+ykccc/xf9Kh8XoC3OJZeFcXyoHWg=
+github.com/gogpu/gg v0.46.8 h1:Dp4WBvS5kJhTXMjyazdyYKFKOHXqUFkL50wlatpMQ/Y=
+github.com/gogpu/gg v0.46.8/go.mod h1:NsQZ0v/wR4yjc8+ykccc/xf9Kh8XoC3OJZeFcXyoHWg=
 github.com/gogpu/gogpu v0.34.3 h1:tfnttpKedniwc0lqHgHE5660iuJe5us5BNcXRqm08+A=
 github.com/gogpu/gogpu v0.34.3/go.mod h1:M03kOiwdf/ZUc+WYb5+FIPO5p1loCmfPY+qMJDlNTFw=
 github.com/gogpu/gpucontext v0.18.0 h1:Y48ScE0cNPevoqZEhT8CxWGh9C86TeCjtLu5eFU+Grw=
