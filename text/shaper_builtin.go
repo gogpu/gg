@@ -69,6 +69,7 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 			Y:        0,
 			XAdvance: advance,
 			YAdvance: 0,
+			IsCJK:    IsCJKRune(r),
 		})
 
 		x += advance

@@ -235,9 +235,10 @@ func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, glyphs []
 	dc.SetFont(face)
 
 	if len(glyphs) > 0 {
+		isCJK := run.Flags&TextFlagCJK != 0
 		shaped := make([]text.ShapedGlyph, len(glyphs))
 		for i, g := range glyphs {
-			shaped[i] = text.ShapedGlyph{GID: g.GlyphID, X: float64(g.X), Y: float64(g.Y)}
+			shaped[i] = text.ShapedGlyph{GID: g.GlyphID, X: float64(g.X), Y: float64(g.Y), IsCJK: isCJK}
 		}
 		dc.DrawShapedGlyphs(shaped, face, float64(run.OriginX), float64(run.OriginY))
 	} else if str != "" {
