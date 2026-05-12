@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.8] - 2026-05-11
+
+### Fixed
+
+- **CJK improvements bypassed through scene/shaper paths** — `ShapedGlyph.IsCJK` field
+  (ADR-027) was never populated, silently disabling script-aware hinting, exact-size
+  rasterization, and Tier 6 routing for CJK text rendered through scene or UI compositor.
+  Fixed in 6 locations: builtin shaper, HarfBuzz shaper, LayoutText, scene encoding
+  (`TextFlagCJK` in `GlyphRunData.Flags`), scene GPU/CPU decoders. Zero breaking changes,
+  no UI modifications needed — fix is transparent through `scene.DrawText` API.
+
 ## [0.46.7] - 2026-05-11
 
 ### Added

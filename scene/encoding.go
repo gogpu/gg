@@ -372,7 +372,7 @@ type TextFlags uint16
 
 const (
 	TextFlagHinting TextFlags = 1 << iota
-	TextFlagCJK                          // ADR-027: text contains CJK characters
+	TextFlagCJK               // ADR-027: text contains CJK characters
 )
 
 // GlyphRunData is the header for a TagText scene encoding element.
