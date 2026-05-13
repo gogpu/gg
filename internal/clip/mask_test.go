@@ -75,6 +75,7 @@ func TestNewMaskClipper(t *testing.T) {
 			}
 			if mc == nil {
 				t.Fatal("NewMaskClipper() returned nil unexpectedly")
+				return
 			}
 			if mc.mask == nil {
 				t.Error("mask is nil")

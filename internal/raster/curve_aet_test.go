@@ -29,6 +29,7 @@ func TestCurveAwareAET_Insert(t *testing.T) {
 	variant := NewLineEdgeVariant(p0, p1, 0)
 	if variant == nil {
 		t.Fatal("NewLineEdgeVariant returned nil")
+		return
 	}
 
 	aet.Insert(*variant)
@@ -73,6 +74,7 @@ func TestCurveAwareAET_Edges(t *testing.T) {
 	variant := NewLineEdgeVariant(p0, p1, 0)
 	if variant == nil {
 		t.Skip("NewLineEdgeVariant returned nil")
+		return
 	}
 
 	aet.Insert(*variant)
@@ -91,12 +93,14 @@ func TestCurveAwareAET_EdgeAt(t *testing.T) {
 	variant := NewLineEdgeVariant(p0, p1, 0)
 	if variant == nil {
 		t.Skip("NewLineEdgeVariant returned nil")
+		return
 	}
 
 	aet.Insert(*variant)
 	edge := aet.EdgeAt(0)
 	if edge == nil {
 		t.Fatal("EdgeAt(0) returned nil")
+		return
 	}
 	if edge.Type != EdgeTypeLine {
 		t.Errorf("EdgeAt(0).Type = %d, want EdgeTypeLine", edge.Type)

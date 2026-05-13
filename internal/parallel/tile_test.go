@@ -609,6 +609,7 @@ func TestTilePool_GetPut(t *testing.T) {
 	tile := pool.Get(TileWidth, TileHeight)
 	if tile == nil {
 		t.Fatal("Get returned nil")
+		return
 	}
 	if tile.Width != TileWidth || tile.Height != TileHeight {
 		t.Errorf("Tile dimensions = %dx%d, want %dx%d", tile.Width, tile.Height, TileWidth, TileHeight)
@@ -624,6 +625,7 @@ func TestTilePool_GetPut(t *testing.T) {
 	tile2 := pool.Get(TileWidth, TileHeight)
 	if tile2 == nil {
 		t.Fatal("Second Get returned nil")
+		return
 	}
 }
 
@@ -634,6 +636,7 @@ func TestTilePool_GetEdgeTile(t *testing.T) {
 	tile := pool.Get(32, 16)
 	if tile == nil {
 		t.Fatal("Get returned nil for edge tile")
+		return
 	}
 	if tile.Width != 32 || tile.Height != 16 {
 		t.Errorf("Edge tile dimensions = %dx%d, want 32x16", tile.Width, tile.Height)
@@ -649,6 +652,7 @@ func TestTilePool_GetEdgeTile(t *testing.T) {
 	tile2 := pool.Get(32, 16)
 	if tile2 == nil {
 		t.Fatal("Second Get returned nil for edge tile")
+		return
 	}
 	if tile2.Width != 32 || tile2.Height != 16 {
 		t.Errorf("Reused edge tile dimensions = %dx%d, want 32x16", tile2.Width, tile2.Height)
