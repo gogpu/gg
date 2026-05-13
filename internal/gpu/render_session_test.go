@@ -1204,3 +1204,72 @@ func TestIsBlitOnly(t *testing.T) {
 		}
 	})
 }
+
+// TestReadbackGrouped_NilTexturesReturnsError verifies that
+// encodeSubmitReadbackGrouped returns an error instead of crashing
+// when textures have been destroyed (e.g., concurrent resize).
+// Regression test for TransitionTextures NULL VkImage crash (ui#101).
+func TestReadbackGrouped_NilTexturesReturnsError(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	target := gg.GPURenderTarget{
+		Data:   make([]byte, 100*100*4),
+		Width:  100,
+		Height: 100,
+		Stride: 400,
+	}
+
+	// Session with NO textures allocated — simulates post-destroy state.
+	err := s.encodeSubmitReadbackGrouped(100, 100, nil, target, nil)
+	if err == nil {
+		t.Error("encodeSubmitReadbackGrouped with nil textures should return error, not crash")
+	}
+}
+
+// TestReadback_NilTexturesReturnsError verifies the non-grouped readback
+// path also returns an error when textures are nil.
+func TestReadback_NilTexturesReturnsError(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	target := gg.GPURenderTarget{
+		Data:   make([]byte, 100*100*4),
+		Width:  100,
+		Height: 100,
+		Stride: 400,
+	}
+
+	err := s.encodeSubmitReadback(100, 100, nil, nil, nil, nil, nil, nil, nil, target)
+	if err == nil {
+		t.Error("encodeSubmitReadback with nil textures should return error, not crash")
+	}
+}
+
+// TestCopySubmitAndReadback_NilResolveTexReturnsError verifies
+// copySubmitAndReadback returns an error when resolveTex is nil.
+func TestCopySubmitAndReadback_NilResolveTexReturnsError(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	s := NewGPURenderSession(device, queue)
+	defer s.Destroy()
+
+	target := gg.GPURenderTarget{
+		Data:   make([]byte, 100*100*4),
+		Width:  100,
+		Height: 100,
+		Stride: 400,
+	}
+
+	err := s.copySubmitAndReadback(nil, 100, 100, target)
+	if err == nil {
+		t.Error("copySubmitAndReadback with nil resolveTex should return error, not crash")
+	}
+}

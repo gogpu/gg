@@ -33,6 +33,7 @@ func TestNewPool(t *testing.T) {
 			pool := NewPool(tt.maxPerBucket)
 			if pool == nil {
 				t.Fatal("NewPool returned nil")
+				return
 			}
 			if pool.maxSize != tt.wantMaxSize {
 				t.Errorf("maxSize = %d, want %d", pool.maxSize, tt.wantMaxSize)

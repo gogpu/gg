@@ -313,6 +313,7 @@ func TestParallelRasterizer_FillRect_EdgeTiles(t *testing.T) {
 	tile := pr.Grid().TileAt(1, 1)
 	if tile == nil {
 		t.Fatal("Edge tile (1,1) is nil")
+		return
 	}
 
 	if tile.Width != 36 || tile.Height != 36 {

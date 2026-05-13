@@ -523,16 +523,6 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 		return nil
 	}
 
-	// Detect curves in the source path. Stroke-expanded outlines from curved
-	// paths (arcs, beziers) produce ring-shaped contours that the stencil
-	// fan tessellator cannot handle correctly — the fan origin is inside the
-	// ring, filling the interior as a lens/chord shape instead of a thin
-	// stroke band. Fall back to CPU rasterizer for curved strokes.
-	// Fixes ui#101 Thread F (circular progress arc rendered as filled lens).
-	if path.HasCurves() {
-		return gg.ErrFallbackToCPU
-	}
-
 	strokeVerbs := convertPathVerbsToStroke(path.Verbs())
 	style := stroke.Stroke{
 		Width:      paint.EffectiveLineWidth(),
@@ -547,7 +537,17 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 	}
 
 	fillPath := strokeResultToPath(outVerbs, outCoords)
-	return rc.FillPath(target, fillPath, paint)
+
+	// Stroke-expanded outlines are ring-shaped contours (outer + inner edges).
+	// With NonZero fill rule, the fan tessellator fills the entire interior
+	// including the hollow center — rendering as a lens/chord shape.
+	// EvenOdd fill rule correctly handles ring topology: interior crosses
+	// 2 boundaries (even = empty), stroke band crosses 1 (odd = filled).
+	// This is the Skia Ganesh pattern for GPU stroke rendering.
+	// Fixes ui#101 Thread F (circular progress arc rendered as filled lens).
+	strokePaint := *paint
+	strokePaint.FillRule = gg.FillRuleEvenOdd
+	return rc.FillPath(target, fillPath, &strokePaint)
 }
 
 // FillShape accumulates a filled shape for batch dispatch.
