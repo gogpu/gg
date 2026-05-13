@@ -1261,3 +1261,140 @@ func TestPixmapTextureView_ClosedCanvas(t *testing.T) {
 		t.Error("PixmapTextureView() on closed canvas should be nil (IsNil)")
 	}
 }
+
+// mockHiDPIProvider wraps mockProvider with WindowProvider (ScaleFactor).
+type mockHiDPIProvider struct {
+	*mockProvider
+	gpucontext.NullWindowProvider
+}
+
+func newMockHiDPIProvider(scale float64) *mockHiDPIProvider {
+	return &mockHiDPIProvider{
+		mockProvider:       newMockProvider(),
+		NullWindowProvider: gpucontext.NullWindowProvider{W: 100, H: 100, SF: scale},
+	}
+}
+
+func (m *mockHiDPIProvider) ScaleFactor() float64 { return m.NullWindowProvider.ScaleFactor() }
+func (m *mockHiDPIProvider) Size() (int, int)     { return m.NullWindowProvider.Size() }
+func (m *mockHiDPIProvider) RequestRedraw()       { m.NullWindowProvider.RequestRedraw() }
+
+// TestMarkDirty_HiDPI_UsesPhysicalDimensions verifies that MarkDirty sets
+// dirtyRect to physical pixel dimensions, not logical. On Retina (scale=2.0),
+// logical 100x100 → physical 200x200. Using logical dimensions would cause
+// uploadTexture to do a partial upload of only the upper-left quadrant.
+//
+// Regression test for gg#308: Mac Retina renders only upper-left quadrant.
+// Root cause: v0.45.4 changed MarkDirty to use c.ctx.Width()/Height() (logical)
+// instead of c.ctx.PixelWidth()/PixelHeight() (physical).
+func TestMarkDirty_HiDPI_UsesPhysicalDimensions(t *testing.T) {
+	provider := newMockHiDPIProvider(2.0)
+	c, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	if c.ctx.DeviceScale() != 2.0 {
+		t.Fatalf("DeviceScale = %.1f, want 2.0", c.ctx.DeviceScale())
+	}
+	if c.ctx.PixelWidth() != 200 || c.ctx.PixelHeight() != 200 {
+		t.Fatalf("PixelSize = %dx%d, want 200x200", c.ctx.PixelWidth(), c.ctx.PixelHeight())
+	}
+
+	c.dirty = false
+	c.dirtyRect = image.Rectangle{}
+
+	c.MarkDirty()
+
+	expected := image.Rect(0, 0, 200, 200)
+	if c.dirtyRect != expected {
+		t.Errorf("MarkDirty() dirtyRect = %v, want %v (physical pixels, not logical)",
+			c.dirtyRect, expected)
+	}
+}
+
+// TestFlush_HiDPI_FullUploadAfterMarkDirty verifies that MarkDirty on a HiDPI
+// canvas triggers a full texture upload (UpdateData), not a partial upload
+// (UpdateRegion) covering only the upper-left quadrant.
+//
+// Regression test for gg#308.
+func TestFlush_HiDPI_FullUploadAfterMarkDirty(t *testing.T) {
+	provider := newMockHiDPIProvider(2.0)
+	c, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render: creates texture at physical resolution (200x200).
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	if len(renderer.textures) != 1 {
+		t.Fatalf("Expected 1 texture, got %d", len(renderer.textures))
+	}
+	tex := renderer.textures[0]
+	if tex.width != 200 || tex.height != 200 {
+		t.Fatalf("Texture size = %dx%d, want 200x200 (physical)", tex.width, tex.height)
+	}
+
+	// MarkDirty (full invalidation) then flush.
+	c.MarkDirty()
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	// Must be full upload (UpdateData), NOT partial (UpdateRegion).
+	// With the bug: dirtyRect=(0,0,100,100) logical != bounds=(0,0,200,200) physical
+	// → partial upload of 1/4 texture → upper-left quadrant only.
+	if tex.updated != 1 {
+		t.Errorf("UpdateData called %d times, want 1 (full upload after MarkDirty)", tex.updated)
+	}
+	if len(tex.regionUpdates) != 0 {
+		t.Errorf("UpdateRegion called %d times, want 0 (MarkDirty should trigger full upload, not partial)",
+			len(tex.regionUpdates))
+		if len(tex.regionUpdates) > 0 {
+			ru := tex.regionUpdates[0]
+			t.Errorf("  partial region = (%d,%d,%d,%d) — this is the Retina quadrant bug (gg#308)",
+				ru.x, ru.y, ru.w, ru.h)
+		}
+	}
+}
+
+// TestMarkDirtyRegion_HiDPI_PartialUpload verifies that MarkDirtyRegion with
+// physical pixel coordinates produces a correct partial upload on HiDPI canvas.
+func TestMarkDirtyRegion_HiDPI_PartialUpload(t *testing.T) {
+	provider := newMockHiDPIProvider(2.0)
+	c, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	renderer := &mockRenderer{}
+	dc := &mockDrawContext{renderer: renderer}
+
+	// First render: creates texture.
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("First RenderTo() error = %v", err)
+	}
+	tex := renderer.textures[0]
+
+	// Mark a region in physical pixels (as documented by MarkDirtyRegion).
+	c.MarkDirtyRegion(image.Rect(10, 10, 50, 50))
+	if err := c.RenderTo(dc); err != nil {
+		t.Fatalf("Second RenderTo() error = %v", err)
+	}
+
+	if len(tex.regionUpdates) != 1 {
+		t.Fatalf("UpdateRegion called %d times, want 1", len(tex.regionUpdates))
+	}
+	ru := tex.regionUpdates[0]
+	if ru.x != 10 || ru.y != 10 || ru.w != 40 || ru.h != 40 {
+		t.Errorf("UpdateRegion = (%d,%d,%d,%d), want (10,10,40,40)", ru.x, ru.y, ru.w, ru.h)
+	}
+}

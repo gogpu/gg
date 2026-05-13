@@ -270,7 +270,7 @@ func (c *Canvas) SetDeviceScale(scale float64) {
 // use MarkDirtyRegion to upload only the changed region.
 func (c *Canvas) MarkDirty() {
 	c.dirty = true
-	c.dirtyRect = image.Rect(0, 0, c.ctx.Width(), c.ctx.Height())
+	c.dirtyRect = image.Rect(0, 0, c.ctx.PixelWidth(), c.ctx.PixelHeight())
 }
 
 // LastDamage returns the damage rectangle (union) from the most recent frame.

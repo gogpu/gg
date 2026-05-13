@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.9] - 2026-05-13
+
+### Fixed
+
+- **Mac Retina renders only upper-left quadrant** (gg#308) — `MarkDirty()` set
+  `dirtyRect` to logical pixel dimensions (`Width()/Height()`) instead of physical
+  (`PixelWidth()/PixelHeight()`). On Retina (scale=2.0), this caused `uploadTexture()`
+  to do a partial upload of only 1/4 of the pixmap, rendering the upper-left quadrant
+  only. First frame was unaffected because initial texture creation uses full data.
+  Regression introduced in v0.45.4 (BUG-GG-LASTDAMAGE-001 fix).
+
+### Added
+
+- **HiDPI regression tests** — `TestMarkDirty_HiDPI_UsesPhysicalDimensions`,
+  `TestFlush_HiDPI_FullUploadAfterMarkDirty`, `TestMarkDirtyRegion_HiDPI_PartialUpload`
+  with `mockHiDPIProvider` (scale=2.0). Prevents future logical/physical coordinate
+  mismatches in texture upload path.
+
 ## [0.46.8] - 2026-05-11
 
 ### Fixed
