@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.46.6
+## Current State: v0.46.9
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **CJK text rendering** (ADR-027) — script-aware hinting, exact-size rasterization, dual MSDF atlas 64/128px, TTC collection support. Enterprise patterns: Skia, FreeType, DirectWrite, Core Text
@@ -66,7 +66,15 @@
 - [ ] Gradient support — BrushLinearGradient/BrushRadialGradient in scene
 - [ ] MSDF reference size increase for CJK display text validation (visual QA)
 - [ ] Integration test: full damage blit pipeline via software backend (CI)
-- [ ] HiDPI damage coordinate validation (DeviceScale != 1.0)
+- [x] HiDPI damage coordinate validation (DeviceScale != 1.0) — done in v0.46.9
+
+### v0.46.9 ✅ Released
+- [x] **Mac Retina quadrant fix** (gg#308) — `MarkDirty()` used logical pixel dimensions for `dirtyRect`, causing partial texture upload (1/4) on HiDPI. Fixed to use `PixelWidth()/PixelHeight()`
+- [x] **HiDPI regression tests** — `mockHiDPIProvider` (scale=2.0), 3 tests for MarkDirty + uploadTexture coordinate correctness
+- [x] HiDPI damage coordinate validation (DeviceScale != 1.0)
+
+### v0.46.8 ✅ Released
+- [x] **CJK IsCJK propagation** — fixed in 6 locations (shaper, scene encoding/decoding)
 
 ### v0.46.7 ✅ Released
 - [x] **Multi-rect damage** (ADR-028) — per-draw dynamic scissor, 97% tile savings for distant widgets
