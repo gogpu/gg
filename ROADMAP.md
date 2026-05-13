@@ -68,12 +68,16 @@
 - [ ] Integration test: full damage blit pipeline via software backend (CI)
 - [x] HiDPI damage coordinate validation (DeviceScale != 1.0) — done in v0.46.9
 
-### v0.46.10 — Preparing
-- [x] **GPU scene image affine scale** (ui#101 Thread C, @AnyCPU) — `resolveImage` honors scale components
+### v0.46.11 — Preparing
 - [x] **GPU stroke EvenOdd fill** (ui#101 Thread F, @AnyCPU) — ring-shaped outlines with EvenOdd rule (Skia Ganesh pattern)
 - [x] **Nil texture barrier guard** (ui#101) — prevents Vulkan crash on concurrent resize
 - [x] **SA5011 staticcheck fixes** — 11 `return` after `t.Fatal` in 5 test files
-- [x] Dependencies: wgpu v0.27.5, gogpu v0.34.4, x/image v0.40.0, x/text v0.37.0
+- [x] Dependencies: wgpu v0.27.5, gogpu v0.34.4
+
+### v0.46.10 ✅ Released
+- [x] **GPU scene image affine scale** (ui#101 Thread C, @AnyCPU) — `resolveImage` honors scale components
+- [x] **GPU curved stroke HasCurves** — CPU fallback for curves (superseded by v0.46.11 EvenOdd)
+- [x] Dependencies: wgpu v0.27.4, gogpu v0.34.4, x/image v0.40.0, x/text v0.37.0
 
 ### v0.46.9 ✅ Released
 - [x] **Mac Retina quadrant fix** (gg#308, @sverrehu) — `MarkDirty()` logical→physical pixel dimensions
