@@ -2289,6 +2289,11 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	glyphMaskRes *glyphMaskFrameResources,
 	target gg.GPURenderTarget,
 ) error {
+	if s.textures.resolveTex == nil || s.textures.resolveView == nil ||
+		s.textures.msaaView == nil || s.textures.stencilView == nil {
+		return fmt.Errorf("offscreen textures destroyed (concurrent resize?)")
+	}
+
 	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_encoder",
 	})
@@ -2394,6 +2399,10 @@ func (s *GPURenderSession) encodeSubmitReadback(
 func (s *GPURenderSession) copySubmitAndReadback(
 	encoder *wgpu.CommandEncoder, w, h uint32, target gg.GPURenderTarget,
 ) error {
+	if s.textures.resolveTex == nil {
+		return fmt.Errorf("resolve texture nil in copySubmitAndReadback (concurrent resize?)")
+	}
+
 	// BUG-GG-ENCODER-LIFECYCLE-001: this method takes ownership of encoder.
 	// Defer ensures DiscardEncoding on any error or panic before Finish.
 	// DiscardEncoding is idempotent (no-op if already released by Finish).
@@ -2814,6 +2823,11 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	target gg.GPURenderTarget,
 	baseLayerRes *imageFrameResources,
 ) error {
+	if s.textures.resolveTex == nil || s.textures.resolveView == nil ||
+		s.textures.msaaView == nil || s.textures.stencilView == nil {
+		return fmt.Errorf("offscreen textures destroyed (concurrent resize?)")
+	}
+
 	encoder, err := s.device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
 		Label: "session_encoder",
 	})
