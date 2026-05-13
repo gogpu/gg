@@ -21,24 +21,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FillPath` → stencil-then-cover. Fan tessellation created incorrect stencil
   coverage for ring-shaped stroke outlines, rendering arcs as chord-closed filled
   lenses. Affected `CircularProgress` widget in M3 theme (v0.44.0+ regression).
-  Fix: detect curves via `Path.HasCurves()` and fall back to CPU rasterizer.
+  Fix: use EvenOdd fill rule for stroke-expanded outlines — ring interior crosses
+  2 boundaries (even = empty), stroke band crosses 1 (odd = filled). Skia Ganesh
+  pattern for GPU stroke rendering.
+
+- **Vulkan crash on stale texture in readback barrier** (ui#101) — `encodeSubmitReadback`
+  and `encodeSubmitReadbackGrouped` passed `resolveTex` to `TransitionTextures`
+  without nil check. Concurrent resize destroying textures between `ensureTextures`
+  and barrier caused NULL VkImage → `vkCmdPipelineBarrier` crash (Exception 0xc0000005).
+  Fix: nil texture guard in all three readback functions.
 
 ### Added
 
 - **`Path.HasCurves()`** — reports whether a path contains quadratic or cubic curves.
-  Used by GPU stroke pipeline to detect paths requiring CPU fallback.
 
 - **GPU scene image scale tests** — `TestGPUSceneRenderer_ImageRespectsAffineScale`,
   `TestGPUSceneRenderer_ImageIdentityScale`, `TestGPUSceneRenderer_ImageScale2x`.
   Pixel-level verification that DrawImage honors affine scale components.
 
-- **HasCurves tests** — 5 table-driven tests for `Path.HasCurves()` covering empty,
-  lines-only, quadratic, cubic, and mixed paths.
+- **HasCurves tests** — 5 table-driven tests for `Path.HasCurves()`.
+
+- **Nil texture readback tests** — `TestReadbackGrouped_NilTexturesReturnsError`,
+  `TestReadback_NilTexturesReturnsError`, `TestCopySubmitAndReadback_NilResolveTexReturnsError`.
+  Verify error return instead of crash when textures destroyed.
+
+- **SA5011 staticcheck fixes** — added `return` after `t.Fatal`/`t.Skip` in 5 test files
+  (11 locations) to satisfy newer staticcheck nil pointer analysis.
 
 ### Changed
 
-- **Dependencies** — wgpu v0.27.3 → v0.27.4 (goffi v0.5.1 struct ABI fix, flaky CI fix),
-  x/image v0.39.0 → v0.40.0, x/text v0.36.0 → v0.37.0.
+- **Dependencies** — wgpu v0.27.3 → v0.27.5 (defensive NULL handle guard in
+  TransitionTextures, goffi v0.5.1 struct ABI), gogpu v0.34.3 → v0.34.4
+  (macOS TextField fix), x/image v0.39.0 → v0.40.0, x/text v0.36.0 → v0.37.0.
 
 ## [0.46.9] - 2026-05-13
 
