@@ -1024,7 +1024,7 @@ func BenchmarkPathVerbs(b *testing.B) {
 // TestHasCurves verifies curve detection for GPU stroke fallback (ui#101 Thread F).
 func TestHasCurves(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		build func(*Path)
 		want  bool
 	}{
