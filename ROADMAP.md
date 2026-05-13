@@ -68,9 +68,15 @@
 - [ ] Integration test: full damage blit pipeline via software backend (CI)
 - [x] HiDPI damage coordinate validation (DeviceScale != 1.0) — done in v0.46.9
 
+### v0.46.10 — Preparing
+- [x] **GPU scene image affine scale** (ui#101 Thread C, @AnyCPU) — `resolveImage` honors scale components
+- [x] **GPU curved stroke lens fix** (ui#101 Thread F, @AnyCPU) — `HasCurves()` → CPU fallback for stencil
+- [x] **GPU scene image tests** — 3 pixel-level affine scale tests (0.5x, 1x, 2x)
+- [x] **HasCurves tests** — 5 table-driven path curve detection tests
+
 ### v0.46.9 ✅ Released
-- [x] **Mac Retina quadrant fix** (gg#308) — `MarkDirty()` used logical pixel dimensions for `dirtyRect`, causing partial texture upload (1/4) on HiDPI. Fixed to use `PixelWidth()/PixelHeight()`
-- [x] **HiDPI regression tests** — `mockHiDPIProvider` (scale=2.0), 3 tests for MarkDirty + uploadTexture coordinate correctness
+- [x] **Mac Retina quadrant fix** (gg#308, @sverrehu) — `MarkDirty()` logical→physical pixel dimensions
+- [x] **HiDPI regression tests** — `mockHiDPIProvider` (scale=2.0), 3 tests
 - [x] HiDPI damage coordinate validation (DeviceScale != 1.0)
 
 ### v0.46.8 ✅ Released
