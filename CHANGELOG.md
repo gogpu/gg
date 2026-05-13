@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pixel-level verification that DrawImage honors affine scale components.
 
 - **HasCurves tests** — 5 table-driven tests for `Path.HasCurves()` covering empty,
+  lines-only, quadratic, cubic, and mixed paths.
+
+### Changed
+
+- **Dependencies** — wgpu v0.27.3 → v0.27.4 (goffi v0.5.1 struct ABI fix, flaky CI fix),
+  x/image v0.39.0 → v0.40.0, x/text v0.36.0 → v0.37.0.
 
 ## [0.46.9] - 2026-05-13
 
