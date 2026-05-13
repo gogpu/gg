@@ -5,12 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.10] - 2026-05-14
+
+### Fixed
+
+- **GPU scene renderer ignores affine scale for images** (ui#101 Thread C, @AnyCPU) —
+  `resolveImage` in `scene/gpu_renderer.go` used only translation (C, F) from the
+  affine transform, ignoring scale components (A, E). On HiDPI displays where the
+  scene encodes an inverse-DPI affine, SVG icons rendered ~2x too large. CPU scene
+  renderer handled this correctly. Fix: use `DrawImageEx` with `DstWidth/DstHeight`
+  computed from affine scale.
+
+- **GPU stroke of curved paths renders as filled lens** (ui#101 Thread F, @AnyCPU) —
+  `StrokePath` expanded curved strokes (arcs, beziers) to filled outlines via
+  `FillPath` → stencil-then-cover. Fan tessellation created incorrect stencil
+  coverage for ring-shaped stroke outlines, rendering arcs as chord-closed filled
+  lenses. Affected `CircularProgress` widget in M3 theme (v0.44.0+ regression).
+  Fix: detect curves via `Path.HasCurves()` and fall back to CPU rasterizer.
+
+### Added
+
+- **`Path.HasCurves()`** — reports whether a path contains quadratic or cubic curves.
+  Used by GPU stroke pipeline to detect paths requiring CPU fallback.
+
+- **GPU scene image scale tests** — `TestGPUSceneRenderer_ImageRespectsAffineScale`,
+  `TestGPUSceneRenderer_ImageIdentityScale`, `TestGPUSceneRenderer_ImageScale2x`.
+  Pixel-level verification that DrawImage honors affine scale components.
+
+- **HasCurves tests** — 5 table-driven tests for `Path.HasCurves()` covering empty,
+  lines-only, quadratic, cubic, and mixed paths.
+
+### Changed
+
+- **Dependencies** — wgpu v0.27.3 → v0.27.4 (goffi v0.5.1 struct ABI fix, flaky CI fix),
+  x/image v0.39.0 → v0.40.0, x/text v0.36.0 → v0.37.0.
+
 ## [0.46.9] - 2026-05-13
 
 ### Fixed
 
-- **Mac Retina renders only upper-left quadrant** (gg#308) — `MarkDirty()` set
-  `dirtyRect` to logical pixel dimensions (`Width()/Height()`) instead of physical
+- **Mac Retina renders only upper-left quadrant** (gg#308, @sverrehu) — `MarkDirty()`
+  set `dirtyRect` to logical pixel dimensions (`Width()/Height()`) instead of physical
   (`PixelWidth()/PixelHeight()`). On Retina (scale=2.0), this caused `uploadTexture()`
   to do a partial upload of only 1/4 of the pixmap, rendering the upper-left quadrant
   only. First frame was unaffected because initial texture creation uses full data.
@@ -22,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestFlush_HiDPI_FullUploadAfterMarkDirty`, `TestMarkDirtyRegion_HiDPI_PartialUpload`
   with `mockHiDPIProvider` (scale=2.0). Prevents future logical/physical coordinate
   mismatches in texture upload path.
+  lines-only, quadratic, cubic, and mixed paths.
 
 ## [0.46.8] - 2026-05-11
 

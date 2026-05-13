@@ -318,3 +318,119 @@ func TestGPUSceneRenderer_EmptyScene(t *testing.T) {
 		t.Errorf("RenderScene(empty) = %v, want nil", err)
 	}
 }
+
+// TestGPUSceneRenderer_ImageRespectsAffineScale verifies that DrawImage
+// with a scale+translate affine renders at the correct destination size.
+// Regression test for ui#101 Thread C: SVG icons rendered 2x on HiDPI
+// because resolveImage ignored scale components (A, E) of the transform.
+func TestGPUSceneRenderer_ImageRespectsAffineScale(t *testing.T) {
+	dc := gg.NewContext(200, 200)
+
+	// Create a 40x40 red image.
+	imgW, imgH := 40, 40
+	imgData := make([]byte, imgW*imgH*4)
+	for i := 0; i < len(imgData); i += 4 {
+		imgData[i] = 255   // R
+		imgData[i+1] = 0   // G
+		imgData[i+2] = 0   // B
+		imgData[i+3] = 255 // A
+	}
+	img := &Image{Width: imgW, Height: imgH, Data: imgData}
+
+	// Draw with scale=0.5 affine: 40x40 image should render as 20x20 at (10, 10).
+	scene := NewScene()
+	scene.DrawImage(img, NewAffine(0.5, 0, 10, 0, 0.5, 10))
+
+	renderer := NewGPUSceneRenderer(dc)
+	if err := renderer.RenderScene(scene); err != nil {
+		t.Fatalf("RenderScene: %v", err)
+	}
+
+	pm := dc.ResizeTarget()
+
+	// Pixel at (15, 15) should be red (inside scaled image: 10..30 x 10..30).
+	px := pm.GetPixel(15, 15)
+	if px.R < 0.75 || px.A < 0.75 {
+		t.Errorf("pixel at (15,15) = R:%.2f A:%.2f, want red (inside 0.5x scaled image)",
+			px.R, px.A)
+	}
+
+	// Pixel at (35, 35) should be transparent (outside 20x20 dest: 10+20=30).
+	px2 := pm.GetPixel(35, 35)
+	if px2.A > 0.05 {
+		t.Errorf("pixel at (35,35) = A:%.2f, want transparent (outside 0.5x scaled image area) — image rendered at source size ignoring scale",
+			px2.A)
+	}
+}
+
+// TestGPUSceneRenderer_ImageIdentityScale verifies that DrawImage with
+// identity affine (scale=1.0) renders at source pixel size.
+func TestGPUSceneRenderer_ImageIdentityScale(t *testing.T) {
+	dc := gg.NewContext(100, 100)
+
+	imgW, imgH := 20, 20
+	imgData := make([]byte, imgW*imgH*4)
+	for i := 0; i < len(imgData); i += 4 {
+		imgData[i] = 0
+		imgData[i+1] = 255
+		imgData[i+2] = 0
+		imgData[i+3] = 255
+	}
+	img := &Image{Width: imgW, Height: imgH, Data: imgData}
+
+	scene := NewScene()
+	scene.DrawImage(img, NewAffine(1, 0, 5, 0, 1, 5))
+
+	renderer := NewGPUSceneRenderer(dc)
+	if err := renderer.RenderScene(scene); err != nil {
+		t.Fatalf("RenderScene: %v", err)
+	}
+
+	pm := dc.ResizeTarget()
+
+	px := pm.GetPixel(10, 10)
+	if px.G < 0.75 || px.A < 0.75 {
+		t.Errorf("pixel at (10,10) = G:%.2f A:%.2f, want green", px.G, px.A)
+	}
+
+	px2 := pm.GetPixel(30, 30)
+	if px2.A > 0.05 {
+		t.Errorf("pixel at (30,30) = A:%.2f, want transparent", px2.A)
+	}
+}
+
+// TestGPUSceneRenderer_ImageScale2x verifies upscaling: 10x10 image
+// with scale=2.0 renders as 20x20 at the destination.
+func TestGPUSceneRenderer_ImageScale2x(t *testing.T) {
+	dc := gg.NewContext(100, 100)
+
+	imgW, imgH := 10, 10
+	imgData := make([]byte, imgW*imgH*4)
+	for i := 0; i < len(imgData); i += 4 {
+		imgData[i] = 0
+		imgData[i+1] = 0
+		imgData[i+2] = 255
+		imgData[i+3] = 255
+	}
+	img := &Image{Width: imgW, Height: imgH, Data: imgData}
+
+	scene := NewScene()
+	scene.DrawImage(img, NewAffine(2, 0, 0, 0, 2, 0))
+
+	renderer := NewGPUSceneRenderer(dc)
+	if err := renderer.RenderScene(scene); err != nil {
+		t.Fatalf("RenderScene: %v", err)
+	}
+
+	pm := dc.ResizeTarget()
+
+	px := pm.GetPixel(15, 15)
+	if px.B < 0.75 || px.A < 0.75 {
+		t.Errorf("pixel at (15,15) = B:%.2f A:%.2f, want blue (inside 2x scaled image)", px.B, px.A)
+	}
+
+	px2 := pm.GetPixel(25, 25)
+	if px2.A > 0.05 {
+		t.Errorf("pixel at (25,25) = A:%.2f, want transparent (outside 2x scaled image)", px2.A)
+	}
+}
