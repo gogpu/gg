@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/zero_readback
 go 1.25.5
 
 require (
-	github.com/gogpu/gg v0.46.8
+	github.com/gogpu/gg v0.46.9
 	github.com/gogpu/gogpu v0.34.3
 )
 
