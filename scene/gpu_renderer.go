@@ -248,7 +248,14 @@ func (r *GPUSceneRenderer) resolveText(scene *Scene, run GlyphRunData, glyphs []
 	dc.SetFont(prevFace)
 }
 
-// resolveImage renders a scene image through dc.DrawImage.
+// resolveImage renders a scene image through dc.DrawImageEx, honoring
+// the full affine transform (scale + translation). The transform encodes
+// scaleX in A, scaleY in E, translateX in C, translateY in F.
+//
+// Before this fix, only translation (C, F) was used — images rendered at
+// source pixel size, ignoring scale. On HiDPI displays where the scene
+// encodes an inverse-DPI affine (e.g. scale=0.5 for 2x Retina), this
+// caused SVG icons to appear 2x too large (ui#101 Thread C, gg#308).
 func (r *GPUSceneRenderer) resolveImage(scene *Scene, imageIndex uint32, transform Affine) {
 	images := scene.Images()
 	if int(imageIndex) >= len(images) {
@@ -266,8 +273,21 @@ func (r *GPUSceneRenderer) resolveImage(scene *Scene, imageIndex uint32, transfo
 	}
 	buf := gg.ImageBufFromImage(rgba)
 
-	dc := r.dc
-	dc.DrawImage(buf, float64(transform.C), float64(transform.F))
+	dstW := float64(transform.A) * float64(img.Width)
+	dstH := float64(transform.E) * float64(img.Height)
+	if dstW < 0 {
+		dstW = -dstW
+	}
+	if dstH < 0 {
+		dstH = -dstH
+	}
+
+	r.dc.DrawImageEx(buf, gg.DrawImageOptions{
+		X:         float64(transform.C),
+		Y:         float64(transform.F),
+		DstWidth:  dstW,
+		DstHeight: dstH,
+	})
 }
 
 // applySceneBrush sets the gg.Context color from a scene.Brush.
