@@ -523,6 +523,16 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 		return nil
 	}
 
+	// Detect curves in the source path. Stroke-expanded outlines from curved
+	// paths (arcs, beziers) produce ring-shaped contours that the stencil
+	// fan tessellator cannot handle correctly — the fan origin is inside the
+	// ring, filling the interior as a lens/chord shape instead of a thin
+	// stroke band. Fall back to CPU rasterizer for curved strokes.
+	// Fixes ui#101 Thread F (circular progress arc rendered as filled lens).
+	if path.HasCurves() {
+		return gg.ErrFallbackToCPU
+	}
+
 	strokeVerbs := convertPathVerbsToStroke(path.Verbs())
 	style := stroke.Stroke{
 		Width:      paint.EffectiveLineWidth(),

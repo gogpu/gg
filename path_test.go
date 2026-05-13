@@ -1020,3 +1020,44 @@ func BenchmarkPathVerbs(b *testing.B) {
 		_ = p.Verbs()
 	}
 }
+
+// TestHasCurves verifies curve detection for GPU stroke fallback (ui#101 Thread F).
+func TestHasCurves(t *testing.T) {
+	tests := []struct {
+		name string
+		build func(*Path)
+		want  bool
+	}{
+		{"empty", func(p *Path) {}, false},
+		{"lines only", func(p *Path) {
+			p.MoveTo(0, 0)
+			p.LineTo(10, 10)
+			p.LineTo(20, 0)
+			p.Close()
+		}, false},
+		{"quad curve", func(p *Path) {
+			p.MoveTo(0, 0)
+			p.QuadraticTo(5, 10, 10, 0)
+		}, true},
+		{"cubic curve", func(p *Path) {
+			p.MoveTo(0, 0)
+			p.CubicTo(3, 10, 7, 10, 10, 0)
+		}, true},
+		{"mixed lines and cubic", func(p *Path) {
+			p.MoveTo(0, 0)
+			p.LineTo(10, 0)
+			p.CubicTo(15, 5, 15, 15, 10, 20)
+			p.Close()
+		}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Path{}
+			tt.build(p)
+			if got := p.HasCurves(); got != tt.want {
+				t.Errorf("HasCurves() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

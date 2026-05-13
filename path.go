@@ -233,6 +233,16 @@ func (p *Path) NumVerbs() int {
 	return len(p.verbs)
 }
 
+// HasCurves reports whether the path contains any quadratic or cubic curves.
+func (p *Path) HasCurves() bool {
+	for _, v := range p.verbs {
+		if v == QuadTo || v == CubicTo {
+			return true
+		}
+	}
+	return false
+}
+
 // CurrentPoint returns the current point.
 func (p *Path) CurrentPoint() Point {
 	return p.current
