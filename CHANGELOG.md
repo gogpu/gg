@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.1] - 2026-05-16
+
+### Fixed
+
+- **Text rendering performance: batch coalescing** (#322, @unxed) — consecutive
+  `DrawString` calls with the same transform/color/atlas page now merge into a single
+  GPU draw call. Previously each call produced a separate batch → 2400 individual
+  `DrawString("A")` calls generated 2400 GPU draw calls (~55ms on Intel HD 520).
+  With coalescing: 1 draw call (~2ms). Architecture: ADR-031, enterprise pattern
+  (Skia `SkTextBlob` → `DirectMaskSubRun`, Chrome text blob batching).
+
+  Applies to both Tier 6 (GlyphMask) and Tier 4 (MSDF) text pipelines.
+
+### Added
+
+- **HiDPI dimension warning in ggcanvas.New()** (#322) — warns when passed dimensions
+  appear to be physical pixels instead of logical, catching the common mistake of using
+  `FramebufferWidth/Height` instead of `Width/Height` on HiDPI displays.
+
+- **Batch coalescing tests** — 15 tests for `CanMerge` + coalescing behavior
+  (same-style merge, different-color/transform/LCD/atlas no-merge, mixed sequences).
+  6 tests for HiDPI dimension warning detection.
+
 ## [0.47.0] - 2026-05-16
 
 ### Added
