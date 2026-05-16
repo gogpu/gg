@@ -511,6 +511,19 @@ type TextBatch struct {
 	AtlasSize float32
 }
 
+// CanMerge reports whether other can be merged into this batch.
+// Batches are mergeable when they share the same visual properties
+// (transform, color, atlas, MSDF parameters) — only the quad list differs.
+// This enables draw call coalescing: multiple DrawString calls with the
+// same style produce a single GPU draw call (ADR-031).
+func (b *TextBatch) CanMerge(other TextBatch) bool {
+	return b.Transform == other.Transform &&
+		b.Color == other.Color &&
+		b.AtlasIndex == other.AtlasIndex &&
+		b.PxRange == other.PxRange &&
+		b.AtlasSize == other.AtlasSize
+}
+
 // ---- Vertex/index/uniform data builders ----
 
 // quadsToVertices converts TextQuads to vertex array.
