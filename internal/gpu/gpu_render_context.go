@@ -463,6 +463,7 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 		va := rc.shared.velloAccel
 		rc.shared.mu.Unlock()
 		if va != nil && va.CanCompute() {
+			va.SetAntiAlias(rc.antiAlias)
 			return va.FillPath(target, path, paint)
 		}
 	}
@@ -524,6 +525,7 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 		va := rc.shared.velloAccel
 		rc.shared.mu.Unlock()
 		if va != nil && va.CanCompute() {
+			va.SetAntiAlias(rc.antiAlias)
 			return va.StrokePath(target, path, paint)
 		}
 	}
@@ -573,6 +575,7 @@ func (rc *GPURenderContext) FillShape(target gg.GPURenderTarget, shape gg.Detect
 		va := rc.shared.velloAccel
 		rc.shared.mu.Unlock()
 		if va != nil && va.CanCompute() {
+			va.SetAntiAlias(rc.antiAlias)
 			return va.FillShape(target, shape, paint)
 		}
 	}
@@ -593,6 +596,7 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 		va := rc.shared.velloAccel
 		rc.shared.mu.Unlock()
 		if va != nil && va.CanCompute() {
+			va.SetAntiAlias(rc.antiAlias)
 			return va.StrokeShape(target, shape, paint)
 		}
 	}

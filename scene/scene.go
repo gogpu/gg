@@ -39,6 +39,15 @@ type Scene struct {
 	// currentTransform is the current combined transform
 	currentTransform Affine
 
+	// antiAlias controls whether subsequent draws use anti-aliasing.
+	// Default: true. State changes are delta-encoded (TagSetAntiAlias emitted
+	// only when the value differs from lastEncodedAA).
+	antiAlias bool
+
+	// lastEncodedAA tracks the last AA state emitted into the encoding.
+	// Used for dirty tracking to avoid redundant TagSetAntiAlias tags.
+	lastEncodedAA bool
+
 	// imageRegistry maps image handles to indices
 	imageRegistry []*Image
 
@@ -61,6 +70,8 @@ func NewScene() *Scene {
 		version:          0,
 		bounds:           EmptyRect(),
 		currentTransform: IdentityAffine(),
+		antiAlias:        true,
+		lastEncodedAA:    true,
 		imageRegistry:    make([]*Image, 0, 8),
 		fontRegistry:     make(map[uint64]*text.FontSource, 4),
 	}
@@ -75,8 +86,38 @@ func (s *Scene) Reset() {
 	s.version++
 	s.bounds = EmptyRect()
 	s.currentTransform = IdentityAffine()
+	s.antiAlias = true
+	s.lastEncodedAA = true
 	s.imageRegistry = s.imageRegistry[:0]
 	clear(s.fontRegistry)
+}
+
+// SetAntiAlias enables or disables anti-aliasing for subsequent fill and stroke
+// operations. When disabled, shapes are rendered with binary (pixel-perfect)
+// coverage, producing crisp edges ideal for UI elements at exact pixel boundaries.
+//
+// The state change is delta-encoded: TagSetAntiAlias is emitted into the encoding
+// only when the value differs from the previously encoded state. Default is true.
+//
+// Reference: Skia SkPaint::setAntiAlias, Cairo cairo_set_antialias.
+func (s *Scene) SetAntiAlias(enabled bool) {
+	s.antiAlias = enabled
+	s.version++
+}
+
+// AntiAlias returns whether anti-aliasing is enabled for subsequent draws.
+func (s *Scene) AntiAlias() bool {
+	return s.antiAlias
+}
+
+// emitAntiAliasIfNeeded emits TagSetAntiAlias into the given encoding when
+// the current AA state differs from the last-encoded state. This implements
+// delta encoding to avoid redundant tags in the stream.
+func (s *Scene) emitAntiAliasIfNeeded(enc *Encoding) {
+	if s.antiAlias != s.lastEncodedAA {
+		enc.EncodeAntiAlias(s.antiAlias)
+		s.lastEncodedAA = s.antiAlias
+	}
 }
 
 // Fill fills a shape with the given style, transform, and brush.
@@ -90,6 +131,9 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 
 	// Get the current layer's encoding
 	enc := s.currentEncoding()
+
+	// Emit AA state change if needed (delta encoding).
+	s.emitAntiAliasIfNeeded(enc)
 
 	// Optimization: RoundRectShape uses dedicated SDF encoding
 	// which bypasses path construction entirely.
@@ -156,6 +200,9 @@ func (s *Scene) Stroke(style *StrokeStyle, transform Affine, brush Brush, shape 
 
 	// Get the current layer's encoding
 	enc := s.currentEncoding()
+
+	// Emit AA state change if needed (delta encoding).
+	s.emitAntiAliasIfNeeded(enc)
 
 	// Encode transform if not identity
 	if !combinedTransform.IsIdentity() {

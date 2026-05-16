@@ -72,6 +72,16 @@ func (r *SoftwareRenderer) Resize(width, height int) {
 	r.noAAEdgeBuilder = nil
 }
 
+// SetAntiAlias enables or disables anti-aliasing for subsequent Fill/Stroke calls.
+// When disabled, the NoAAFiller (integer scanline, binary coverage) is used
+// instead of the AnalyticFiller or CoverageFiller.
+//
+// This method is intended for use by the scene renderer which needs to
+// propagate per-draw AA state decoded from TagSetAntiAlias commands.
+func (r *SoftwareRenderer) SetAntiAlias(enabled bool) {
+	r.antiAlias = enabled
+}
+
 // SetDeviceScale sets the HiDPI device scale factor for the renderer.
 // When scale > 1.0, curve flattening tolerance is reduced for finer
 // subdivision on HiDPI displays (femtovg pattern: tol = baseTol / scale).

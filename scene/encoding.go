@@ -474,6 +474,17 @@ func (e *Encoding) Reset() {
 	e.shapeCount = 0
 }
 
+// EncodeAntiAlias adds an anti-aliasing state change command.
+// The value is stored as 1 uint32 in drawData (0 = disabled, 1 = enabled).
+func (e *Encoding) EncodeAntiAlias(enabled bool) {
+	e.tags = append(e.tags, TagSetAntiAlias)
+	var val uint32
+	if enabled {
+		val = 1
+	}
+	e.drawData = append(e.drawData, val)
+}
+
 // EncodeTransform adds a transform command.
 func (e *Encoding) EncodeTransform(t Affine) {
 	e.tags = append(e.tags, TagTransform)
@@ -848,6 +859,8 @@ func (e *Encoding) AppendWithImages(other *Encoding, imageOffset uint32) {
 			drawIdx += 5
 		case TagPushLayer:
 			drawIdx += 2
+		case TagSetAntiAlias:
+			drawIdx++ // 1 uint32: 0 or 1
 		case TagImage:
 			if imageOffset > 0 && drawIdx < len(other.drawData) {
 				e.drawData[drawDataStart+drawIdx] += imageOffset
@@ -996,6 +1009,9 @@ func (e *Encoding) AppendWithTranslation(other *Encoding, dx, dy float32, imageO
 
 		case TagPushLayer:
 			drawIdx += 2 // blend mode + alpha
+
+		case TagSetAntiAlias:
+			drawIdx++ // 1 uint32: 0 or 1, no coordinate data
 
 		case TagImage:
 			if imageOffset > 0 && drawIdx < len(other.drawData) {

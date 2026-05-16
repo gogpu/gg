@@ -781,6 +781,10 @@ func (r *Renderer) executeEncodingOnTile(dec *Decoder, tile *parallel.Tile, pm *
 			run, glyphs, _, brush := dec.Text()
 			r.renderTextOnTile(run, glyphs, brush, currentTransform, tileX, tileY, activePM, sr, fillPaint)
 
+		case TagSetAntiAlias:
+			aa := dec.AntiAlias()
+			sr.SetAntiAlias(aa)
+
 		case TagBrush:
 			// Brush definitions are stored in the brushes array and referenced
 			// by index from Fill/Stroke/Text commands. The TagBrush tag encodes

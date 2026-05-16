@@ -50,6 +50,11 @@ type VelloAccelerator struct {
 	pendingPaths  []tilecompute.PathDef
 	pendingTarget *gg.GPURenderTarget // target for the pending scene (nil if empty)
 
+	// antiAlias controls whether paths are rendered with anti-aliasing.
+	// When false, path coordinates are snapped to pixel grid before encoding
+	// (Skia Graphite snap_rect_to_pixels pattern) for crisp binary-coverage output.
+	antiAlias bool
+
 	gpuReady       bool
 	externalDevice bool // true when using shared device (don't destroy on Close)
 }
@@ -107,6 +112,14 @@ func (a *VelloAccelerator) Close() {
 // Called by gg.SetLogger to propagate logging configuration.
 func (a *VelloAccelerator) SetLogger(l *slog.Logger) {
 	setLogger(l)
+}
+
+// SetAntiAlias sets the anti-aliasing state for subsequent FillPath/StrokePath calls.
+// When disabled, path coordinates are snapped to the pixel grid before encoding,
+// producing crisp binary-coverage output for axis-aligned geometry.
+// Reference: Skia Graphite snap_rect_to_pixels pattern.
+func (a *VelloAccelerator) SetAntiAlias(enabled bool) {
+	a.antiAlias = enabled
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
@@ -182,6 +195,9 @@ func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider)
 // FillPath converts a path to a PathDef and accumulates it for the next Flush.
 // The actual GPU dispatch happens when Flush is called. Returns ErrFallbackToCPU
 // if the GPU is not ready or the path is empty.
+//
+// When anti-aliasing is disabled, path coordinates are snapped to pixel grid
+// before encoding, producing exact pixel coverage for axis-aligned geometry.
 func (a *VelloAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	if path == nil || path.NumVerbs() == 0 {
 		return nil
@@ -201,7 +217,13 @@ func (a *VelloAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, pa
 		}
 	}
 
-	pathDef := convertPathToPathDef(path, paint)
+	// Snap path coordinates to pixel grid when AA is disabled.
+	pathToEncode := path
+	if !a.antiAlias {
+		pathToEncode = snapPathToPixelGrid(path)
+	}
+
+	pathDef := convertPathToPathDef(pathToEncode, paint)
 	if len(pathDef.Lines) == 0 {
 		return nil
 	}
@@ -421,6 +443,37 @@ func compositeOver(target gg.GPURenderTarget, src *image.RGBA) {
 func velloSameTarget(a *gg.GPURenderTarget, b *gg.GPURenderTarget) bool {
 	return a.Width == b.Width && a.Height == b.Height &&
 		len(a.Data) == len(b.Data) && len(a.Data) > 0 && &a.Data[0] == &b.Data[0]
+}
+
+// snapPathToPixelGrid rounds all path coordinates to the nearest integer pixel.
+// For axis-aligned geometry this produces exact pixel coverage (no partial coverage
+// from anti-aliasing). Paths already in device-space coordinates (transformed by
+// Context.doFill before reaching the accelerator) are rounded in-place.
+//
+// Reference: Skia Graphite snap_rect_to_pixels pattern — ensures rectangles and
+// other axis-aligned shapes land exactly on pixel boundaries when AA is disabled.
+func snapPathToPixelGrid(path *gg.Path) *gg.Path {
+	snapped := gg.NewPath()
+	path.Iterate(func(verb gg.PathVerb, coords []float64) {
+		switch verb {
+		case gg.MoveTo:
+			snapped.MoveTo(math.Round(coords[0]), math.Round(coords[1]))
+		case gg.LineTo:
+			snapped.LineTo(math.Round(coords[0]), math.Round(coords[1]))
+		case gg.QuadTo:
+			snapped.QuadraticTo(
+				math.Round(coords[0]), math.Round(coords[1]),
+				math.Round(coords[2]), math.Round(coords[3]))
+		case gg.CubicTo:
+			snapped.CubicTo(
+				math.Round(coords[0]), math.Round(coords[1]),
+				math.Round(coords[2]), math.Round(coords[3]),
+				math.Round(coords[4]), math.Round(coords[5]))
+		case gg.Close:
+			snapped.Close()
+		}
+	})
+	return snapped
 }
 
 // RenderSceneCompute renders paths through the GPU compute pipeline.
