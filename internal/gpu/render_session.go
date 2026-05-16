@@ -222,6 +222,11 @@ type GPURenderSession struct {
 	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
 	frameRendered bool
 
+	// antiAlias determines SDF coverage computation mode.
+	// When true (default), smoothstep produces smooth edges.
+	// When false, binary step produces aliased edges.
+	antiAlias bool
+
 	// lastView tracks the most recent per-pass view used for rendering.
 	// When the view changes between Flush calls (e.g., two gg.Context
 	// instances rendering to different targets), frameRendered is reset
@@ -249,8 +254,9 @@ type GPURenderSession struct {
 // queue. Textures and pipelines are not allocated until RenderFrame is called.
 func NewGPURenderSession(device *wgpu.Device, queue *wgpu.Queue) *GPURenderSession {
 	return &GPURenderSession{
-		device: device,
-		queue:  queue,
+		device:    device,
+		queue:     queue,
+		antiAlias: true,
 	}
 }
 
@@ -1367,7 +1373,7 @@ func (s *GPURenderSession) buildSDFResources(shapes []SDFRenderShape, w, h uint3
 		return nil, fmt.Errorf("write vertex buffer: %w", err)
 	}
 
-	uniformData := makeSDFRenderUniform(w, h)
+	uniformData := makeSDFRenderUniform(w, h, s.antiAlias)
 	if s.sdfUniformBuf == nil {
 		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_sdf_uniform",
@@ -1448,7 +1454,7 @@ func (s *GPURenderSession) buildConvexResources(commands []ConvexDrawCommand, w,
 		return nil, fmt.Errorf("write convex vertex buffer: %w", err)
 	}
 
-	uniformData := makeSDFRenderUniform(w, h) // Same 16-byte viewport layout.
+	uniformData := makeSDFRenderUniform(w, h, true) // Same 16-byte viewport layout; convex AA is per-vertex.
 	if s.convexUniformBuf == nil {
 		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: "session_convex_uniform",

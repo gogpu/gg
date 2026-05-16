@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] - 2026-05-16
+
+### Added
+
+- **Pixel-Perfect Mode (Anti-Aliasing Toggle)** — `dc.SetAntiAlias(false)` disables
+  anti-aliasing for geometry rendering, producing crisp aliased edges with binary
+  coverage (fully inside or fully outside). Use cases: pixel art, retro-style graphics,
+  L-System fractals, technical drawings, sharp grid lines. (#319, @rcarlier)
+
+  - **API:** `Context.SetAntiAlias(enabled bool)` / `Context.AntiAlias() bool`.
+    Context-level state, participates in Push/Pop. Text AA remains independent (TextMode).
+  - **CPU:** Dedicated `NoAAFiller` — integer scanline walker with `FixedRoundToInt`
+    edge rounding. Completely separate code path (Skia `SkScan::FillPath` / tiny-skia
+    `scan::path` pattern), ~2-3× faster than analytic AA.
+  - **GPU SDF:** Binary step coverage via `anti_alias` uniform flag. Shapes render
+    with hard pixel edges on all backends (Vulkan, DX12, Metal, GLES, Software).
+  - **Recording:** `Recorder.SetAntiAlias()` mirrors the Context API for vector export.
+  - **Architecture:** ADR-030, based on research of 5 enterprise engines (Skia, Cairo,
+    tiny-skia, Vello, femtovg). All use separate non-AA code paths, not threshold on
+    AA output.
+
+  ```go
+  dc.SetAntiAlias(false)  // all subsequent draws — pixel-perfect
+  dc.DrawRectangle(10, 10, 100, 50)
+  dc.Fill()               // binary fill, no gray edge pixels
+  dc.SetAntiAlias(true)   // back to smooth AA
+  ```
+
 ## [0.46.11] - 2026-05-14
 
 ### Fixed

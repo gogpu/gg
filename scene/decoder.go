@@ -187,6 +187,22 @@ func (d *Decoder) Transform() Affine {
 }
 
 // ---------------------------------------------------------------------------
+// State Command Decoders
+// ---------------------------------------------------------------------------
+
+// AntiAlias reads the current SetAntiAlias command data.
+// Returns true if anti-aliasing is enabled, false if disabled.
+// Only valid when Tag() == TagSetAntiAlias.
+func (d *Decoder) AntiAlias() bool {
+	if d.drawIdx+1 > len(d.enc.drawData) {
+		return true // default: AA enabled
+	}
+	val := d.enc.drawData[d.drawIdx]
+	d.drawIdx++
+	return val != 0
+}
+
+// ---------------------------------------------------------------------------
 // Draw Command Decoders
 // ---------------------------------------------------------------------------
 

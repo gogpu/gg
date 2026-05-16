@@ -29,6 +29,12 @@ const (
 	//   | d  e  f |
 	TagTransform Tag = 0x01
 
+	// TagSetAntiAlias sets the anti-aliasing state for subsequent draw commands.
+	// Data: 1 uint32 in drawData (0 = disabled, 1 = enabled).
+	// Emitted only when the AA state changes (delta encoding, like TagTransform).
+	// Reference: Skia SkPaint::setAntiAlias, Cairo cairo_set_antialias.
+	TagSetAntiAlias Tag = 0x02
+
 	// TagBeginPath marks the start of a new path.
 	// Data: none (marker only)
 	TagBeginPath Tag = 0x10
@@ -104,10 +110,14 @@ const (
 )
 
 // String returns a human-readable name for the tag.
+//
+//nolint:cyclop // simple switch dispatch over all tag values
 func (t Tag) String() string {
 	switch t {
 	case TagTransform:
 		return "Transform"
+	case TagSetAntiAlias:
+		return "SetAntiAlias"
 	case TagBeginPath:
 		return "BeginPath"
 	case TagMoveTo:

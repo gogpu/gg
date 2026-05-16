@@ -38,7 +38,7 @@
 
 | Category | Capabilities |
 |----------|--------------|
-| **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, CPU fallback |
+| **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, **pixel-perfect mode** (`SetAntiAlias(false)` — dedicated NoAAFiller, Skia/Cairo/tiny-skia pattern), CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
 | **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, damage-aware multi-rect sub-region updates, per-draw dynamic scissor ADR-028) |
@@ -120,6 +120,22 @@ dc.Fill()
 // Force specific algorithm for benchmarking
 dc.SetRasterizerMode(gg.RasterizerSparseStrips)
 ```
+
+### Pixel-Perfect Mode (No Anti-Aliasing)
+
+Disable anti-aliasing for crisp, aliased edges — useful for pixel art, retro graphics,
+technical drawings, and sharp grid lines:
+
+```go
+dc.SetAntiAlias(false)          // binary coverage: inside=opaque, outside=transparent
+dc.DrawRectangle(10, 10, 100, 50)
+dc.Fill()                        // no gray edge pixels
+dc.SetAntiAlias(true)           // back to smooth AA
+```
+
+Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern) — ~2-3× faster
+than analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
+(controlled via `SetTextMode`).
 
 ### GPU Acceleration (Optional)
 

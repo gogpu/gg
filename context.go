@@ -64,6 +64,10 @@ type Context struct {
 	// Rasterizer mode
 	rasterizerMode RasterizerMode // CPU rasterizer selection mode
 
+	// Anti-aliasing
+	antiAlias      bool   // anti-aliasing enabled (default: true)
+	antiAliasStack []bool // Push/Pop stack for antiAlias state
+
 	// Text rendering
 	textMode         TextMode               // text strategy selection (default: Auto)
 	outlineExtractor *text.OutlineExtractor // lazy: for transform-aware text (Strategy B)
@@ -171,6 +175,7 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		clipStackDepth:        make([]int, 0, 8),
 		pipelineMode:          options.pipelineMode,
 		damageTrackingEnabled: true,
+		antiAlias:             true,
 	}
 }
 
@@ -307,6 +312,29 @@ func (c *Context) SetRasterizerMode(mode RasterizerMode) {
 // RasterizerMode returns the current rasterizer mode.
 func (c *Context) RasterizerMode() RasterizerMode {
 	return c.rasterizerMode
+}
+
+// SetAntiAlias enables or disables anti-aliasing for geometry rendering.
+//
+// When enabled (default), shapes are rendered with smooth edges using analytic
+// anti-aliasing (Skia AAA). When disabled, shapes are rendered with binary
+// coverage (fully inside or fully outside) producing crisp, aliased edges.
+//
+// This is useful for pixel art, retro-style graphics, technical drawings,
+// and any use case where sub-pixel blending is undesirable.
+//
+// Text anti-aliasing is controlled independently via SetTextMode.
+// The anti-aliasing state participates in Push/Pop.
+//
+// Reference: Skia SkPaint::setAntiAlias, Cairo cairo_set_antialias,
+// tiny-skia Paint.anti_alias.
+func (c *Context) SetAntiAlias(enabled bool) {
+	c.antiAlias = enabled
+}
+
+// AntiAlias returns whether anti-aliasing is enabled for geometry rendering.
+func (c *Context) AntiAlias() bool {
+	return c.antiAlias
 }
 
 // SetTextMode sets the text rendering strategy.
@@ -868,6 +896,9 @@ func (c *Context) Push() {
 		maskCopy = c.mask.Clone()
 	}
 	c.maskStack = append(c.maskStack, maskCopy)
+
+	// Save current anti-aliasing state
+	c.antiAliasStack = append(c.antiAliasStack, c.antiAlias)
 }
 
 // Pop restores the last saved state.
@@ -901,6 +932,12 @@ func (c *Context) Pop() {
 	if len(c.maskStack) > 0 {
 		c.mask = c.maskStack[len(c.maskStack)-1]
 		c.maskStack = c.maskStack[:len(c.maskStack)-1]
+	}
+
+	// Restore anti-aliasing state
+	if len(c.antiAliasStack) > 0 {
+		c.antiAlias = c.antiAliasStack[len(c.antiAliasStack)-1]
+		c.antiAliasStack = c.antiAliasStack[:len(c.antiAliasStack)-1]
 	}
 }
 
@@ -1416,6 +1453,7 @@ type gpuContextOps interface {
 	ClearClipPath()
 	BeginFrame()
 	SetPipelineMode(mode PipelineMode)
+	SetAntiAlias(enabled bool)
 	PendingCount() int
 	Close()
 }
@@ -1645,6 +1683,11 @@ func (c *Context) doFill() error {
 	// At scale=1.0 this is a zero-copy no-op.
 	devicePath := c.deviceSpacePath()
 
+	// Propagate anti-aliasing state to GPU render context.
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.SetAntiAlias(c.antiAlias)
+	}
+
 	// Temporarily swap c.path to device-space for GPU tryGPUOp
 	// (which reads c.path for shape detection and path rendering).
 	origPath := c.path
@@ -1655,11 +1698,15 @@ func (c *Context) doFill() error {
 		return nil
 	}
 
-	// CPU path: flush pending GPU, apply mode to software renderer.
+	// CPU path: flush pending GPU, apply mode and AA state to software renderer.
 	c.flushGPUAccelerator()
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
 		sr.rasterizerMode = cpuMode
-		defer func() { sr.rasterizerMode = RasterizerAuto }()
+		sr.antiAlias = c.antiAlias
+		defer func() {
+			sr.rasterizerMode = RasterizerAuto
+			sr.antiAlias = true
+		}()
 	}
 
 	return c.renderer.Fill(c.pixmap, devicePath, c.paint)
@@ -1684,6 +1731,11 @@ func (c *Context) doStroke() error {
 	// Transform path to device-space for rendering.
 	devicePath := c.deviceSpacePath()
 
+	// Propagate anti-aliasing state to GPU render context.
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.SetAntiAlias(c.antiAlias)
+	}
+
 	// Temporarily swap c.path to device-space for GPU tryGPUOp.
 	origPath := c.path
 	c.path = devicePath
@@ -1696,7 +1748,11 @@ func (c *Context) doStroke() error {
 	c.flushGPUAccelerator()
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
 		sr.rasterizerMode = cpuMode
-		defer func() { sr.rasterizerMode = RasterizerAuto }()
+		sr.antiAlias = c.antiAlias
+		defer func() {
+			sr.rasterizerMode = RasterizerAuto
+			sr.antiAlias = true
+		}()
 	}
 
 	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)

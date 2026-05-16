@@ -41,6 +41,7 @@ type Recorder struct {
 	dashPattern []float64
 	dashOffset  float64
 	fillRule    FillRule
+	antiAlias   bool
 	transform   Matrix
 
 	// Current font
@@ -63,6 +64,7 @@ type recorderState struct {
 	dashPattern []float64
 	dashOffset  float64
 	fillRule    FillRule
+	antiAlias   bool
 	transform   Matrix
 	fontFace    text.Face
 	fontFamily  string
@@ -87,6 +89,7 @@ func NewRecorder(width, height int) *Recorder {
 		lineJoin:    LineJoinMiter,
 		miterLimit:  4.0,
 		fillRule:    FillRuleNonZero,
+		antiAlias:   true,
 		transform:   Identity(),
 		stateStack:  make([]recorderState, 0, 8),
 	}
@@ -226,6 +229,7 @@ func (r *Recorder) Save() {
 		dashPattern: dashCopy,
 		dashOffset:  r.dashOffset,
 		fillRule:    r.fillRule,
+		antiAlias:   r.antiAlias,
 		transform:   r.transform,
 		fontFace:    r.fontFace,
 		fontFamily:  r.fontFamily,
@@ -254,6 +258,7 @@ func (r *Recorder) Restore() {
 	r.dashPattern = state.dashPattern
 	r.dashOffset = state.dashOffset
 	r.fillRule = state.fillRule
+	r.antiAlias = state.antiAlias
 	r.transform = state.transform
 	r.fontFace = state.fontFace
 	r.fontFamily = state.fontFamily
@@ -494,6 +499,18 @@ func (r *Recorder) SetFillRule(rule FillRule) {
 func (r *Recorder) SetFillRuleGG(rule gg.FillRule) {
 	// #nosec G115 -- FillRule enum values are within uint8 range
 	r.SetFillRule(FillRule(rule))
+}
+
+// SetAntiAlias enables or disables anti-aliasing for geometry rendering.
+// When disabled, shapes are rendered with binary coverage (no gray edge pixels).
+func (r *Recorder) SetAntiAlias(enabled bool) {
+	r.antiAlias = enabled
+	r.commands = append(r.commands, SetAntiAliasCommand{Enabled: enabled})
+}
+
+// AntiAlias returns whether anti-aliasing is enabled.
+func (r *Recorder) AntiAlias() bool {
+	return r.antiAlias
 }
 
 // --------------------------------------------------------------------------

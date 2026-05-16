@@ -195,6 +195,10 @@ func (r *GPUSceneRenderer) RenderScene(scene *Scene) error { //nolint:gocyclo,cy
 		case TagEndClip:
 			dc.Pop()
 
+		case TagSetAntiAlias:
+			aa := dec.AntiAlias()
+			dc.SetAntiAlias(aa)
+
 		case TagText:
 			run, glyphs, str, brush := dec.Text()
 			r.resolveText(scene, run, glyphs, str, brush)

@@ -43,6 +43,22 @@ func NewSceneBuilderFrom(scene *Scene) *SceneBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// State Operations
+// ---------------------------------------------------------------------------
+
+// SetAntiAlias enables or disables anti-aliasing for subsequent draw operations.
+// When disabled, shapes use binary coverage for pixel-perfect rendering.
+func (b *SceneBuilder) SetAntiAlias(enabled bool) *SceneBuilder {
+	b.scene.SetAntiAlias(enabled)
+	return b
+}
+
+// AntiAlias returns whether anti-aliasing is enabled for subsequent draws.
+func (b *SceneBuilder) AntiAlias() bool {
+	return b.scene.AntiAlias()
+}
+
+// ---------------------------------------------------------------------------
 // Drawing Operations
 // ---------------------------------------------------------------------------
 

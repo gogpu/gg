@@ -29,6 +29,18 @@ type SoftwareRenderer struct {
 	// to support forced algorithm selection (RasterizerSparseStrips, etc.).
 	// Reset to RasterizerAuto after each call.
 	rasterizerMode RasterizerMode
+
+	// antiAlias is set by Context before calling Fill/Stroke.
+	// When false, the NoAAFiller (integer scanline, binary coverage) is used
+	// instead of AnalyticFiller/CoverageFiller. Reset to true after each call.
+	antiAlias bool
+
+	// noAAFiller is the non-anti-aliased filler (lazy-initialized).
+	noAAFiller *raster.NoAAFiller
+
+	// noAAEdgeBuilder is a separate EdgeBuilder with aaShift=0 for non-AA.
+	// Non-AA does not need sub-pixel edge coordinate shifting.
+	noAAEdgeBuilder *raster.EdgeBuilder
 }
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
@@ -40,6 +52,7 @@ func NewSoftwareRenderer(width, height int) *SoftwareRenderer {
 		width:          width,
 		height:         height,
 		deviceScale:    1.0,
+		antiAlias:      true,
 	}
 }
 
@@ -54,6 +67,19 @@ func (r *SoftwareRenderer) Resize(width, height int) {
 	}
 	r.edgeBuilder = eb
 	r.analyticFiller = raster.NewAnalyticFiller(width, height)
+	// Reset lazy no-AA resources so they pick up new dimensions.
+	r.noAAFiller = nil
+	r.noAAEdgeBuilder = nil
+}
+
+// SetAntiAlias enables or disables anti-aliasing for subsequent Fill/Stroke calls.
+// When disabled, the NoAAFiller (integer scanline, binary coverage) is used
+// instead of the AnalyticFiller or CoverageFiller.
+//
+// This method is intended for use by the scene renderer which needs to
+// propagate per-draw AA state decoded from TagSetAntiAlias commands.
+func (r *SoftwareRenderer) SetAntiAlias(enabled bool) {
+	r.antiAlias = enabled
 }
 
 // SetDeviceScale sets the HiDPI device scale factor for the renderer.
@@ -313,6 +339,12 @@ func applyMaskCoverage(maskFn func(x, y int) uint8, px, py int, coverage uint8) 
 // When rasterizerMode is set (via Context.SetRasterizerMode), the forced
 // algorithm is used instead of auto-selection.
 func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// Non-AA path: completely separate code path (Skia/tiny-skia pattern).
+	// Integer scanline, binary coverage, no CoverageFiller/AnalyticFiller.
+	if !r.antiAlias {
+		return r.fillNoAA(pixmap, p, paint)
+	}
+
 	// Force mode: specific algorithm without auto-selection.
 	switch r.rasterizerMode {
 	case RasterizerAnalytic:
@@ -402,6 +434,121 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 
 	return nil
+}
+
+// fillNoAA renders a filled path without anti-aliasing.
+// Uses a dedicated NoAAFiller that produces solid horizontal spans with
+// binary coverage (0 or 255). This is a completely separate code path
+// from the AA rasterizer (Skia SkScan::FillPath / tiny-skia scan::path pattern).
+func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// Lazy-init the no-AA edge builder and filler.
+	if r.noAAEdgeBuilder == nil {
+		r.noAAEdgeBuilder = raster.NewEdgeBuilder(0) // aaShift=0: no sub-pixel
+		if r.deviceScale > 1.0 {
+			r.noAAEdgeBuilder.SetFlattenTolerance(0.1 / r.deviceScale)
+		}
+	}
+	if r.noAAFiller == nil {
+		r.noAAFiller = raster.NewNoAAFiller(r.width, r.height)
+	}
+
+	r.noAAEdgeBuilder.Reset()
+
+	clipMargin := float32(2)
+	clipRect := raster.Rect{
+		MinX: -clipMargin,
+		MinY: -clipMargin,
+		MaxX: float32(pixmap.Width()) + clipMargin,
+		MaxY: float32(pixmap.Height()) + clipMargin,
+	}
+	r.noAAEdgeBuilder.SetClipRect(&clipRect)
+
+	r.noAAEdgeBuilder.SetFlattenCurves(true)
+	defer r.noAAEdgeBuilder.SetFlattenCurves(false)
+
+	verbs := p.Verbs()
+	if len(verbs) > 0 {
+		verbBytes := unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(verbs))), len(verbs))
+		r.noAAEdgeBuilder.BuildFromPathF64(verbBytes, p.Coords())
+	}
+
+	if r.noAAEdgeBuilder.IsEmpty() {
+		return nil
+	}
+
+	coreFillRule := raster.FillRuleNonZero
+	if paint.FillRule == FillRuleEvenOdd {
+		coreFillRule = raster.FillRuleEvenOdd
+	}
+
+	clipFn := paint.ClipCoverage
+	maskFn := paint.MaskCoverage
+
+	if color, ok := solidColorFromPaint(paint); ok {
+		r.noAAFiller.Fill(r.noAAEdgeBuilder, coreFillRule, func(y, left, spanWidth int) {
+			r.blitNoAASolidSpan(pixmap, y, left, spanWidth, color, clipFn, maskFn)
+		})
+	} else {
+		r.noAAFiller.Fill(r.noAAEdgeBuilder, coreFillRule, func(y, left, spanWidth int) {
+			r.blitNoAAPaintSpan(pixmap, y, left, spanWidth, paint, clipFn, maskFn)
+		})
+	}
+
+	return nil
+}
+
+// blitNoAASolidSpan blits a solid-color span with optional clip and mask.
+func (r *SoftwareRenderer) blitNoAASolidSpan(
+	pixmap *Pixmap, y, left, spanWidth int, color RGBA,
+	clipFn func(float64, float64) byte, maskFn func(int, int) uint8,
+) {
+	for x := left; x < left+spanWidth; x++ {
+		cov := noaaPixelCoverage(x, y, clipFn, maskFn)
+		if cov == 0 {
+			continue
+		}
+		r.blendCoverageSolid(pixmap, x, y, cov, color)
+	}
+}
+
+// blitNoAAPaintSpan blits a paint-sampled span with optional clip and mask.
+func (r *SoftwareRenderer) blitNoAAPaintSpan(
+	pixmap *Pixmap, y, left, spanWidth int, paint *Paint,
+	clipFn func(float64, float64) byte, maskFn func(int, int) uint8,
+) {
+	for x := left; x < left+spanWidth; x++ {
+		cov := noaaPixelCoverage(x, y, clipFn, maskFn)
+		if cov == 0 {
+			continue
+		}
+		c := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+		r.blendCoverageSolid(pixmap, x, y, cov, c)
+	}
+}
+
+// noaaPixelCoverage computes per-pixel coverage from clip and mask functions.
+// Returns 0 if the pixel is fully clipped/masked, 255 if no clip/mask is active.
+func noaaPixelCoverage(x, y int, clipFn func(float64, float64) byte, maskFn func(int, int) uint8) byte {
+	cov := byte(255)
+	if clipFn != nil {
+		clipCov := clipFn(float64(x)+0.5, float64(y)+0.5)
+		if clipCov == 0 {
+			return 0
+		}
+		cov = clipCov
+	}
+	if maskFn != nil {
+		mc := maskFn(x, y)
+		if mc == 0 {
+			return 0
+		}
+		if cov != 255 {
+			cov = uint8(uint16(cov) * uint16(mc) / 255)
+		} else {
+			cov = mc
+		}
+	}
+	return cov
 }
 
 // blendCoverageSolid blends a single pixel with solid color and coverage.
