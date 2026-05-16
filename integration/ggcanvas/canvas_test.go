@@ -1498,3 +1498,115 @@ func (h *warningDetector) WithAttrs(attrs []slog.Attr) slog.Handler {
 func (h *warningDetector) WithGroup(name string) slog.Handler {
 	return h
 }
+
+// --- Draw() per-frame state reset tests (ADR-032, gg#328) ---
+
+func TestDraw_ResetsMatrix(t *testing.T) {
+	provider := newMockProvider()
+	canvas, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Close()
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		dc.Translate(25, 25)
+		dc.Scale(0.5, 0.5)
+	})
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		m := dc.GetTransform()
+		if m != gg.Identity() {
+			t.Errorf("matrix should reset to Identity between Draw() calls, got %v", m)
+		}
+	})
+}
+
+func TestDraw_ResetsPath(t *testing.T) {
+	provider := newMockProvider()
+	canvas, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Close()
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		dc.MoveTo(0, 0)
+		dc.LineTo(50, 50)
+	})
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		if _, _, ok := dc.GetCurrentPoint(); ok {
+			t.Error("path should be cleared between Draw() calls")
+		}
+	})
+}
+
+func TestDraw_PreservesFont(t *testing.T) {
+	provider := newMockProvider()
+	canvas, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Close()
+
+	var fontSet bool
+	_ = canvas.Draw(func(dc *gg.Context) {
+		if dc.Font() != nil {
+			fontSet = true
+		}
+	})
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		if fontSet && dc.Font() == nil {
+			t.Error("font should persist between Draw() calls")
+		}
+	})
+}
+
+func TestDraw_UnwindsPush(t *testing.T) {
+	provider := newMockProvider()
+	canvas, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Close()
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		dc.Push()
+		dc.Translate(10, 10)
+	})
+
+	_ = canvas.Draw(func(dc *gg.Context) {
+		m := dc.GetTransform()
+		if m != gg.Identity() {
+			t.Errorf("leaked Push() should be unwound by Draw(), got matrix %v", m)
+		}
+	})
+}
+
+func TestDraw_MultipleFramesStable(t *testing.T) {
+	provider := newMockProvider()
+	canvas, err := New(provider, 100, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canvas.Close()
+
+	for i := range 10 {
+		_ = canvas.Draw(func(dc *gg.Context) {
+			dc.Translate(0.5, 0.5)
+			dc.Scale(0.995, 0.995)
+			dc.SetRGB(1, 0, 0)
+			dc.DrawRectangle(10, 10, 30, 30)
+			dc.Fill()
+		})
+
+		_ = canvas.Draw(func(dc *gg.Context) {
+			m := dc.GetTransform()
+			if m != gg.Identity() {
+				t.Fatalf("frame %d: matrix drifted to %v", i, m)
+			}
+		})
+	}
+}

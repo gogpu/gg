@@ -373,12 +373,21 @@ func (c *Canvas) MarkDirtyRegion(r image.Rectangle) {
 // This ensures the first render pass clears the surface while mid-frame
 // CPU fallback flushes (bitmap text, gradient fill) use LoadOpLoad to
 // preserve previously drawn content. See RENDER-DIRECT-003.
+//
+// Per-frame state (matrix, path, clip, mask) is automatically reset via
+// Push/Pop wrapper (Skia SkAutoCanvasRestore pattern, ADR-032). Configuration
+// state (font, paint color, textMode) persists across frames.
 func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
 	gg.BeginAcceleratorFrame()
+	c.ctx.Push()
+	c.ctx.Identity()
+	c.ctx.ClearPath()
+	c.ctx.ResetFrameDamage()
 	fn(c.ctx)
+	c.ctx.Pop()
 	c.MarkDirty()
 	return nil
 }

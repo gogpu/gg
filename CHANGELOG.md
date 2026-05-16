@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.2] - 2026-05-16
+
+### Fixed
+
+- **ggcanvas.Draw() per-frame state reset** (#328, @unxed) — `Draw()` now wraps
+  the user closure with `Push()/Identity()/ClearPath()/Pop()` (Skia SkAutoCanvasRestore
+  pattern, ADR-032). Matrix transforms, paths, and clips no longer accumulate across
+  frames. Configuration state (font, paint color, textMode) persists as expected.
+
+### Added
+
+- **Draw state reset tests** — 5 tests: matrix reset, path clear, font persistence,
+  Push unwind, multi-frame stability (10 frames with drift detection).
+
 ## [0.47.1] - 2026-05-16
 
 ### Fixed
