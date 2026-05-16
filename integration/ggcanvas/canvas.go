@@ -84,8 +84,29 @@ func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error)
 		if s := wp.ScaleFactor(); s > 0 {
 			scale = s
 		}
+		warnIfPhysicalDimensions(wp, width, height, scale)
 	}
 	return NewWithScale(provider, width, height, scale)
+}
+
+// warnIfPhysicalDimensions logs a warning when passed dimensions appear to be
+// physical pixels instead of logical points. Common mistake on HiDPI displays.
+func warnIfPhysicalDimensions(wp gpucontext.WindowProvider, width, height int, scale float64) {
+	if scale <= 1.0 {
+		return
+	}
+	logicalW, logicalH := wp.Size()
+	if logicalW <= 0 || logicalH <= 0 {
+		return
+	}
+	threshold := 1.5
+	if width > int(float64(logicalW)*threshold) || height > int(float64(logicalH)*threshold) {
+		gg.Logger().Warn("ggcanvas.New: dimensions look like physical pixels, not logical — "+
+			"pass ctx.Width()/ctx.Height() instead of FramebufferWidth/FramebufferHeight",
+			"passed", fmt.Sprintf("%dx%d", width, height),
+			"logical_window", fmt.Sprintf("%dx%d", logicalW, logicalH),
+			"scale", scale)
+	}
 }
 
 // NewWithScale creates a Canvas with HiDPI device scale support.

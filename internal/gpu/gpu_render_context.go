@@ -245,10 +245,22 @@ func (rc *GPURenderContext) QueueStencil(target gg.GPURenderTarget, cmd StencilP
 }
 
 // QueueText accumulates an MSDF text batch for dispatch.
+// Adjacent batches with identical visual properties (transform, color, atlas,
+// MSDF parameters) are coalesced into a single batch to minimize GPU draw calls (ADR-031).
 func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
 			slogger().Warn("auto-flush failed", "err", fErr)
+		}
+	}
+	// Coalesce with last pending batch if same visual properties (ADR-031).
+	if n := len(rc.pendingTextBatches); n > 0 {
+		last := &rc.pendingTextBatches[n-1]
+		if last.CanMerge(batch) {
+			last.Quads = append(last.Quads, batch.Quads...)
+			rc.pendingTarget = target
+			rc.hasPendingTarget = true
+			return
 		}
 	}
 	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
@@ -328,10 +340,22 @@ func (rc *GPURenderContext) QueueGPUTextureDraw(target gg.GPURenderTarget, view 
 }
 
 // QueueGlyphMask accumulates a glyph mask batch for dispatch.
+// Adjacent batches with identical visual properties (transform, color, LCD mode,
+// atlas page) are coalesced into a single batch to minimize GPU draw calls (ADR-031).
 func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch GlyphMaskBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
 			slogger().Warn("auto-flush failed", "err", fErr)
+		}
+	}
+	// Coalesce with last pending batch if same visual properties (ADR-031).
+	if n := len(rc.pendingGlyphMaskBatches); n > 0 {
+		last := &rc.pendingGlyphMaskBatches[n-1]
+		if last.CanMerge(batch) {
+			last.Quads = append(last.Quads, batch.Quads...)
+			rc.pendingTarget = target
+			rc.hasPendingTarget = true
+			return
 		}
 	}
 	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)

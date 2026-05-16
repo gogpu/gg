@@ -620,6 +620,18 @@ type GlyphMaskBatch struct {
 	AtlasPageIndex int
 }
 
+// CanMerge reports whether other can be merged into this batch.
+// Batches are mergeable when they share the same visual properties
+// (transform, color, LCD mode, atlas page) — only the quad list differs.
+// This enables draw call coalescing: multiple DrawString calls with the
+// same style produce a single GPU draw call (ADR-031).
+func (b *GlyphMaskBatch) CanMerge(other GlyphMaskBatch) bool {
+	return b.Transform == other.Transform &&
+		b.Color == other.Color &&
+		b.IsLCD == other.IsLCD &&
+		b.AtlasPageIndex == other.AtlasPageIndex
+}
+
 // ---- Vertex/index/uniform data builders ----
 
 // buildGlyphMaskVertexData serializes GlyphMaskQuad slices into raw vertex

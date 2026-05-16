@@ -4,10 +4,13 @@
 package ggcanvas
 
 import (
+	"context"
 	"errors"
 	"image"
+	"log/slog"
 	"testing"
 
+	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 )
@@ -1397,4 +1400,101 @@ func TestMarkDirtyRegion_HiDPI_PartialUpload(t *testing.T) {
 	if ru.x != 10 || ru.y != 10 || ru.w != 40 || ru.h != 40 {
 		t.Errorf("UpdateRegion = (%d,%d,%d,%d), want (10,10,40,40)", ru.x, ru.y, ru.w, ru.h)
 	}
+}
+
+// --- warnIfPhysicalDimensions tests ---
+
+func TestWarnIfPhysicalDimensions_DetectsPhysical(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 1600, 1200, 2.0)
+	})
+	if !logged {
+		t.Error("should warn when passed dimensions are physical (2× logical)")
+	}
+}
+
+func TestWarnIfPhysicalDimensions_NoWarnForLogical(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 800, 600, 2.0)
+	})
+	if logged {
+		t.Error("should not warn when passed dimensions are logical")
+	}
+}
+
+func TestWarnIfPhysicalDimensions_NoWarnScale1(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 1.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 800, 600, 1.0)
+	})
+	if logged {
+		t.Error("should not warn at scale 1.0")
+	}
+}
+
+func TestWarnIfPhysicalDimensions_NoWarnZeroSize(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 0, H: 0, SF: 2.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 1600, 1200, 2.0)
+	})
+	if logged {
+		t.Error("should not warn when window size is zero")
+	}
+}
+
+func TestWarnIfPhysicalDimensions_Scale3(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 400, H: 300, SF: 3.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 1200, 900, 3.0)
+	})
+	if !logged {
+		t.Error("should warn at scale 3.0 when passed 3× logical dimensions")
+	}
+}
+
+func TestWarnIfPhysicalDimensions_SlightlyLargerNoWarn(t *testing.T) {
+	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
+	logged := captureWarning(func() {
+		warnIfPhysicalDimensions(wp, 1000, 700, 2.0)
+	})
+	if logged {
+		t.Error("should not warn for dimensions only slightly larger than logical (< 1.5×)")
+	}
+}
+
+// captureWarning detects whether warnIfPhysicalDimensions logs a warning
+// by temporarily replacing the slog handler.
+func captureWarning(fn func()) bool {
+	var warned bool
+	origHandler := gg.Logger().Handler()
+	gg.SetLogger(slog.New(&warningDetector{warned: &warned, inner: origHandler}))
+	defer gg.SetLogger(slog.New(origHandler))
+	fn()
+	return warned
+}
+
+type warningDetector struct {
+	warned *bool
+	inner  slog.Handler
+}
+
+func (h *warningDetector) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= slog.LevelWarn
+}
+
+func (h *warningDetector) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // slog.Handler interface requires value receiver
+	if r.Level >= slog.LevelWarn {
+		*h.warned = true
+	}
+	return nil
+}
+
+func (h *warningDetector) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h
+}
+
+func (h *warningDetector) WithGroup(name string) slog.Handler {
+	return h
 }
