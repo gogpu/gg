@@ -15,7 +15,8 @@
 
 struct Uniforms {
     viewport: vec2<f32>,   // width, height in pixels
-    _pad: vec2<f32>,
+    anti_alias: u32,       // 1 = anti-aliased (smoothstep), 0 = aliased (binary step)
+    _pad: u32,
 }
 
 struct VertexInput {
@@ -149,13 +150,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let abs_d = sqrt(d * d);
     let effective_dist = d + in.is_stroked * (abs_d - in.half_stroke - d);
 
-    // --- Coverage via smoothstep (arithmetic implementation) ---
+    // --- Coverage computation ---
+    // AA path: smoothstep (arithmetic implementation, 1px transition zone).
     let t_raw = effective_dist + 0.5;
     // clamp(t_raw, 0, 1) via arithmetic
     let t_pos = (t_raw + sqrt(t_raw * t_raw)) * 0.5;
     let t_diff = t_pos - 1.0;
     let t = (t_pos + 1.0 - sqrt(t_diff * t_diff)) * 0.5;
-    let coverage = 1.0 - t * t * (3.0 - 2.0 * t);
+    let aa_coverage = 1.0 - t * t * (3.0 - 2.0 * t);
+
+    // No-AA path: binary step (inside=1.0, outside=0.0).
+    // Uses steep ramp via naga-safe arithmetic (same max/min pattern).
+    // Factor 65536 makes the transition zone < 0.001px — effectively binary.
+    let steep = -effective_dist * 65536.0;
+    let sp = (steep + sqrt(steep * steep)) * 0.5;
+    let sd = sp - 1.0;
+    let noaa_coverage = (sp + 1.0 - sqrt(sd * sd)) * 0.5;
+
+    // Blend between AA and no-AA based on uniform flag.
+    // anti_alias=1 → aa_coverage, anti_alias=0 → noaa_coverage.
+    let aa_f = f32(u.anti_alias);
+    let coverage = aa_f * aa_coverage + (1.0 - aa_f) * noaa_coverage;
 
     // Apply RRect clip coverage.
     let clip_cov = rrect_clip_coverage(in.clip_position.xy);

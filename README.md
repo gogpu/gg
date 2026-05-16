@@ -121,6 +121,22 @@ dc.Fill()
 dc.SetRasterizerMode(gg.RasterizerSparseStrips)
 ```
 
+### Pixel-Perfect Mode (No Anti-Aliasing)
+
+Disable anti-aliasing for crisp, aliased edges — useful for pixel art, retro graphics,
+technical drawings, and sharp grid lines:
+
+```go
+dc.SetAntiAlias(false)          // binary coverage: inside=opaque, outside=transparent
+dc.DrawRectangle(10, 10, 100, 50)
+dc.Fill()                        // no gray edge pixels
+dc.SetAntiAlias(true)           // back to smooth AA
+```
+
+Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern) — ~2-3× faster
+than analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
+(controlled via `SetTextMode`).
+
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with

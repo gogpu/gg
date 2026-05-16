@@ -58,6 +58,9 @@ type GPURenderContext struct {
 	sceneStats   gg.SceneStats
 	pipelineMode gg.PipelineMode
 
+	// Anti-aliasing state for GPU rendering (propagated from Context).
+	antiAlias bool
+
 	// Shared command encoder for single-command-buffer frames (ADR-017).
 	// When set, Flush records render passes into this encoder instead of
 	// creating its own + submitting. The caller owns Finish + Submit.
@@ -78,6 +81,12 @@ func (rc *GPURenderContext) PendingCount() int {
 // SetPipelineMode sets the pipeline mode for this context's operations.
 func (rc *GPURenderContext) SetPipelineMode(mode gg.PipelineMode) {
 	rc.pipelineMode = mode
+}
+
+// SetAntiAlias sets the anti-aliasing state for GPU rendering.
+// When false, SDF shapes use binary step coverage instead of smoothstep.
+func (rc *GPURenderContext) SetAntiAlias(enabled bool) {
+	rc.antiAlias = enabled
 }
 
 // SetClipRect records a scissor rect change for this context.
@@ -625,6 +634,9 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 		rc.session.SetConvexRenderer(convexRend)
 		rc.session.SetStencilRenderer(stencilRend)
 	}
+
+	// Propagate per-frame anti-aliasing state to session.
+	rc.session.antiAlias = rc.antiAlias
 
 	// Transfer per-context frame tracking to session before rendering.
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)

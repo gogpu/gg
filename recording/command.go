@@ -62,6 +62,7 @@ const (
 	CmdSetMiterLimit  // Set miter limit
 	CmdSetDash        // Set dash pattern
 	CmdSetFillRule    // Set fill rule
+	CmdSetAntiAlias   // Set anti-aliasing mode
 )
 
 // commandTypeNames maps CommandType values to their string representation.
@@ -86,6 +87,7 @@ var commandTypeNames = [...]string{
 	CmdSetMiterLimit:  "SetMiterLimit",
 	CmdSetDash:        "SetDash",
 	CmdSetFillRule:    "SetFillRule",
+	CmdSetAntiAlias:   "SetAntiAlias",
 }
 
 // String returns the string representation of a CommandType.
@@ -364,6 +366,15 @@ type SetFillRuleCommand struct {
 
 // Type implements Command.
 func (SetFillRuleCommand) Type() CommandType { return CmdSetFillRule }
+
+// SetAntiAliasCommand enables or disables anti-aliasing for geometry rendering.
+type SetAntiAliasCommand struct {
+	// Enabled is true for anti-aliased rendering, false for aliased.
+	Enabled bool
+}
+
+// Type implements Command.
+func (SetAntiAliasCommand) Type() CommandType { return CmdSetAntiAlias }
 
 // --------------------------------------------------------------------------
 // Supporting Types

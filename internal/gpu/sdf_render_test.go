@@ -439,7 +439,7 @@ func TestBuildSDFRenderVerticesEmpty(t *testing.T) {
 }
 
 func TestMakeSDFRenderUniform(t *testing.T) {
-	data := makeSDFRenderUniform(800, 600)
+	data := makeSDFRenderUniform(800, 600, true)
 	if len(data) != sdfRenderUniformSize {
 		t.Fatalf("expected %d bytes, got %d", sdfRenderUniformSize, len(data))
 	}
@@ -453,11 +453,23 @@ func TestMakeSDFRenderUniform(t *testing.T) {
 		t.Errorf("viewport height = %f, expected 600.0", h)
 	}
 
+	// anti_alias should be 1 (true).
+	aa := binary.LittleEndian.Uint32(data[8:12])
+	if aa != 1 {
+		t.Errorf("expected anti_alias=1, got %d", aa)
+	}
+
 	// Padding should be zero.
-	pad1 := binary.LittleEndian.Uint32(data[8:12])
-	pad2 := binary.LittleEndian.Uint32(data[12:16])
-	if pad1 != 0 || pad2 != 0 {
-		t.Errorf("expected zero padding, got %d, %d", pad1, pad2)
+	pad := binary.LittleEndian.Uint32(data[12:16])
+	if pad != 0 {
+		t.Errorf("expected zero padding, got %d", pad)
+	}
+
+	// Test with AA disabled.
+	data2 := makeSDFRenderUniform(100, 200, false)
+	aa2 := binary.LittleEndian.Uint32(data2[8:12])
+	if aa2 != 0 {
+		t.Errorf("expected anti_alias=0, got %d", aa2)
 	}
 }
 

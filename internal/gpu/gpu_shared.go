@@ -77,7 +77,8 @@ func (s *GPUShared) NewRenderContext() *GPURenderContext {
 	// This avoids creating a standalone Vulkan instance before gogpu has a
 	// chance to provide its DeviceProvider (which may be software/CPU).
 	return &GPURenderContext{
-		shared: s,
+		shared:    s,
+		antiAlias: true,
 	}
 }
 
