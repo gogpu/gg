@@ -521,6 +521,9 @@ func (c *Context) SetDamageTracking(enabled bool) {
 // Callers with retained-mode knowledge (e.g., ui widget tree) should call
 // this for each dirty boundary after compositing, so that FrameDamage()
 // accurately reflects which surface regions changed this frame.
+//
+// Bounds are in logical (user-space) coordinates. The context automatically
+// scales them to physical pixels via deviceScale for the OS compositor.
 func (c *Context) TrackDamageRect(bounds image.Rectangle) {
 	c.trackDamage(bounds)
 }
@@ -533,13 +536,17 @@ func (c *Context) trackDamage(bounds image.Rectangle) {
 		return
 	}
 
-	// HiDPI fix: scale logical damage rect to physical pixels for the OS compositor.
-	if c.deviceScale > 1.0 {
-		x0 := int(math.Floor(float64(bounds.Min.X) * c.deviceScale))
-		y0 := int(math.Floor(float64(bounds.Min.Y) * c.deviceScale))
-		x1 := int(math.Ceil(float64(bounds.Max.X) * c.deviceScale))
-		y1 := int(math.Ceil(float64(bounds.Max.Y) * c.deviceScale))
-		bounds = image.Rect(x0, y0, x1, y1)
+	// Scale logical damage rect to physical pixels for OS compositor APIs
+	// (Vulkan VK_KHR_incremental_present, DX12 Present1, EGL, Wayland damage_buffer).
+	// Floor/Ceil ensures conservative rounding with no pixel gaps.
+	if !c.deviceMatrix.IsIdentity() {
+		s := c.deviceScale
+		bounds = image.Rect(
+			int(math.Floor(float64(bounds.Min.X)*s)),
+			int(math.Floor(float64(bounds.Min.Y)*s)),
+			int(math.Ceil(float64(bounds.Max.X)*s)),
+			int(math.Ceil(float64(bounds.Max.Y)*s)),
+		)
 	}
 
 	c.frameDamageRects = append(c.frameDamageRects, bounds)

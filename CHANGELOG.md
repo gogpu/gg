@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.3] - 2026-05-19
+
+### Fixed
+
+- **HiDPI quarter-screen rendering** (#327, #332, @unxed) — `trackDamage()` recorded
+  damage rects in logical coordinates, but OS compositor APIs (Vulkan
+  `VK_KHR_incremental_present`, DX12 `Present1`, EGL) expect physical pixels.
+  Compositor updated only the logical area (800×600) instead of the full physical
+  surface (1600×1200). Fix: scale damage rects by `deviceScale` with Floor/Ceil
+  conservative rounding. Guard uses `deviceMatrix.IsIdentity()` (enterprise pattern).
+
+- **`SetPresentDamage()` coordinate mismatch** (BUG-GG-DAMAGE-COORDS-001) — documentation
+  said "physical pixels" but callers (ui widget tree) passed logical coordinates.
+  Fix: scale logical→physical inside `SetPresentDamage()`, corrected documentation.
+
+### Added
+
+- **9 damage scaling regression tests** — HiDPI scale 2.0/3.0/1.5, partial rect,
+  fractional coords, stroke, multiple rects, public API (`TrackDamageRect`).
+
 ## [0.47.2] - 2026-05-16
 
 ### Fixed
