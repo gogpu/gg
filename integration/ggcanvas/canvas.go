@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
@@ -311,9 +312,10 @@ func (c *Canvas) NeedsAnimationFrame() bool {
 }
 
 // SetPresentDamage sets damage rectangles for the next present call (ADR-021 Level 4).
-// Rects are in physical pixels with top-left origin. They are forwarded to
-// gogpu SetDamageRects() → wgpu PresentWithDamage() → OS compositor hint
-// (VK_KHR_incremental_present, DX12 Present1, eglSwapBuffersWithDamage).
+// Rects are in logical (user-space) coordinates with top-left origin. They are
+// automatically scaled to physical pixels and forwarded to gogpu SetDamageRects()
+// → wgpu PresentWithDamage() → OS compositor hint (VK_KHR_incremental_present,
+// DX12 Present1, eglSwapBuffersWithDamage).
 //
 // Callers with retained-mode knowledge (e.g. ui widget tree) should provide
 // BOTH old and new bounds of moved/resized objects. Immediate-mode callers
@@ -323,6 +325,19 @@ func (c *Canvas) NeedsAnimationFrame() bool {
 // Rects are consumed after one present and do not persist across frames.
 // When nil or empty, the full surface is presented (backward compatible).
 func (c *Canvas) SetPresentDamage(rects []image.Rectangle) {
+	scale := c.ctx.DeviceScale()
+	if scale != 1.0 {
+		scaled := make([]image.Rectangle, len(rects))
+		for i, r := range rects {
+			scaled[i] = image.Rect(
+				int(math.Floor(float64(r.Min.X)*scale)),
+				int(math.Floor(float64(r.Min.Y)*scale)),
+				int(math.Ceil(float64(r.Max.X)*scale)),
+				int(math.Ceil(float64(r.Max.Y)*scale)),
+			)
+		}
+		rects = scaled
+	}
 	c.presentDamageRects = rects
 }
 
