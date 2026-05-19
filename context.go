@@ -532,6 +532,16 @@ func (c *Context) trackDamage(bounds image.Rectangle) {
 	if !c.damageTrackingEnabled || bounds.Empty() {
 		return
 	}
+
+	// HiDPI fix: scale logical damage rect to physical pixels for the OS compositor.
+	if c.deviceScale > 1.0 {
+		x0 := int(math.Floor(float64(bounds.Min.X) * c.deviceScale))
+		y0 := int(math.Floor(float64(bounds.Min.Y) * c.deviceScale))
+		x1 := int(math.Ceil(float64(bounds.Max.X) * c.deviceScale))
+		y1 := int(math.Ceil(float64(bounds.Max.Y) * c.deviceScale))
+		bounds = image.Rect(x0, y0, x1, y1)
+	}
+
 	c.frameDamageRects = append(c.frameDamageRects, bounds)
 	if len(c.frameDamageRects) > maxDamageRects {
 		merged := c.frameDamageRects[0]
