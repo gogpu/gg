@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Text invisible on clipped elements after first sibling (Tier 4 MSDF and Tier 6 GlyphMask)** — When adjacent
+  elements inside clip regions (e.g. buttons in a row) share the same font and text color,
+  text batch coalescing merged all their text runs into a single batch entry.
+  Because the batch count only advanced on the *first* element's text, `buildScissorGroups`
+  assigned the entire merged batch to the first element's scissor rect, clipping away text
+  from all subsequent elements. Fills for those elements then rendered on top of the
+  (already clipped-away) text, making it appear invisible. Fix: `recordScissorSegment` now
+  sets a `textBatchSealed` flag that prevents both `QueueGlyphMask` and `QueueText` from merging
+  into the previous batch when a scissor boundary has been crossed. Each clipped element
+  gets its own batch entry so `buildScissorGroups` places each batch in the correct scissor
+  group. Merging within the same clip region is preserved for efficiency.
+
 ## [0.47.4] - 2026-05-21
 
 ### Added
