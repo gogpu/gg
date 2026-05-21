@@ -41,6 +41,10 @@ type SoftwareRenderer struct {
 	// noAAEdgeBuilder is a separate EdgeBuilder with aaShift=0 for non-AA.
 	// Non-AA does not need sub-pixel edge coordinate shifting.
 	noAAEdgeBuilder *raster.EdgeBuilder
+
+	// scratchStrokePath reuses path allocation across Stroke calls.
+	// Matches Skia fOuter.reset() pattern — zero per-stroke allocation.
+	scratchStrokePath *Path
 }
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
@@ -832,11 +836,14 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
 	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
-	// Convert back to gg.Path
-	strokePath := strokeResultToPath(outVerbs, outCoords)
+	// Convert back to gg.Path (reuse scratch to avoid per-stroke allocation).
+	if r.scratchStrokePath == nil {
+		r.scratchStrokePath = NewPath()
+	}
+	strokeResultToPath(r.scratchStrokePath, outVerbs, outCoords)
 
 	// Fill the stroke path - this gives us anti-aliased strokes
-	return r.Fill(pixmap, strokePath, paint)
+	return r.Fill(pixmap, r.scratchStrokePath, paint)
 }
 
 // convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
@@ -849,29 +856,29 @@ func convertVerbsToStroke(verbs []PathVerb) []stroke.PathVerb {
 	return result
 }
 
-// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
-func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *Path {
-	p := NewPath()
+// strokeResultToPath converts stroke output (verbs+coords) into dst Path.
+// Reuses dst to avoid per-stroke allocation (Skia fOuter.reset() pattern).
+func strokeResultToPath(dst *Path, verbs []stroke.PathVerb, coords []float64) {
+	dst.Reset()
 	ci := 0
 	for _, v := range verbs {
 		switch v {
 		case stroke.VerbMoveTo:
-			p.MoveTo(coords[ci], coords[ci+1])
+			dst.MoveTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbLineTo:
-			p.LineTo(coords[ci], coords[ci+1])
+			dst.LineTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbQuadTo:
-			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			dst.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
 			ci += 4
 		case stroke.VerbCubicTo:
-			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			dst.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
 			ci += 6
 		case stroke.VerbClose:
-			p.Close()
+			dst.Close()
 		}
 	}
-	return p
 }
 
 // convertLineCap converts gg.LineCap to stroke.LineCap.

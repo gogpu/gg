@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polygons (triangle, pentagon) vertex pointing up at rotation=0, even-sided (square,
   hexagon) flat top. 5 vertex positioning tests.
 
+### Performance
+
+- **Zero-alloc stroke path** — `strokeResultToPath` now reuses scratch `Path` on
+  `SoftwareRenderer` instead of allocating per call (Skia `fOuter.reset()` pattern).
+  StrokePath: 1 alloc → 0 allocs, 4.3× faster (10 segments). All core rendering
+  paths (fill, stroke, circle, rect, pixmap) are now zero-allocation.
+
 ## [0.47.4] - 2026-05-21
 
 ### Added
