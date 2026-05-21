@@ -646,6 +646,20 @@ func TestNewPixmapFromBuffer_PanicBadDims(t *testing.T) {
 	}
 }
 
+func TestNewPixmapFromBuffer_PanicOverflow(t *testing.T) {
+	// Dimensions that would silently wrap width*height*4 to 0 on 32-bit int
+	// (GOARCH=386/arm) must panic on every platform — otherwise the size
+	// check passes with need=0 and subsequent pixel writes go out of bounds.
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for oversized dimensions")
+		}
+	}()
+	// 32768*32768*4 = 2^32 which wraps to 0 in 32-bit int.
+	// On 64-bit this is also rejected by the maxDim (2^30) guard.
+	NewPixmapFromBuffer(make([]uint8, 16), 32768, 32768)
+}
+
 func TestPixmap_ImageView(t *testing.T) {
 	const w, h = 5, 4
 	pm := NewPixmap(w, h)
