@@ -5,21 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.48.0] - 2026-05-21
+
+### Added
+
+- **Text stroke/outline API** (ADR-033, #334, @rcarlier) — enterprise text stroke matching
+  Skia `kStroke_Style`, Cairo `cairo_text_path`, HTML5 `strokeText`, Vello `DrawGlyphs+Stroke`:
+  - `StrokeString(s, x, y)` — strokes glyph outlines using current line width/cap/join
+  - `StrokeStringAnchored(s, x, y, ax, ay)` — anchored variant
+  - `TextPath(s, x, y) *Path` — returns glyph outlines as Path for fill/stroke/clip
+  - Always uses vector outlines regardless of TextMode (MSDF/GlyphMask can't be stroked)
+  - Recording mirror: `StrokeTextCommand`
+
+  ```go
+  dc.SetLineWidth(3)
+  dc.SetRGB(0, 0, 0)
+  dc.StrokeString("Hello", x, y)  // black outline
+  dc.SetRGB(1, 1, 1)
+  dc.DrawString("Hello", x, y)    // white fill on top
+  ```
+
+- **Aliased text mode** (ADR-034, #334, @rcarlier) — pixel-perfect text rendering with binary
+  coverage (0 or 255, no gray pixels). Matches Skia `SkFont::Edging::kAlias`:
+  - `dc.SetTextMode(gg.TextModeAliased)` — new TextMode value
+  - GlyphMask (Tier 6): `NoAAFiller` for binary glyph masks
+  - MSDF (Tier 4): `step(0.5)` shader for hard edges
+  - Separate from geometry AA (`SetAntiAlias`) — matches Skia/Cairo separation
+
+  ```go
+  dc.SetTextMode(gg.TextModeAliased)
+  dc.DrawString("Pixel Perfect", x, y)  // no gray edge pixels
+  ```
 
 ### Fixed
 
-- **Text invisible on clipped elements after first sibling (Tier 4 MSDF and Tier 6 GlyphMask)** — When adjacent
-  elements inside clip regions (e.g. buttons in a row) share the same font and text color,
-  text batch coalescing merged all their text runs into a single batch entry.
-  Because the batch count only advanced on the *first* element's text, `buildScissorGroups`
-  assigned the entire merged batch to the first element's scissor rect, clipping away text
-  from all subsequent elements. Fills for those elements then rendered on top of the
-  (already clipped-away) text, making it appear invisible. Fix: `recordScissorSegment` now
-  sets a `textBatchSealed` flag that prevents both `QueueGlyphMask` and `QueueText` from merging
-  into the previous batch when a scissor boundary has been crossed. Each clipped element
-  gets its own batch entry so `buildScissorGroups` places each batch in the correct scissor
-  group. Merging within the same clip region is preserved for efficiency.
+- **Text invisible on clipped sibling elements** (#335, #338, #339, #340, @celer) — batch
+  coalescing (ADR-031) merged same-style text across scissor boundaries. Per-tier seal
+  flags (`textBatchSealed`, `glyphBatchSealed`) now prevent merging across clip changes.
+  Both Tier 4 (MSDF) and Tier 6 (GlyphMask) covered. Intra-group merging preserved.
+
+- **NaN/Inf stack overflow in curve subdivision** (ADR-035, #341, @rcarlier) — 12 recursive
+  curve flattening functions across 4 files now have `depth > 10` guards (16 for arc length).
+  Prevents stack overflow on NaN/Inf coordinates. 18 NaN/Inf safety tests.
+
+- **DrawRegularPolygon rotation** (#334, @rcarlier) — fogleman/gg compatibility: odd-sided
+  polygons (triangle, pentagon) vertex pointing up at rotation=0, even-sided (square,
+  hexagon) flat top. 5 vertex positioning tests.
 
 ## [0.47.4] - 2026-05-21
 
