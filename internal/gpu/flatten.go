@@ -129,6 +129,16 @@ func addMonotonicLine(segments *SegmentList, x0, y0, x1, y1 float32) {
 // flattenQuadratic flattens a quadratic Bezier curve to line segments.
 // Uses recursive subdivision based on flatness criterion.
 func flattenQuadratic(segments *SegmentList, x0, y0, cx, cy, x1, y1 float32, tol float32) {
+	flattenQuadraticRec(segments, x0, y0, cx, cy, x1, y1, tol, 0)
+}
+
+func flattenQuadraticRec(segments *SegmentList, x0, y0, cx, cy, x1, y1 float32, tol float32, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		addMonotonicLine(segments, x0, y0, x1, y1)
+		return
+	}
+
 	// Check if flat enough using the midpoint deviation
 	// For a quadratic, max deviation is at t=0.5
 	midX := 0.25*x0 + 0.5*cx + 0.25*x1
@@ -156,17 +166,17 @@ func flattenQuadratic(segments *SegmentList, x0, y0, cx, cy, x1, y1 float32, tol
 		t := (y0 - cy) / denom
 		if t > flattenEpsilon && t < 1.0-flattenEpsilon {
 			// Split at extremum
-			splitQuadraticAt(segments, x0, y0, cx, cy, x1, y1, t, tol)
+			splitQuadraticAt(segments, x0, y0, cx, cy, x1, y1, t, tol, depth)
 			return
 		}
 	}
 
 	// Subdivide at midpoint
-	subdivideQuadratic(segments, x0, y0, cx, cy, x1, y1, tol)
+	subdivideQuadratic(segments, x0, y0, cx, cy, x1, y1, tol, depth)
 }
 
 // splitQuadraticAt splits a quadratic at parameter t and flattens both parts.
-func splitQuadraticAt(segments *SegmentList, x0, y0, cx, cy, x1, y1, t float32, tol float32) {
+func splitQuadraticAt(segments *SegmentList, x0, y0, cx, cy, x1, y1, t float32, tol float32, depth int) {
 	// De Casteljau subdivision
 	// First level
 	ax := lerp(x0, cx, t)
@@ -179,12 +189,12 @@ func splitQuadraticAt(segments *SegmentList, x0, y0, cx, cy, x1, y1, t float32, 
 	my := lerp(ay, by, t)
 
 	// Flatten both halves
-	flattenQuadratic(segments, x0, y0, ax, ay, mx, my, tol)
-	flattenQuadratic(segments, mx, my, bx, by, x1, y1, tol)
+	flattenQuadraticRec(segments, x0, y0, ax, ay, mx, my, tol, depth+1)
+	flattenQuadraticRec(segments, mx, my, bx, by, x1, y1, tol, depth+1)
 }
 
 // subdivideQuadratic subdivides a quadratic at t=0.5 and flattens both parts.
-func subdivideQuadratic(segments *SegmentList, x0, y0, cx, cy, x1, y1, tol float32) {
+func subdivideQuadratic(segments *SegmentList, x0, y0, cx, cy, x1, y1, tol float32, depth int) {
 	// De Casteljau at t=0.5
 	ax := 0.5 * (x0 + cx)
 	ay := 0.5 * (y0 + cy)
@@ -194,13 +204,23 @@ func subdivideQuadratic(segments *SegmentList, x0, y0, cx, cy, x1, y1, tol float
 	my := 0.5 * (ay + by)
 
 	// Flatten both halves
-	flattenQuadratic(segments, x0, y0, ax, ay, mx, my, tol)
-	flattenQuadratic(segments, mx, my, bx, by, x1, y1, tol)
+	flattenQuadraticRec(segments, x0, y0, ax, ay, mx, my, tol, depth+1)
+	flattenQuadraticRec(segments, mx, my, bx, by, x1, y1, tol, depth+1)
 }
 
 // flattenCubic flattens a cubic Bezier curve to line segments.
 // Uses recursive subdivision based on flatness criterion.
 func flattenCubic(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32, tol float32) {
+	flattenCubicRec(segments, x0, y0, c1x, c1y, c2x, c2y, x1, y1, tol, 0)
+}
+
+func flattenCubicRec(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32, tol float32, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		addMonotonicLine(segments, x0, y0, x1, y1)
+		return
+	}
+
 	// Check if flat enough using control point deviation from chord
 	// For a cubic, check both control points' distance from the chord
 	ux := 3*c1x - 2*x0 - x1
@@ -241,17 +261,17 @@ func flattenCubic(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1 floa
 				validRoots[0], validRoots[1] = validRoots[1], validRoots[0]
 			}
 			// Split at first extremum
-			splitCubicAt(segments, x0, y0, c1x, c1y, c2x, c2y, x1, y1, validRoots[0], tol)
+			splitCubicAt(segments, x0, y0, c1x, c1y, c2x, c2y, x1, y1, validRoots[0], tol, depth)
 			return
 		}
 	}
 
 	// Subdivide at midpoint
-	subdivideCubic(segments, x0, y0, c1x, c1y, c2x, c2y, x1, y1, tol)
+	subdivideCubic(segments, x0, y0, c1x, c1y, c2x, c2y, x1, y1, tol, depth)
 }
 
 // splitCubicAt splits a cubic at parameter t and flattens both parts.
-func splitCubicAt(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, t float32, tol float32) {
+func splitCubicAt(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, t float32, tol float32, depth int) {
 	// De Casteljau subdivision for cubic
 	// First level
 	ax := lerp(x0, c1x, t)
@@ -272,12 +292,12 @@ func splitCubicAt(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, t f
 	my := lerp(dy, ey, t)
 
 	// Flatten both halves
-	flattenCubic(segments, x0, y0, ax, ay, dx, dy, mx, my, tol)
-	flattenCubic(segments, mx, my, ex, ey, cx, cy, x1, y1, tol)
+	flattenCubicRec(segments, x0, y0, ax, ay, dx, dy, mx, my, tol, depth+1)
+	flattenCubicRec(segments, mx, my, ex, ey, cx, cy, x1, y1, tol, depth+1)
 }
 
 // subdivideCubic subdivides a cubic at t=0.5 and flattens both parts.
-func subdivideCubic(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, tol float32) {
+func subdivideCubic(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, tol float32, depth int) {
 	// De Casteljau at t=0.5
 	ax := 0.5 * (x0 + c1x)
 	ay := 0.5 * (y0 + c1y)
@@ -295,8 +315,8 @@ func subdivideCubic(segments *SegmentList, x0, y0, c1x, c1y, c2x, c2y, x1, y1, t
 	my := 0.5 * (dy + ey)
 
 	// Flatten both halves
-	flattenCubic(segments, x0, y0, ax, ay, dx, dy, mx, my, tol)
-	flattenCubic(segments, mx, my, ex, ey, cx, cy, x1, y1, tol)
+	flattenCubicRec(segments, x0, y0, ax, ay, dx, dy, mx, my, tol, depth+1)
+	flattenCubicRec(segments, mx, my, ex, ey, cx, cy, x1, y1, tol, depth+1)
 }
 
 // flattenEpsilon is a small value for floating point comparisons in flattening.

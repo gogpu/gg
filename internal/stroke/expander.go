@@ -682,11 +682,17 @@ func (e *StrokeExpander) appendReversed(pb *pathBuilder) {
 // Uses the reusable flattenBuf to avoid per-curve allocations.
 func (e *StrokeExpander) flattenQuad(p0, p1, p2 Point) []Point {
 	e.flattenBuf = append(e.flattenBuf[:0], p0)
-	e.flattenQuadRec(p0, p1, p2)
+	e.flattenQuadRec(p0, p1, p2, 0)
 	return e.flattenBuf
 }
 
-func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point) {
+func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		e.flattenBuf = append(e.flattenBuf, p2)
+		return
+	}
+
 	// Check if curve is flat enough
 	dist := distanceToLine(p1, p0, p2)
 	if dist < e.tolerance {
@@ -699,19 +705,25 @@ func (e *StrokeExpander) flattenQuadRec(p0, p1, p2 Point) {
 	q1 := p1.Lerp(p2, 0.5)
 	q2 := q0.Lerp(q1, 0.5)
 
-	e.flattenQuadRec(p0, q0, q2)
-	e.flattenQuadRec(q2, q1, p2)
+	e.flattenQuadRec(p0, q0, q2, depth+1)
+	e.flattenQuadRec(q2, q1, p2, depth+1)
 }
 
 // flattenCubic flattens a cubic Bezier curve to line segments.
 // Uses the reusable flattenBuf to avoid per-curve allocations.
 func (e *StrokeExpander) flattenCubic(p0, p1, p2, p3 Point) []Point {
 	e.flattenBuf = append(e.flattenBuf[:0], p0)
-	e.flattenCubicRec(p0, p1, p2, p3)
+	e.flattenCubicRec(p0, p1, p2, p3, 0)
 	return e.flattenBuf
 }
 
-func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point) {
+func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		e.flattenBuf = append(e.flattenBuf, p3)
+		return
+	}
+
 	// Check if curve is flat enough
 	d1 := distanceToLine(p1, p0, p3)
 	d2 := distanceToLine(p2, p0, p3)
@@ -730,8 +742,8 @@ func (e *StrokeExpander) flattenCubicRec(p0, p1, p2, p3 Point) {
 	r1 := q1.Lerp(q2, 0.5)
 	s := r0.Lerp(r1, 0.5)
 
-	e.flattenCubicRec(p0, q0, r0, s)
-	e.flattenCubicRec(s, r1, q2, p3)
+	e.flattenCubicRec(p0, q0, r0, s, depth+1)
+	e.flattenCubicRec(s, r1, q2, p3, depth+1)
 }
 
 // distanceToLine calculates the perpendicular distance from point p to line segment (a, b).

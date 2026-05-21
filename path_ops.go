@@ -149,12 +149,18 @@ func flattenQuadWinding(p0, p1, p2, pt Point) int {
 	// Use adaptive subdivision based on flatness
 	const tolerance = 0.1
 	var winding int
-	flattenQuadWindingRecursive(q, pt, tolerance, &winding)
+	flattenQuadWindingRecursive(q, pt, tolerance, &winding, 0)
 	return winding
 }
 
 // flattenQuadWindingRecursive recursively subdivides and accumulates winding.
-func flattenQuadWindingRecursive(q QuadBez, pt Point, tolerance float64, winding *int) {
+func flattenQuadWindingRecursive(q QuadBez, pt Point, tolerance float64, winding *int, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		*winding += lineWinding(q.P0, q.P2, pt)
+		return
+	}
+
 	// Flatness test: distance from control point to chord
 	mid := q.P0.Lerp(q.P2, 0.5)
 	dist := q.P1.Sub(mid).Length()
@@ -167,8 +173,8 @@ func flattenQuadWindingRecursive(q QuadBez, pt Point, tolerance float64, winding
 
 	// Subdivide and recurse
 	q1, q2 := q.Subdivide()
-	flattenQuadWindingRecursive(q1, pt, tolerance, winding)
-	flattenQuadWindingRecursive(q2, pt, tolerance, winding)
+	flattenQuadWindingRecursive(q1, pt, tolerance, winding, depth+1)
+	flattenQuadWindingRecursive(q2, pt, tolerance, winding, depth+1)
 }
 
 // cubicWinding computes the winding contribution of a cubic Bezier.
@@ -196,12 +202,18 @@ func flattenCubicWinding(p0, p1, p2, p3, pt Point) int {
 
 	const tolerance = 0.1
 	var winding int
-	flattenCubicWindingRecursive(c, pt, tolerance, &winding)
+	flattenCubicWindingRecursive(c, pt, tolerance, &winding, 0)
 	return winding
 }
 
 // flattenCubicWindingRecursive recursively subdivides and accumulates winding.
-func flattenCubicWindingRecursive(c CubicBez, pt Point, tolerance float64, winding *int) {
+func flattenCubicWindingRecursive(c CubicBez, pt Point, tolerance float64, winding *int, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		*winding += lineWinding(c.P0, c.P3, pt)
+		return
+	}
+
 	// Flatness test: max distance from control points to chord
 	flatness := cubicFlatness(c)
 
@@ -213,8 +225,8 @@ func flattenCubicWindingRecursive(c CubicBez, pt Point, tolerance float64, windi
 
 	// Subdivide and recurse
 	c1, c2 := c.Subdivide()
-	flattenCubicWindingRecursive(c1, pt, tolerance, winding)
-	flattenCubicWindingRecursive(c2, pt, tolerance, winding)
+	flattenCubicWindingRecursive(c1, pt, tolerance, winding, depth+1)
+	flattenCubicWindingRecursive(c2, pt, tolerance, winding, depth+1)
 }
 
 // cubicFlatness returns the maximum distance from control points to the chord.
@@ -364,11 +376,17 @@ func (p *Path) FlattenCallback(tolerance float64, fn func(pt Point)) {
 // flattenQuad flattens a quadratic Bezier curve.
 func flattenQuad(p0, p1, p2 Point, tolerance float64, fn func(pt Point)) {
 	q := NewQuadBez(p0, p1, p2)
-	flattenQuadRecursive(q, tolerance*tolerance, fn)
+	flattenQuadRecursive(q, tolerance*tolerance, fn, 0)
 }
 
 // flattenQuadRecursive recursively subdivides the quadratic.
-func flattenQuadRecursive(q QuadBez, toleranceSq float64, fn func(pt Point)) {
+func flattenQuadRecursive(q QuadBez, toleranceSq float64, fn func(pt Point), depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		fn(q.P2)
+		return
+	}
+
 	// Flatness test: distance from control point to chord midpoint
 	mid := q.P0.Lerp(q.P2, 0.5)
 	dist := q.P1.Sub(mid)
@@ -379,18 +397,24 @@ func flattenQuadRecursive(q QuadBez, toleranceSq float64, fn func(pt Point)) {
 
 	// Subdivide
 	q1, q2 := q.Subdivide()
-	flattenQuadRecursive(q1, toleranceSq, fn)
-	flattenQuadRecursive(q2, toleranceSq, fn)
+	flattenQuadRecursive(q1, toleranceSq, fn, depth+1)
+	flattenQuadRecursive(q2, toleranceSq, fn, depth+1)
 }
 
 // flattenCubic flattens a cubic Bezier curve.
 func flattenCubic(p0, p1, p2, p3 Point, tolerance float64, fn func(pt Point)) {
 	c := NewCubicBez(p0, p1, p2, p3)
-	flattenCubicRecursive(c, tolerance*tolerance, fn)
+	flattenCubicRecursive(c, tolerance*tolerance, fn, 0)
 }
 
 // flattenCubicRecursive recursively subdivides the cubic.
-func flattenCubicRecursive(c CubicBez, toleranceSq float64, fn func(pt Point)) {
+func flattenCubicRecursive(c CubicBez, toleranceSq float64, fn func(pt Point), depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		fn(c.P3)
+		return
+	}
+
 	// Flatness test using the standard cubic flatness metric
 	flatness := cubicFlatness(c)
 
@@ -401,8 +425,8 @@ func flattenCubicRecursive(c CubicBez, toleranceSq float64, fn func(pt Point)) {
 
 	// Subdivide
 	c1, c2 := c.Subdivide()
-	flattenCubicRecursive(c1, toleranceSq, fn)
-	flattenCubicRecursive(c2, toleranceSq, fn)
+	flattenCubicRecursive(c1, toleranceSq, fn, depth+1)
+	flattenCubicRecursive(c2, toleranceSq, fn, depth+1)
 }
 
 // Reversed returns a new path with reversed direction.
@@ -590,11 +614,16 @@ func (p *Path) Length(accuracy float64) float64 {
 // Uses adaptive subdivision.
 func quadLength(p0, p1, p2 Point, accuracy float64) float64 {
 	q := NewQuadBez(p0, p1, p2)
-	return quadLengthRecursive(q, accuracy*accuracy)
+	return quadLengthRecursive(q, accuracy*accuracy, 0)
 }
 
 // quadLengthRecursive recursively computes quadratic arc length.
-func quadLengthRecursive(q QuadBez, accuracySq float64) float64 {
+func quadLengthRecursive(q QuadBez, accuracySq float64, depth int) float64 {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 16 {
+		return q.P0.Distance(q.P2)
+	}
+
 	// Compute chord length and control polygon length
 	chord := q.P0.Distance(q.P2)
 	polygon := q.P0.Distance(q.P1) + q.P1.Distance(q.P2)
@@ -607,18 +636,23 @@ func quadLengthRecursive(q QuadBez, accuracySq float64) float64 {
 
 	// Subdivide
 	q1, q2 := q.Subdivide()
-	return quadLengthRecursive(q1, accuracySq) + quadLengthRecursive(q2, accuracySq)
+	return quadLengthRecursive(q1, accuracySq, depth+1) + quadLengthRecursive(q2, accuracySq, depth+1)
 }
 
 // cubicLength computes the arc length of a cubic Bezier.
 // Uses adaptive subdivision.
 func cubicLength(p0, p1, p2, p3 Point, accuracy float64) float64 {
 	c := NewCubicBez(p0, p1, p2, p3)
-	return cubicLengthRecursive(c, accuracy*accuracy)
+	return cubicLengthRecursive(c, accuracy*accuracy, 0)
 }
 
 // cubicLengthRecursive recursively computes cubic arc length.
-func cubicLengthRecursive(c CubicBez, accuracySq float64) float64 {
+func cubicLengthRecursive(c CubicBez, accuracySq float64, depth int) float64 {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 16 {
+		return c.P0.Distance(c.P3)
+	}
+
 	// Compute chord length and control polygon length
 	chord := c.P0.Distance(c.P3)
 	polygon := c.P0.Distance(c.P1) + c.P1.Distance(c.P2) + c.P2.Distance(c.P3)
@@ -631,5 +665,5 @@ func cubicLengthRecursive(c CubicBez, accuracySq float64) float64 {
 
 	// Subdivide
 	c1, c2 := c.Subdivide()
-	return cubicLengthRecursive(c1, accuracySq) + cubicLengthRecursive(c2, accuracySq)
+	return cubicLengthRecursive(c1, accuracySq, depth+1) + cubicLengthRecursive(c2, accuracySq, depth+1)
 }
