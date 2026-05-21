@@ -42,6 +42,26 @@ func NewPixmap(width, height int) *Pixmap {
 	}
 }
 
+// NewPixmapFromBuffer wraps an existing premultiplied-RGBA buffer as a Pixmap
+// without allocating. The Pixmap aliases buf[:width*height*4]; the caller
+// keeps ownership and must not reuse buf until the Pixmap is done.
+// Panics on non-positive dimensions or undersized buf.
+func NewPixmapFromBuffer(buf []uint8, width, height int) *Pixmap {
+	if width <= 0 || height <= 0 {
+		panic("gg: NewPixmapFromBuffer: width and height must be > 0")
+	}
+	need := width * height * 4
+	if len(buf) < need {
+		panic("gg: NewPixmapFromBuffer: buffer too small")
+	}
+	return &Pixmap{
+		width:  width,
+		height: height,
+		data:   buf[:need],
+		genID:  nextPixmapGenID.Add(1),
+	}
+}
+
 // GenerationID returns the unique identifier for this pixmap's current content.
 // Used by GPU texture cache to avoid stale texture reuse (ADR-014).
 // The ID changes when NotifyPixelsChanged() is called.
@@ -206,6 +226,17 @@ func (p *Pixmap) ToImage() *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, p.width, p.height))
 	copy(img.Pix, p.data)
 	return img
+}
+
+// ImageView returns an *image.RGBA whose Pix aliases the pixmap's buffer
+// (zero-copy alternative to ToImage). External writes through the returned
+// image must be followed by NotifyPixelsChanged for GPU cache correctness.
+func (p *Pixmap) ImageView() *image.RGBA {
+	return &image.RGBA{
+		Pix:    p.data,
+		Stride: p.width * 4,
+		Rect:   image.Rect(0, 0, p.width, p.height),
+	}
 }
 
 // FromImage creates a pixmap from an image.

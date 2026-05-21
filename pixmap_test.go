@@ -584,3 +584,105 @@ func TestPixmap_FillRect_GenID(t *testing.T) {
 		t.Error("genID should change after FillRect")
 	}
 }
+
+func TestNewPixmapFromBuffer(t *testing.T) {
+	const w, h = 4, 3
+	buf := make([]uint8, w*h*4)
+	pm := NewPixmapFromBuffer(buf, w, h)
+
+	if pm.Width() != w || pm.Height() != h {
+		t.Fatalf("dims got (%d,%d) want (%d,%d)", pm.Width(), pm.Height(), w, h)
+	}
+
+	// Write through pixmap → expect to read back via buffer.
+	pm.SetPixelPremul(1, 2, 10, 20, 30, 40)
+	i := (2*w + 1) * 4
+	if buf[i] != 10 || buf[i+1] != 20 || buf[i+2] != 30 || buf[i+3] != 40 {
+		t.Errorf("buffer not aliased: got (%d,%d,%d,%d)", buf[i], buf[i+1], buf[i+2], buf[i+3])
+	}
+
+	// Write through buffer → expect to read back via pixmap.At().
+	j := (0*w + 0) * 4
+	buf[j+0], buf[j+1], buf[j+2], buf[j+3] = 1, 2, 3, 4
+	r, g, b, a := pm.At(0, 0).RGBA()
+	if r/257 != 1 || g/257 != 2 || b/257 != 3 || a/257 != 4 {
+		t.Errorf("pixmap did not see external write: At got (%d,%d,%d,%d)/257", r/257, g/257, b/257, a/257)
+	}
+
+	// Data() should return the exact same backing array.
+	if &pm.Data()[0] != &buf[0] {
+		t.Error("Data() returned a copy instead of aliasing")
+	}
+}
+
+func TestNewPixmapFromBuffer_OverSizedBuffer(t *testing.T) {
+	const w, h = 2, 2
+	buf := make([]uint8, w*h*4*4) // 4x oversize
+	pm := NewPixmapFromBuffer(buf, w, h)
+	if len(pm.Data()) != w*h*4 {
+		t.Errorf("pixmap data length got %d, want %d", len(pm.Data()), w*h*4)
+	}
+}
+
+func TestNewPixmapFromBuffer_PanicSmallBuffer(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for undersized buffer")
+		}
+	}()
+	NewPixmapFromBuffer(make([]uint8, 4), 10, 10)
+}
+
+func TestNewPixmapFromBuffer_PanicBadDims(t *testing.T) {
+	for _, dims := range [][2]int{{0, 10}, {10, 0}, {-1, 10}, {10, -1}} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("expected panic for dims %v", dims)
+				}
+			}()
+			NewPixmapFromBuffer(make([]uint8, 4096), dims[0], dims[1])
+		}()
+	}
+}
+
+func TestPixmap_ImageView(t *testing.T) {
+	const w, h = 5, 4
+	pm := NewPixmap(w, h)
+	pm.SetPixelPremul(2, 1, 90, 80, 70, 60)
+
+	img := pm.ImageView()
+	if img.Bounds() != image.Rect(0, 0, w, h) {
+		t.Errorf("bounds got %v, want %v", img.Bounds(), image.Rect(0, 0, w, h))
+	}
+	if img.Stride != w*4 {
+		t.Errorf("stride got %d, want %d", img.Stride, w*4)
+	}
+	if &img.Pix[0] != &pm.Data()[0] {
+		t.Error("ImageView did not alias pixmap data")
+	}
+
+	// Read via image.RGBA.
+	i := img.PixOffset(2, 1)
+	if img.Pix[i] != 90 || img.Pix[i+1] != 80 || img.Pix[i+2] != 70 || img.Pix[i+3] != 60 {
+		t.Errorf("image view pixel mismatch")
+	}
+
+	// Mutating via the image must reflect in the pixmap.
+	img.Pix[i] = 200
+	if pm.Data()[(1*w+2)*4] != 200 {
+		t.Error("write through image view not visible in pixmap")
+	}
+}
+
+func TestPixmap_ImageView_ExternalBuffer(t *testing.T) {
+	const w, h = 8, 8
+	buf := make([]uint8, w*h*4)
+	pm := NewPixmapFromBuffer(buf, w, h)
+	img := pm.ImageView()
+
+	// Same backing array all three ways.
+	if &img.Pix[0] != &buf[0] || &pm.Data()[0] != &buf[0] {
+		t.Fatal("buffer / pixmap.Data() / image.Pix must share storage")
+	}
+}
