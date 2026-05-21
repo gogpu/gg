@@ -41,6 +41,10 @@ type SoftwareRenderer struct {
 	// noAAEdgeBuilder is a separate EdgeBuilder with aaShift=0 for non-AA.
 	// Non-AA does not need sub-pixel edge coordinate shifting.
 	noAAEdgeBuilder *raster.EdgeBuilder
+
+	// scratchStrokePath reuses path allocation across Stroke calls.
+	// Matches Skia fOuter.reset() pattern — zero per-stroke allocation.
+	scratchStrokePath *Path
 }
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
@@ -636,6 +640,10 @@ func (r *SoftwareRenderer) forcedFiller(mode RasterizerMode) CoverageFiller {
 // solidColorFromPaint returns the solid color if paint is solid.
 // Returns (color, true) for solid paints, (zero, false) for patterns/gradients.
 func solidColorFromPaint(paint *Paint) (RGBA, bool) {
+	// Fast path: inline solid color (zero allocation, no interface dispatch).
+	if paint.isSolid {
+		return paint.solidColor, true
+	}
 	// Check Brush first (takes precedence)
 	if paint.Brush != nil {
 		if sb, ok := paint.Brush.(SolidBrush); ok {
@@ -832,11 +840,14 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
 	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
-	// Convert back to gg.Path
-	strokePath := strokeResultToPath(outVerbs, outCoords)
+	// Convert back to gg.Path (reuse scratch to avoid per-stroke allocation).
+	if r.scratchStrokePath == nil {
+		r.scratchStrokePath = NewPath()
+	}
+	strokeResultToPath(r.scratchStrokePath, outVerbs, outCoords)
 
 	// Fill the stroke path - this gives us anti-aliased strokes
-	return r.Fill(pixmap, strokePath, paint)
+	return r.Fill(pixmap, r.scratchStrokePath, paint)
 }
 
 // convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
@@ -849,29 +860,29 @@ func convertVerbsToStroke(verbs []PathVerb) []stroke.PathVerb {
 	return result
 }
 
-// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
-func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *Path {
-	p := NewPath()
+// strokeResultToPath converts stroke output (verbs+coords) into dst Path.
+// Reuses dst to avoid per-stroke allocation (Skia fOuter.reset() pattern).
+func strokeResultToPath(dst *Path, verbs []stroke.PathVerb, coords []float64) {
+	dst.Reset()
 	ci := 0
 	for _, v := range verbs {
 		switch v {
 		case stroke.VerbMoveTo:
-			p.MoveTo(coords[ci], coords[ci+1])
+			dst.MoveTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbLineTo:
-			p.LineTo(coords[ci], coords[ci+1])
+			dst.LineTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbQuadTo:
-			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			dst.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
 			ci += 4
 		case stroke.VerbCubicTo:
-			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			dst.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
 			ci += 6
 		case stroke.VerbClose:
-			p.Close()
+			dst.Close()
 		}
 	}
-	return p
 }
 
 // convertLineCap converts gg.LineCap to stroke.LineCap.
@@ -1095,11 +1106,17 @@ func pathEndAt(p *Path, x, y float64) bool {
 // flattenQuadForDash flattens a quadratic bezier to line points.
 func flattenQuadForDash(x0, y0, cx, cy, x1, y1, tolerance float64) []float64 {
 	points := []float64{x0, y0}
-	flattenQuadRecForDash(x0, y0, cx, cy, x1, y1, tolerance, &points)
+	flattenQuadRecForDash(x0, y0, cx, cy, x1, y1, tolerance, &points, 0)
 	return points
 }
 
-func flattenQuadRecForDash(x0, y0, cx, cy, x1, y1, tolerance float64, points *[]float64) {
+func flattenQuadRecForDash(x0, y0, cx, cy, x1, y1, tolerance float64, points *[]float64, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		*points = append(*points, x1, y1)
+		return
+	}
+
 	// Check if curve is flat enough (distance from control to midpoint of line)
 	mx := (x0 + x1) / 2
 	my := (y0 + y1) / 2
@@ -1120,18 +1137,24 @@ func flattenQuadRecForDash(x0, y0, cx, cy, x1, y1, tolerance float64, points *[]
 	x012 := (x01 + x12) / 2
 	y012 := (y01 + y12) / 2
 
-	flattenQuadRecForDash(x0, y0, x01, y01, x012, y012, tolerance, points)
-	flattenQuadRecForDash(x012, y012, x12, y12, x1, y1, tolerance, points)
+	flattenQuadRecForDash(x0, y0, x01, y01, x012, y012, tolerance, points, depth+1)
+	flattenQuadRecForDash(x012, y012, x12, y12, x1, y1, tolerance, points, depth+1)
 }
 
 // flattenCubicForDash flattens a cubic bezier to line points.
 func flattenCubicForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float64) []float64 {
 	points := []float64{x0, y0}
-	flattenCubicRecForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, &points)
+	flattenCubicRecForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, &points, 0)
 	return points
 }
 
-func flattenCubicRecForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float64, points *[]float64) {
+func flattenCubicRecForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float64, points *[]float64, depth int) {
+	// Max recursion depth to prevent stack overflow (e.g. NaN coordinates)
+	if depth > 10 {
+		*points = append(*points, x1, y1)
+		return
+	}
+
 	// Check if curve is flat enough
 	// Use distance of control points from the line
 	d1 := pointLineDistance(c1x, c1y, x0, y0, x1, y1)
@@ -1157,8 +1180,8 @@ func flattenCubicRecForDash(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float6
 	x0123 := (x012 + x123) / 2
 	y0123 := (y012 + y123) / 2
 
-	flattenCubicRecForDash(x0, y0, x01, y01, x012, y012, x0123, y0123, tolerance, points)
-	flattenCubicRecForDash(x0123, y0123, x123, y123, x23, y23, x1, y1, tolerance, points)
+	flattenCubicRecForDash(x0, y0, x01, y01, x012, y012, x0123, y0123, tolerance, points, depth+1)
+	flattenCubicRecForDash(x0123, y0123, x123, y123, x23, y23, x1, y1, tolerance, points, depth+1)
 }
 
 // pointLineDistance calculates perpendicular distance from point to line.

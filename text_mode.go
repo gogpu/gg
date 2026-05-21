@@ -43,6 +43,23 @@ const (
 	// pixel-perfect hinted text for horizontal layouts at small sizes.
 	// Best for: UI labels, small body text (<48px), horizontal-only text.
 	TextModeGlyphMask
+
+	// TextModeAliased forces aliased (non-anti-aliased) text rendering.
+	// Every pixel in the glyph mask is binary: fully opaque (255) or fully
+	// transparent (0). No sub-pixel coverage, no fractional alpha.
+	//
+	// This matches Skia's SkFont::Edging::kAlias and is independent of the
+	// geometry anti-aliasing controlled by SetAntiAlias (ADR-030). Text AA
+	// and geometry AA are orthogonal — you can have aliased text on
+	// anti-aliased shapes, or vice versa.
+	//
+	// Uses the same Tier 6 glyph mask pipeline (R8 atlas + GPU textured
+	// quads) but rasterizes with the NoAAFiller (integer scanline, binary
+	// spans) instead of the AnalyticFiller (256-level AA).
+	//
+	// Best for: retro/pixel-art aesthetics, terminal emulators, bitmap
+	// font emulation, development tools where crisp edges are preferred.
+	TextModeAliased
 )
 
 // String returns the text mode name.
@@ -58,6 +75,8 @@ func (m TextMode) String() string {
 		return "Bitmap"
 	case TextModeGlyphMask:
 		return "GlyphMask"
+	case TextModeAliased:
+		return "Aliased"
 	default:
 		return "Unknown"
 	}

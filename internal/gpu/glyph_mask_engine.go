@@ -144,7 +144,65 @@ func (e *GlyphMaskEngine) LayoutText(
 		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y, IsCJK: text.IsCJKRune(glyph.Rune)})
 	}
 
-	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK), nil
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
+}
+
+// LayoutTextAliased converts a text string into a GlyphMaskBatch with binary
+// (aliased) rasterization. Same pipeline as LayoutText but uses NoAAFiller
+// (0/255 only) instead of AnalyticFiller (256-level AA). The aliased flag
+// also sets GlyphMaskFlagAliased in the cache key so aliased and AA masks
+// are cached separately.
+//
+// This implements Skia's SkFont::Edging::kAlias behavior for the Tier 6
+// glyph mask pipeline.
+func (e *GlyphMaskEngine) LayoutTextAliased(
+	face text.Face,
+	s string,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+	deviceScale float64,
+) (GlyphMaskBatch, error) {
+	if face == nil || s == "" {
+		return GlyphMaskBatch{}, nil
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	fontSize := face.Size() * deviceScale
+	if fontSize <= 0 {
+		fontSize = face.Size()
+	}
+	fontSource := face.Source()
+	fontID := computeGlyphMaskFontID(fontSource)
+	parsed := fontSource.Parsed()
+
+	isCJK := false
+	for _, r := range s {
+		isCJK = text.IsCJKRune(r)
+		break
+	}
+	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
+
+	// Aliased text never uses LCD subpixel rendering — binary coverage
+	// is incompatible with 3x horizontal oversampling.
+	useLCD := false
+
+	premul := color.Premultiply()
+	batchColor := [4]float32{
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
+	}
+
+	var shaped []text.ShapedGlyph
+	for glyph := range face.Glyphs(s) {
+		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y, IsCJK: text.IsCJKRune(glyph.Rune)})
+	}
+
+	lcdLayout := text.LCDLayoutNone
+	var lcdFilter text.LCDFilter
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, true), nil
 }
 
 // LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
@@ -184,11 +242,15 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	}
 
 	lcdFilter := e.lcdFilter
-	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK), nil
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
 }
 
-// layoutGlyphs is the common implementation for LayoutText and LayoutShapedGlyphs.
-// Must be called with e.mu held.
+// layoutGlyphs is the common implementation for LayoutText, LayoutTextAliased,
+// and LayoutShapedGlyphs. Must be called with e.mu held.
+//
+// When aliased is true, glyphs are rasterized with binary coverage (0/255 only)
+// using RasterizeAliased instead of RasterizeHinted, and the cache key has the
+// GlyphMaskFlagAliased flag set to prevent mixing AA and aliased masks.
 func (e *GlyphMaskEngine) layoutGlyphs(
 	glyphs []text.ShapedGlyph,
 	x, y float64,
@@ -203,6 +265,7 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	matrix gg.Matrix,
 	deviceScale float64,
 	isCJK bool,
+	aliased bool,
 ) GlyphMaskBatch {
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
@@ -231,23 +294,12 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 			key = text.MakeGlyphMaskKey(fontID, glyph.GID, fontSize, fracX, fracY)
 		}
 
-		var region text.GlyphMaskRegion
-		var rErr error
-
-		if useLCD {
-			region, rErr = e.rasterizeLCDGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, *lcdFilter, lcdLayout)
-		} else {
-			region, rErr = e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-				result, err2 := e.rasterizer.RasterizeHinted(parsed, glyph.GID, rasterSize, fracX, fracY, hinting)
-				if err2 != nil {
-					return nil, 0, 0, 0, 0, err2
-				}
-				if result == nil {
-					return nil, 0, 0, 0, 0, nil // empty glyph (space)
-				}
-				return result.Mask, result.Width, result.Height, result.BearingX, result.BearingY, nil
-			})
+		// Set aliased flag in cache key so aliased and AA masks are stored separately.
+		if aliased {
+			key.Flags = text.GlyphMaskFlagAliased
 		}
+
+		region, rErr := e.rasterizeGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, useLCD, aliased, *lcdFilter, lcdLayout)
 		if rErr != nil {
 			slogger().Warn("glyph mask rasterize failed", "gid", glyph.GID, "err", rErr)
 			continue
@@ -313,6 +365,48 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 		AtlasWidth:     atlasSize,
 		AtlasHeight:    atlasSize,
 		AtlasPageIndex: 0, // Currently single page support (first page).
+	}
+}
+
+// rasterizeGlyph dispatches glyph rasterization to the appropriate method
+// based on rendering mode (LCD, aliased, or standard AA). Must be called
+// with e.mu held.
+func (e *GlyphMaskEngine) rasterizeGlyph(
+	key text.GlyphMaskKey,
+	parsed text.ParsedFont,
+	gid text.GlyphID,
+	size float64,
+	fracX, fracY float64,
+	hinting text.Hinting,
+	useLCD, aliased bool,
+	lcdFilter text.LCDFilter,
+	lcdLayout text.LCDLayout,
+) (text.GlyphMaskRegion, error) {
+	switch {
+	case useLCD:
+		return e.rasterizeLCDGlyph(key, parsed, gid, size, fracX, fracY, hinting, lcdFilter, lcdLayout)
+	case aliased:
+		return e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
+			result, err := e.rasterizer.RasterizeAliased(parsed, gid, size, fracX, fracY, hinting)
+			if err != nil {
+				return nil, 0, 0, 0, 0, err
+			}
+			if result == nil {
+				return nil, 0, 0, 0, 0, nil // empty glyph (space)
+			}
+			return result.Mask, result.Width, result.Height, result.BearingX, result.BearingY, nil
+		})
+	default:
+		return e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
+			result, err := e.rasterizer.RasterizeHinted(parsed, gid, size, fracX, fracY, hinting)
+			if err != nil {
+				return nil, 0, 0, 0, 0, err
+			}
+			if result == nil {
+				return nil, 0, 0, 0, 0, nil // empty glyph (space)
+			}
+			return result.Mask, result.Width, result.Height, result.BearingX, result.BearingY, nil
+		})
 	}
 }
 

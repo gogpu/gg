@@ -36,6 +36,15 @@ const (
 
 // Paint represents the styling information for drawing.
 type Paint struct {
+	// solidColor stores the solid color inline (Skia fColor4f pattern).
+	// When isSolid is true, this is the authoritative color source —
+	// Brush and Pattern are nil, avoiding interface boxing allocations.
+	solidColor RGBA
+
+	// isSolid is true when the paint represents a single solid color
+	// stored in solidColor. When true, Brush and Pattern are nil.
+	isSolid bool
+
 	// Pattern is the fill or stroke pattern.
 	//
 	// Deprecated: Use Brush instead. Pattern is maintained for backward compatibility.
@@ -100,8 +109,8 @@ type Paint struct {
 // NewPaint creates a new Paint with default values.
 func NewPaint() *Paint {
 	return &Paint{
-		Pattern:    NewSolidPattern(Black),
-		Brush:      Solid(Black),
+		solidColor: Black,
+		isSolid:    true,
 		LineWidth:  1.0,
 		LineCap:    LineCapButt,
 		LineJoin:   LineJoinMiter,
@@ -114,6 +123,8 @@ func NewPaint() *Paint {
 // Clone creates a copy of the Paint.
 func (p *Paint) Clone() *Paint {
 	clone := &Paint{
+		solidColor: p.solidColor,
+		isSolid:    p.isSolid,
 		Pattern:    p.Pattern,
 		Brush:      p.Brush,
 		LineWidth:  p.LineWidth,
@@ -131,27 +142,44 @@ func (p *Paint) Clone() *Paint {
 }
 
 // SetBrush sets the brush for this Paint.
-// It also updates the Pattern field for backward compatibility.
+// For solid colors, the color is stored inline (zero allocations).
+// For non-solid brushes, it also updates the Pattern field for backward compatibility.
 func (p *Paint) SetBrush(b Brush) {
+	if sb, ok := b.(SolidBrush); ok {
+		p.solidColor = sb.Color
+		p.isSolid = true
+		p.Brush = nil
+		p.Pattern = nil
+		return
+	}
 	p.Brush = b
 	p.Pattern = PatternFromBrush(b)
+	p.isSolid = false
 }
 
 // GetBrush returns the current brush.
-// If Brush is nil, it returns a brush converted from Pattern.
+// For solid colors, returns a SolidBrush value (no allocation).
+// If Brush is nil and not solid, it returns a brush converted from Pattern.
 func (p *Paint) GetBrush() Brush {
+	if p.isSolid {
+		return SolidBrush{Color: p.solidColor}
+	}
 	if p.Brush != nil {
 		return p.Brush
 	}
 	if p.Pattern != nil {
 		return BrushFromPattern(p.Pattern)
 	}
-	return Solid(Black)
+	return SolidBrush{Color: Black}
 }
 
 // ColorAt returns the color at the given position.
-// It uses Brush if set, otherwise falls back to Pattern.
+// For solid colors, returns the inline color directly (no interface dispatch).
+// For non-solid paints, uses Brush if set, otherwise falls back to Pattern.
 func (p *Paint) ColorAt(x, y float64) RGBA {
+	if p.isSolid {
+		return p.solidColor
+	}
 	if p.Brush != nil {
 		return p.Brush.ColorAt(x, y)
 	}
@@ -159,6 +187,22 @@ func (p *Paint) ColorAt(x, y float64) RGBA {
 		return p.Pattern.ColorAt(x, y)
 	}
 	return Black
+}
+
+// SolidColor returns the inline solid color and true if the paint is a solid
+// color. Returns (zero, false) for non-solid paints (gradients, patterns).
+// This is the recommended way for external packages to check solid color
+// without interface type assertions on Brush/Pattern.
+func (p *Paint) SolidColor() (RGBA, bool) {
+	if p.isSolid {
+		return p.solidColor, true
+	}
+	return RGBA{}, false
+}
+
+// IsSolid reports whether the paint is a solid color stored inline.
+func (p *Paint) IsSolid() bool {
+	return p.isSolid
 }
 
 // GetStroke returns the effective stroke style.

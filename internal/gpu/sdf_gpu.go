@@ -223,6 +223,15 @@ func (a *SDFAccelerator) DrawGlyphMaskText(target gg.GPURenderTarget, face any, 
 	return rc.DrawGlyphMaskText(target, face, s, x, y, color, matrix, deviceScale)
 }
 
+// DrawGlyphMaskTextAliased queues aliased text for GPU glyph mask rendering via the default context.
+func (a *SDFAccelerator) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	a.mu.Lock()
+	a.ensureDefaultCtx()
+	rc := a.defaultCtx
+	a.mu.Unlock()
+	return rc.DrawGlyphMaskTextAliased(target, face, s, x, y, color, matrix, deviceScale)
+}
+
 // FillPath queues a filled path for GPU rendering via the default context.
 func (a *SDFAccelerator) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	a.mu.Lock()
@@ -288,6 +297,9 @@ func (a *SDFAccelerator) ensureDefaultCtx() {
 
 // getColorFromPaint extracts the solid color from a paint.
 func getColorFromPaint(paint *gg.Paint) gg.RGBA {
+	if color, ok := paint.SolidColor(); ok {
+		return color
+	}
 	if paint.Brush != nil {
 		if sb, isSolid := paint.Brush.(gg.SolidBrush); isSolid {
 			return sb.Color

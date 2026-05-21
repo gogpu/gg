@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, **pixel-perfect mode** (`SetAntiAlias(false)` — dedicated NoAAFiller, Skia/Cairo/tiny-skia pattern), CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
+| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, **HiDPI-aware damage tracking** (logical→physical scaling for OS compositor), damage-aware multi-rect sub-region updates, per-draw dynamic scissor ADR-028) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
@@ -136,6 +136,33 @@ dc.SetAntiAlias(true)           // back to smooth AA
 Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern) — ~2-3× faster
 than analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
 (controlled via `SetTextMode`).
+
+### Text Stroke & Outline
+
+Stroke text outlines for outlined/bordered text effects (Skia/Cairo/HTML5 pattern):
+
+```go
+dc.SetLineWidth(3)
+dc.SetRGB(0, 0, 0)
+dc.StrokeString("Hello", x, y)  // black outline
+dc.SetRGB(1, 1, 1)
+dc.DrawString("Hello", x, y)    // white fill on top
+
+// Or get text as a Path for custom operations:
+path := dc.TextPath("Hello", x, y)
+```
+
+### Aliased Text
+
+Pixel-perfect text with binary coverage (Skia `SkFont::Edging::kAlias`):
+
+```go
+dc.SetTextMode(gg.TextModeAliased)  // no gray edge pixels on text
+dc.DrawString("Pixel Perfect", x, y)
+```
+
+Geometry AA (`SetAntiAlias`) and text AA (`SetTextMode`) are independent — matching
+Skia and Cairo separation.
 
 ### GPU Acceleration (Optional)
 
@@ -513,8 +540,10 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 | DirtyRegion.Mark | 10.9ns | Lock-free atomic |
 | MSDF lookup | <10ns | Zero-allocation |
 | Path iteration | 23ns | SOA Iterate(), 0 allocs |
-| FillRect | 77µs | **0 allocs** (zero-alloc pipeline) |
-| FillCircle r100 | 2ms | **0 allocs** (zero-alloc pipeline) |
+| FillRect 100×100 | 520µs | **0 allocs** (zero-alloc pipeline) |
+| FillCircle r100 | 1.7ms | **0 allocs** (zero-alloc pipeline) |
+| StrokePath 10seg | 219ns | **0 allocs** (scratch path reuse, Skia pattern) |
+| SetRGB/SetRGBA | <1ns | **0 allocs** (inline solidColor, ADR-036) |
 | Gradient ColorAt | 33ns | 0 allocs (pre-sorted stops) |
 
 ## Debugging

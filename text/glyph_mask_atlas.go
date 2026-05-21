@@ -33,7 +33,20 @@ type GlyphMaskKey struct {
 	// SubpixelYQ2 is the fractional Y position multiplied by 4 (0..3).
 	// Typically 0 for horizontal text (no vertical subpixel positioning).
 	SubpixelYQ2 uint8
+
+	// Flags encodes rendering mode flags that affect the rasterized output.
+	// Different rasterization modes (AA vs aliased) produce different masks
+	// for the same glyph and must be cached separately.
+	//
+	// Bit 0 (GlyphMaskFlagAliased): binary coverage (0/255 only, NoAAFiller).
+	// Bits 1-7: reserved for future use.
+	Flags uint8
 }
+
+// GlyphMaskFlagAliased marks the glyph mask as rasterized with binary coverage
+// (0 or 255 only) using the NoAAFiller. When set, the same glyph at the same
+// size gets a different cache key from its anti-aliased counterpart.
+const GlyphMaskFlagAliased uint8 = 1 << 0
 
 // MakeGlyphMaskKey creates a GlyphMaskKey from rendering parameters.
 // The size is in pixels (ppem). The subpixelX/Y are fractional pixel offsets [0, 1).
@@ -60,6 +73,15 @@ func MakeGlyphMaskKey(fontID uint64, glyphID GlyphID, size float64, subpixelX, s
 		SubpixelXQ2: spxQ2,
 		SubpixelYQ2: spyQ2,
 	}
+}
+
+// MakeGlyphMaskKeyAliased creates a GlyphMaskKey with the aliased flag set.
+// The resulting cache entry is distinct from the anti-aliased version of the
+// same glyph — different rasterization modes produce different coverage data.
+func MakeGlyphMaskKeyAliased(fontID uint64, glyphID GlyphID, size float64, subpixelX, subpixelY float64) GlyphMaskKey {
+	key := MakeGlyphMaskKey(fontID, glyphID, size, subpixelX, subpixelY)
+	key.Flags = GlyphMaskFlagAliased
+	return key
 }
 
 // sizeBuckets defines discrete rasterization sizes for zoom resilience (Skia pattern).

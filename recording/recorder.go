@@ -178,6 +178,12 @@ func (r *Recording) Playback(backend Backend) error {
 			brush := r.resources.GetBrush(c.Brush)
 			// Font face lookup would need additional handling
 			backend.DrawText(c.Text, c.X, c.Y, nil, brush)
+		case StrokeTextCommand:
+			brush := r.resources.GetBrush(c.Brush)
+			// StrokeText is recorded as a stroke text command.
+			// Backends that support text stroking can use the stroke style;
+			// others fall back to DrawText (fill) as an approximation.
+			backend.DrawText(c.Text, c.X, c.Y, nil, brush)
 		// Style commands are handled by the backend's internal state
 		// during the actual drawing operations
 		case SetFillStyleCommand, SetStrokeStyleCommand,
@@ -1018,6 +1024,41 @@ func (r *Recorder) DrawStringAnchored(s string, x, y, ax, ay float64) {
 	// For recording, we store the base position and let the backend handle anchoring
 	// This is a simplification; a full implementation would measure text
 	r.DrawString(s, x, y)
+}
+
+// StrokeString strokes text outlines at position (x, y) where y is the baseline.
+// The stroke width, cap, join, and dash are captured from the current recorder state.
+func (r *Recorder) StrokeString(s string, x, y float64) {
+	px, py := r.transform.TransformPoint(x, y)
+
+	brushRef := r.resources.AddBrush(r.strokeBrush)
+
+	stroke := Stroke{
+		Width:       r.lineWidth,
+		Cap:         r.lineCap,
+		Join:        r.lineJoin,
+		MiterLimit:  r.miterLimit,
+		DashPattern: r.dashPattern,
+		DashOffset:  r.dashOffset,
+	}
+
+	r.commands = append(r.commands, StrokeTextCommand{
+		Text:       s,
+		X:          px,
+		Y:          py,
+		FontSize:   r.fontSize,
+		FontFamily: r.fontFamily,
+		Brush:      brushRef,
+		Stroke:     stroke,
+	})
+}
+
+// StrokeStringAnchored strokes text outlines with an anchor point.
+// The anchor point is specified by ax and ay, which are in the range [0, 1].
+func (r *Recorder) StrokeStringAnchored(s string, x, y, ax, ay float64) {
+	// For recording, we store the base position and let the backend handle anchoring
+	// This is a simplification; a full implementation would measure text
+	r.StrokeString(s, x, y)
 }
 
 // MeasureString returns approximate dimensions of text.

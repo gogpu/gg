@@ -48,14 +48,12 @@ type GPURenderContext struct {
 	clipPath        *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 	scissorSegments []scissorSegment
 
-	// textBatchSealed prevents the next QueueGlyphMask or QueueText call from
-	// merging into the previous batch when a scissor boundary has been crossed.
-	// This ensures that text batches are split at clip changes so buildScissorGroups
-	// can assign each batch to the correct scissor group. Without this, all text
-	// runs sharing the same font+color across multiple clipped elements merge
-	// into one batch, which gets assigned to the first element's scissor rect
-	// and clips away text from all subsequent elements.
-	textBatchSealed bool
+	// Per-tier batch seal flags prevent merging across scissor boundaries.
+	// Two separate flags needed: a single shared flag would be consumed by
+	// the first Queue call (e.g., QueueText), allowing the second tier
+	// (e.g., QueueGlyphMask) to merge across the same boundary.
+	textBatchSealed  bool // seals QueueText (MSDF Tier 4)
+	glyphBatchSealed bool // seals QueueGlyphMask (Tier 6)
 
 	// Per-context frame tracking (fixes LoadOp corruption).
 	// When frameRendered is true, subsequent render passes use LoadOpLoad.
@@ -153,6 +151,7 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.frameRendered = false
 	rc.lastView = nil
 	rc.textBatchSealed = false
+	rc.glyphBatchSealed = false
 }
 
 // SetSharedEncoder sets a shared command encoder for single-command-buffer
@@ -364,9 +363,9 @@ func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch Glyp
 	}
 	// Coalesce with last pending batch if same visual properties (ADR-031).
 	// Skip merging if a scissor boundary was crossed since the last batch was
-	// queued (textBatchSealed=true); this keeps text batches within the
+	// queued (glyphBatchSealed=true); this keeps glyph batches within the
 	// correct scissor group so text is not clipped by a sibling element's rect.
-	if n := len(rc.pendingGlyphMaskBatches); n > 0 && !rc.textBatchSealed {
+	if n := len(rc.pendingGlyphMaskBatches); n > 0 && !rc.glyphBatchSealed {
 		last := &rc.pendingGlyphMaskBatches[n-1]
 		if last.CanMerge(batch) {
 			last.Quads = append(last.Quads, batch.Quads...)
@@ -375,7 +374,7 @@ func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch Glyp
 			return
 		}
 	}
-	rc.textBatchSealed = false // new batch started; allow future merges within same scissor region
+	rc.glyphBatchSealed = false
 	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
@@ -443,6 +442,44 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 	batch, err := engine.LayoutText(textFace, s, x, y, color, matrix, deviceScale)
 	if err != nil {
 		slogger().Debug("DrawGlyphMaskText: LayoutText failed", "err", err, "text", s, "w", target.Width, "h", target.Height)
+		return gg.ErrFallbackToCPU
+	}
+	if len(batch.Quads) == 0 {
+		return nil
+	}
+
+	rc.QueueGlyphMask(target, batch)
+	return nil
+}
+
+// DrawGlyphMaskTextAliased shapes and queues text for aliased (binary coverage)
+// glyph mask rendering. Same pipeline as DrawGlyphMaskText but rasterizes with
+// NoAAFiller (0/255 only) instead of AnalyticFiller (256-level AA).
+func (rc *GPURenderContext) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	textFace, ok := face.(text.Face)
+	if !ok || textFace == nil {
+		return gg.ErrFallbackToCPU
+	}
+
+	rc.sceneStats.TextCount++
+
+	if !rc.shared.gpuReady {
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
+	}
+
+	rc.shared.mu.Lock()
+	rc.shared.ensureGlyphMaskEngine()
+	engine := rc.shared.glyphMaskEngine
+	rc.shared.mu.Unlock()
+
+	batch, err := engine.LayoutTextAliased(textFace, s, x, y, color, matrix, deviceScale)
+	if err != nil {
+		slogger().Debug("DrawGlyphMaskTextAliased: LayoutTextAliased failed", "err", err, "text", s, "w", target.Width, "h", target.Height)
 		return gg.ErrFallbackToCPU
 	}
 	if len(batch.Quads) == 0 {
@@ -911,15 +948,16 @@ func (rc *GPURenderContext) Close() {
 	rc.clipPath = nil
 	rc.scissorSegments = nil
 	rc.textBatchSealed = false
+	rc.glyphBatchSealed = false
 	rc.sceneStats = gg.SceneStats{}
 }
 
 // recordScissorSegment records a scissor state change in the timeline.
-// It also seals the last text batch so that the next QueueGlyphMask or
-// QueueText call starts a new batch entry instead of merging, ensuring text
-// batches stay within the correct scissor group (see textBatchSealed).
+// It seals both text tiers so the next QueueGlyphMask/QueueText starts
+// a new batch instead of merging across the scissor boundary.
 func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
 	rc.textBatchSealed = true
+	rc.glyphBatchSealed = true
 	seg := scissorSegment{
 		sdfCount:     len(rc.pendingShapes),
 		convexCount:  len(rc.pendingConvexCommands),

@@ -358,6 +358,7 @@ func TestGetColorFromPaint(t *testing.T) {
 
 	t.Run("pattern", func(t *testing.T) {
 		paint := NewPaint()
+		paint.isSolid = false // bypass inline solid path
 		paint.Brush = nil
 		paint.Pattern = NewSolidPattern(Green)
 		c := getColorFromPaint(paint)
@@ -368,6 +369,7 @@ func TestGetColorFromPaint(t *testing.T) {
 
 	t.Run("nil everything", func(t *testing.T) {
 		paint := NewPaint()
+		paint.isSolid = false // bypass inline solid path
 		paint.Brush = nil
 		paint.Pattern = nil
 		c := getColorFromPaint(paint)
@@ -508,7 +510,7 @@ func TestSDFCircleFillClipped(t *testing.T) {
 
 	// Clip to left half only (x < 50).
 	paint := NewPaint()
-	paint.Brush = Solid(Red)
+	paint.SetBrush(Solid(Red))
 	paint.ClipCoverage = func(x, _ float64) byte {
 		if x < 50 {
 			return 255
@@ -556,7 +558,7 @@ func TestSDFRRectFillClipped(t *testing.T) {
 
 	// Clip to top half only (y < 50).
 	paint := NewPaint()
-	paint.Brush = Solid(RGBA{R: 0, G: 0, B: 1, A: 1})
+	paint.SetBrush(Solid(RGBA{R: 0, G: 0, B: 1, A: 1}))
 	paint.ClipCoverage = func(_, y float64) byte {
 		if y < 50 {
 			return 255
