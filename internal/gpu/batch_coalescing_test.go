@@ -483,6 +483,104 @@ func TestQueueGlyphMask_ScissorBoundary_PreservesIntraGroupMerging(t *testing.T)
 	}
 }
 
+// --- Scissor-boundary text batch isolation tests ---
+
+// TestQueueText_ScissorBoundary_SplitsBatch verifies that same-style text
+// runs queued across scissor boundaries are NOT merged into a single batch.
+//
+// Regression test for the same bug affecting the MSDF (Tier 4) text pipeline.
+// QueueText merged all same-font/same-color runs into one batch regardless of
+// intervening clip changes. buildScissorGroups then assigned the entire merged
+// batch to the first element's scissor rect, causing text from all subsequent
+// sibling elements to be clipped away.
+func TestQueueText_ScissorBoundary_SplitsBatch(t *testing.T) {
+	rc := &GPURenderContext{}
+	target := makeCoalesceTestTarget()
+
+	quad := func(x float32) TextBatch {
+		return TextBatch{
+			Transform:  gg.Identity(),
+			Color:      gg.RGBA{R: 1, G: 1, B: 1, A: 1},
+			AtlasIndex: 0,
+			PxRange:    4.0,
+			AtlasSize:  1024,
+			Quads:      []TextQuad{{X0: x, Y0: 0, X1: x + 10, Y1: 10}},
+		}
+	}
+
+	// Simulate three sibling elements each clipped to their own rect.
+	clip1 := [4]uint32{0, 0, 100, 30}
+	clip2 := [4]uint32{0, 30, 100, 30}
+	clip3 := [4]uint32{0, 60, 100, 30}
+
+	// Button 1: set clip, queue text.
+	rc.recordScissorSegment(&clip1)
+	rc.QueueText(target, quad(0))
+
+	// Button 2: change clip, queue text with identical style.
+	rc.recordScissorSegment(&clip2)
+	rc.QueueText(target, quad(10))
+
+	// Button 3: change clip again, queue text with identical style.
+	rc.recordScissorSegment(&clip3)
+	rc.QueueText(target, quad(20))
+
+	if len(rc.pendingTextBatches) != 3 {
+		t.Fatalf("expected 3 separate text batches (one per scissor region), got %d — "+
+			"same-style runs across scissor boundaries must not be merged",
+			len(rc.pendingTextBatches))
+	}
+	for i, b := range rc.pendingTextBatches {
+		if len(b.Quads) != 1 {
+			t.Errorf("batch[%d]: expected 1 quad, got %d", i, len(b.Quads))
+		}
+	}
+}
+
+// TestQueueText_ScissorBoundary_PreservesIntraGroupMerging verifies that
+// within a single scissor region, same-style consecutive text runs still merge.
+func TestQueueText_ScissorBoundary_PreservesIntraGroupMerging(t *testing.T) {
+	rc := &GPURenderContext{}
+	target := makeCoalesceTestTarget()
+
+	quad := func(x float32) TextBatch {
+		return TextBatch{
+			Transform:  gg.Identity(),
+			Color:      gg.RGBA{R: 1, G: 1, B: 1, A: 1},
+			AtlasIndex: 0,
+			PxRange:    4.0,
+			AtlasSize:  1024,
+			Quads:      []TextQuad{{X0: x}},
+		}
+	}
+
+	clip1 := [4]uint32{0, 0, 100, 50}
+	clip2 := [4]uint32{0, 50, 100, 50}
+
+	// Region 1: two runs that should merge.
+	rc.recordScissorSegment(&clip1)
+	rc.QueueText(target, quad(0))
+	rc.QueueText(target, quad(10)) // same style -> merges with previous
+
+	// Region 2: two more runs that should merge with each other but not region 1.
+	rc.recordScissorSegment(&clip2)
+	rc.QueueText(target, quad(20))
+	rc.QueueText(target, quad(30)) // same style -> merges with previous
+
+	if len(rc.pendingTextBatches) != 2 {
+		t.Fatalf("expected 2 batches (one per scissor region, each with 2 quads merged), got %d",
+			len(rc.pendingTextBatches))
+	}
+	if len(rc.pendingTextBatches[0].Quads) != 2 {
+		t.Errorf("region 1 batch: expected 2 merged quads, got %d",
+			len(rc.pendingTextBatches[0].Quads))
+	}
+	if len(rc.pendingTextBatches[1].Quads) != 2 {
+		t.Errorf("region 2 batch: expected 2 merged quads, got %d",
+			len(rc.pendingTextBatches[1].Quads))
+	}
+}
+
 // makeCoalesceTestTarget creates a minimal GPURenderTarget for coalescing tests.
 // Uses a non-nil Data slice so sameTarget compares via data pointer identity.
 func makeCoalesceTestTarget() gg.GPURenderTarget {

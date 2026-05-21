@@ -48,14 +48,14 @@ type GPURenderContext struct {
 	clipPath        *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 	scissorSegments []scissorSegment
 
-	// glyphBatchSealed prevents the next QueueGlyphMask call from merging into
-	// the previous batch when a scissor boundary has been crossed. This ensures
-	// that glyph batches are split at clip changes so buildScissorGroups can
-	// assign each batch to the correct scissor group. Without this, all text
+	// textBatchSealed prevents the next QueueGlyphMask or QueueText call from
+	// merging into the previous batch when a scissor boundary has been crossed.
+	// This ensures that text batches are split at clip changes so buildScissorGroups
+	// can assign each batch to the correct scissor group. Without this, all text
 	// runs sharing the same font+color across multiple clipped elements merge
 	// into one batch, which gets assigned to the first element's scissor rect
 	// and clips away text from all subsequent elements.
-	glyphBatchSealed bool
+	textBatchSealed bool
 
 	// Per-context frame tracking (fixes LoadOp corruption).
 	// When frameRendered is true, subsequent render passes use LoadOpLoad.
@@ -152,7 +152,7 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.clipPath = nil
 	rc.frameRendered = false
 	rc.lastView = nil
-	rc.glyphBatchSealed = false
+	rc.textBatchSealed = false
 }
 
 // SetSharedEncoder sets a shared command encoder for single-command-buffer
@@ -264,7 +264,10 @@ func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch
 		}
 	}
 	// Coalesce with last pending batch if same visual properties (ADR-031).
-	if n := len(rc.pendingTextBatches); n > 0 {
+	// Skip merging if a scissor boundary was crossed since the last batch was
+	// queued (textBatchSealed=true); this keeps text batches within the
+	// correct scissor group so text is not clipped by a sibling element's rect.
+	if n := len(rc.pendingTextBatches); n > 0 && !rc.textBatchSealed {
 		last := &rc.pendingTextBatches[n-1]
 		if last.CanMerge(batch) {
 			last.Quads = append(last.Quads, batch.Quads...)
@@ -273,6 +276,7 @@ func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch
 			return
 		}
 	}
+	rc.textBatchSealed = false // new batch started; allow future merges within same scissor region
 	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
@@ -360,9 +364,9 @@ func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch Glyp
 	}
 	// Coalesce with last pending batch if same visual properties (ADR-031).
 	// Skip merging if a scissor boundary was crossed since the last batch was
-	// queued (glyphBatchSealed=true); this keeps glyph batches within the
+	// queued (textBatchSealed=true); this keeps text batches within the
 	// correct scissor group so text is not clipped by a sibling element's rect.
-	if n := len(rc.pendingGlyphMaskBatches); n > 0 && !rc.glyphBatchSealed {
+	if n := len(rc.pendingGlyphMaskBatches); n > 0 && !rc.textBatchSealed {
 		last := &rc.pendingGlyphMaskBatches[n-1]
 		if last.CanMerge(batch) {
 			last.Quads = append(last.Quads, batch.Quads...)
@@ -371,7 +375,7 @@ func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch Glyp
 			return
 		}
 	}
-	rc.glyphBatchSealed = false // new batch started; allow future merges within same scissor region
+	rc.textBatchSealed = false // new batch started; allow future merges within same scissor region
 	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
@@ -906,15 +910,16 @@ func (rc *GPURenderContext) Close() {
 	rc.clipRRect = nil
 	rc.clipPath = nil
 	rc.scissorSegments = nil
+	rc.textBatchSealed = false
 	rc.sceneStats = gg.SceneStats{}
 }
 
 // recordScissorSegment records a scissor state change in the timeline.
-// It also seals the last glyph batch so that the next QueueGlyphMask call
-// starts a new batch entry instead of merging, ensuring glyph batches stay
-// within the correct scissor group (see glyphBatchSealed).
+// It also seals the last text batch so that the next QueueGlyphMask or
+// QueueText call starts a new batch entry instead of merging, ensuring text
+// batches stay within the correct scissor group (see textBatchSealed).
 func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
-	rc.glyphBatchSealed = true
+	rc.textBatchSealed = true
 	seg := scissorSegment{
 		sdfCount:     len(rc.pendingShapes),
 		convexCount:  len(rc.pendingConvexCommands),
