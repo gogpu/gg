@@ -540,8 +540,10 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 | DirtyRegion.Mark | 10.9ns | Lock-free atomic |
 | MSDF lookup | <10ns | Zero-allocation |
 | Path iteration | 23ns | SOA Iterate(), 0 allocs |
-| FillRect | 77µs | **0 allocs** (zero-alloc pipeline) |
-| FillCircle r100 | 2ms | **0 allocs** (zero-alloc pipeline) |
+| FillRect 100×100 | 520µs | **0 allocs** (zero-alloc pipeline) |
+| FillCircle r100 | 1.7ms | **0 allocs** (zero-alloc pipeline) |
+| StrokePath 10seg | 219ns | **0 allocs** (scratch path reuse, Skia pattern) |
+| SetRGB/SetRGBA | <1ns | **0 allocs** (inline solidColor, ADR-036) |
 | Gradient ColorAt | 33ns | 0 allocs (pre-sorted stops) |
 
 ## Debugging

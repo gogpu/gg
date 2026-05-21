@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `*SolidPattern` heap allocation (Skia `fColor4f` dual-field pattern).
   SetRGB: 2 → 0 allocs. ComplexScene: 80 → 68 allocs (-15%).
 
+### Changed
+
+- **Dependencies** — wgpu v0.28.6 (GLES hidden window context), gogpu v0.38.0
+  (PlatformProvider delegation, SurfaceState lifecycle).
+
 ## [0.47.4] - 2026-05-21
 
 ### Added
