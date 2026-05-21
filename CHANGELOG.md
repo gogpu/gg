@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.4] - 2026-05-21
+
+### Added
+
+- **`NewPixmapFromBuffer(buf, width, height)`** (#336, @huanfeng) — wrap a caller-owned
+  premultiplied-RGBA buffer as a Pixmap without allocating. Enables zero-copy buffer reuse
+  in hot rendering loops (e.g., software IME at 60fps). Integer overflow guard protects
+  32-bit platforms. Follows Skia `SkPixmap` / Go `image.RGBA.SubImage` aliasing pattern.
+
+- **`(*Pixmap).ImageView()`** (#336, @huanfeng) — zero-copy alternative to `ToImage()`.
+  Returns `*image.RGBA` whose `Pix` aliases the pixmap's buffer. O(1) with no data copy.
+
 ## [0.47.3] - 2026-05-19
 
 ### Fixed
