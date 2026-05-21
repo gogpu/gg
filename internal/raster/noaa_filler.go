@@ -184,3 +184,37 @@ func (nf *NoAAFiller) Fill(
 func fixedRoundToInt(x FDot16) int {
 	return int((x + FDot16Half) >> FDot16Shift)
 }
+
+// FillToBufferNoAA renders path edges to a byte buffer with binary coverage
+// (0 or 255). Uses NoAAFiller (integer scanline, no sub-pixel coverage).
+//
+// The buffer must have width*height elements. Each pixel is either 0 (outside)
+// or 255 (inside) — no intermediate alpha values.
+//
+// This is the aliased counterpart of FillToBuffer (which produces 256-level
+// anti-aliased coverage via the AnalyticFiller).
+func FillToBufferNoAA(
+	eb *EdgeBuilder,
+	width, height int,
+	fillRule FillRule,
+	buffer []uint8,
+) {
+	if len(buffer) < width*height {
+		return
+	}
+
+	// Clear the buffer — NoAAFiller only writes filled spans.
+	clear(buffer[:width*height])
+
+	filler := NewNoAAFiller(width, height)
+	filler.Fill(eb, fillRule, func(y, left, spanWidth int) {
+		offset := y*width + left
+		end := offset + spanWidth
+		if offset < 0 || end > len(buffer) {
+			return
+		}
+		for i := offset; i < end; i++ {
+			buffer[i] = 255
+		}
+	})
+}

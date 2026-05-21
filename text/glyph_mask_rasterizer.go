@@ -122,16 +122,81 @@ func (r *GlyphMaskRasterizer) RasterizeOutline(
 	return r.rasterizeOutline(outline, subpixelX, subpixelY)
 }
 
-// rasterizeOutline is the internal implementation.
+// rasterizeOutline is the internal AA implementation (256-level coverage).
 func (r *GlyphMaskRasterizer) rasterizeOutline(
 	outline *GlyphOutline,
 	subpixelX, subpixelY float64,
 ) (*GlyphMaskResult, error) {
-	// Compute tight bounding box with subpixel offset.
-	// The outline bounds are in pixel coordinates at the target size.
-	// We add a 1-pixel margin for anti-aliasing coverage.
-	const aaMargin = 1
+	// AA rasterization: 1px margin for AA fringe, aaShift=2 (4x subpixel grid),
+	// 256-level coverage via FillToBuffer.
+	return r.rasterizeOutlineCore(outline, subpixelX, subpixelY, 1, 2, raster.FillToBuffer)
+}
 
+// RasterizeAliased renders a single glyph into an R8 alpha mask with binary
+// coverage (0 or 255 only). No anti-aliasing, no sub-pixel coverage.
+//
+// This matches Skia's SkFont::Edging::kAlias — the glyph outline is filled
+// with integer scanline walking (NoAAFiller) instead of the AnalyticFiller.
+// The result is a crisp, staircase-edged mask suitable for pixel-art
+// aesthetics, terminal emulators, or bitmap font emulation.
+//
+// Unlike RasterizeHinted (which uses aaMargin=1 for AA fringe), aliased
+// rasterization uses aaMargin=0 because there is no sub-pixel fringe.
+//
+// Parameters:
+//   - font: parsed font to extract outlines from
+//   - gid: glyph index in the font
+//   - size: font size in pixels (ppem)
+//   - subpixelX: fractional X offset in pixels [0, 1) for subpixel positioning
+//   - subpixelY: fractional Y offset in pixels [0, 1) for subpixel positioning
+//   - hinting: hinting mode (HintingNone, HintingVertical, HintingFull)
+//
+// Returns nil result for empty glyphs (e.g., space character).
+func (r *GlyphMaskRasterizer) RasterizeAliased(
+	font ParsedFont,
+	gid GlyphID,
+	size float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+) (*GlyphMaskResult, error) {
+	// Extract outline at the target size with hinting.
+	outline, err := r.extractor.ExtractOutlineHinted(font, gid, size, hinting)
+	if err != nil {
+		return nil, err
+	}
+	if outline == nil || outline.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
+	}
+
+	return r.rasterizeOutlineAliased(outline, subpixelX, subpixelY)
+}
+
+// rasterizeOutlineAliased is the aliased (binary coverage) rasterization path.
+func (r *GlyphMaskRasterizer) rasterizeOutlineAliased(
+	outline *GlyphOutline,
+	subpixelX, subpixelY float64,
+) (*GlyphMaskResult, error) {
+	// Aliased rasterization: no AA margin, aaShift=0 (integer scanline),
+	// binary coverage (0/255) via FillToBufferNoAA.
+	return r.rasterizeOutlineCore(outline, subpixelX, subpixelY, 0, 0, raster.FillToBufferNoAA)
+}
+
+// fillFunc is the signature for raster fill functions (FillToBuffer, FillToBufferNoAA).
+type fillFunc = func(eb *raster.EdgeBuilder, width, height int, fillRule raster.FillRule, buffer []uint8)
+
+// rasterizeOutlineCore is the shared implementation for AA and aliased glyph
+// mask rasterization. The aaMargin controls the bounding box expansion (1 for
+// AA fringe, 0 for aliased). The aaShift controls the EdgeBuilder sub-pixel
+// grid (2 = 4x AA, 0 = integer scanline). The fill function determines
+// coverage computation (FillToBuffer = 256-level, FillToBufferNoAA = binary).
+func (r *GlyphMaskRasterizer) rasterizeOutlineCore(
+	outline *GlyphOutline,
+	subpixelX, subpixelY float64,
+	aaMargin int,
+	aaShift int,
+	fill fillFunc,
+) (*GlyphMaskResult, error) {
+	// Compute tight bounding box with subpixel offset.
 	// Outline Y coordinates from sfnt are already in Y-down (screen) convention:
 	// Y=0 at baseline, Y<0 above baseline, Y>0 below baseline.
 	// No Y-flip needed — OutlineExtractor preserves sfnt's Y-down convention.
@@ -165,6 +230,45 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 	offsetX := float32(-pixMinX) + float32(subpixelX)
 	offsetY := float32(-pixMinY) + float32(subpixelY)
 
+	r.buildOutlinePath(outline, offsetX, offsetY)
+
+	if len(r.pathVerbs) == 0 {
+		return nil, nil //nolint:nilnil // no path segments = nothing to rasterize
+	}
+
+	// Build edges and fill to alpha buffer.
+	eb := raster.NewEdgeBuilder(aaShift)
+	eb.SetFlattenCurves(true)
+	eb.BuildFromPath(&glyphPath{verbs: r.pathVerbs, points: r.pathPoints}, raster.IdentityTransform{})
+
+	if eb.IsEmpty() {
+		return nil, nil //nolint:nilnil // no edges produced = nothing to rasterize
+	}
+
+	mask := make([]byte, maskW*maskH)
+	fill(eb, maskW, maskH, raster.FillRuleNonZero, mask)
+
+	// Compute bearings: offset from glyph origin to mask top-left.
+	// BearingX: horizontal offset in pixels (negative = left of origin).
+	// BearingY: vertical offset in pixels (positive = above baseline).
+	// In Y-down coords, pixMinY is negative for above-baseline content,
+	// so -pixMinY gives positive distance above baseline.
+	bearingX := float32(pixMinX) - float32(subpixelX)
+	bearingY := float32(-pixMinY) + float32(subpixelY)
+
+	return &GlyphMaskResult{
+		Mask:     mask,
+		Width:    maskW,
+		Height:   maskH,
+		BearingX: bearingX,
+		BearingY: bearingY,
+	}, nil
+}
+
+// buildOutlinePath converts glyph outline segments into the reusable path
+// buffers (pathVerbs/pathPoints). Extracted to eliminate duplication between
+// rasterizeOutline, rasterizeOutlineAliased, and rasterizeLCDOutline.
+func (r *GlyphMaskRasterizer) buildOutlinePath(outline *GlyphOutline, offsetX, offsetY float32) {
 	r.pathVerbs = r.pathVerbs[:0]
 	r.pathPoints = r.pathPoints[:0]
 
@@ -203,43 +307,10 @@ func (r *GlyphMaskRasterizer) rasterizeOutline(
 		}
 	}
 
-	// Close the path (fonts always have closed contours)
+	// Close the path (fonts always have closed contours).
 	if len(r.pathVerbs) > 0 {
 		r.pathVerbs = append(r.pathVerbs, raster.Close)
 	}
-
-	if len(r.pathVerbs) == 0 {
-		return nil, nil //nolint:nilnil // no path segments = nothing to rasterize
-	}
-
-	// Build edges and fill to alpha buffer
-	eb := raster.NewEdgeBuilder(2) // 4x AA (Skia default)
-	eb.SetFlattenCurves(true)      // Flatten curves to lines for AnalyticFiller
-	eb.BuildFromPath(&glyphPath{verbs: r.pathVerbs, points: r.pathPoints}, raster.IdentityTransform{})
-
-	if eb.IsEmpty() {
-		return nil, nil //nolint:nilnil // no edges produced = nothing to rasterize
-	}
-
-	// Rasterize to alpha buffer
-	mask := make([]byte, maskW*maskH)
-	raster.FillToBuffer(eb, maskW, maskH, raster.FillRuleNonZero, mask)
-
-	// Compute bearings: offset from glyph origin to mask top-left.
-	// BearingX: horizontal offset in pixels (negative = left of origin).
-	// BearingY: vertical offset in pixels (positive = above baseline).
-	// In Y-down coords, pixMinY is negative for above-baseline content,
-	// so -pixMinY gives positive distance above baseline.
-	bearingX := float32(pixMinX) - float32(subpixelX)
-	bearingY := float32(-pixMinY) + float32(subpixelY)
-
-	return &GlyphMaskResult{
-		Mask:     mask,
-		Width:    maskW,
-		Height:   maskH,
-		BearingX: bearingX,
-		BearingY: bearingY,
-	}, nil
 }
 
 // RasterizeLCD renders a glyph with 3x horizontal oversampling for LCD

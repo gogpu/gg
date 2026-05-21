@@ -220,6 +220,17 @@ type GPUGlyphMaskAccelerator interface {
 	DrawGlyphMaskText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
+// GPUAliasedTextAccelerator is an optional interface for accelerators that
+// support aliased (non-anti-aliased) text rendering through the glyph mask
+// pipeline. When TextModeAliased is set, Context.DrawString routes text
+// through this interface instead of GPUGlyphMaskAccelerator.
+//
+// The glyph masks are rasterized with binary coverage (0 or 255 only) using
+// the NoAAFiller, matching Skia's SkFont::Edging::kAlias behavior.
+type GPUAliasedTextAccelerator interface {
+	DrawGlyphMaskTextAliased(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+}
+
 // GPUShapedTextAccelerator extends GPUGlyphMaskAccelerator with support for
 // pre-shaped glyph rendering. This eliminates re-shaping at render time —
 // the scene's stored glyph IDs and positions are used directly.

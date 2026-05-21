@@ -69,6 +69,15 @@ func (c *Context) DrawString(s string, x, y float64) {
 			return
 		}
 		c.drawStringCPU(s, x, y)
+	case TextModeAliased:
+		// Aliased text through glyph mask pipeline with binary rasterization.
+		// Same Tier 6 atlas + GPU path, but NoAAFiller instead of AnalyticFiller.
+		if c.tryGPUGlyphMaskTextAliased(s, x, y) {
+			return
+		}
+		// CPU fallback: bitmap rasterization (already non-AA at small sizes).
+		c.flushGPUAccelerator()
+		c.drawStringCPU(s, x, y)
 	case TextModeMSDF:
 		// Try GPU MSDF first; fall back to CPU if unavailable.
 		if c.tryGPUText(s, x, y) {
@@ -239,6 +248,26 @@ func (c *Context) tryGPUGlyphMaskText(s string, x, y float64) bool {
 		return false
 	}
 	return gma.DrawGlyphMaskText(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+}
+
+// tryGPUGlyphMaskTextAliased attempts to render aliased text via the GPU glyph
+// mask pipeline. Same Tier 6 pipeline but with binary (0/255) rasterization.
+// Returns true if text was successfully queued for aliased glyph mask rendering.
+func (c *Context) tryGPUGlyphMaskTextAliased(s string, x, y float64) bool {
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	if rc := c.gpuCtxOps(); rc != nil {
+		return rc.DrawGlyphMaskTextAliased(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+	}
+	a := Accelerator()
+	if a == nil {
+		return false
+	}
+	ata, ok := a.(GPUAliasedTextAccelerator)
+	if !ok {
+		return false
+	}
+	return ata.DrawGlyphMaskTextAliased(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
 }
 
 // selectTextStrategy returns the effective text rendering strategy.

@@ -453,6 +453,44 @@ func (rc *GPURenderContext) DrawGlyphMaskText(target gg.GPURenderTarget, face an
 	return nil
 }
 
+// DrawGlyphMaskTextAliased shapes and queues text for aliased (binary coverage)
+// glyph mask rendering. Same pipeline as DrawGlyphMaskText but rasterizes with
+// NoAAFiller (0/255 only) instead of AnalyticFiller (256-level AA).
+func (rc *GPURenderContext) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	textFace, ok := face.(text.Face)
+	if !ok || textFace == nil {
+		return gg.ErrFallbackToCPU
+	}
+
+	rc.sceneStats.TextCount++
+
+	if !rc.shared.gpuReady {
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
+	}
+
+	rc.shared.mu.Lock()
+	rc.shared.ensureGlyphMaskEngine()
+	engine := rc.shared.glyphMaskEngine
+	rc.shared.mu.Unlock()
+
+	batch, err := engine.LayoutTextAliased(textFace, s, x, y, color, matrix, deviceScale)
+	if err != nil {
+		slogger().Debug("DrawGlyphMaskTextAliased: LayoutTextAliased failed", "err", err, "text", s, "w", target.Width, "h", target.Height)
+		return gg.ErrFallbackToCPU
+	}
+	if len(batch.Quads) == 0 {
+		return nil
+	}
+
+	rc.QueueGlyphMask(target, batch)
+	return nil
+}
+
 // DrawShapedGlyphMaskText renders pre-shaped glyphs through the glyph mask pipeline.
 // Same as DrawGlyphMaskText but skips shaping — uses stored glyph positions directly.
 func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
