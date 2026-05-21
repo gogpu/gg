@@ -37,6 +37,10 @@ func (p *FuncPainter) PaintSpan(dest []RGBA, x, y, length int) {
 // Solid paints return SolidPainter (fast). Non-solid paints return FuncPainter
 // that samples paint.ColorAt per pixel.
 func PainterFromPaint(paint *Paint) Painter {
+	// Fast path: inline solid color (no interface dispatch).
+	if paint.isSolid {
+		return &SolidPainter{Color: paint.solidColor}
+	}
 	// Check Brush first (takes precedence)
 	if paint.Brush != nil {
 		if sb, ok := paint.Brush.(SolidBrush); ok {

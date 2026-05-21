@@ -313,16 +313,34 @@ func (c *Context) CreateImagePattern(img *ImageBuf, x, y, w, h int) Pattern {
 
 // SetFillPattern sets the fill pattern.
 // It also updates the Brush field for consistency with ColorAt precedence.
+// For solid patterns, stores the color inline (zero allocations).
 func (c *Context) SetFillPattern(pattern Pattern) {
+	if sp, ok := pattern.(*SolidPattern); ok {
+		c.paint.solidColor = sp.Color
+		c.paint.isSolid = true
+		c.paint.Brush = nil
+		c.paint.Pattern = nil
+		return
+	}
 	c.paint.Pattern = pattern
 	c.paint.Brush = BrushFromPattern(pattern)
+	c.paint.isSolid = false
 }
 
 // SetStrokePattern sets the stroke pattern.
 // It also updates the Brush field for consistency with ColorAt precedence.
+// For solid patterns, stores the color inline (zero allocations).
 func (c *Context) SetStrokePattern(pattern Pattern) {
+	if sp, ok := pattern.(*SolidPattern); ok {
+		c.paint.solidColor = sp.Color
+		c.paint.isSolid = true
+		c.paint.Brush = nil
+		c.paint.Pattern = nil
+		return
+	}
 	c.paint.Pattern = pattern
 	c.paint.Brush = BrushFromPattern(pattern)
+	c.paint.isSolid = false
 }
 
 // ImagePattern represents an image-based pattern with full affine transform support.

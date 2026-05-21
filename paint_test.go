@@ -26,11 +26,20 @@ func TestNewPaint(t *testing.T) {
 	if !p.Antialias {
 		t.Error("Antialias = false, want true")
 	}
-	if p.Brush == nil {
-		t.Error("Brush = nil, want non-nil")
+
+	// Default paint is solid black (stored inline, no Brush/Pattern allocation).
+	if !p.IsSolid() {
+		t.Error("IsSolid = false, want true")
 	}
-	if p.Pattern == nil {
-		t.Error("Pattern = nil, want non-nil")
+	c, ok := p.SolidColor()
+	if !ok || c != Black {
+		t.Errorf("SolidColor = %v, %v, want Black, true", c, ok)
+	}
+
+	// GetBrush returns correct value even though Brush field is nil.
+	brush := p.GetBrush()
+	if brush.ColorAt(0, 0) != Black {
+		t.Errorf("GetBrush color = %v, want Black", brush.ColorAt(0, 0))
 	}
 }
 
@@ -49,8 +58,11 @@ func TestPaintClone(t *testing.T) {
 	if clone.LineCap != p.LineCap {
 		t.Errorf("clone.LineCap = %v, want %v", clone.LineCap, p.LineCap)
 	}
-	if clone.Brush == nil {
-		t.Error("clone.Brush = nil")
+
+	// Solid colors are stored inline — verify via SolidColor accessor.
+	c, ok := clone.SolidColor()
+	if !ok || c != Red {
+		t.Errorf("clone SolidColor = %v, %v, want Red, true", c, ok)
 	}
 
 	// Verify it's a separate object
@@ -62,23 +74,58 @@ func TestPaintClone(t *testing.T) {
 
 // TestPaintSetBrush tests the SetBrush method.
 func TestPaintSetBrush(t *testing.T) {
-	p := NewPaint()
-	brush := Solid(Blue)
-	p.SetBrush(brush)
+	t.Run("solid brush stores inline", func(t *testing.T) {
+		p := NewPaint()
+		p.SetBrush(Solid(Blue))
 
-	if sb, ok := p.Brush.(SolidBrush); !ok || sb.Color != Blue {
-		t.Error("SetBrush did not set brush correctly")
-	}
-	if p.Pattern == nil {
-		t.Error("SetBrush did not update Pattern for compatibility")
-	}
+		// Solid brushes are stored inline — Brush and Pattern are nil.
+		if !p.IsSolid() {
+			t.Error("IsSolid = false after SetBrush(Solid)")
+		}
+		c, ok := p.SolidColor()
+		if !ok || c != Blue {
+			t.Errorf("SolidColor = %v, %v, want Blue, true", c, ok)
+		}
+		if p.Brush != nil {
+			t.Error("Brush should be nil for solid color")
+		}
+		if p.Pattern != nil {
+			t.Error("Pattern should be nil for solid color")
+		}
+	})
+
+	t.Run("non-solid brush sets fields", func(t *testing.T) {
+		p := NewPaint()
+		custom := CustomBrush{Func: func(x, y float64) RGBA { return Red }, Name: "test"}
+		p.SetBrush(custom)
+
+		if p.IsSolid() {
+			t.Error("IsSolid = true after SetBrush(CustomBrush)")
+		}
+		if p.Brush == nil {
+			t.Error("Brush = nil after SetBrush(CustomBrush)")
+		}
+		if p.Pattern == nil {
+			t.Error("Pattern = nil after SetBrush(CustomBrush)")
+		}
+	})
 }
 
 // TestPaintGetBrush tests the GetBrush method.
 func TestPaintGetBrush(t *testing.T) {
-	t.Run("with brush set", func(t *testing.T) {
+	t.Run("with solid brush (inline)", func(t *testing.T) {
 		p := NewPaint()
-		p.Brush = Solid(Green)
+		p.SetBrush(Solid(Green))
+		brush := p.GetBrush()
+		if sb, ok := brush.(SolidBrush); !ok || sb.Color != Green {
+			t.Error("GetBrush did not return correct solid brush")
+		}
+	})
+
+	t.Run("with brush field set directly", func(t *testing.T) {
+		p := &Paint{}
+		p.Brush = Solid(Green) // Direct field write bypasses SetBrush
+		p.isSolid = false      // Explicitly not inline
 		brush := p.GetBrush()
 		if sb, ok := brush.(SolidBrush); !ok || sb.Color != Green {
 			t.Error("GetBrush did not return set brush")
@@ -115,9 +162,17 @@ func TestPaintGetBrush(t *testing.T) {
 
 // TestPaintColorAt tests the ColorAt method.
 func TestPaintColorAt(t *testing.T) {
-	t.Run("with brush set", func(t *testing.T) {
+	t.Run("with solid brush via SetBrush", func(t *testing.T) {
 		p := NewPaint()
-		p.Brush = Solid(Red)
+		p.SetBrush(Solid(Red))
+		c := p.ColorAt(0, 0)
+		if c != Red {
+			t.Errorf("ColorAt = %v, want Red", c)
+		}
+	})
+
+	t.Run("with brush field directly", func(t *testing.T) {
+		p := &Paint{Brush: Solid(Red)}
 		c := p.ColorAt(0, 0)
 		if c != Red {
 			t.Errorf("ColorAt = %v, want Red", c)
@@ -150,6 +205,19 @@ func TestPaintColorAt(t *testing.T) {
 		c := p.ColorAt(0, 0)
 		if c != Red {
 			t.Errorf("ColorAt = %v, want Red (brush should take precedence)", c)
+		}
+	})
+
+	t.Run("isSolid takes precedence over both", func(t *testing.T) {
+		p := &Paint{
+			solidColor: Green,
+			isSolid:    true,
+			Pattern:    NewSolidPattern(Blue),
+			Brush:      Solid(Red),
+		}
+		c := p.ColorAt(0, 0)
+		if c != Green {
+			t.Errorf("ColorAt = %v, want Green (isSolid takes precedence)", c)
 		}
 	})
 }
@@ -200,21 +268,31 @@ func TestContextStrokeBrush(t *testing.T) {
 	}
 }
 
-// TestContextSetColorUpdatesPatternAndBrush tests that SetColor updates both.
-func TestContextSetColorUpdatesPatternAndBrush(t *testing.T) {
+// TestContextSetColorUpdatesInlineSolid tests that SetColor stores inline.
+func TestContextSetColorUpdatesInlineSolid(t *testing.T) {
 	dc := NewContext(100, 100)
 	dc.SetRGB(1, 0, 0) // Red
 
-	// Check brush
+	// Check via GetBrush (returns SolidBrush from inline color)
 	brush := dc.FillBrush()
 	c := brush.ColorAt(0, 0)
 	if c != Red {
 		t.Errorf("brush color = %v, want Red", c)
 	}
 
-	// Check pattern (for backward compatibility)
-	if dc.paint.Pattern == nil {
-		t.Error("Pattern is nil after SetRGB")
+	// Verify inline solid storage (Brush and Pattern are nil for zero alloc)
+	if !dc.paint.IsSolid() {
+		t.Error("IsSolid = false after SetRGB")
+	}
+	sc, ok := dc.paint.SolidColor()
+	if !ok || sc != Red {
+		t.Errorf("SolidColor = %v, %v, want Red, true", sc, ok)
+	}
+	if dc.paint.Brush != nil {
+		t.Error("Brush should be nil after SetRGB (stored inline)")
+	}
+	if dc.paint.Pattern != nil {
+		t.Error("Pattern should be nil after SetRGB (stored inline)")
 	}
 }
 

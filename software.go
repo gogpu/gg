@@ -640,6 +640,10 @@ func (r *SoftwareRenderer) forcedFiller(mode RasterizerMode) CoverageFiller {
 // solidColorFromPaint returns the solid color if paint is solid.
 // Returns (color, true) for solid paints, (zero, false) for patterns/gradients.
 func solidColorFromPaint(paint *Paint) (RGBA, bool) {
+	// Fast path: inline solid color (zero allocation, no interface dispatch).
+	if paint.isSolid {
+		return paint.solidColor, true
+	}
 	// Check Brush first (takes precedence)
 	if paint.Brush != nil {
 		if sb, ok := paint.Brush.(SolidBrush); ok {

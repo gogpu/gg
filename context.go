@@ -591,22 +591,34 @@ func (c *Context) FillRectCPU(x, y, w, h float64, col RGBA) {
 
 // SetColor sets the current drawing color.
 func (c *Context) SetColor(col color.Color) {
-	c.paint.SetBrush(Solid(FromColor(col)))
+	c.paint.solidColor = FromColor(col)
+	c.paint.isSolid = true
+	c.paint.Brush = nil
+	c.paint.Pattern = nil
 }
 
 // SetRGB sets the current color using RGB values (0-1).
 func (c *Context) SetRGB(r, g, b float64) {
-	c.paint.SetBrush(SolidRGB(r, g, b))
+	c.paint.solidColor = RGBA{R: r, G: g, B: b, A: 1}
+	c.paint.isSolid = true
+	c.paint.Brush = nil
+	c.paint.Pattern = nil
 }
 
 // SetRGBA sets the current color using RGBA values (0-1).
 func (c *Context) SetRGBA(r, g, b, a float64) {
-	c.paint.SetBrush(SolidRGBA(r, g, b, a))
+	c.paint.solidColor = RGBA{R: r, G: g, B: b, A: a}
+	c.paint.isSolid = true
+	c.paint.Brush = nil
+	c.paint.Pattern = nil
 }
 
 // SetHexColor sets the current color using a hex string.
 func (c *Context) SetHexColor(hex string) {
-	c.paint.SetBrush(SolidHex(hex))
+	c.paint.solidColor = Hex(hex)
+	c.paint.isSolid = true
+	c.paint.Brush = nil
+	c.paint.Pattern = nil
 }
 
 // SetFillBrush sets the brush used for fill operations.
@@ -1188,9 +1200,17 @@ func (c *Context) DrawEllipticalArc(x, y, rx, ry, angle1, angle2 float64) {
 }
 
 // currentColor returns the current drawing color from the paint.
-// If the current pattern is a solid color, returns that color.
+// If the paint is a solid color, returns that color.
 // Otherwise returns black as a fallback.
 func (c *Context) currentColor() color.Color {
+	if c.paint.isSolid {
+		return c.paint.solidColor.Color()
+	}
+	if c.paint.Brush != nil {
+		if sb, ok := c.paint.Brush.(SolidBrush); ok {
+			return sb.Color.Color()
+		}
+	}
 	if p, ok := c.paint.Pattern.(*SolidPattern); ok {
 		return p.Color.Color()
 	}

@@ -54,10 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **Zero-alloc stroke path** — `strokeResultToPath` now reuses scratch `Path` on
-  `SoftwareRenderer` instead of allocating per call (Skia `fOuter.reset()` pattern).
-  StrokePath: 1 alloc → 0 allocs, 4.3× faster (10 segments). All core rendering
-  paths (fill, stroke, circle, rect, pixmap) are now zero-allocation.
+- **Zero-alloc stroke path** — `strokeResultToPath` reuses scratch `Path` on
+  `SoftwareRenderer` (Skia `fOuter.reset()` pattern). StrokePath: 1 → 0 allocs, 4.3× faster.
+
+- **Zero-alloc paint color** (ADR-036) — `SetRGB`/`SetRGBA`/`SetHexColor` now write
+  directly to inline `solidColor RGBA` value field on Paint, bypassing interface boxing
+  and `*SolidPattern` heap allocation (Skia `fColor4f` dual-field pattern).
+  SetRGB: 2 → 0 allocs. ComplexScene: 80 → 68 allocs (-15%).
 
 ## [0.47.4] - 2026-05-21
 

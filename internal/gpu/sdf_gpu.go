@@ -297,6 +297,9 @@ func (a *SDFAccelerator) ensureDefaultCtx() {
 
 // getColorFromPaint extracts the solid color from a paint.
 func getColorFromPaint(paint *gg.Paint) gg.RGBA {
+	if color, ok := paint.SolidColor(); ok {
+		return color
+	}
 	if paint.Brush != nil {
 		if sb, isSolid := paint.Brush.(gg.SolidBrush); isSolid {
 			return sb.Color

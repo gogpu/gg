@@ -278,6 +278,9 @@ func (a *SDFAccelerator) strokeRRectSDF(target GPURenderTarget, shape DetectedSh
 // getColorFromPaint extracts a solid color from the paint.
 // If the paint uses a gradient or pattern, returns the color at (0, 0).
 func getColorFromPaint(paint *Paint) RGBA {
+	if paint.isSolid {
+		return paint.solidColor
+	}
 	if paint.Brush != nil {
 		if sb, ok := paint.Brush.(SolidBrush); ok {
 			return sb.Color

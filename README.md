@@ -137,6 +137,33 @@ Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern) — ~2-3×
 than analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
 (controlled via `SetTextMode`).
 
+### Text Stroke & Outline
+
+Stroke text outlines for outlined/bordered text effects (Skia/Cairo/HTML5 pattern):
+
+```go
+dc.SetLineWidth(3)
+dc.SetRGB(0, 0, 0)
+dc.StrokeString("Hello", x, y)  // black outline
+dc.SetRGB(1, 1, 1)
+dc.DrawString("Hello", x, y)    // white fill on top
+
+// Or get text as a Path for custom operations:
+path := dc.TextPath("Hello", x, y)
+```
+
+### Aliased Text
+
+Pixel-perfect text with binary coverage (Skia `SkFont::Edging::kAlias`):
+
+```go
+dc.SetTextMode(gg.TextModeAliased)  // no gray edge pixels on text
+dc.DrawString("Pixel Perfect", x, y)
+```
+
+Geometry AA (`SetAntiAlias`) and text AA (`SetTextMode`) are independent — matching
+Skia and Cairo separation.
+
 ### GPU Acceleration (Optional)
 
 gg supports optional GPU acceleration through the `GPUAccelerator` interface with
