@@ -542,21 +542,84 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 	text.Draw(c.pixmap, s, deviceFace, p.X, p.Y, c.currentColor())
 }
 
-// drawStringAsOutlines renders text by converting glyph vector outlines to a Path
-// and filling through the normal multi-tier pipeline (GPU → CoverageFiller → Analytic).
-// Strategy B (Vello pattern): handles rotation, non-uniform scale, shear, mirroring,
-// and extreme scales that exceed the bitmap threshold.
+// StrokeString strokes text outlines at position (x, y) where y is the baseline.
+// The stroke width, cap, join, and dash come from the current paint state.
 //
-// Design: all glyphs are composed into ONE path for a single efficient fill call.
-// Outlines are built in user space, then path.Transform(CTM) converts to device space.
-// The device-space path is routed through doFill() so that GPU accelerator can render
-// it to the surface (stencil+cover) when SurfaceTarget is active, or CPU renders
-// to pixmap in standalone mode.
-func (c *Context) drawStringAsOutlines(s string, x, y float64) {
+// Unlike DrawString, StrokeString always uses vector outlines regardless of the
+// current TextMode — MSDF and glyph mask pipelines cannot produce stroked text.
+// If no font has been set with SetFont, this function does nothing.
+//
+// Enterprise pattern: matches HTML5 Canvas strokeText(), Cairo show_text() + stroke(),
+// Skia SkPaint::kStroke_Style + drawTextBlob.
+func (c *Context) StrokeString(s string, x, y float64) {
+	if c.face == nil {
+		return
+	}
+	path := c.textOutlinePath(s, x, y)
+	if path == nil {
+		return
+	}
+
+	devicePath := path.Transform(c.totalMatrix())
+	c.trackDamage(devicePath.Bounds())
+
+	// Set GPU scissor rect for rectangular clips.
+	defer c.setGPUClipRect()()
+
+	// Save and restore context path — doStroke uses c.path.
+	savedPath := c.path
+	c.path = devicePath
+	_ = c.doStroke()
+	c.path = savedPath
+}
+
+// StrokeStringAnchored strokes text outlines with an anchor point.
+// The anchor point is specified by ax and ay, which are in the range [0, 1].
+//
+//	(0, 0) = top-left
+//	(0.5, 0.5) = center
+//	(1, 1) = bottom-right
+//
+// The text is positioned so that the anchor point is at (x, y).
+// The stroke width, cap, join, and dash come from the current paint state.
+// Always uses vector outlines regardless of TextMode.
+func (c *Context) StrokeStringAnchored(s string, x, y, ax, ay float64) {
+	if c.face == nil {
+		return
+	}
+
+	w, _ := text.Measure(s, c.face)
+	metrics := c.face.Metrics()
+	h := metrics.Ascent + metrics.Descent
+	x -= w * ax
+	y = y + metrics.Ascent - ay*h
+
+	c.StrokeString(s, x, y)
+}
+
+// TextPath returns a user-space Path containing the vector outlines of text s
+// positioned at (x, y) where y is the baseline. The returned path can be filled,
+// stroked, or used for hit-testing with the caller's own pipeline.
+//
+// Returns nil if no font is set or the text produces no outlines.
+//
+// Enterprise pattern: matches HTML5 Canvas addText() (proposed), Cairo text_path(),
+// Skia SkTextBlob → SkPath (via getPath).
+func (c *Context) TextPath(s string, x, y float64) *Path {
+	if c.face == nil {
+		return nil
+	}
+	return c.textOutlinePath(s, x, y)
+}
+
+// textOutlinePath builds a user-space Path containing glyph outlines for text s
+// at user-space position (x, y). Uses glyph cache for efficiency.
+// Returns nil if the font has no FontSource (e.g. MultiFace) or the text
+// produces no outlines.
+func (c *Context) textOutlinePath(s string, x, y float64) *Path {
 	source := c.face.Source()
 	if source == nil {
-		c.drawStringBitmap(s, x, y) // MultiFace fallback
-		return
+		return nil
 	}
 
 	extractor := c.ensureOutlineExtractor()
@@ -629,6 +692,28 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 		path.Close()
 	}
 	if path.isEmpty() {
+		return nil
+	}
+	return path
+}
+
+// drawStringAsOutlines renders text by converting glyph vector outlines to a Path
+// and filling through the normal multi-tier pipeline (GPU → CoverageFiller → Analytic).
+// Strategy B (Vello pattern): handles rotation, non-uniform scale, shear, mirroring,
+// and extreme scales that exceed the bitmap threshold.
+//
+// Design: all glyphs are composed into ONE path for a single efficient fill call.
+// Outlines are built in user space, then path.Transform(CTM) converts to device space.
+// The device-space path is routed through doFill() so that GPU accelerator can render
+// it to the surface (stencil+cover) when SurfaceTarget is active, or CPU renders
+// to pixmap in standalone mode.
+func (c *Context) drawStringAsOutlines(s string, x, y float64) {
+	path := c.textOutlinePath(s, x, y)
+	if path == nil {
+		// MultiFace fallback: textOutlinePath returns nil when Source() is nil.
+		if c.face != nil && c.face.Source() == nil {
+			c.drawStringBitmap(s, x, y)
+		}
 		return
 	}
 

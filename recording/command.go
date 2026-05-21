@@ -52,6 +52,7 @@ const (
 	CmdStrokeRect // Stroke a rectangle
 	CmdDrawImage  // Draw an image
 	CmdDrawText   // Draw text
+	CmdStrokeText // Stroke text outlines
 
 	// Style commands
 	CmdSetFillStyle   // Set fill brush
@@ -79,6 +80,7 @@ var commandTypeNames = [...]string{
 	CmdStrokeRect:     "StrokeRect",
 	CmdDrawImage:      "DrawImage",
 	CmdDrawText:       "DrawText",
+	CmdStrokeText:     "StrokeText",
 	CmdSetFillStyle:   "SetFillStyle",
 	CmdSetStrokeStyle: "SetStrokeStyle",
 	CmdSetLineWidth:   "SetLineWidth",
@@ -287,6 +289,28 @@ type DrawTextCommand struct {
 
 // Type implements Command.
 func (DrawTextCommand) Type() CommandType { return CmdDrawText }
+
+// StrokeTextCommand strokes text outlines at a specified position.
+// The stroke style (width, cap, join, dash) is captured at recording time.
+type StrokeTextCommand struct {
+	// Text is the string to render.
+	Text string
+	// X is the horizontal position.
+	X float64
+	// Y is the vertical position (baseline).
+	Y float64
+	// FontSize is the size of the font in points.
+	FontSize float64
+	// FontFamily is the name of the font family.
+	FontFamily string
+	// Brush references the stroke color/brush in the resource pool.
+	Brush BrushRef
+	// Stroke contains the stroke style (width, cap, join, dash).
+	Stroke Stroke
+}
+
+// Type implements Command.
+func (StrokeTextCommand) Type() CommandType { return CmdStrokeText }
 
 // --------------------------------------------------------------------------
 // Style Commands
