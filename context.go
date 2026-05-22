@@ -1782,7 +1782,6 @@ func (c *Context) doStroke() error {
 	if ok {
 		return nil
 	}
-
 	c.flushGPUAccelerator()
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
 		sr.rasterizerMode = cpuMode

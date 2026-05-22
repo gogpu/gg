@@ -530,7 +530,12 @@ func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, f
 // FillPath queues a filled path for GPU rendering.
 func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	if !rc.shared.gpuReady {
-		return gg.ErrFallbackToCPU
+		rc.shared.mu.Lock()
+		err := rc.shared.ensureGPU()
+		rc.shared.mu.Unlock()
+		if err != nil || !rc.shared.gpuReady {
+			return gg.ErrFallbackToCPU
+		}
 	}
 
 	rc.sceneStats.PathCount++
@@ -560,14 +565,22 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 	premulB := float32(color.B * color.A)
 	premulA := float32(color.A)
 
-	// Try convex fast-path.
-	if points, ok := extractConvexPolygon(path); ok {
-		cmd := ConvexDrawCommand{
-			Points: points,
-			Color:  [4]float32{premulR, premulG, premulB, premulA},
+	// Try convex fast-path (NonZero fill rule only).
+	// The convex renderer uses centroid fan tessellation without stencil buffer,
+	// which is structurally equivalent to NonZero fill. For EvenOdd paths
+	// (e.g., stroke-expanded ring outlines), the stencil-then-cover path below
+	// must be used — it correctly implements EvenOdd via stencil bit inversion.
+	// Skia Ganesh gates its convex fast-path on isSimpleFill() for the same reason.
+	if paint.FillRule != gg.FillRuleEvenOdd {
+		if points, ok := extractConvexPolygon(path); ok {
+			slogger().Debug("FillPath: convex fast-path", "points", len(points), "fillRule", paint.FillRule)
+			cmd := ConvexDrawCommand{
+				Points: points,
+				Color:  [4]float32{premulR, premulG, premulB, premulA},
+			}
+			rc.QueueConvex(target, cmd)
+			return nil
 		}
-		rc.QueueConvex(target, cmd)
-		return nil
 	}
 
 	// Fall back to stencil-then-cover.
@@ -628,13 +641,19 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 
 	fillPath := strokeResultToPath(outVerbs, outCoords)
 
-	// Stroke-expanded outlines are ring-shaped contours (outer + inner edges).
-	// With NonZero fill rule, the fan tessellator fills the entire interior
-	// including the hollow center — rendering as a lens/chord shape.
-	// EvenOdd fill rule correctly handles ring topology: interior crosses
-	// 2 boundaries (even = empty), stroke band crosses 1 (odd = filled).
-	// This is the Skia Ganesh pattern for GPU stroke rendering.
-	// Fixes ui#101 Thread F (circular progress arc rendered as filled lens).
+	// Stroke-expanded outlines require EvenOdd fill rule for BOTH open and
+	// closed paths. The stroke expander's inner join pivot routing (handleInnerJoin)
+	// creates self-intersecting V-shapes at each vertex. With NonZero fill,
+	// stencil fan tessellation counts winding=2 at pixels between forward/reverse
+	// edges, incorrectly filling the entire interior. With EvenOdd, self-intersection
+	// crossings XOR correctly: stroke band (1 crossing = odd = filled), interior
+	// area (2 crossings = even = empty).
+	//
+	// This applies to both topologies:
+	//   - Closed paths: ring topology (2 contours, hollow center)
+	//   - Open paths: self-intersecting single contour (inner join V-shapes)
+	//
+	// Skia Ganesh pattern. Fixes ui#101 Thread F + issue #347.
 	strokePaint := *paint
 	strokePaint.FillRule = gg.FillRuleEvenOdd
 	return rc.FillPath(target, fillPath, &strokePaint)

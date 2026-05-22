@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/internal/stroke"
 )
 
 // --- Helper functions for generating test polygons ---
@@ -418,4 +419,99 @@ func BenchmarkAnalyzeConvexity1000(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		AnalyzeConvexity(pts)
 	}
+}
+
+// TestStrokeExpandedSineWaveNotConvex verifies that the stroke-expanded outline
+// of a 100-segment damped sine wave polyline is correctly rejected by IsConvex.
+// This is the root cause of issue #347: the stroke outline has consistent
+// cross-product signs (all positive) but self-intersects at inner join pivots,
+// producing many Y-direction flips that the direction-flip check catches.
+func TestStrokeExpandedSineWaveNotConvex(t *testing.T) {
+	points := makeStrokeExpandedSineWave()
+	if len(points) < 100 {
+		t.Fatalf("expected many points, got %d", len(points))
+	}
+
+	result := AnalyzeConvexity(points)
+	if result.Convex {
+		t.Errorf("stroke-expanded sine wave should NOT be convex (issue #347), "+
+			"got Convex=true with %d points", len(points))
+	}
+
+	xFlips, yFlips := countDirectionFlips(points)
+	if yFlips <= maxConvexDirectionFlips {
+		t.Errorf("expected many Y-direction flips for sine wave stroke, got %d", yFlips)
+	}
+	t.Logf("direction flips: x=%d y=%d (threshold=%d)", xFlips, yFlips, maxConvexDirectionFlips)
+}
+
+// TestDirectionFlipCheckPreservesConvexPolygons ensures the direction-flip
+// check does NOT reject genuinely convex polygons (triangles, hexagons, etc).
+func TestDirectionFlipCheckPreservesConvexPolygons(t *testing.T) {
+	tests := []struct {
+		name   string
+		points []gg.Point
+	}{
+		{"triangle", makeRegularPolygon(0, 0, 10, 3)},
+		{"square", makeRegularPolygon(0, 0, 10, 4)},
+		{"pentagon", makeRegularPolygon(0, 0, 10, 5)},
+		{"hexagon", makeRegularPolygon(0, 0, 10, 6)},
+		{"dodecagon", makeRegularPolygon(0, 0, 10, 12)},
+		{"circle_100", makeRegularPolygon(0, 0, 10, 100)},
+		{"axis_aligned_rect", []gg.Point{
+			gg.Pt(0, 0), gg.Pt(10, 0), gg.Pt(10, 5), gg.Pt(0, 5),
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !IsConvex(tt.points) {
+				t.Errorf("genuine convex polygon %q should pass IsConvex", tt.name)
+			}
+		})
+	}
+}
+
+// makeStrokeExpandedSineWave reproduces the exact geometry from issue #347:
+// 100-segment damped sine wave, 2px stroke, butt cap, miter join, miter limit 10.
+func makeStrokeExpandedSineWave() []gg.Point {
+	const n = 100
+
+	verbs := make([]stroke.PathVerb, 0, n)
+	coords := make([]float64, 0, n*2)
+	for i := 0; i < n; i++ {
+		t := float64(i) * 0.1
+		x := 50 + t*70
+		y := 250 - math.Sin(t)*math.Exp(-t*0.1)*200
+		if i == 0 {
+			verbs = append(verbs, stroke.VerbMoveTo)
+		} else {
+			verbs = append(verbs, stroke.VerbLineTo)
+		}
+		coords = append(coords, x, y)
+	}
+
+	style := stroke.Stroke{
+		Width:      2.0,
+		Cap:        stroke.LineCapButt,
+		Join:       stroke.LineJoinMiter,
+		MiterLimit: 10.0,
+	}
+	expander := stroke.NewStrokeExpander(style)
+	outVerbs, outCoords := expander.Expand(verbs, coords)
+
+	var points []gg.Point
+	ci := 0
+	for _, v := range outVerbs {
+		switch v {
+		case stroke.VerbMoveTo, stroke.VerbLineTo:
+			points = append(points, gg.Pt(outCoords[ci], outCoords[ci+1]))
+			ci += 2
+		case stroke.VerbQuadTo:
+			ci += 4
+		case stroke.VerbCubicTo:
+			ci += 6
+		case stroke.VerbClose:
+		}
+	}
+	return points
 }
