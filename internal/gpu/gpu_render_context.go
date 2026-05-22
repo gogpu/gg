@@ -222,6 +222,16 @@ func (rc *GPURenderContext) QueueShape(target gg.GPURenderTarget, shape gg.Detec
 	if !ok {
 		return gg.ErrFallbackToCPU
 	}
+
+	// Skip zero-alpha shapes — premultiplied SrcOver with (0,0,0,0) is a
+	// mathematical no-op but wastes GPU bandwidth and can interfere with
+	// MSAA sample coverage weighting (BUG-SDF-001: transparent fill makes
+	// subsequent stroke invisible). Enterprise pattern: Skia nothingToDraw()
+	// (SkPaint.cpp:273), Cairo nothing_to_do() (cairo-surface.c:2148).
+	if rs.ColorA == 0 {
+		return nil
+	}
+
 	rc.pendingShapes = append(rc.pendingShapes, rs)
 
 	rc.pendingTarget = target
