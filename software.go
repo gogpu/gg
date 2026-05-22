@@ -846,13 +846,13 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 	strokeResultToPath(r.scratchStrokePath, outVerbs, outCoords)
 
-	// Force analytic (scanline) rasterizer for stroke-expanded fills.
-	// The tile-based SparseStripsFiller has a winding propagation bug
-	// (accumulated winding not carried between adjacent tiles) that causes
-	// self-intersecting stroke outlines to render 2.2x thicker than correct.
-	// The AnalyticFiller's per-scanline edge walk correctly handles winding
-	// cancellation at self-intersections. Fixes #347.
-	// See: BUG-SPARSE-STRIPS-001 for the underlying tile rasterizer issue.
+	// Route stroke fills through AnalyticFiller (Skia AAA scanline).
+	// Stroke-expanded multi-contour outlines (e.g., closed path → 4 contours)
+	// require per-scanline winding tracking that the tile-based SparseStripsFiller
+	// does not support (Vello's strip pipeline uses per-strip fill_gap flags).
+	// This matches Skia Ganesh which routes strokes through scanline renderers,
+	// not tile rasterizers. Single-contour strokes work with either filler after
+	// the expander.go fix (#347), but multi-contour needs scanline.
 	prevMode := r.rasterizerMode
 	r.rasterizerMode = RasterizerAnalytic
 	err := r.Fill(pixmap, r.scratchStrokePath, paint)
