@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.1] - 2026-05-22
+
+### Fixed
+
+- **GPU stroke renders polyline as filled polygon** (#347, @TuSKan) — three-part fix
+  for GPU-accelerated stroke rendering of multi-segment polylines (ADR-037):
+
+  1. **CPU stroke filler selection** — stroke-expanded fills now force AnalyticFiller
+     (scanline AA), bypassing SparseStripsFiller which has a winding propagation bug
+     for self-intersecting stroke outlines (BUG-SPARSE-STRIPS-001). This is the primary
+     fix for pixmap contexts where GPU fallback to CPU produces thick aliased strokes.
+
+  2. **GPU lazy initialization** — `FillPath`/`StrokePath` now call `ensureGPU()` for
+     lazy device creation, matching the pattern used by text methods (`DrawText`).
+     Previously GPU path always failed for pixmap contexts (`gpuReady=false`).
+
+  3. **Convex fast-path FillRule gate** — convex polygon renderer now skipped for
+     `FillRuleEvenOdd` paths. Stroke-expanded outlines can pass `IsConvex()` check
+     despite self-intersecting; convex renderer ignores FillRule, filling the convex
+     hull. Added Skia-style direction-flip check (`IsConcaveBySign` pattern) to
+     `IsConvex()` for additional protection.
+
+### Changed
+
+- `IsConvex()` now checks direction-flip count per axis (max 3, matching Skia
+  `IsConcaveBySign` and femtovg). Rejects self-intersecting stroke outlines that
+  previously passed the cross-product-sign-only check.
+
+### Dependencies
+
+- gogpu v0.39.0, wgpu v0.28.7, gpucontext v0.19.0
+
 ## [0.48.0] - 2026-05-21
 
 ### Added

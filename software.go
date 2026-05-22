@@ -846,8 +846,18 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 	strokeResultToPath(r.scratchStrokePath, outVerbs, outCoords)
 
-	// Fill the stroke path - this gives us anti-aliased strokes
-	return r.Fill(pixmap, r.scratchStrokePath, paint)
+	// Force analytic (scanline) rasterizer for stroke-expanded fills.
+	// The tile-based SparseStripsFiller has a winding propagation bug
+	// (accumulated winding not carried between adjacent tiles) that causes
+	// self-intersecting stroke outlines to render 2.2x thicker than correct.
+	// The AnalyticFiller's per-scanline edge walk correctly handles winding
+	// cancellation at self-intersections. Fixes #347.
+	// See: BUG-SPARSE-STRIPS-001 for the underlying tile rasterizer issue.
+	prevMode := r.rasterizerMode
+	r.rasterizerMode = RasterizerAnalytic
+	err := r.Fill(pixmap, r.scratchStrokePath, paint)
+	r.rasterizerMode = prevMode
+	return err
 }
 
 // convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
