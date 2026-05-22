@@ -344,12 +344,11 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 	dot := ab.Dot(cd)
 	hypot := math.Hypot(cross, dot)
 
-	// Skip join if angle change is insignificant, but still connect paths
-	// to maintain continuity. Without the lineTo calls, the forward/backward
-	// paths have a gap at circle cardinal points where tangents are identical.
+	// Skip join if angle change is insignificant (kurbo stroke.rs:428).
+	// Rust kurbo emits nothing here — the paths continue without explicit
+	// connecting segments. The connection happens implicitly from the next
+	// doLine() which adds lineTo for both forward and backward paths.
 	if dot > 0.0 && math.Abs(cross) < hypot*e.joinThresh {
-		e.forward.lineTo(p0.Add(norm.Neg()))
-		e.backward.lineTo(p0.Add(norm))
 		return
 	}
 
@@ -375,15 +374,12 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 }
 
 // handleInnerJoin handles the concave (inner) side of a join.
-// Routes through the pivot point to prevent self-intersection artifacts.
-//
-// This follows Skia/tiny-skia's handle_inner_join pattern (stroker.rs:1370-1379):
-// In the degenerate case that the stroke radius is larger than our segments,
-// just connecting the two inner segments may "show through" as a funny diagonal.
-// To fix this, we go through the pivot point, creating a V-shape.
-func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, afterNorm Vec2) {
+// Routes through the pivot point (kurbo stroke.rs:445/452).
+// Kurbo emits only lineTo(p0) for the inner side — the connection to the
+// new normal position comes from the unconditional lineTo in doLine(),
+// not from a second lineTo here.
+func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, _ Vec2) {
 	path.lineTo(pivot)
-	path.lineTo(pivot.Add(afterNorm))
 }
 
 // applyOuterJoin applies the requested join type to the outer (convex) side of a join.

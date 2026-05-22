@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.2] - 2026-05-22
+
+### Fixed
+
+- **Stroke expander: match Rust kurbo output** (#347) — root cause fix for stroke
+  rendering. Inner join handler emitted extra `lineTo(pivot+afterNorm)` and skip-threshold
+  path emitted connecting segments that Rust kurbo does not. Result: 397 elements (Go) vs
+  201 (Rust kurbo) with 196 duplicate points creating self-intersecting outlines. Fixed to
+  produce identical 201-element output matching Rust kurbo golden reference.
+
+- **Stroke fills routed through AnalyticFiller** — architectural routing matching Skia Ganesh
+  pattern (strokes → scanline renderer, not tile rasterizer). Multi-contour closed-path
+  strokes (e.g., glyph "O" → 4 contours) require per-scanline winding tracking.
+
+### Added
+
+- Golden test `TestStrokeExpander_SineWaveGolden` — verifies 201 elements, 0 duplicate
+  points, 0 self-intersections, key coordinates match Rust kurbo.
+
 ## [0.48.1] - 2026-05-22
 
 ### Fixed
