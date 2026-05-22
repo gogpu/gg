@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.3] - 2026-05-22
+
+### Fixed
+
+- **SDF pipeline: transparent fill makes stroke invisible** (BUG-SDF-001) — `QueueShape`
+  now skips zero-alpha shapes. Premultiplied SrcOver blend with (0,0,0,0) is a mathematical
+  no-op but interfered with MSAA sample coverage weighting, causing subsequent strokes on
+  the same shape to render invisibly. Matches Skia `SkPaint::nothingToDraw()` (alpha==0 +
+  SrcOver → skip) and Cairo `nothing_to_do()` patterns.
+
 ## [0.48.2] - 2026-05-22
 
 ### Fixed
