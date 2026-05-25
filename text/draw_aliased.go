@@ -1,10 +1,8 @@
 package text
 
 import (
-	"image"
 	"image/color"
 	"image/draw"
-	"math"
 )
 
 // DrawAliased renders text to a destination image using binary (non-anti-aliased)
@@ -29,42 +27,5 @@ func DrawAliased(dst draw.Image, text string, face Face, x, y float64, col color
 
 	text = expandTabs(text)
 
-	parsed := sf.source.Parsed()
-	ppem := sf.size
-	hinting := sf.config.hinting
-
-	rast := NewGlyphMaskRasterizer()
-	src := image.NewUniform(col)
-
-	for glyph := range sf.Glyphs(text) {
-		if glyph.GID == 0 {
-			continue
-		}
-
-		// glyph.X is the accumulated horizontal position (includes all prior advances).
-		glyphX := x + glyph.X
-		glyphY := y + glyph.Y
-
-		intX := math.Floor(glyphX)
-		intY := math.Floor(glyphY)
-		subpixelX := glyphX - intX
-		subpixelY := glyphY - intY
-
-		result, err := rast.RasterizeAliased(parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
-		if err != nil || result == nil {
-			continue
-		}
-
-		maskImg := &image.Alpha{
-			Pix:    result.Mask,
-			Stride: result.Width,
-			Rect:   image.Rect(0, 0, result.Width, result.Height),
-		}
-
-		dstX := int(intX) + int(math.Round(float64(result.BearingX)))
-		dstY := int(intY) - int(math.Round(float64(result.BearingY)))
-
-		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
-		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
-	}
+	drawGlyphs(dst, sf, text, x, y, col, rasterizeAliasedGlyph)
 }

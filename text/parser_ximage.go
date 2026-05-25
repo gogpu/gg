@@ -90,7 +90,7 @@ func (f *ximageParsedFont) GlyphAdvance(glyphIndex uint16, ppem float64) float64
 	var buf sfnt.Buffer
 
 	// Get advance in font units
-	advance, err := f.font.GlyphAdvance(&buf, sfnt.GlyphIndex(glyphIndex), fixed.Int26_6(ppem*64), font.HintingFull)
+	advance, err := f.font.GlyphAdvance(&buf, sfnt.GlyphIndex(glyphIndex), fixed.Int26_6(ppem*64), font.HintingNone)
 	if err != nil {
 		return 0
 	}

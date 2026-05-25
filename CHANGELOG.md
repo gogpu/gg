@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.5] - 2026-05-25
+
+### Fixed
+
+- **Fractional glyph advances: letters merging at 10-12px** (ADR-039) — `GlyphAdvance()`
+  now uses `font.HintingNone` for layout advances (design metrics, fractional) instead of
+  `font.HintingFull` (grid-fitted, integer-rounded). At 12px Arial, "T" advance changes
+  from 7.0 to 7.33, preserving the 0.97px gap between "T" and "e" that was lost to rounding.
+  Matches Skia `linearHoriAdvance` / Cairo `hint_metrics=OFF` enterprise pattern.
+
+- **TextModeAliased CPU fallback** (#353) — `dc.SetTextMode(gg.TextModeAliased)` now works
+  on CPU-only contexts (`gg.NewContext()` + `SavePNG()`). Uses per-glyph `NoAAFiller`
+  rasterization (binary 0/255 coverage), matching Skia `SkFont::Edging::kAlias` and
+  GPU Tier 6 path. Previously fell back to `x/image/font.Drawer` which always anti-aliases.
+
+### Changed
+
+- **Per-glyph text rendering** — `text.Draw()` replaced `font.Drawer` with per-glyph
+  rendering via `GlyphMaskRasterizer.RasterizeHinted()`. Enables independent control of
+  outline hinting (crisp stems) and advance positioning (fractional). Shared `drawGlyphs()`
+  helper used by both `Draw()` and `DrawAliased()`.
+
+### Added
+
+- `text.DrawAliased()` — CPU aliased text rendering function, parallel to `text.Draw()`.
+- 13 new tests: `TestDrawAliased_BinaryAlpha`, `TestDrawAliased_MultipleSizes`,
+  `TestTextModeAliased_BinaryAlpha`, `TestTextModeAliased_DrawString_CPUFallback`,
+  and 9 more covering edge cases and GPU/CPU consistency.
+
 ## [0.48.4] - 2026-05-25
 
 ### Fixed
