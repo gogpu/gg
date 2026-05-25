@@ -190,7 +190,7 @@ func verbCoordCount(v PathVerb) int {
 }
 
 // StrokeExpander converts stroked paths to filled paths.
-// This follows the kurbo stroke expansion algorithm.
+// This follows the tiny-skia/Skia stroke expansion algorithm.
 //
 // StrokeExpander is designed for reuse: call Expand() multiple times on the same
 // instance. Internal buffers are retained and reused between calls to minimize
@@ -374,12 +374,18 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 }
 
 // handleInnerJoin handles the concave (inner) side of a join.
-// Routes through the pivot point (kurbo stroke.rs:445/452).
-// Kurbo emits only lineTo(p0) for the inner side — the connection to the
-// new normal position comes from the unconditional lineTo in doLine(),
-// not from a second lineTo here.
-func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, _ Vec2) {
+//
+// Two-step routing (tiny-skia stroker.rs:1370-1379, Skia SkStrokerPriv):
+//  1. lineTo(pivot) — route through the center to prevent self-intersection
+//  2. lineTo(pivot + afterNorm) — place at correct normal offset for next segment
+//
+// afterNorm points toward the inner path's side (already oriented by the caller:
+// cross>0 passes norm toward backward, cross<0 passes norm.Neg() toward forward).
+// Without step 2, the inner path "jumps" diagonally from pivot to the next
+// doLine() position, creating visible teeth on thick strokes (#354).
+func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, afterNorm Vec2) {
 	path.lineTo(pivot)
+	path.lineTo(pivot.Add(afterNorm))
 }
 
 // applyOuterJoin applies the requested join type to the outer (convex) side of a join.

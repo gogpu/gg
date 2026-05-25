@@ -574,6 +574,12 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 // StrokeString strokes text outlines at position (x, y) where y is the baseline.
 // The stroke width, cap, join, and dash come from the current paint state.
 //
+// For thick strokes (lineWidth > 2), use [Context.SetLineJoin] with [LineJoinRound]
+// to avoid miter spikes at glyph segment junctions. Glyph outlines contain many
+// short curve segments, and the default [LineJoinMiter] produces sharp spikes at
+// each junction. All enterprise text renderers (Skia, Cairo, Qt) recommend or
+// default to round joins for stroked text.
+//
 // Unlike DrawString, StrokeString always uses vector outlines regardless of the
 // current TextMode — MSDF and glyph mask pipelines cannot produce stroked text.
 // If no font has been set with SetFont, this function does nothing.

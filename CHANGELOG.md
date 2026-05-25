@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.4] - 2026-05-25
+
+### Fixed
+
+- **Stroke inner join: teeth on circles, twisted corners on rectangles** (#354, #353) —
+  `handleInnerJoin` now emits two `lineTo` calls matching tiny-skia `stroker.rs:1370-1379`:
+  first routes through pivot to prevent self-intersection, then places the inner path at
+  the correct normal offset for the next segment (ADR-038). Previously the second `lineTo`
+  was missing, causing the inner path to "jump" diagonally from pivot to the next segment,
+  creating visible sawtooth artifacts on thick strokes (lineWidth ≥ 5). Affects all curved
+  shapes: circles, ellipses, rounded rectangles, arcs, regular polygons, glyph outlines.
+
+### Changed
+
+- **StrokeString godoc** — added recommendation to use `SetLineJoin(LineJoinRound)` for
+  thick text strokes. Default `LineJoinMiter` produces miter spikes at glyph segment
+  junctions, matching enterprise text renderer behavior (Skia, Cairo, Qt).
+
+### Added
+
+- Tests: `TestStrokeExpander_ThickCircleNoTeeth` (4 lineWidth values), 
+  `TestStrokeExpander_ThickRectNoRotation` (4 lineWidth values),
+  `TestStrokeExpander_InnerJoinOffset` — regression tests for #354.
+
 ## [0.48.3] - 2026-05-22
 
 ### Fixed
