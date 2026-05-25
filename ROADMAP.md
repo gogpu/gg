@@ -19,90 +19,60 @@
 
 ---
 
-## Current State: v0.46.9
+## Current State: v0.48.6
 
 ✅ **Production-ready** with GPU-accelerated rendering:
-- **CJK text rendering** (ADR-027) — script-aware hinting, exact-size rasterization, dual MSDF atlas 64/128px, TTC collection support. Enterprise patterns: Skia, FreeType, DirectWrite, Core Text
-- **Damage-aware compositing** (ADR-026) — LoadOpLoad + scissor, TrackDamageRect, debug overlay dedup. Enterprise patterns: Chrome Viz, Flutter Impeller, Android SurfaceFlinger
+- **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
+- **Aliased text** (ADR-034) — TextModeAliased on GPU (Tier 6 NoAAFiller) AND CPU (per-glyph binary rasterization), Skia kAlias parity
+- **Per-glyph text rendering** (ADR-039) — fractional glyph advances (Skia linearMetrics), hinted outlines + fractional positioning
+- **Stroke inner join** (ADR-038) — tiny-skia parity, no teeth on thick strokes
+- **SparseStripsFiller winding** — Vello backdrop.wgsl prefix-sum, windingDelta propagation
+- **SDF thin stroke fallback** (ADR-040) — lineWidth < 2.0 → geometric expansion
+- **NaN safety** (ADR-035) — depth guards on all 12 recursive flatten functions
+- **Damage union** — forwardDamageRects unions explicit + frame damage
+- **CJK text rendering** (ADR-027) — script-aware hinting, exact-size rasterization, dual MSDF atlas 64/128px
+- **Damage-aware compositing** (ADR-026) — LoadOpLoad + scissor, TrackDamageRect, debug overlay dedup
 - **Scene text TagText** (ADR-022) — glyph references, shape-once, DrawShapedGlyphs (Skia drawTextBlob)
-- **Atlas zoom resilience** — Skia size buckets, page reclamation, frame-based compact (ui#94)
 - **ClearType LCD auto-detection** (ADR-024) — Windows SPI, macOS None, Linux Xft/Wayland
-- **Deferred ortho projection** (ADR-025) — Skia sk_RTAdjust, correct offscreen text
 - **Four-level damage pipeline** (ADR-021) — Object Diff → Tile Dirty → GPU Scissor → OS Present
-- **Adapter-aware render mode** (`GOGPU_RENDER_MODE=auto|cpu|gpu`, ADR-020)
-- Canvas API, Text, Images, Clipping, Layers
-- **Seven-tier GPU render pipeline** (SDF + Convex + Stencil-then-Cover + Textured Quad + GPU Texture Composite + MSDF Text + Compute + Glyph Mask)
-- **Zero-readback compositor pipeline** (ADR-015/016)
+- Seven-tier GPU render pipeline (SDF + Convex + Stencil+Cover + Textured Quad + MSDF Text + Compute + Glyph Mask)
+- Zero-readback compositor pipeline (ADR-015/016), single command buffer (ADR-017)
 - All 5 backends: Vulkan, DX12, DX12+DXIL, GLES, Software
-- **Single command buffer compositor** (ADR-017, Flutter Impeller pattern) — CreateSharedEncoder + SetSharedEncoder + SubmitSharedEncoder for multi-context frames
-- **GPU-to-GPU texture compositing** — DrawGPUTexture + CreateOffscreenTexture (Flutter pattern, zero readback)
-- **Bullet-proof encoder lifecycle** — defer-based safety, no silently swallowed errors
-- **Per-context GPU accelerator** (ADR-013) — Skia GrContext pattern, multi-context isolation
-- **Skia AAA pixel-perfect rasterizer** — trapezoid decomposition, diff=0 vs C++ Skia
-- **GPU DrawImage** — Tier 3 textured quad, zero mid-frame CPU flush
-- **Scene GPU auto-select** — GPU rendering for retained-mode scenes
-- **Smart multi-engine rasterizer** — 5 algorithms with per-path auto-selection
-- **Zero-alloc hot path** — QueueShape 26ns/0allocs, ScissorSegment 13ns/0allocs
-- **TexturePool** — Flutter RenderTargetCache pattern, per-frame lifecycle
-- **Path SOA representation** — `[]PathVerb` + `[]float64` (ADR-010, enterprise standard)
-- **Vello compute clip pipeline** — BeginClip/EndClip with packed blend stack (ADR-012)
-- **Alpha mask API** — per-shape, per-layer, luminance masks, GPU interface
-- Vello 9-stage compute pipeline for full-scene GPU rasterization
-- GPU MSDF text + Glyph mask dual-strategy text rendering
-- GPU stroke rendering, RenderDirect zero-copy GPU surface rendering
-- **GPU RRect clip** — analytic SDF in fragment shaders (GPU-CLIP-002)
-- **GPU scissor rect clip** — hardware scissor for rectangular clips (GPU-CLIP-001)
-- **Separated deviceMatrix/userMatrix** — Cairo/Skia/Blend2D pattern for correct HiDPI
-- **SVG renderer** (`gg/svg` package) — parse + render SVG XML for JB-quality icons
-- Recording System for vector export (PDF, SVG)
-- Font hinting, ClearType LCD subpixel rendering
-- Premultiplied alpha, 29 blend modes, structured logging
+- Skia AAA pixel-perfect rasterizer, Vello 9-stage compute pipeline
+- Smart multi-engine rasterizer — 6 algorithms with per-path auto-selection
+- SVG renderer, Recording System (PDF/SVG export), premultiplied alpha, 29 blend modes
 
 ---
 
 ## Upcoming
 
-### v0.47.0 — Next
+### v0.49.0 — Next
 - [ ] Gradient support — BrushLinearGradient/BrushRadialGradient in scene
-- [ ] MSDF reference size increase for CJK display text validation (visual QA)
-- [ ] Integration test: full damage blit pipeline via software backend (CI)
-- [x] HiDPI damage coordinate validation (DeviceScale != 1.0) — done in v0.46.9
+- [ ] GPU-CLIP-003d — stencil-based arbitrary path clip for remaining shapes
 
-### v0.46.11 — Preparing
-- [x] **GPU stroke EvenOdd fill** (ui#101 Thread F, @AnyCPU) — ring-shaped outlines with EvenOdd rule (Skia Ganesh pattern)
-- [x] **Nil texture barrier guard** (ui#101) — prevents Vulkan crash on concurrent resize
-- [x] **SA5011 staticcheck fixes** — 11 `return` after `t.Fatal` in 5 test files
-- [x] Dependencies: wgpu v0.27.5, gogpu v0.34.4
+### v0.48.6 — Current
+- [x] **SparseStripsFiller winding propagation** (BUG-SPARSE-STRIPS-001) — Vello backdrop.wgsl parity
+- [x] **SDF thin stroke fallback** (#346, ADR-040) — lineWidth < 2.0 → geometric expansion
+- [x] **Present damage union** — forwardDamageRects unions explicit + frame damage
 
-### v0.46.10 ✅ Released
-- [x] **GPU scene image affine scale** (ui#101 Thread C, @AnyCPU) — `resolveImage` honors scale components
-- [x] **GPU curved stroke HasCurves** — CPU fallback for curves (superseded by v0.46.11 EvenOdd)
-- [x] Dependencies: wgpu v0.27.4, gogpu v0.34.4, x/image v0.40.0, x/text v0.37.0
+### v0.48.5 ✅ Released
+- [x] **TextModeAliased CPU fallback** (#353) — per-glyph NoAAFiller, works without GPU
+- [x] **Fractional glyph advances** (ADR-039) — Skia linearMetrics, letters no longer merge at 10-12px
+- [x] **Per-glyph text rendering** — text.Draw replaced font.Drawer with RasterizeHinted
 
-### v0.46.9 ✅ Released
-- [x] **Mac Retina quadrant fix** (gg#308, @sverrehu) — `MarkDirty()` logical→physical pixel dimensions
-- [x] **HiDPI regression tests** — `mockHiDPIProvider` (scale=2.0), 3 tests
-- [x] HiDPI damage coordinate validation (DeviceScale != 1.0)
+### v0.48.4 ✅ Released
+- [x] **Stroke inner join teeth** (#354, #353, ADR-038) — tiny-skia stroker.rs parity
 
-### v0.46.8 ✅ Released
-- [x] **CJK IsCJK propagation** — fixed in 6 locations (shaper, scene encoding/decoding)
+### v0.48.0–v0.48.3 ✅ Released
+- [x] Text stroke (ADR-033), TextModeAliased GPU (ADR-034), zero-alloc paint (ADR-036)
+- [x] Scissor coalescing (#335 @celer), NaN safety (ADR-035), polygon rotation (#334 @rcarlier)
+- [x] GPU stroke polyline fix (#347 @TuSKan), stroke expander kurbo parity, BUG-SDF-001
 
-### v0.46.7 ✅ Released
-- [x] **Multi-rect damage** (ADR-028) — per-draw dynamic scissor, 97% tile savings for distant widgets
-- [x] **multi_damage_demo example** — visual validation of per-draw scissor
-- [x] Dependencies: wgpu v0.27.3, gogpu v0.34.3
+### v0.47.0–v0.47.4 ✅ Released
+- [x] Pixel-Perfect Mode (ADR-030), text batch coalescing (ADR-031)
+- [x] HiDPI damage scaling, NewPixmapFromBuffer zero-copy
 
-### v0.46.5–v0.46.6 ✅ Released
-- [x] **Damage-aware compositing** (ADR-026) — RenderDirectWithDamage, LoadOpLoad + scissor
-- [x] **TrackDamageRect** — compositor damage reporting (Chrome Viz / Flutter DiffContext pattern)
-- [x] **Damage scissor intersection** — applyGroupScissorWithDamage, both encode paths
-- [x] **Debug overlay feedback loop fix** — refresh-on-match dedup (Android SurfaceFlinger)
-- [x] **CJK text rendering** (ADR-027) — script-aware hinting, bucket bypass, Tier 6 force, dual MSDF 128px
-- [x] **TTC collection support** — automatic .ttc/.otc detection, WithCollectionIndex option
-- [x] **E2E software backend tests** — pixel-exact LoadOpLoad + scissor verification
-- [x] **computeDamageScissor** — pure function, 10 table-driven tests, CI-ready without GPU
-
-### v0.46.0–v0.46.4 ✅ Released
+### v0.46.0–v0.46.11 ✅ Released
 
 ### v0.45.2–v0.45.3 ✅ Released
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
@@ -259,6 +229,13 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.48.6** | 2026-05 | SparseStripsFiller winding (Vello parity), SDF thin stroke fallback (#346), damage union |
+| v0.48.5 | 2026-05 | TextModeAliased CPU (#353), fractional advances (ADR-039), per-glyph rendering |
+| v0.48.4 | 2026-05 | Stroke inner join teeth (#354, ADR-038, tiny-skia parity) |
+| v0.48.0–3 | 2026-05 | Text stroke (ADR-033), aliased text GPU (ADR-034), GPU stroke fix (#347) |
+| v0.47.0–4 | 2026-05 | Pixel-Perfect Mode (ADR-030), text batch coalescing, HiDPI damage |
+| v0.46.0–11 | 2026-05 | CJK (ADR-027), damage pipeline (ADR-026), scene text (ADR-022), LCD auto-detect |
+| v0.43.0–v0.45.4 | 2026-04 | Compositor APIs, single command buffer, damage pipeline, GPU clips |
 | **v0.42.0** | 2026-04 | GPU texture compositing (DrawGPUTexture + CreateOffscreenTexture), Flutter pattern |
 | v0.41.0–2 | 2026-04 | Per-context GPU (ADR-013), Tier 3 textured quad, Skia AAA, ImageCache genID, text kerning |
 | v0.40.1 | 2026-04 | Adreno fix (#252), Vello compute clip, Buffer.Map, deps update |

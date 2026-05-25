@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SparseStripsFiller winding propagation** (BUG-SPARSE-STRIPS-001) — interior tiles
+  between shape edges rendered as empty gaps. Fixed backdrop calculation to use Vello
+  `backdrop.wgsl` prefix-sum pattern, added `windingDelta` propagation between non-adjacent
+  tiles (Rust Vello `strip.rs:259-263`), and backdrop-only tile emission for filled interiors.
+
 - **SDF thin stroke invisible on GPU** (#346, ADR-040) — SDF stroke with `lineWidth < 2.0`
   now falls back to geometric expansion. The SDF annular ring at sub-2px widths is thinner
   than the smoothstep AA zone, producing near-zero coverage. Affects both CPU SDF accelerator
