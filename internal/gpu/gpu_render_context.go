@@ -699,6 +699,12 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 		return rc.shared.cpuFallback.StrokeShape(target, shape, paint)
 	}
 
+	// Thin strokes (< 2px) fall back to geometric expansion — SDF annular ring
+	// is thinner than smoothstep AA zone, producing near-zero coverage (ADR-040).
+	if paint.EffectiveLineWidth() < 2.0 {
+		return gg.ErrFallbackToCPU
+	}
+
 	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel

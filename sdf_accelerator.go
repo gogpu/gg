@@ -8,6 +8,12 @@ const (
 	// per-pixel SDF evaluation cost exceeds the benefit for tiny shapes where
 	// the total pixel count is low (e.g., a 10x10 circle = 100 pixels).
 	sdfMinSize = 16
+
+	// sdfMinStrokeWidth is the minimum stroke width for SDF stroke rendering.
+	// Below this, the annular ring (half_stroke) is thinner than the smoothstep
+	// AA zone, producing near-zero coverage. Geometric stroke expansion (CPU
+	// scanline) handles thin strokes correctly. ADR-040.
+	sdfMinStrokeWidth = 2.0
 )
 
 // SDFAccelerator is a CPU-based SDF accelerator for simple geometric shapes.
@@ -90,6 +96,9 @@ func (a *SDFAccelerator) Flush(_ GPURenderTarget) error { return nil }
 // unless forceSDF is enabled (RasterizerSDF mode).
 func (a *SDFAccelerator) StrokeShape(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	if !a.forceSDF && shapeTooSmallForSDF(shape) {
+		return ErrFallbackToCPU
+	}
+	if !a.forceSDF && paint.EffectiveLineWidth() < sdfMinStrokeWidth {
 		return ErrFallbackToCPU
 	}
 	switch shape.Kind {

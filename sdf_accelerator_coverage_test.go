@@ -333,6 +333,52 @@ func TestShapeTooSmallForSDF(t *testing.T) {
 	}
 }
 
+// --- sdfMinStrokeWidth tests ---
+
+func TestSDFAccelerator_ThinStrokeFallback(t *testing.T) {
+	accel := &SDFAccelerator{}
+	target := GPURenderTarget{
+		Data:   make([]uint8, 100*100*4),
+		Width:  100,
+		Height: 100,
+		Stride: 400,
+	}
+	shape := DetectedShape{
+		Kind:    ShapeRRect,
+		CenterX: 50, CenterY: 50,
+		Width: 80, Height: 40,
+		CornerRadius: 5,
+	}
+
+	tests := []struct {
+		name      string
+		lineWidth float64
+		wantErr   bool
+	}{
+		{"lineWidth=1.0 fallback", 1.0, true},
+		{"lineWidth=1.5 fallback", 1.5, true},
+		{"lineWidth=1.99 fallback", 1.99, true},
+		{"lineWidth=2.0 renders", 2.0, false},
+		{"lineWidth=3.0 renders", 3.0, false},
+		{"lineWidth=10.0 renders", 10.0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paint := NewPaint()
+			paint.SetBrush(Solid(Red))
+			paint.LineWidth = tt.lineWidth
+			err := accel.StrokeShape(target, shape, paint)
+			if tt.wantErr && err == nil {
+				t.Errorf("lineWidth=%.1f: expected ErrFallbackToCPU, got nil", tt.lineWidth)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("lineWidth=%.1f: unexpected error: %v", tt.lineWidth, err)
+			}
+		})
+	}
+}
+
 // --- getColorFromPaint tests ---
 
 func TestGetColorFromPaint(t *testing.T) {
