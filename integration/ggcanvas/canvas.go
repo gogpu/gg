@@ -342,8 +342,8 @@ func (c *Canvas) SetPresentDamage(rects []image.Rectangle) {
 }
 
 // forwardDamageRects sends damage rects to the OS compositor via SetDamageRects
-// (ADR-021 Level 4). Uses explicit rects from SetPresentDamage if available,
-// otherwise falls back to immediate-mode FrameDamage rects.
+// (ADR-021 Level 4). Unions explicit rects from SetPresentDamage with
+// immediate-mode FrameDamage — never lets caller understate actual damage.
 // Clears presentDamageRects after forwarding (one-shot per frame).
 func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectangle) {
 	setter, ok := dc.(DamageRectSetter)
@@ -354,6 +354,8 @@ func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectang
 	rects := c.presentDamageRects
 	if len(rects) == 0 {
 		rects = frameDamage
+	} else if len(frameDamage) > 0 {
+		rects = append(rects, frameDamage...)
 	}
 	if len(rects) > 0 {
 		setter.SetDamageRects(rects)

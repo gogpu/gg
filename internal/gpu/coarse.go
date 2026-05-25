@@ -334,39 +334,69 @@ func (cr *CoarseRasterizer) TileRows() uint16 {
 
 // CalculateBackdrop calculates the backdrop winding for fine rasterization.
 // Returns a slice of backdrop values indexed by [y * columns + x].
+//
+// Backdrop represents the accumulated winding number from the left edge of
+// the viewport to each tile. This is computed in two passes:
+//  1. Accumulate winding deltas at tiles that have segment entries.
+//  2. Propagate (prefix-sum) left-to-right across ALL tiles in each row,
+//     filling interior tiles that have no segments but are inside a filled
+//     region.
+//
+// This matches the Vello backdrop compute shader (backdrop.wgsl) which performs
+// a left-to-right prefix sum per row. Without this propagation, interior tiles
+// of wide shapes (e.g. a rectangle spanning many tiles) would have zero backdrop
+// and render as empty gaps.
+//
+// Reference: Vello tilecompute/shaders/backdrop.wgsl, Rust Vello strip.rs:259-263
 func (cr *CoarseRasterizer) CalculateBackdrop() []int32 {
 	if cr.segments == nil || len(cr.entries) == 0 {
 		return nil
 	}
 
-	backdrop := make([]int32, int(cr.tileColumns)*int(cr.tileRows))
+	cols := int(cr.tileColumns)
+	rows := int(cr.tileRows)
+	backdrop := make([]int32, cols*rows)
 
 	// Ensure entries are sorted
 	cr.SortEntries()
 
 	lines := cr.segments.Segments()
 
-	// Process each row
-	currentY := uint16(0xFFFF)
-	rowWinding := int32(0)
-
+	// Pass 1: Record winding deltas at tiles that have segment entries.
+	// A winding delta at tile (x,y) means segments in that tile contribute
+	// a net winding change that affects all tiles to the right on the same row.
 	for _, entry := range cr.entries {
-		// New row?
-		if entry.Y != currentY {
-			currentY = entry.Y
-			rowWinding = 0
-		}
-
-		// Get backdrop for this tile position
-		idx := int(entry.Y)*int(cr.tileColumns) + int(entry.X)
-		if idx < len(backdrop) {
-			backdrop[idx] = rowWinding
-		}
-
-		// Update winding based on segment direction
 		if entry.Winding && int(entry.LineIdx) < len(lines) {
 			line := lines[entry.LineIdx]
-			rowWinding += int32(line.Winding)
+			idx := int(entry.Y)*cols + int(entry.X)
+			if idx >= 0 && idx < len(backdrop) {
+				backdrop[idx] += int32(line.Winding)
+			}
+		}
+	}
+
+	// Pass 2: Left-to-right prefix sum per row (Vello backdrop pattern).
+	// After this, backdrop[y*cols+x] contains the total winding from the
+	// left edge of the viewport to tile (x,y), inclusive of all segments
+	// in tiles 0..x on row y.
+	for y := 0; y < rows; y++ {
+		rowBase := y * cols
+		sum := int32(0)
+		for x := 0; x < cols; x++ {
+			sum += backdrop[rowBase+x]
+			backdrop[rowBase+x] = sum
+		}
+	}
+
+	// Pass 3: Shift right — backdrop for tile X should be the accumulated
+	// winding from segments strictly to the LEFT of X (tiles 0..X-1), not
+	// including X itself. This matches the Vello convention where backdrop
+	// represents the winding state BEFORE processing local segments.
+	for y := 0; y < rows; y++ {
+		rowBase := y * cols
+		prev := int32(0)
+		for x := 0; x < cols; x++ {
+			backdrop[rowBase+x], prev = prev, backdrop[rowBase+x]
 		}
 	}
 

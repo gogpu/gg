@@ -1172,7 +1172,7 @@ func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
 	}
 }
 
-func TestSetPresentDamage_ExplicitOverridesFrameDamage(t *testing.T) {
+func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1187,8 +1187,14 @@ func TestSetPresentDamage_ExplicitOverridesFrameDamage(t *testing.T) {
 	dc := &mockRenderTarget{}
 	c.forwardDamageRects(dc, frameDamage)
 
-	if len(dc.damageRects) != 1 || dc.damageRects[0] != explicit[0] {
-		t.Errorf("damageRects = %v, want explicit %v", dc.damageRects, explicit)
+	if len(dc.damageRects) != 2 {
+		t.Fatalf("damageRects count = %d, want 2 (union of explicit + frame)", len(dc.damageRects))
+	}
+	if dc.damageRects[0] != explicit[0] {
+		t.Errorf("damageRects[0] = %v, want explicit %v", dc.damageRects[0], explicit[0])
+	}
+	if dc.damageRects[1] != frameDamage[0] {
+		t.Errorf("damageRects[1] = %v, want frameDamage %v", dc.damageRects[1], frameDamage[0])
 	}
 }
 

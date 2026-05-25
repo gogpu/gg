@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, **pixel-perfect mode** (`SetAntiAlias(false)` — dedicated NoAAFiller, Skia/Cairo/tiny-skia pattern), CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
+| **Text** | TrueType fonts, MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks — GPU + CPU), **per-glyph rendering** (fractional advances, Skia linearMetrics pattern), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, **HiDPI-aware damage tracking** (logical→physical scaling for OS compositor), damage-aware multi-rect sub-region updates, per-draw dynamic scissor ADR-028) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
@@ -154,11 +154,13 @@ path := dc.TextPath("Hello", x, y)
 
 ### Aliased Text
 
-Pixel-perfect text with binary coverage (Skia `SkFont::Edging::kAlias`):
+Pixel-perfect text with binary coverage (Skia `SkFont::Edging::kAlias`).
+Works on both GPU and CPU — no GPU required:
 
 ```go
 dc.SetTextMode(gg.TextModeAliased)  // no gray edge pixels on text
 dc.DrawString("Pixel Perfect", x, y)
+dc.SavePNG("aliased.png")           // works standalone, no import _ "gg/gpu" needed
 ```
 
 Geometry AA (`SetAntiAlias`) and text AA (`SetTextMode`) are independent — matching

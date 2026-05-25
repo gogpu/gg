@@ -1040,3 +1040,183 @@ func BenchmarkSparseStripsPool(b *testing.B) {
 		pool.Put(ssr)
 	}
 }
+
+// =============================================================================
+// Winding Propagation Tests (BUG-SPARSE-STRIPS-001)
+// =============================================================================
+
+// TestWindingPropagationBetweenTiles verifies that winding is correctly
+// propagated between non-adjacent tiles on the same row. A wide rectangle
+// has its left edge in tile 0 and right edge in tile 9; tiles between
+// them must be fully filled via backdrop prefix-sum propagation.
+//
+// Before the fix (BUG-SPARSE-STRIPS-001), interior tiles that had no
+// segment entries and zero backdrop would render empty because
+// CalculateBackdrop only wrote values at tiles with coarse entries,
+// not for the entire row. The fix implements a Vello-style left-to-right
+// prefix sum (backdrop.wgsl pattern) so interior tiles inherit the
+// accumulated winding from edges to their left.
+//
+// The rectangle uses tile-aligned Y coordinates (y=0 to y=8) so that
+// edge segments cross tile TOP boundaries, setting winding=true in the
+// coarse entries. This ensures backdrop propagation covers all tile rows.
+//
+// Reference: Vello tilecompute/shaders/backdrop.wgsl, strip.rs:259-263
+func TestWindingPropagationBetweenTiles(t *testing.T) {
+	// Canvas: 40x8 pixels = 10x2 tiles (TileSize=4)
+	// Rectangle from (1,0) to (39,8) — left edge in tile col 0,
+	// right edge in tile col 9. Y range covers full canvas height
+	// so backdrop propagation works on all tile rows.
+	const (
+		canvasW = 40
+		canvasH = 8
+	)
+
+	path := scene.NewPath().Rectangle(1, 0, 38, 8) // x, y, w, h
+	config := DefaultConfig(canvasW, canvasH)
+	config.FillRule = scene.FillNonZero
+	ssr := NewSparseStripsRasterizer(config)
+
+	ssr.RasterizePath(path, scene.IdentityAffine(), FlattenTolerance)
+	grid := ssr.Grid()
+
+	// Check interior tiles (columns 1 through 8) — these are between
+	// the left and right edges and should be fully filled (alpha=255).
+	for tileCol := int32(1); tileCol <= 8; tileCol++ {
+		for tileRow := int32(0); tileRow < 2; tileRow++ {
+			tile := grid.Get(tileCol, tileRow)
+
+			for py := 0; py < TileSize; py++ {
+				pixelY := int(tileRow)*TileSize + py
+				if pixelY >= canvasH {
+					continue
+				}
+				for px := 0; px < TileSize; px++ {
+					pixelX := int(tileCol)*TileSize + px
+					if pixelX < 2 || pixelX >= 38 {
+						continue // Near edges, may have partial coverage
+					}
+
+					if tile == nil {
+						t.Errorf("Interior pixel (%d,%d) in tile(%d,%d): tile is nil, want alpha=255",
+							pixelX, pixelY, tileCol, tileRow)
+						continue
+					}
+
+					alpha := tile.GetCoverage(px, py)
+					if alpha < 250 {
+						t.Errorf("Interior pixel (%d,%d) in tile(%d,%d): alpha=%d, want >=250 (fully filled)",
+							pixelX, pixelY, tileCol, tileRow, alpha)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestWindingPropagation_FineRasterizer verifies backdrop propagation
+// in the FineRasterizer code path (non-strip), which is used for
+// tile-grid based rendering.
+func TestWindingPropagation_FineRasterizer(t *testing.T) {
+	const (
+		canvasW = 40
+		canvasH = 8
+	)
+
+	// Tile-aligned rectangle: y=0 to y=8 fills full tile rows,
+	// ensuring backdrop propagation works for all rows.
+	path := scene.NewPath().Rectangle(1, 0, 38, 8)
+	segments := FlattenPath(path, scene.IdentityAffine(), FlattenTolerance)
+
+	cr := NewCoarseRasterizer(canvasW, canvasH)
+	cr.Rasterize(segments)
+	cr.SortEntries()
+	backdrop := cr.CalculateBackdrop()
+
+	fr := NewFineRasterizer(canvasW, canvasH)
+	fr.Rasterize(cr, segments, backdrop)
+	grid := fr.Grid()
+
+	// Interior tiles (columns 1-8) must be fully filled via backdrop.
+	for tileCol := int32(1); tileCol <= 8; tileCol++ {
+		for tileRow := int32(0); tileRow < 2; tileRow++ {
+			tile := grid.Get(tileCol, tileRow)
+
+			for py := 0; py < TileSize; py++ {
+				pixelY := int(tileRow)*TileSize + py
+				if pixelY >= canvasH {
+					continue
+				}
+				for px := 0; px < TileSize; px++ {
+					pixelX := int(tileCol)*TileSize + px
+					if pixelX < 2 || pixelX >= 38 {
+						continue
+					}
+
+					if tile == nil {
+						t.Errorf("FineRasterizer: interior pixel (%d,%d) in tile(%d,%d): tile is nil",
+							pixelX, pixelY, tileCol, tileRow)
+						continue
+					}
+
+					alpha := tile.GetCoverage(px, py)
+					if alpha < 250 {
+						t.Errorf("FineRasterizer: interior pixel (%d,%d) in tile(%d,%d): alpha=%d, want >=250",
+							pixelX, pixelY, tileCol, tileRow, alpha)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestWindingPropagation_EvenOddFillRule verifies winding propagation
+// works correctly with EvenOdd fill rule. A simple rectangle should
+// render identically regardless of fill rule.
+func TestWindingPropagation_EvenOddFillRule(t *testing.T) {
+	const (
+		canvasW = 24
+		canvasH = 8
+	)
+
+	// Tile-aligned Y: y=0 to y=8 fills full tile rows.
+	path := scene.NewPath().Rectangle(1, 0, 22, 8)
+	config := DefaultConfig(canvasW, canvasH)
+	config.FillRule = scene.FillEvenOdd
+	ssr := NewSparseStripsRasterizer(config)
+
+	ssr.RasterizePath(path, scene.IdentityAffine(), FlattenTolerance)
+	grid := ssr.Grid()
+
+	// Interior tiles (columns 1 through 4) should be fully filled
+	for tileCol := int32(1); tileCol <= 4; tileCol++ {
+		for tileRow := int32(0); tileRow < 2; tileRow++ {
+			tile := grid.Get(tileCol, tileRow)
+
+			for py := 0; py < TileSize; py++ {
+				pixelY := int(tileRow)*TileSize + py
+				if pixelY >= canvasH {
+					continue
+				}
+				for px := 0; px < TileSize; px++ {
+					pixelX := int(tileCol)*TileSize + px
+					if pixelX < 2 || pixelX >= 22 {
+						continue
+					}
+
+					if tile == nil {
+						t.Errorf("EvenOdd: interior pixel (%d,%d) in tile(%d,%d): tile is nil",
+							pixelX, pixelY, tileCol, tileRow)
+						continue
+					}
+
+					alpha := tile.GetCoverage(px, py)
+					if alpha < 250 {
+						t.Errorf("EvenOdd: interior pixel (%d,%d) in tile(%d,%d): alpha=%d, want >=250",
+							pixelX, pixelY, tileCol, tileRow, alpha)
+					}
+				}
+			}
+		}
+	}
+}

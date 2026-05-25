@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.6] - 2026-05-26
+
+### Fixed
+
+- **SparseStripsFiller winding propagation** (BUG-SPARSE-STRIPS-001) — interior tiles
+  between shape edges rendered as empty gaps. Fixed backdrop calculation to use Vello
+  `backdrop.wgsl` prefix-sum pattern, added `windingDelta` propagation between non-adjacent
+  tiles (Rust Vello `strip.rs:259-263`), and backdrop-only tile emission for filled interiors.
+
+- **SDF thin stroke invisible on GPU** (#346, ADR-040) — SDF stroke with `lineWidth < 2.0`
+  now falls back to geometric expansion. The SDF annular ring at sub-2px widths is thinner
+  than the smoothstep AA zone, producing near-zero coverage. Affects both CPU SDF accelerator
+  and GPU render context. M3 Outlined button (lineWidth=1.5) now renders correctly.
+
+- **Present damage union** (TASK-GG-PRESENT-DAMAGE-UNION) — `forwardDamageRects` now unions
+  explicit rects from `SetPresentDamage()` with immediate-mode `FrameDamage`, never letting
+  caller understate actual damage. Previously explicit rects overrode frame damage, causing
+  DWM flickering when debug overlay drew outside declared damage region.
+
 ## [0.48.5] - 2026-05-25
 
 ### Fixed
@@ -19,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on CPU-only contexts (`gg.NewContext()` + `SavePNG()`). Uses per-glyph `NoAAFiller`
   rasterization (binary 0/255 coverage), matching Skia `SkFont::Edging::kAlias` and
   GPU Tier 6 path. Previously fell back to `x/image/font.Drawer` which always anti-aliases.
+
+- **SDF thin stroke invisible on GPU** (#346, ADR-040) — SDF stroke with `lineWidth < 2.0`
+  now falls back to geometric expansion. The SDF annular ring at sub-2px widths is thinner
+  than the smoothstep AA zone, producing near-zero coverage. Affects both CPU SDF accelerator
+  and GPU render context. M3 Outlined button (lineWidth=1.5) now renders correctly.
 
 ### Changed
 

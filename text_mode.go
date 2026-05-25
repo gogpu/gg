@@ -53,9 +53,12 @@ const (
 	// and geometry AA are orthogonal — you can have aliased text on
 	// anti-aliased shapes, or vice versa.
 	//
-	// Uses the same Tier 6 glyph mask pipeline (R8 atlas + GPU textured
-	// quads) but rasterizes with the NoAAFiller (integer scanline, binary
-	// spans) instead of the AnalyticFiller (256-level AA).
+	// Works on both GPU and CPU paths:
+	//   - GPU: Tier 6 glyph mask pipeline (R8 atlas + textured quads)
+	//   - CPU: per-glyph [DrawAliased] via [GlyphMaskRasterizer.RasterizeAliased]
+	//
+	// Both paths use NoAAFiller (integer scanline, binary spans) for
+	// pixel-identical output regardless of GPU availability.
 	//
 	// Best for: retro/pixel-art aesthetics, terminal emulators, bitmap
 	// font emulation, development tools where crisp edges are preferred.

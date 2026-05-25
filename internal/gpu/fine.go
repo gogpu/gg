@@ -57,6 +57,15 @@ func (fr *FineRasterizer) FillRule() scene.FillStyle {
 
 // Rasterize performs fine rasterization on coarse tile entries.
 // It calculates analytic anti-aliased coverage for each pixel.
+//
+// After processing all coarse entries (tiles with segments), this method
+// also emits solid tiles for backdrop-only positions — tiles that have
+// non-zero backdrop winding but no segment entries. These are the interior
+// tiles of filled shapes (e.g., the middle of a wide rectangle).
+//
+// Reference: Vello backdrop.wgsl prefix sum + fine.wgsl backdrop fill.
+//
+//nolint:gocognit // Complexity inherent to tile iteration + backdrop-only emission
 func (fr *FineRasterizer) Rasterize(
 	coarse *CoarseRasterizer,
 	segments *SegmentList,
@@ -67,6 +76,12 @@ func (fr *FineRasterizer) Rasterize(
 	fr.grid.Reset()
 
 	if segments == nil || len(coarse.Entries()) == 0 {
+		// Even with no entries, backdrop may contain non-zero values
+		// from a prior CalculateBackdrop() — but if entries is empty,
+		// backdrop should also be nil per CalculateBackdrop contract.
+		if backdrop != nil {
+			fr.emitBackdropOnlyTiles(backdrop, coarse)
+		}
 		return
 	}
 
@@ -76,9 +91,18 @@ func (fr *FineRasterizer) Rasterize(
 	// Process tiles in sorted order, grouping by location
 	coarse.SortEntries()
 
+	// Track which tiles were visited via coarse entries so we can emit
+	// backdrop-only tiles afterward.
+	visited := make(map[uint32]bool, len(entries))
+
 	var currentX, currentY uint16 = 0xFFFF, 0xFFFF
 	var tileWinding [TileSize][TileSize]float32
 	var accumulatedWinding [TileSize]float32
+	// windingDelta tracks net integer winding from processed segments on the
+	// current row. When jumping to a non-adjacent tile on the same row, we
+	// propagate this delta into accumulatedWinding so that sub-pixel area
+	// contributions are not lost. Matches Rust Vello strip.rs:259-263.
+	var windingDelta int32
 
 	for i, entry := range entries {
 		// Check if we're at a new tile location
@@ -88,15 +112,42 @@ func (fr *FineRasterizer) Rasterize(
 				fr.finalizeTile(currentX, currentY, &tileWinding, &accumulatedWinding)
 			}
 
+			// Detect row change vs same-row tile gap
+			if currentY != 0xFFFF && entry.Y != currentY {
+				// New row — reset winding delta
+				windingDelta = 0
+			}
+
 			// Start new tile
 			currentX, currentY = entry.X, entry.Y
+			visited[tileKey32(currentX, currentY)] = true
 			fr.initTileWinding(&tileWinding, &accumulatedWinding, currentX, currentY)
+
+			// When jumping to a non-adjacent tile on the same row,
+			// propagate windingDelta into accumulatedWinding.
+			// Rust Vello strip.rs:263: accumulated_winding = f32x4::splat(s, winding_delta as f32)
+			// The backdrop provides coarse integer winding; windingDelta adds the
+			// net contribution from segments processed in previous tiles on this row.
+			if windingDelta != 0 {
+				wdF := float32(windingDelta)
+				for y := 0; y < TileSize; y++ {
+					accumulatedWinding[y] += wdF
+					for x := 0; x < TileSize; x++ {
+						tileWinding[y][x] += wdF
+					}
+				}
+			}
 		}
 
 		// Process segment contribution to this tile
 		if int(entry.LineIdx) < len(lines) {
 			line := lines[entry.LineIdx]
 			fr.processSegment(line, currentX, currentY, &tileWinding, &accumulatedWinding)
+
+			// Update winding delta from segments that contribute winding at this tile
+			if entry.Winding {
+				windingDelta += int32(line.Winding)
+			}
 		}
 
 		// Check if next entry is at different location (or this is last)
@@ -106,6 +157,59 @@ func (fr *FineRasterizer) Rasterize(
 			if !isLast {
 				currentX, currentY = 0xFFFF, 0xFFFF
 			}
+		}
+	}
+
+	// Emit solid tiles for backdrop-only positions (interior tiles with no segments).
+	// These tiles have non-zero backdrop from the prefix sum but were never visited
+	// because no segments cross them.
+	fr.emitBackdropOnlyTilesWithVisited(backdrop, coarse, visited)
+}
+
+// tileKey32 packs tile coordinates into a single uint32 for map lookup.
+func tileKey32(x, y uint16) uint32 {
+	return uint32(y)<<16 | uint32(x)
+}
+
+// emitBackdropOnlyTiles fills tiles that have non-zero backdrop but no coarse entries.
+// This is the fallback path when there are no coarse entries at all.
+func (fr *FineRasterizer) emitBackdropOnlyTiles(backdrop []int32, coarse *CoarseRasterizer) {
+	fr.emitBackdropOnlyTilesWithVisited(backdrop, coarse, nil)
+}
+
+// emitBackdropOnlyTilesWithVisited fills tiles that have non-zero backdrop but
+// were not visited during coarse entry processing. These are the interior tiles
+// of filled shapes — they have no segments crossing them but should be solid
+// because the winding number (from edges to the left) is non-zero.
+func (fr *FineRasterizer) emitBackdropOnlyTilesWithVisited(
+	backdrop []int32,
+	coarse *CoarseRasterizer,
+	visited map[uint32]bool,
+) {
+	if backdrop == nil {
+		return
+	}
+
+	cols := int(coarse.TileColumns())
+	rows := int(coarse.TileRows())
+
+	for ty := 0; ty < rows; ty++ {
+		for tx := 0; tx < cols; tx++ {
+			idx := ty*cols + tx
+			if idx >= len(backdrop) || backdrop[idx] == 0 {
+				continue
+			}
+
+			//nolint:gosec // tx, ty bounded by viewport tile dimensions
+			key := tileKey32(uint16(tx), uint16(ty))
+			if visited != nil && visited[key] {
+				continue // Already processed via coarse entries
+			}
+
+			// This tile has non-zero backdrop and no segments — fill solid.
+			//nolint:gosec // tx, ty bounded by viewport tile dimensions
+			tile := fr.grid.GetOrCreate(int32(tx), int32(ty))
+			fr.fillTileWithBackdrop(tile, backdrop[idx])
 		}
 	}
 }
@@ -734,6 +838,22 @@ func (sr *StripRenderer) RenderTiles(
 			// Initialize new tile
 			currentX, currentY = entry.X, entry.Y
 			sr.initTileWindingForStrip(&tileWinding, &accumulatedWinding, backdrop, currentX, currentY, int(coarse.TileColumns()))
+
+			// When jumping to a non-adjacent tile on the same row, propagate
+			// windingDelta into accumulatedWinding so that sub-pixel area
+			// contributions from prior tiles are not lost.
+			// Matches Rust Vello strip.rs:259-263:
+			//   accumulated_winding = f32x4::splat(s, winding_delta as f32)
+			if !prevLocation && windingDelta != 0 {
+				wdF := float32(windingDelta)
+				for y := 0; y < TileSize; y++ {
+					accumulatedWinding[y] += wdF
+					for x := 0; x < TileSize; x++ {
+						tileWinding[y][x] += wdF
+					}
+				}
+			}
+
 			prevTile = entry
 		}
 
