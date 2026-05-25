@@ -4,10 +4,9 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/opentype"
-	"golang.org/x/image/math/fixed"
 )
 
 // Draw renders text to a destination image.
@@ -33,40 +32,110 @@ func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color)
 	}
 }
 
-// drawSourceFace renders text using a sourceFace.
-func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, col color.Color) {
-	// Get the parsed font
+// glyphRasterizeFunc is the per-glyph rasterization callback used by drawGlyphs.
+// It abstracts the difference between RasterizeHinted (256-level AA) and
+// RasterizeAliased (binary coverage), allowing drawSourceFace and DrawAliased
+// to share the glyph iteration and compositing loop.
+type glyphRasterizeFunc func(
+	rast *GlyphMaskRasterizer,
+	pf ParsedFont,
+	gid GlyphID,
+	ppem float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+) (*GlyphMaskResult, error)
+
+// drawGlyphs is the shared per-glyph rendering loop for drawSourceFace and
+// DrawAliased. Each glyph is individually rasterized via the provided callback,
+// then composited at its precise subpixel position using draw.DrawMask.
+//
+// The Glyphs() iterator returns fractional X positions from HintingNone
+// advances (ADR-039), while the rasterize callback controls outline
+// rasterization (AA vs aliased).
+func drawGlyphs(
+	dst draw.Image,
+	sf *sourceFace,
+	text string,
+	x, y float64,
+	col color.Color,
+	rasterize glyphRasterizeFunc,
+) {
 	parsed := sf.source.Parsed()
-	xparsed, ok := parsed.(*ximageParsedFont)
-	if !ok {
-		return
-	}
+	ppem := sf.size
+	hinting := sf.config.hinting
 
-	// Create opentype face
-	opts := &opentype.FaceOptions{
-		Size:    sf.size,
-		DPI:     72,
-		Hinting: mapHinting(sf.config.hinting),
-	}
+	rast := NewGlyphMaskRasterizer()
+	src := image.NewUniform(col)
 
-	otFace, err := opentype.NewFace(xparsed.font, opts)
-	if err != nil {
-		return
-	}
-	defer func() {
-		_ = otFace.Close()
-	}()
+	for glyph := range sf.Glyphs(text) {
+		if glyph.GID == 0 {
+			continue
+		}
 
-	// Create drawer
-	d := &font.Drawer{
-		Dst:  dst,
-		Src:  image.NewUniform(col),
-		Face: otFace,
-		Dot:  fixed.Point26_6{X: fixed.Int26_6(x * 64), Y: fixed.Int26_6(y * 64)},
-	}
+		// glyph.X is the accumulated horizontal position (includes all prior advances).
+		glyphX := x + glyph.X
+		glyphY := y + glyph.Y
 
-	// Tabs already expanded to spaces by Draw() via expandTabs().
-	d.DrawString(text)
+		intX := math.Floor(glyphX)
+		intY := math.Floor(glyphY)
+		subpixelX := glyphX - intX
+		subpixelY := glyphY - intY
+
+		result, err := rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+		if err != nil || result == nil {
+			continue
+		}
+
+		maskImg := &image.Alpha{
+			Pix:    result.Mask,
+			Stride: result.Width,
+			Rect:   image.Rect(0, 0, result.Width, result.Height),
+		}
+
+		dstX := int(intX) + int(math.Round(float64(result.BearingX)))
+		dstY := int(intY) - int(math.Round(float64(result.BearingY)))
+
+		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
+		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
+	}
+}
+
+// rasterizeHintedGlyph rasterizes a glyph with 256-level analytic AA coverage.
+func rasterizeHintedGlyph(
+	rast *GlyphMaskRasterizer,
+	pf ParsedFont,
+	gid GlyphID,
+	ppem float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+) (*GlyphMaskResult, error) {
+	return rast.RasterizeHinted(pf, gid, ppem, subpixelX, subpixelY, hinting)
+}
+
+// rasterizeAliasedGlyph rasterizes a glyph with binary (0 or 255) coverage.
+func rasterizeAliasedGlyph(
+	rast *GlyphMaskRasterizer,
+	pf ParsedFont,
+	gid GlyphID,
+	ppem float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+) (*GlyphMaskResult, error) {
+	return rast.RasterizeAliased(pf, gid, ppem, subpixelX, subpixelY, hinting)
+}
+
+// drawSourceFace renders text using per-glyph rasterization with fractional
+// advances. Each glyph is individually rasterized via GlyphMaskRasterizer
+// (256-level analytic AA with hinting), then composited at its precise
+// subpixel position.
+//
+// This replaces the previous font.Drawer approach which used integer-rounded
+// advances internally, causing letters to merge at small sizes (e.g., "Te"
+// at 12px). The Glyphs() iterator now returns fractional X positions from
+// HintingNone advances (ADR-039), while outline rasterization still uses
+// the face's configured hinting for crisp stems.
+func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, col color.Color) {
+	drawGlyphs(dst, sf, text, x, y, col, rasterizeHintedGlyph)
 }
 
 // drawMultiFace renders text using a MultiFace, selecting the appropriate font for each rune.
