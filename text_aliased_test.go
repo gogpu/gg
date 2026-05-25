@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"image"
 	"os"
 	"testing"
 
@@ -67,8 +68,8 @@ func TestTextModeAliased_SelectStrategy(t *testing.T) {
 }
 
 // TestTextModeAliased_DrawString_CPUFallback verifies that aliased text
-// renders without panic on CPU path (no GPU accelerator registered).
-// Without GPU, it falls back to CPU bitmap rendering.
+// renders with binary alpha on CPU path (no GPU accelerator registered).
+// Uses drawStringCPUAliased which routes through NoAAFiller per-glyph.
 func TestTextModeAliased_DrawString_CPUFallback(t *testing.T) {
 	fontPath := findAliasedTestFont()
 	if fontPath == "" {
@@ -88,7 +89,6 @@ func TestTextModeAliased_DrawString_CPUFallback(t *testing.T) {
 	dc.SetRGB(0, 0, 0)
 	dc.SetTextMode(TextModeAliased)
 
-	// Should not panic.
 	dc.DrawString("Hello", 10, 30)
 
 	// Verify some pixels were drawn (not all white).
@@ -108,6 +108,47 @@ func TestTextModeAliased_DrawString_CPUFallback(t *testing.T) {
 	}
 	if !drawn {
 		t.Error("No pixels drawn — aliased text may not be rendering")
+	}
+}
+
+// TestTextModeAliased_BinaryAlpha verifies the full pipeline:
+// Context.DrawString with TextModeAliased produces only binary alpha in the pixmap.
+func TestTextModeAliased_BinaryAlpha(t *testing.T) {
+	fontPath := findAliasedTestFont()
+	if fontPath == "" {
+		t.Skip("No system font available")
+	}
+
+	dc := NewContext(200, 50)
+
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	face := source.Face(24.0)
+	dc.SetFont(face)
+	dc.SetRGB(0, 0, 0)
+	dc.SetTextMode(TextModeAliased)
+
+	dc.DrawString("OWg", 10, 35)
+
+	img := dc.Image().(*image.RGBA)
+	hasNonZero := false
+	for i := 3; i < len(img.Pix); i += 4 {
+		a := img.Pix[i]
+		if a != 0 && a != 255 {
+			x := (i / 4) % img.Stride / 4 //nolint:mnd // pixel index math
+			y := (i / 4) / (img.Stride / 4)
+			t.Errorf("pixel(%d,%d) alpha = %d, want 0 or 255", x, y, a)
+			return
+		}
+		if a != 0 {
+			hasNonZero = true
+		}
+	}
+
+	if !hasNonZero {
+		t.Error("no pixels drawn — aliased text pipeline produced empty pixmap")
 	}
 }
 

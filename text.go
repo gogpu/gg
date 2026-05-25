@@ -75,9 +75,8 @@ func (c *Context) DrawString(s string, x, y float64) {
 		if c.tryGPUGlyphMaskTextAliased(s, x, y) {
 			return
 		}
-		// CPU fallback: bitmap rasterization (already non-AA at small sizes).
-		c.flushGPUAccelerator()
-		c.drawStringCPU(s, x, y)
+		// CPU fallback: per-glyph NoAAFiller rasterization (binary 0/255 masks).
+		c.drawStringCPUAliased(s, x, y)
 	case TextModeMSDF:
 		// Try GPU MSDF first; fall back to CPU if unavailable.
 		if c.tryGPUText(s, x, y) {
@@ -569,6 +568,47 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 	p := c.totalMatrix().TransformPoint(Pt(x, y))
 	c.flushGPUAccelerator()
 	text.Draw(c.pixmap, s, deviceFace, p.X, p.Y, c.currentColor())
+}
+
+// drawStringCPUAliased renders text with binary (non-anti-aliased) coverage on CPU.
+// Uses GlyphMaskRasterizer.RasterizeAliased (NoAAFiller) to produce per-glyph R8
+// masks with only 0 or 255 values, then composites via draw.DrawMask.
+//
+// For rotation/skew, routes through drawStringAsOutlines with AA disabled so the
+// normal fill pipeline uses NoAAFiller for vector outlines.
+func (c *Context) drawStringCPUAliased(s string, x, y float64) {
+	m := c.matrix
+
+	// Non-trivial transforms: route through vector outlines with AA disabled.
+	// IsTranslationOnly = identity + translation.
+	// Uniform positive scale: B=0, D=0, A=E, A>0.
+	if !m.IsTranslationOnly() && !(m.B == 0 && m.D == 0 && m.A == m.E && m.A > 0) {
+		saved := c.paint.Antialias
+		c.paint.Antialias = false
+		c.drawStringAsOutlines(s, x, y)
+		c.paint.Antialias = saved
+		return
+	}
+
+	p := c.totalMatrix().TransformPoint(Pt(x, y))
+	c.flushGPUAccelerator()
+
+	face := c.face
+	if c.deviceScale != 1.0 {
+		if source := c.face.Source(); source != nil {
+			face = source.Face(c.face.Size() * c.deviceScale)
+		}
+	}
+
+	// Uniform scale: create device-size face for crisp rendering.
+	if !m.IsTranslationOnly() && m.B == 0 && m.D == 0 && m.A == m.E && m.A > 0 {
+		deviceSize := c.face.Size() * m.A
+		if source := c.face.Source(); source != nil {
+			face = source.Face(deviceSize * c.deviceScale)
+		}
+	}
+
+	text.DrawAliased(c.pixmap, s, face, p.X, p.Y, c.currentColor())
 }
 
 // StrokeString strokes text outlines at position (x, y) where y is the baseline.
