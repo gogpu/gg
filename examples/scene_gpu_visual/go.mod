@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/scene_gpu_visual
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.48.6
+	github.com/gogpu/gg v0.48.7
 	github.com/gogpu/gogpu v0.40.0
 )
 
