@@ -137,8 +137,7 @@ func (a *VelloAccelerator) CanCompute() bool {
 
 // SetDeviceProvider switches the accelerator to use a shared GPU device
 // from an external provider (e.g., gogpu). The provider's Device() must
-// return a *wgpu.Device (as gpucontext.Device) so we can access HalDevice()
-// and HalQueue() for direct HAL-level GPU operations.
+// return a *wgpu.Device (as gpucontext.Device).
 func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
 	dev := provider.Device()
 	if dev == nil {
