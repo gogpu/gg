@@ -37,6 +37,10 @@ type Face interface {
 	// Size returns the size of this face in points.
 	Size() float64
 
+	// Features returns the OpenType font features configured for this face.
+	// Features are set via [WithFeatures] when creating the face.
+	Features() []FontFeature
+
 	// private prevents external implementation
 	private()
 }
@@ -208,6 +212,11 @@ func (f *sourceFace) Source() *FontSource {
 // Size implements Face.Size.
 func (f *sourceFace) Size() float64 {
 	return f.size
+}
+
+// Features implements Face.Features.
+func (f *sourceFace) Features() []FontFeature {
+	return f.config.features
 }
 
 // private implements the Face interface.

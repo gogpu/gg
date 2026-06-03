@@ -134,6 +134,11 @@ func (f *FilteredFace) Size() float64 {
 	return f.face.Size()
 }
 
+// Features implements Face.Features.
+func (f *FilteredFace) Features() []FontFeature {
+	return f.face.Features()
+}
+
 // private implements the Face interface.
 func (f *FilteredFace) private() {}
 
