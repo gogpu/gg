@@ -792,7 +792,7 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 		return
 	}
 
-	devicePath := path.Transform(c.totalMatrix())
+	devicePath := path.Transform(c.matrix)
 
 	// Route through the normal fill pipeline (doFill) so GPU accelerator
 	// can render to the surface when SurfaceTarget is active. Without this,
