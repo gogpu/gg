@@ -41,6 +41,12 @@ type Face interface {
 	// Features are set via [WithFeatures] when creating the face.
 	Features() []FontFeature
 
+	// Language returns the BCP 47 language tag for this face (e.g., "en", "ja", "ar").
+	// The language affects OpenType shaping: script-specific ligatures, localized
+	// forms, and language-dependent glyph selection.
+	// Language is set via [WithLanguage] when creating the face; defaults to "en".
+	Language() string
+
 	// private prevents external implementation
 	private()
 }
@@ -217,6 +223,11 @@ func (f *sourceFace) Size() float64 {
 // Features implements Face.Features.
 func (f *sourceFace) Features() []FontFeature {
 	return f.config.features
+}
+
+// Language implements Face.Language.
+func (f *sourceFace) Language() string {
+	return f.config.language
 }
 
 // private implements the Face interface.

@@ -33,6 +33,7 @@ func (m *mockFace) Direction() Direction        { return m.direction }
 func (m *mockFace) Source() *FontSource         { return nil }
 func (m *mockFace) Size() float64               { return m.size }
 func (m *mockFace) Features() []FontFeature     { return nil }
+func (m *mockFace) Language() string             { return "en" }
 func (m *mockFace) private()                    {}
 func (m *mockFace) HasGlyph(r rune) bool        { _, ok := m.glyphs[r]; return ok }
 func (m *mockFace) Advance(text string) float64 { panic("not implemented") }
@@ -271,5 +272,19 @@ func TestMultiFaceSize(t *testing.T) {
 
 	if mf.Size() != 12 {
 		t.Errorf("expected size 12, got %f", mf.Size())
+	}
+}
+
+func TestMultiFaceLanguage(t *testing.T) {
+	face1 := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})
+	face2 := newMockFace(12, DirectionLTR, map[rune]float64{'b': 7})
+
+	mf, err := NewMultiFace(face1, face2)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	if mf.Language() != "en" {
+		t.Errorf("expected language \"en\", got %q", mf.Language())
 	}
 }

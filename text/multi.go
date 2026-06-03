@@ -157,6 +157,12 @@ func (m *MultiFace) Features() []FontFeature {
 	return m.faces[0].Features()
 }
 
+// Language implements Face.Language.
+// Returns the language from the first face.
+func (m *MultiFace) Language() string {
+	return m.faces[0].Language()
+}
+
 // private implements the Face interface.
 func (m *MultiFace) private() {}
 

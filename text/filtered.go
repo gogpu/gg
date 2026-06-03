@@ -139,6 +139,11 @@ func (f *FilteredFace) Features() []FontFeature {
 	return f.face.Features()
 }
 
+// Language implements Face.Language.
+func (f *FilteredFace) Language() string {
+	return f.face.Language()
+}
+
 // private implements the Face interface.
 func (f *FilteredFace) private() {}
 

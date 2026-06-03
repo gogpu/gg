@@ -105,7 +105,7 @@ func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 		Face:         goTextFace,
 		Size:         floatToFixed(size),
 		Script:       script,
-		Language:     language.NewLanguage("en"),
+		Language:     language.NewLanguage(face.Language()),
 		FontFeatures: convertFeatures(face.Features()),
 	}
 

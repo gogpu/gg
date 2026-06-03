@@ -277,6 +277,15 @@ func TestFilteredFaceSize(t *testing.T) {
 	}
 }
 
+func TestFilteredFaceLanguage(t *testing.T) {
+	face := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})
+	ff := NewFilteredFace(face, RangeBasicLatin)
+
+	if ff.Language() != "en" {
+		t.Errorf("expected language \"en\", got %q", ff.Language())
+	}
+}
+
 func TestFilteredFaceWithMultiFace(t *testing.T) {
 	// Create a MultiFace with Latin and Cyrillic coverage
 	latinFace := newMockFace(12, DirectionLTR, map[rune]float64{
