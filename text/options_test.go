@@ -373,4 +373,3 @@ func TestFaceLanguage_IndependentPerFace(t *testing.T) {
 		t.Errorf("faceAR.Language() = %q, want \"ar\"", faceAR.Language())
 	}
 }
-

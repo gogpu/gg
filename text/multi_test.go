@@ -33,7 +33,7 @@ func (m *mockFace) Direction() Direction        { return m.direction }
 func (m *mockFace) Source() *FontSource         { return nil }
 func (m *mockFace) Size() float64               { return m.size }
 func (m *mockFace) Features() []FontFeature     { return nil }
-func (m *mockFace) Language() string             { return "en" }
+func (m *mockFace) Language() string            { return "en" }
 func (m *mockFace) private()                    {}
 func (m *mockFace) HasGlyph(r rune) bool        { _, ok := m.glyphs[r]; return ok }
 func (m *mockFace) Advance(text string) float64 { panic("not implemented") }
