@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-text/typesetting/di"
 	"github.com/go-text/typesetting/font"
+	ot "github.com/go-text/typesetting/font/opentype"
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/shaping"
 	"golang.org/x/image/math/fixed"
@@ -97,14 +98,15 @@ func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 
 	// Build shaping input.
 	input := shaping.Input{
-		Text:      runes,
-		RunStart:  0,
-		RunEnd:    len(runes),
-		Direction: dir,
-		Face:      goTextFace,
-		Size:      floatToFixed(size),
-		Script:    script,
-		Language:  language.NewLanguage("en"),
+		Text:         runes,
+		RunStart:     0,
+		RunEnd:       len(runes),
+		Direction:    dir,
+		Face:         goTextFace,
+		Size:         floatToFixed(size),
+		Script:       script,
+		Language:     language.NewLanguage(face.Language()),
+		FontFeatures: convertFeatures(face.Features()),
 	}
 
 	// Get a HarfbuzzShaper from the pool (not concurrent-safe, so each
@@ -253,4 +255,22 @@ func convertGlyphs(glyphs []shaping.Glyph, dir di.Direction, sourceText string) 
 	}
 
 	return result
+}
+
+// convertFeatures converts text.FontFeature to shaping.FontFeature.
+func convertFeatures(features []FontFeature) []shaping.FontFeature {
+	if len(features) == 0 {
+		return nil
+	}
+
+	out := make([]shaping.FontFeature, len(features))
+
+	for i, f := range features {
+		out[i] = shaping.FontFeature{
+			Tag:   ot.NewTag(f.Tag[0], f.Tag[1], f.Tag[2], f.Tag[3]),
+			Value: f.Value,
+		}
+	}
+
+	return out
 }

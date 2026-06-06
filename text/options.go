@@ -1,5 +1,66 @@
 package text
 
+// FontFeature enables or disables an OpenType font feature.
+// Features are identified by a 4-byte tag (e.g., "tnum" for tabular figures)
+// and controlled by a uint32 value (1 = enable, 0 = disable).
+//
+// See https://learn.microsoft.com/en-us/typography/opentype/spec/featurelist
+type FontFeature struct {
+	Tag   [4]byte // e.g., [4]byte{'t','n','u','m'}
+	Value uint32  // 1 = enable, 0 = disable
+}
+
+// NewFontFeature creates a FontFeature from a 4-character OpenType tag string
+// and a value. The tag must be exactly 4 ASCII characters (e.g., "tnum", "liga",
+// "smcp"). Panics if the tag is not exactly 4 bytes.
+//
+// Example:
+//
+//	tnum := text.NewFontFeature("tnum", 1)  // enable tabular nums
+//	liga := text.NewFontFeature("liga", 0)  // disable ligatures
+func NewFontFeature(tag string, value uint32) FontFeature {
+	if len(tag) != 4 {
+		panic("text.NewFontFeature: tag must be exactly 4 bytes, got " + tag)
+	}
+	return FontFeature{
+		Tag:   [4]byte{tag[0], tag[1], tag[2], tag[3]},
+		Value: value,
+	}
+}
+
+// Predefined font feature constants for common use cases.
+var (
+	// TabularNums enables tabular (monospaced) digit widths.
+	// This ensures that digits like 1 and 0 occupy the same horizontal space,
+	// which is essential for aligned numeric columns (e.g., axis tick labels).
+	TabularNums = FontFeature{Tag: [4]byte{'t', 'n', 'u', 'm'}, Value: 1}
+
+	// ProportionalNums explicitly requests proportional (variable-width) digit widths.
+	// This is the default for most fonts, but can be used to override a face
+	// that was configured with TabularNums.
+	ProportionalNums = FontFeature{Tag: [4]byte{'p', 'n', 'u', 'm'}, Value: 1}
+
+	// NoLigatures disables standard ligatures (fi, fl, ffi, etc.).
+	NoLigatures = FontFeature{Tag: [4]byte{'l', 'i', 'g', 'a'}, Value: 0}
+
+	// Kerning enables kerning (pair-wise glyph spacing adjustment).
+	// Kerning is enabled by default in most OpenType fonts; this constant
+	// is useful for explicitly requesting it when combined with other features.
+	Kerning = FontFeature{Tag: [4]byte{'k', 'e', 'r', 'n'}, Value: 1}
+
+	// NoKerning disables kerning.
+	NoKerning = FontFeature{Tag: [4]byte{'k', 'e', 'r', 'n'}, Value: 0}
+
+	// SmallCaps enables small capitals substitution.
+	// Lowercase letters are replaced with small capital forms.
+	SmallCaps = FontFeature{Tag: [4]byte{'s', 'm', 'c', 'p'}, Value: 1}
+
+	// OldstyleNums enables oldstyle (text) figures.
+	// Digits have varying heights and descenders (3, 4, 5, 7, 9 descend),
+	// matching the visual rhythm of body text.
+	OldstyleNums = FontFeature{Tag: [4]byte{'o', 'n', 'u', 'm'}, Value: 1}
+)
+
 // SourceOption configures FontSource creation.
 type SourceOption func(*sourceConfig)
 
@@ -56,6 +117,7 @@ type faceConfig struct {
 	direction Direction
 	hinting   Hinting
 	language  string
+	features  []FontFeature // OpenType features (tnum, liga, etc.)
 }
 
 // defaultFaceConfig returns the default face configuration.
@@ -85,5 +147,22 @@ func WithHinting(h Hinting) FaceOption {
 func WithLanguage(lang string) FaceOption {
 	return func(c *faceConfig) {
 		c.language = lang
+	}
+}
+
+// WithFeatures sets OpenType font features for the face.
+// Features are applied during shaping when using [GoTextShaper].
+// The [BuiltinShaper] ignores features since it does not perform
+// OpenType shaping.
+//
+// Note: Features affect shaped output via [GoTextShaper] only. Methods like
+// [Face.Advance] and [Face.Glyphs] use raw glyph metrics without shaping.
+//
+// Example — enable tabular figures for aligned numeric columns:
+//
+//	face := source.Face(12, text.WithFeatures(text.TabularNums))
+func WithFeatures(features ...FontFeature) FaceOption {
+	return func(c *faceConfig) {
+		c.features = features
 	}
 }
