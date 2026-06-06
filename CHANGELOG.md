@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.8] - 2026-06-06
+
+### Fixed
+
+- **HiDPI double-scale in text outlines** (#361, @TuSKan) — `drawStringAsOutlines` and
+  `StrokeString` applied `deviceMatrix` twice: once in `path.Transform(totalMatrix())`, then
+  again in `doFill()/doStroke()` via `deviceSpacePath()`. At 2x scale, text position was
+  doubled and scale was squared. Fix: use `c.matrix` (user matrix only), matching
+  Cairo/Skia deviceMatrix/userMatrix separation pattern (v0.37.4).
+
+### Added
+
+- **OpenType font features** (#362, @TuSKan) — `WithFeatures(text.TabularNums)` for tabular
+  figures, ligature control, kerning, small caps. `NewFontFeature("tnum", 1)` string
+  constructor. 7 predefined constants. Features applied during HarfBuzz shaping via
+  `GoTextShaper`. Fixed hardcoded `language.NewLanguage("en")` → `face.Language()`.
+
+### Changed
+
+- **Dependencies:** wgpu v0.29.1 → v0.29.4, gogpu v0.41.0 → v0.41.4 in examples.
+
 ## [0.48.7] - 2026-05-26
 
 ### Changed
