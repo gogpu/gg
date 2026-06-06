@@ -635,15 +635,16 @@ func (c *Context) StrokeString(s string, x, y float64) {
 		return
 	}
 
-	devicePath := path.Transform(c.totalMatrix())
-	c.trackDamage(devicePath.Bounds())
+	// User matrix only — doStroke() applies deviceMatrix via deviceSpacePath().
+	transformedPath := path.Transform(c.matrix)
+	c.trackDamage(transformedPath.Bounds())
 
 	// Set GPU scissor rect for rectangular clips.
 	defer c.setGPUClipRect()()
 
 	// Save and restore context path — doStroke uses c.path.
 	savedPath := c.path
-	c.path = devicePath
+	c.path = transformedPath
 	_ = c.doStroke()
 	c.path = savedPath
 }
@@ -792,7 +793,8 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 		return
 	}
 
-	devicePath := path.Transform(c.totalMatrix())
+	// User matrix only — doFill() applies deviceMatrix via deviceSpacePath().
+	transformedPath := path.Transform(c.matrix)
 
 	// Route through the normal fill pipeline (doFill) so GPU accelerator
 	// can render to the surface when SurfaceTarget is active. Without this,
@@ -802,7 +804,7 @@ func (c *Context) drawStringAsOutlines(s string, x, y float64) {
 	// Save and restore context path/paint state — doFill uses c.path and c.paint.
 	savedPath := c.path
 	savedFillRule := c.paint.FillRule
-	c.path = devicePath
+	c.path = transformedPath
 	c.paint.FillRule = FillRuleNonZero
 	_ = c.doFill()
 	c.path = savedPath
