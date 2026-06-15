@@ -14,7 +14,7 @@ require (
 	github.com/gogpu/gpucontext v0.19.0 // indirect
 	github.com/gogpu/gputypes v0.5.0 // indirect
 	github.com/gogpu/naga v0.17.15 // indirect
-	github.com/gogpu/wgpu v0.29.15 // indirect
+	github.com/gogpu/wgpu v0.29.16 // indirect
 	golang.org/x/image v0.40.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
