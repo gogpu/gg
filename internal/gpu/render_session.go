@@ -2131,7 +2131,7 @@ func (s *GPURenderSession) buildGlyphMaskResources(batches []GlyphMaskBatch) (*g
 
 	// Use the max uniform size (96 bytes) for the pool so we never need to
 	// recreate buffers when switching between grayscale and LCD modes.
-	s.ensureGlyphMaskBatchPools(len(batches), glyphMaskLCDUniformSize)
+	s.ensureGlyphMaskBatchPools(len(batches))
 
 	// Build per-batch draw calls.
 	drawCalls, err := s.buildGlyphMaskDrawCalls(batches, s.frameW, s.frameH)
@@ -2196,6 +2196,7 @@ func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch, vie
 			slogger().Warn("glyph mask bind group nil, skipping batch",
 				"index", i, "nQuads", nQuads, "totalBatches", len(batches),
 				"poolLen", len(s.glyphMaskBindGroups))
+			quadOffset += nQuads
 			continue
 		}
 
@@ -2214,13 +2215,13 @@ func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch, vie
 }
 
 // ensureGlyphMaskBatchPools grows the uniform buffer and bind group pools to
-// at least n entries. Existing entries are preserved. The uniformSize parameter
-// is the byte size of each uniform buffer (80 for grayscale, 96 for LCD).
-func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int, uniformSize uint64) {
+// at least n entries. Existing entries are preserved. Uses glyphMaskLCDUniformSize
+// (96 bytes) for all buffers so they work for both grayscale and LCD modes.
+func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 	for len(s.glyphMaskUniformBufs) < n {
 		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
 			Label: fmt.Sprintf("session_glyph_mask_uniform_%d", len(s.glyphMaskUniformBufs)),
-			Size:  uniformSize,
+			Size:  glyphMaskLCDUniformSize,
 			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
 		})
 		if err != nil {
@@ -2248,7 +2249,7 @@ func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu
 		slogger().Warn("SetGlyphMaskAtlasView: nil atlas view", "batchIndex", batchIndex)
 		return
 	}
-	s.ensureGlyphMaskBatchPools(batchIndex+1, glyphMaskLCDUniformSize)
+	s.ensureGlyphMaskBatchPools(batchIndex + 1)
 	if batchIndex >= len(s.glyphMaskBindGroups) {
 		return
 	}
