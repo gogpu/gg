@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.9] - 2026-06-15
+
+### Fixed
+
+- **Glyph mask quadOffset not advanced on nil bind group** (BUG-GLYPHMASK-001, #365) —
+  `buildGlyphMaskDrawCalls` skipped batches with nil bind groups via `continue` without
+  advancing `quadOffset`. All subsequent batches received wrong `indexOffset` into the
+  shared vertex/index buffer, causing text to be invisible or garbled in offscreen GPU
+  textures (e.g., RepaintBoundary in ui). Affects all backends, not GLES-specific.
+
+### Changed
+
+- **Dependencies:** wgpu v0.29.14 → v0.29.15, naga v0.17.14 → v0.17.15,
+  gogpu v0.41.4 → v0.41.14 in examples.
+
 ## [0.48.8] - 2026-06-06
 
 ### Fixed
