@@ -13,14 +13,14 @@ import (
 func TestNullDeviceHandle(t *testing.T) {
 	var handle DeviceHandle = NullDeviceHandle{}
 
-	if handle.Device() != nil {
-		t.Error("NullDeviceHandle.Device() should return nil")
+	if !handle.Device().IsNil() {
+		t.Error("NullDeviceHandle.Device() should return nil handle")
 	}
-	if handle.Queue() != nil {
-		t.Error("NullDeviceHandle.Queue() should return nil")
+	if !handle.Queue().IsNil() {
+		t.Error("NullDeviceHandle.Queue() should return nil handle")
 	}
-	if handle.Adapter() != nil {
-		t.Error("NullDeviceHandle.Adapter() should return nil")
+	if !handle.Adapter().IsNil() {
+		t.Error("NullDeviceHandle.Adapter() should return nil handle")
 	}
 	if handle.SurfaceFormat() != gputypes.TextureFormatUndefined {
 		t.Error("NullDeviceHandle.SurfaceFormat() should return Undefined")
@@ -80,8 +80,8 @@ func TestDeviceHandleAlias(t *testing.T) {
 
 	// Verify handle is usable as DeviceHandle
 	var dh DeviceHandle = handle
-	if dh.Device() != nil {
-		t.Error("NullDeviceHandle.Device() should return nil")
+	if !dh.Device().IsNil() {
+		t.Error("NullDeviceHandle.Device() should return nil handle")
 	}
 
 	// Verify DeviceHandle is compatible with gpucontext.DeviceProvider

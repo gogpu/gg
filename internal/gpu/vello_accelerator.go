@@ -140,13 +140,13 @@ func (a *VelloAccelerator) CanCompute() bool {
 // return a *wgpu.Device (as gpucontext.Device).
 func (a *VelloAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
 	dev := provider.Device()
-	if dev == nil {
+	if dev.IsNil() {
 		return fmt.Errorf("vello-compute: provider Device is nil")
 	}
 
-	wgpuDev, ok := dev.(*wgpu.Device)
-	if !ok {
-		return fmt.Errorf("vello-compute: provider Device is not *wgpu.Device (got %T)", dev)
+	wgpuDev := wgpu.DeviceFromHandle(dev)
+	if wgpuDev == nil {
+		return fmt.Errorf("vello-compute: provider Device handle is invalid")
 	}
 	wgpuQueue := wgpuDev.Queue()
 	if wgpuQueue == nil {

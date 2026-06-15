@@ -15,38 +15,21 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// mockDevice implements gpucontext.Device for testing.
-type mockDevice struct{}
-
-func (m *mockDevice) Poll(wait bool) {}
-func (m *mockDevice) Destroy()       {}
-
-// mockQueue implements gpucontext.Queue for testing.
-type mockQueue struct{}
-
-// mockAdapter implements gpucontext.Adapter for testing.
-type mockAdapter struct{}
-
 // mockProvider implements gpucontext.DeviceProvider for testing.
+// Uses zero-value gpucontext handles (opaque structs, no mock needed).
 type mockProvider struct {
-	device  gpucontext.Device
-	queue   gpucontext.Queue
-	adapter gpucontext.Adapter
-	format  gputypes.TextureFormat
+	format gputypes.TextureFormat
 }
 
 func newMockProvider() *mockProvider {
 	return &mockProvider{
-		device:  &mockDevice{},
-		queue:   &mockQueue{},
-		adapter: &mockAdapter{},
-		format:  gputypes.TextureFormatBGRA8Unorm,
+		format: gputypes.TextureFormatBGRA8Unorm,
 	}
 }
 
-func (m *mockProvider) Device() gpucontext.Device             { return m.device }
-func (m *mockProvider) Queue() gpucontext.Queue               { return m.queue }
-func (m *mockProvider) Adapter() gpucontext.Adapter           { return m.adapter }
+func (m *mockProvider) Device() gpucontext.Device             { return gpucontext.Device{} }
+func (m *mockProvider) Queue() gpucontext.Queue               { return gpucontext.Queue{} }
+func (m *mockProvider) Adapter() gpucontext.Adapter           { return gpucontext.Adapter{} }
 func (m *mockProvider) SurfaceFormat() gputypes.TextureFormat { return m.format }
 func (m *mockProvider) AdapterInfo() gpucontext.AdapterInfo {
 	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}

@@ -131,11 +131,10 @@ type GPUAccelerator interface {
 // When SetDeviceProvider is called, the accelerator reuses the provided GPU
 // device instead of creating its own.
 //
-// The provider's Device() returns gpucontext.Device which consumers
-// type-assert to *wgpu.Device for full HAL access:
+// The provider's Device() returns gpucontext.Device (opaque handle).
+// Use wgpu.DeviceFromHandle() to extract the concrete *wgpu.Device:
 //
-//	dev := provider.Device().(*wgpu.Device)
-//	halDevice := dev.HalDevice()
+//	wgpuDev := wgpu.DeviceFromHandle(provider.Device())
 type DeviceProviderAware interface {
 	SetDeviceProvider(provider gpucontext.DeviceProvider) error
 }
