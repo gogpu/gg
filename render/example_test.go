@@ -132,14 +132,14 @@ func ExamplePixmapTarget_Clear() {
 func ExampleNullDeviceHandle() {
 	handle := render.NullDeviceHandle{}
 
-	// NullDeviceHandle returns nil for all GPU resources
-	fmt.Printf("device: %v\n", handle.Device())
-	fmt.Printf("queue: %v\n", handle.Queue())
-	fmt.Printf("adapter: %v\n", handle.Adapter())
+	// NullDeviceHandle returns nil handles for all GPU resources
+	fmt.Printf("device nil: %v\n", handle.Device().IsNil())
+	fmt.Printf("queue nil: %v\n", handle.Queue().IsNil())
+	fmt.Printf("adapter nil: %v\n", handle.Adapter().IsNil())
 	// Output:
-	// device: <nil>
-	// queue: <nil>
-	// adapter: <nil>
+	// device nil: true
+	// queue nil: true
+	// adapter nil: true
 }
 
 // ExampleGPURenderer_Capabilities demonstrates querying renderer capabilities.

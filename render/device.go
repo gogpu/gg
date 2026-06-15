@@ -157,14 +157,14 @@ type DeviceCapabilities struct {
 // Used for CPU-only rendering where no GPU is available.
 type NullDeviceHandle struct{}
 
-// Device returns nil for the null device.
-func (NullDeviceHandle) Device() gpucontext.Device { return nil }
+// Device returns zero-value (nil) device handle.
+func (NullDeviceHandle) Device() gpucontext.Device { return gpucontext.Device{} }
 
-// Queue returns nil for the null device.
-func (NullDeviceHandle) Queue() gpucontext.Queue { return nil }
+// Queue returns zero-value (nil) queue handle.
+func (NullDeviceHandle) Queue() gpucontext.Queue { return gpucontext.Queue{} }
 
-// Adapter returns nil for the null device.
-func (NullDeviceHandle) Adapter() gpucontext.Adapter { return nil }
+// Adapter returns zero-value (nil) adapter handle.
+func (NullDeviceHandle) Adapter() gpucontext.Adapter { return gpucontext.Adapter{} }
 
 // SurfaceFormat returns undefined format for the null device.
 func (NullDeviceHandle) SurfaceFormat() gputypes.TextureFormat {

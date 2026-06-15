@@ -125,29 +125,28 @@ func (s *GPUShared) SetForceSDF(force bool) {
 // (e.g., gogpu). The provider's Device() must return a *wgpu.Device.
 func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
 	// Check if adapter is software/CPU — GPU shaders don't work on CPU backends.
-	if adapter := provider.Adapter(); adapter != nil {
-		if wgpuAdapter, ok := adapter.(*wgpu.Adapter); ok {
-			if wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
-				slogger().Info("gpu-shared: software adapter detected, GPU acceleration disabled")
-				s.mu.Lock()
-				s.softwareMode = true
-				s.device = nil
-				s.queue = nil
-				s.instance = nil
-				s.mu.Unlock()
-				return nil
-			}
+	if adapter := provider.Adapter(); !adapter.IsNil() {
+		wgpuAdapter := wgpu.AdapterFromHandle(adapter)
+		if wgpuAdapter != nil && wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
+			slogger().Info("gpu-shared: software adapter detected, GPU acceleration disabled")
+			s.mu.Lock()
+			s.softwareMode = true
+			s.device = nil
+			s.queue = nil
+			s.instance = nil
+			s.mu.Unlock()
+			return nil
 		}
 	}
 
 	dev := provider.Device()
-	if dev == nil {
+	if dev.IsNil() {
 		return fmt.Errorf("gpu-shared: provider Device is nil")
 	}
 
-	wgpuDev, ok := dev.(*wgpu.Device)
-	if !ok {
-		return fmt.Errorf("gpu-shared: provider Device is not *wgpu.Device (got %T)", dev)
+	wgpuDev := wgpu.DeviceFromHandle(dev)
+	if wgpuDev == nil {
+		return fmt.Errorf("gpu-shared: provider Device handle is invalid")
 	}
 	wgpuQueue := wgpuDev.Queue()
 	if wgpuQueue == nil {
