@@ -6,7 +6,7 @@ replace github.com/gogpu/gg => ../..
 
 require (
 	github.com/gogpu/gg v0.48.9
-	github.com/gogpu/gogpu v0.41.14
+	github.com/gogpu/gogpu v0.42.0
 	github.com/gogpu/gpucontext v0.21.0
 )
 
