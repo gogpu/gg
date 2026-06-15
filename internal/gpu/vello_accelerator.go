@@ -260,8 +260,14 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	// Build a gg.Path from the expanded outline.
 	fillPath := strokeResultToPath(outVerbs, outCoords)
 
-	// Route through FillPath (accumulates into pending scene).
-	return a.FillPath(target, fillPath, paint)
+	// The expanded stroke is two closed contours (outer + inner, opposite winding).
+	// EvenOdd fill rule is required so the inner contour cancels the outer,
+	// producing a hollow ring. NonZero would fill solid because inner join
+	// pivot V-shapes create self-intersections. Matches GPURenderContext.StrokePath
+	// (gpu_render_context.go:667). ADR-043, #369.
+	strokePaint := *paint
+	strokePaint.FillRule = gg.FillRuleEvenOdd
+	return a.FillPath(target, fillPath, &strokePaint)
 }
 
 // FillShape converts a detected shape to a path and accumulates it for the next Flush.
