@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Dependencies:** wgpu v0.29.14 → v0.29.15, naga v0.17.14 → v0.17.15,
-  gogpu v0.41.4 → v0.41.13 in examples.
+  gogpu v0.41.4 → v0.41.14 in examples.
 
 ## [0.48.8] - 2026-06-06
 

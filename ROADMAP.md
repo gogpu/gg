@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.48.6
+## Current State: v0.48.9
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
@@ -44,16 +44,67 @@
 
 ---
 
-## Upcoming
+## Roadmap to v1.0.0 (November 2027 — Go's 18th anniversary)
 
-### v0.49.0 — Next
-- [ ] Gradient support — BrushLinearGradient/BrushRadialGradient in scene
-- [ ] GPU-CLIP-003d — stencil-based arbitrary path clip for remaining shapes
+### v0.49.0 — Gradients & Clipping (Q3 2026)
+- [ ] **Linear & radial gradients** — BrushLinearGradient/BrushRadialGradient, GPU SDF gradient shader
+- [ ] **GPU-CLIP-003d** — stencil-based arbitrary path clip for text + complex shapes
+- [ ] **Thread safety** (#365) — atomic global caches, Context.closed CAS, sync.Once for gpuCtx
+- [ ] **Performance** (#365) — scissor groups ownership transfer (~5-10% CPU), path conversion scratch buffers
 
-### v0.48.6 — Current
+### v0.50.0 — API Quality (Q3–Q4 2026)
+- [ ] **Type alias cleanup** (#365) — replace 7 public aliases with real types (breaking)
+- [ ] **Error hierarchy** — GPUError, FontError, RenderError with sentinel values
+- [ ] **wgpu#218 migration** — gputypes direct imports (13 files, 86 lines)
+- [ ] **Deprecated Paint fields** — removal or v2.0 commitment (Pattern, LineWidth, LineCap, LineJoin)
+- [ ] **Test coverage for GPU core** — gpu_render_context.go (0 tests → 50+), render_session.go expansion
+
+### v0.51.0+ — Advanced Features (Q4 2026 – Q1 2027)
+- [ ] **Conic gradients** — sweep/angular gradient (CSS conic-gradient parity)
+- [ ] **Mesh gradients** — Coons patch (Inkscape/SVG2 pattern)
+- [ ] **Path boolean operations** — union, intersect, difference, XOR (Skia PathOps)
+- [ ] **GPU blur/shadow** — Gaussian blur compute shader, drop shadows (Skia SkMaskFilter)
+- [ ] **Backdrop filters** — blur, color matrix behind layers (CSS backdrop-filter, Flutter BackdropFilter)
+- [ ] **Color filter layers** — hue/saturation/brightness per-layer (Skia SkColorFilter)
+
+### v0.52.0+ — Platform Expansion (Q1–Q2 2027)
+- [ ] **WebAssembly** — browser rendering via wgpu Browser backend (js,wasm build tag)
+- [ ] **Android/iOS** — mobile GPU rendering via wgpu Metal/Vulkan
+- [ ] **SVG 2.0 compliance** — full SVG rendering (JSVG-level feature parity)
+- [ ] **PDF export improvements** — gradients, clipping, transparency in PDF output
+
+### Pre-1.0.0 — API Freeze Blockers
+- [ ] **API-001** — GPU handle API shape: generics `Handle[Tag]` vs plain structs
+- [ ] **API-002** — eliminate remaining `any` (PresentTexture, DrawText face, Canvas.texture)
+- [ ] **API-003** — full public API review: exported types, interfaces, error types
+- [ ] **fogleman/gg migration guide** — side-by-side comparison, breaking changes documented
+- [ ] **Performance baseline** — published benchmarks with regression tracking
+- [ ] **90%+ test coverage** on core API (context.go, path.go, software.go)
+
+### v1.0.0 — Production Release (November 2027)
+- [ ] API stability guarantee — no breaking changes without major version bump
+- [ ] Semantic versioning commitment with deprecation policy
+- [ ] Enterprise deployment guide with configuration reference
+- [ ] Comprehensive pkg.go.dev documentation with examples for every public type
+- [ ] Long-term support plan (LTS branch for critical fixes)
+
+---
+
+## Current Release
+
+### v0.48.9 — Current
+- [x] **Glyph mask quadOffset fix** (BUG-GLYPHMASK-001, #365) — text invisible in offscreen GPU textures
+- [x] **Dependencies** — wgpu v0.29.15, naga v0.17.15, gogpu v0.41.14
+
+### v0.48.8 ✅ Released
+- [x] **HiDPI double-scale fix** (#361, @TuSKan) — deviceMatrix applied twice in text outlines
+- [x] **OpenType font features** (#362, @TuSKan) — WithFeatures(TabularNums), Language() fix
+
+### v0.48.6–v0.48.7 ✅ Released
 - [x] **SparseStripsFiller winding propagation** (BUG-SPARSE-STRIPS-001) — Vello backdrop.wgsl parity
 - [x] **SDF thin stroke fallback** (#346, ADR-040) — lineWidth < 2.0 → geometric expansion
 - [x] **Present damage union** — forwardDamageRects unions explicit + frame damage
+- [x] Dependencies update
 
 ### v0.48.5 ✅ Released
 - [x] **TextModeAliased CPU fallback** (#353) — per-glyph NoAAFiller, works without GPU
@@ -179,22 +230,20 @@
 - [x] Smart multi-engine rasterizer, CoverageFiller, RasterizerMode
 - [x] Text API redesign, CPU text transform, Recording System
 
-### v1.0.0 — Production Release
-- [ ] API stability guarantee
-- [ ] Semantic versioning commitment
-- [ ] Long-term support plan
-- [ ] Enterprise deployment guide
-- [ ] Comprehensive documentation
+### v1.0.0 — Production Release (see roadmap above)
 
 ---
 
-## Future Ideas
+## Post-1.0 Vision
 
-| Theme | Description |
-|-------|-------------|
-| **WebAssembly** | WASM target for browser rendering |
-| **SVG Import** | SVG file parsing and rendering |
-| **Advanced Text** | Complex text shaping (HarfBuzz-style) |
+| Theme | Description | Reference |
+|-------|-------------|-----------|
+| **3D integration** | Scene graph bridge to gogpu/g3d (PBR, glTF) | Skia → Filament |
+| **Compute shaders for 2D** | Full Vello compute pipeline on GPU (all 9 stages) | linebender/vello |
+| **SIMD rasterization** | Go 1.25+ `goexperiment.simd` for CPU path (AVX-512/NEON) | GoMLX PackGEMM |
+| **Animation primitives** | Easing, spring physics, path interpolation | Flutter AnimationController |
+| **Accessibility** | Screen reader text extraction, contrast analysis | Skia SkAnnotation |
+| **Color management** | ICC profiles, Display P3, wide gamut | Skia SkColorSpace |
 
 ---
 
@@ -229,7 +278,10 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.48.6** | 2026-05 | SparseStripsFiller winding (Vello parity), SDF thin stroke fallback (#346), damage union |
+| **v0.48.9** | 2026-06 | Glyph mask quadOffset fix (BUG-GLYPHMASK-001, #365), deps v0.29.15/v0.17.15/v0.41.14 |
+| v0.48.8 | 2026-06 | HiDPI fix (#361 @TuSKan), OpenType font features (#362 @TuSKan) |
+| v0.48.7 | 2026-05 | Dependencies update |
+| v0.48.6 | 2026-05 | SparseStripsFiller winding (Vello parity), SDF thin stroke fallback (#346), damage union |
 | v0.48.5 | 2026-05 | TextModeAliased CPU (#353), fractional advances (ADR-039), per-glyph rendering |
 | v0.48.4 | 2026-05 | Stroke inner join teeth (#354, ADR-038, tiny-skia parity) |
 | v0.48.0–3 | 2026-05 | Text stroke (ADR-033), aliased text GPU (ADR-034), GPU stroke fix (#347) |
