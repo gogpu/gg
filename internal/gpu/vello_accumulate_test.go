@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/internal/gpu/tilecompute"
 )
 
 // TestVelloAccelerator_FillPathAccumulates verifies that FillPath accumulates
@@ -150,6 +151,70 @@ func TestVelloAccelerator_StrokePathAccumulates(t *testing.T) {
 	}
 	if a.PendingCount() != 1 {
 		t.Errorf("expected 1 pending after StrokePath, got %d", a.PendingCount())
+	}
+}
+
+// TestVelloAccelerator_StrokePathUsesEvenOdd is a regression test for #369:
+// expanded stroke outlines must use EvenOdd fill rule so the inner contour
+// cancels the outer (ring topology). Without EvenOdd, strokes render as
+// solid fills. ADR-043.
+func TestVelloAccelerator_StrokePathUsesEvenOdd(t *testing.T) {
+	a := &VelloAccelerator{gpuReady: true}
+	target := makeTestTarget(200, 200)
+
+	// Closed round-rect — the exact shape from #369.
+	path := gg.NewPath()
+	path.RoundedRectangle(40, 40, 120, 80, 12)
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1}))
+	s := gg.Stroke{Width: 1.0, Cap: gg.LineCapButt, Join: gg.LineJoinRound, MiterLimit: 10.0}
+	paint.SetStroke(s)
+
+	if err := a.StrokePath(target, path, paint); err != nil {
+		t.Fatalf("StrokePath: unexpected error: %v", err)
+	}
+	if a.PendingCount() != 1 {
+		t.Fatalf("expected 1 pending, got %d", a.PendingCount())
+	}
+
+	// The accumulated path MUST have EvenOdd fill rule.
+	pathDef := a.pendingPaths[0]
+	if pathDef.FillRule != tilecompute.FillRuleEvenOdd {
+		t.Errorf("StrokePath fill rule = %v, want EvenOdd (%v)",
+			pathDef.FillRule, tilecompute.FillRuleEvenOdd)
+	}
+}
+
+// TestVelloAccelerator_StrokeShapeUsesEvenOdd verifies that StrokeShape
+// (which delegates to StrokePath) also produces EvenOdd fill rule.
+func TestVelloAccelerator_StrokeShapeUsesEvenOdd(t *testing.T) {
+	a := &VelloAccelerator{gpuReady: true}
+	target := makeTestTarget(200, 200)
+
+	shape := gg.DetectedShape{
+		Kind:    gg.ShapeCircle,
+		CenterX: 100,
+		CenterY: 100,
+		RadiusX: 40,
+	}
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+	s := gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinRound, MiterLimit: 10.0}
+	paint.SetStroke(s)
+
+	if err := a.StrokeShape(target, shape, paint); err != nil {
+		t.Fatalf("StrokeShape: unexpected error: %v", err)
+	}
+	if a.PendingCount() != 1 {
+		t.Fatalf("expected 1 pending, got %d", a.PendingCount())
+	}
+
+	pathDef := a.pendingPaths[0]
+	if pathDef.FillRule != tilecompute.FillRuleEvenOdd {
+		t.Errorf("StrokeShape fill rule = %v, want EvenOdd (%v)",
+			pathDef.FillRule, tilecompute.FillRuleEvenOdd)
 	}
 }
 
