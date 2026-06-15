@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.10] - 2026-06-15
+
+### Fixed
+
+- **Backdrop prefix sum boundary leak** (BUG-BACKDROP-001, ADR-042) — `CalculateBackdrop`
+  propagated winding across ALL tile columns in each row. When rotated text glyphs had
+  unclosed contours in the coarse grid, winding leaked to the right edge → solid black
+  pixel artifacts 93px past text boundary. Fix: bound prefix sum to per-row entry extents,
+  matching Vello `backdrop_dyn.wgsl` pattern. Regression since v0.48.6 (PR #357).
+
+### Changed
+
+- **wgpu v0.30.1 opaque handle migration** — `gpucontext.Device`/`Queue`/`Adapter` changed
+  from interfaces to opaque structs. Type assertions replaced with `wgpu.DeviceFromHandle()`
+  and `wgpu.AdapterFromHandle()` helpers. Zero `unsafe.Pointer` usage in gg.
+- **Dependencies:** wgpu v0.29.15 → v0.30.1, gogpu v0.41.14 → v0.42.0, gpucontext v0.19.0 → v0.21.0.
+
 ## [0.48.9] - 2026-06-15
 
 ### Fixed

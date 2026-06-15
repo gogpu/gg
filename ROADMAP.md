@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.48.9
+## Current State: v0.48.10
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
@@ -67,7 +67,7 @@
 - [ ] **Backdrop filters** — blur, color matrix behind layers (CSS backdrop-filter, Flutter BackdropFilter)
 - [ ] **Color filter layers** — hue/saturation/brightness per-layer (Skia SkColorFilter)
 
-### v0.52.0+ — Platform Expansion (Q1–Q2 2027)
+### v0.52.0 — Platform Expansion (Q1–Q2 2027)
 - [ ] **WebAssembly** — browser rendering via wgpu Browser backend (js,wasm build tag)
 - [ ] **Android/iOS** — mobile GPU rendering via wgpu Metal/Vulkan
 - [ ] **SVG 2.0 compliance** — full SVG rendering (JSVG-level feature parity)
@@ -92,7 +92,12 @@
 
 ## Current Release
 
-### v0.48.9 — Current
+### v0.48.10 — Current
+- [x] **Backdrop prefix sum boundary fix** (BUG-BACKDROP-001, ADR-042) — Vello backdrop_dyn pattern
+- [x] **wgpu v0.30.1 opaque handle migration** — DeviceFromHandle/AdapterFromHandle, zero unsafe.Pointer
+- [x] **Dependencies** — wgpu v0.30.1, gogpu v0.42.0, gpucontext v0.21.0
+
+### v0.48.9 ✅ Released
 - [x] **Glyph mask quadOffset fix** (BUG-GLYPHMASK-001, #365) — text invisible in offscreen GPU textures
 - [x] **Dependencies** — wgpu v0.29.15, naga v0.17.15, gogpu v0.41.14
 
@@ -278,7 +283,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.48.9** | 2026-06 | Glyph mask quadOffset fix (BUG-GLYPHMASK-001, #365), deps v0.29.15/v0.17.15/v0.41.14 |
+| **v0.48.10** | 2026-06 | Backdrop prefix sum fix (ADR-042), wgpu v0.30.1 opaque handles, gogpu v0.42.0 |
+| v0.48.9 | 2026-06 | Glyph mask quadOffset fix (BUG-GLYPHMASK-001, #365), deps v0.29.15/v0.17.15/v0.41.14 |
 | v0.48.8 | 2026-06 | HiDPI fix (#361 @TuSKan), OpenType font features (#362 @TuSKan) |
 | v0.48.7 | 2026-05 | Dependencies update |
 | v0.48.6 | 2026-05 | SparseStripsFiller winding (Vello parity), SDF thin stroke fallback (#346), damage union |
