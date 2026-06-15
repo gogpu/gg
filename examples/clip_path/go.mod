@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/gogpu/gg v0.48.8
-	github.com/gogpu/gogpu v0.41.13
+	github.com/gogpu/gogpu v0.41.14
 )
 
 require (
