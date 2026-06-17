@@ -4,7 +4,7 @@
 
 ## What is gg
 
-gg is a 2D graphics library for Go — draw shapes, text, images, paths with anti-aliasing. Features a smart 5-engine rasterizer that auto-selects the best algorithm per path. GPU acceleration via blank import.
+gg is a 2D graphics library for Go — draw shapes, text, images, paths with anti-aliasing. Features a smart 6-algorithm rasterizer that auto-selects the best algorithm per path (NoAA, Analytic, SparseStrips, TileCompute, SDF, Vello PTCL). GPU acceleration via blank import.
 
 Part of the [GoGPU ecosystem](https://github.com/gogpu) — think Flutter or Qt, but Pure Go with zero CGO.
 
@@ -38,15 +38,18 @@ import (
     _ "github.com/gogpu/gg/gpu" // GPU SDF acceleration
 )
 
-canvas, _ := ggcanvas.New(app.GPUContextProvider(), 800, 600)
+var canvas *ggcanvas.Canvas
 
 app.OnDraw(func(dc *gogpu.Context) {
+    if canvas == nil {
+        canvas, _ = ggcanvas.New(dc.GPUContextProvider(), 800, 600)
+    }
     canvas.Draw(func(cc *gg.Context) {
         cc.SetRGB(1, 0, 0)
         cc.DrawCircle(400, 300, 100)
         cc.Fill()
     })
-    canvas.Render(dc.AsTextureDrawer())
+    canvas.Render(dc.RenderTarget())
 })
 ```
 
@@ -71,9 +74,9 @@ golangci-lint run --timeout=5m
 
 ## Examples
 
-- `examples/gogpu_integration/` — GPU-accelerated 2D in window
-- `examples/gallery/` — all drawing features showcase
-- `examples/text/` — text rendering with fonts
+- `examples/gogpu_integration/` — GPU-accelerated 2D in window (six-tier rendering)
+- `examples/lcd_text/` — LCD ClearType text rendering
+- `examples/clip_demo/` — clipping with GPU scissor + SDF
 
 ## Community & Support
 
