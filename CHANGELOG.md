@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.12] - 2026-06-18
+
+### Fixed
+
+- **AMD stencil invert driver bug workaround** (#374, @lkmavi) — `StencilOperationInvert`
+  fails on AMD Radeon 890M D3D12, causing thin round-rect strokes to render as solid fills.
+  Fix: select fill rule dynamically based on path topology via `HadInnerJoin()`. Smooth paths
+  (round-rects, circles with cubic arcs) use NonZero (opposite winding cancels without Invert).
+  Sharp-cornered paths (rectangles, polygons) keep EvenOdd for correct V-shape handling.
+  Applied to both `GPURenderContext.StrokePath` and `VelloAccelerator.StrokePath`.
+  3 regression tests added in `expander_test.go`.
+
 ## [0.48.11] - 2026-06-15
 
 ### Fixed
