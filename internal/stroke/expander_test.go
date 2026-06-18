@@ -762,3 +762,65 @@ func TestRoundJoin_VShape(t *testing.T) {
 		t.Error("round join arc should be near the join point")
 	}
 }
+
+// TestHadInnerJoin_SmoothRoundRect verifies that a round-rect path (with cubic
+// corner arcs) produces no inner-pivot V-shapes. HadInnerJoin must be false so
+// the GPU stencil path can use NonZero fill rule instead of StencilOperationInvert.
+// This is the regression test for issue #374 (thin round-rect strokes solid on AMD).
+func TestHadInnerJoin_SmoothRoundRect(t *testing.T) {
+	// Build a round-rect path with cubic bezier arcs matching DrawRoundedRectangle.
+	const x, y, w, h, r = 10.0, 10.0, 100.0, 50.0, 5.0
+	const k = 0.5522847498307936
+	kr := k * r
+
+	path := newSOAPath()
+	path.moveTo(x+r, y)
+	path.lineTo(x+w-r, y)
+	path.cubicTo(x+w-r+kr, y, x+w, y+r-kr, x+w, y+r)
+	path.lineTo(x+w, y+h-r)
+	path.cubicTo(x+w, y+h-r+kr, x+w-r+kr, y+h, x+w-r, y+h)
+	path.lineTo(x+r, y+h)
+	path.cubicTo(x+r-kr, y+h, x, y+h-r+kr, x, y+h-r)
+	path.lineTo(x, y+r)
+	path.cubicTo(x, y+r-kr, x+r-kr, y, x+r, y)
+	path.close()
+
+	style := Stroke{Width: 1.0, Cap: LineCapButt, Join: LineJoinMiter, MiterLimit: 4.0}
+	exp := NewStrokeExpander(style)
+	verbs, _ := exp.Expand(path.verbs, path.coords)
+
+	if exp.HadInnerJoin() {
+		t.Error("smooth round-rect should have no inner-pivot V-shapes (HadInnerJoin=false); " +
+			"got HadInnerJoin=true, which would trigger EvenOdd+Invert stencil path")
+	}
+
+	// Verify the output has exactly 2 closed contours (outer + inner from finishClosed).
+	closeCount := 0
+	for _, v := range verbs {
+		if v == VerbClose {
+			closeCount++
+		}
+	}
+	if closeCount != 2 {
+		t.Errorf("closed round-rect expansion should produce 2 contours, got %d VerbClose", closeCount)
+	}
+}
+
+// TestHadInnerJoin_SharpRectangle verifies that a sharp-cornered rectangle
+// sets HadInnerJoin=true, keeping EvenOdd fill rule for correct V-shape handling.
+func TestHadInnerJoin_SharpRectangle(t *testing.T) {
+	path := newSOAPath()
+	path.moveTo(10, 10)
+	path.lineTo(110, 10)
+	path.lineTo(110, 60)
+	path.lineTo(10, 60)
+	path.close()
+
+	style := Stroke{Width: 1.0, Cap: LineCapButt, Join: LineJoinMiter, MiterLimit: 4.0}
+	exp := NewStrokeExpander(style)
+	exp.Expand(path.verbs, path.coords)
+
+	if !exp.HadInnerJoin() {
+		t.Error("sharp-cornered rectangle should produce inner-pivot V-shapes (HadInnerJoin=true)")
+	}
+}

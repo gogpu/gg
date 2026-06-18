@@ -651,21 +651,19 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 
 	fillPath := strokeResultToPath(outVerbs, outCoords)
 
-	// Stroke-expanded outlines require EvenOdd fill rule for BOTH open and
-	// closed paths. The stroke expander's inner join pivot routing (handleInnerJoin)
-	// creates self-intersecting V-shapes at each vertex. With NonZero fill,
-	// stencil fan tessellation counts winding=2 at pixels between forward/reverse
-	// edges, incorrectly filling the entire interior. With EvenOdd, self-intersection
-	// crossings XOR correctly: stroke band (1 crossing = odd = filled), interior
-	// area (2 crossings = even = empty).
-	//
-	// This applies to both topologies:
-	//   - Closed paths: ring topology (2 contours, hollow center)
-	//   - Open paths: self-intersecting single contour (inner join V-shapes)
-	//
-	// Skia Ganesh pattern. Fixes ui#101 Thread F + issue #347.
 	strokePaint := *paint
-	strokePaint.FillRule = gg.FillRuleEvenOdd
+	if expander.HadInnerJoin() {
+		// Inner-pivot V-shapes present (sharp corners): EvenOdd stencil (Invert op)
+		// cancels the self-intersections. NonZero would count V-shape area as winding=2
+		// and render it solid. Skia Ganesh pattern. Fixes ui#101 Thread F + issue #347.
+		strokePaint.FillRule = gg.FillRuleEvenOdd
+	} else {
+		// No V-shapes (all joins were skipped — smooth corners like round-rects, circles).
+		// The two contours from finishClosed are properly wound (outer CW, inner CCW),
+		// so NonZero correctly produces a hollow ring without relying on
+		// StencilOperationInvert, which has driver bugs on some AMD D3D12 GPUs (#374).
+		strokePaint.FillRule = gg.FillRuleNonZero
+	}
 	return rc.FillPath(target, fillPath, &strokePaint)
 }
 
