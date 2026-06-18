@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.48.11
+## Current State: v0.48.12
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
@@ -92,9 +92,14 @@
 
 ## Current Release
 
-### v0.48.11 — Current
+### v0.48.12 — Current
+- [x] **AMD stencil invert workaround** (#374, @lkmavi) — dynamic fill rule via `HadInnerJoin()`
+- [x] Smooth paths → NonZero (avoids buggy StencilOperationInvert on AMD D3D12)
+- [x] Sharp paths → EvenOdd (correct V-shape handling)
+- [x] 3 regression tests + 4 Vello accumulator tests updated
+
+### v0.48.11 ✅ Released
 - [x] **Vello StrokePath EvenOdd fill rule** (#369, ADR-043, @TimLai666) — thin strokes solid fill on GPU compute
-- 2 regression tests (StrokePathUsesEvenOdd, StrokeShapeUsesEvenOdd)
 
 ### v0.48.10 ✅ Released
 - [x] **Backdrop prefix sum boundary fix** (BUG-BACKDROP-001, ADR-042) — Vello backdrop_dyn pattern
@@ -287,7 +292,8 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.48.11** | 2026-06 | Vello StrokePath EvenOdd (#369 @TimLai666), thin strokes solid fill fix |
+| **v0.48.12** | 2026-06 | AMD stencil invert workaround (#374 @lkmavi), dynamic fill rule HadInnerJoin |
+| v0.48.11 | 2026-06 | Vello StrokePath EvenOdd (#369 @TimLai666), thin strokes solid fill fix |
 | v0.48.10 | 2026-06 | Backdrop prefix sum fix (ADR-042), wgpu v0.30.1 opaque handles, gogpu v0.42.0 |
 | v0.48.9 | 2026-06 | Glyph mask quadOffset fix (BUG-GLYPHMASK-001, #365), deps v0.29.15/v0.17.15/v0.41.14 |
 | v0.48.8 | 2026-06 | HiDPI fix (#361 @TuSKan), OpenType font features (#362 @TuSKan) |
