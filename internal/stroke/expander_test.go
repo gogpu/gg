@@ -824,3 +824,26 @@ func TestHadInnerJoin_SharpRectangle(t *testing.T) {
 		t.Error("sharp-cornered rectangle should produce inner-pivot V-shapes (HadInnerJoin=true)")
 	}
 }
+
+// TestHadInnerJoin_ZeroRadiusRoundRect verifies that a round-rect with radius=0
+// (which degenerates to a sharp rectangle with no cubic arcs) sets HadInnerJoin=true.
+// This ensures the GPU stencil path falls back to EvenOdd for degenerate round-rects.
+func TestHadInnerJoin_ZeroRadiusRoundRect(t *testing.T) {
+	// radius=0 → DrawRoundedRectangle clamps to 0, producing pure LineTos with 90° corners.
+	const x, y, w, h = 10.0, 10.0, 100.0, 50.0
+
+	path := newSOAPath()
+	path.moveTo(x, y)
+	path.lineTo(x+w, y)
+	path.lineTo(x+w, y+h)
+	path.lineTo(x, y+h)
+	path.close()
+
+	style := Stroke{Width: 1.0, Cap: LineCapButt, Join: LineJoinMiter, MiterLimit: 4.0}
+	exp := NewStrokeExpander(style)
+	exp.Expand(path.verbs, path.coords)
+
+	if !exp.HadInnerJoin() {
+		t.Error("zero-radius round-rect (sharp rectangle) should have HadInnerJoin=true")
+	}
+}
