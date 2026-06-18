@@ -218,6 +218,11 @@ type StrokeExpander struct {
 	// Join threshold for skipping small joins
 	joinThresh float64
 
+	// hadInnerJoin is true if handleInnerJoin was called during the last Expand.
+	// When false, the expanded path has no inner-pivot V-shapes and can be
+	// rendered with NonZero fill rule (avoids StencilOperationInvert).
+	hadInnerJoin bool
+
 	// Reusable buffer for curve flattening (flattenQuad/flattenCubic).
 	// Retained between calls to avoid per-curve allocations.
 	flattenBuf []Point
@@ -291,6 +296,13 @@ func (e *StrokeExpander) Expand(verbs []PathVerb, coords []float64) ([]PathVerb,
 	return e.output.verbs, e.output.coords
 }
 
+// HadInnerJoin reports whether handleInnerJoin was called during the last Expand.
+// When false, all joins were skipped (smooth path) and the expansion produces
+// no inner-pivot V-shapes, making it safe to use NonZero fill rule.
+func (e *StrokeExpander) HadInnerJoin() bool {
+	return e.hadInnerJoin
+}
+
 // reset clears the expander state for a new expansion.
 // Buffers are truncated but retain their backing arrays for reuse.
 func (e *StrokeExpander) reset() {
@@ -304,6 +316,7 @@ func (e *StrokeExpander) reset() {
 	e.lastTan = Vec2{}
 	e.lastNorm = Vec2{}
 	e.joinThresh = 2.0 * e.tolerance / e.style.Width
+	e.hadInnerJoin = false
 }
 
 // doJoin handles joining the current segment to the previous one.
@@ -384,6 +397,7 @@ func (e *StrokeExpander) joinWithPrevious(p0 Point, norm, tan0 Vec2) {
 // Without step 2, the inner path "jumps" diagonally from pivot to the next
 // doLine() position, creating visible teeth on thick strokes (#354).
 func (e *StrokeExpander) handleInnerJoin(path *pathBuilder, pivot Point, afterNorm Vec2) {
+	e.hadInnerJoin = true
 	path.lineTo(pivot)
 	path.lineTo(pivot.Add(afterNorm))
 }
