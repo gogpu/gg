@@ -36,7 +36,9 @@ const vertexStride = 8
 //
 // Two stencil fill pipeline variants are created:
 //   - NonZero: front=IncrementWrap / back=DecrementWrap (winding number).
-//   - EvenOdd: front=Invert / back=Invert (parity count).
+//   - EvenOdd: front=IncrementWrap / back=IncrementWrap with WriteMask=0x01
+//     (parity via bit-0 toggle — equivalent to Invert but avoids the AMD D3D12
+//     StencilOperationInvert driver bug on Radeon 890M and similar GPUs, #374).
 //
 // The cover pipeline reads the stencil buffer with NotEqual(0) and resets
 // stencil values to zero via PassOp=Zero after writing the fill color.
@@ -183,9 +185,14 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 
 	// --- Even-Odd Stencil Fill Pipeline ---
 	//
-	// Even-odd fill rule: both front and back faces invert the stencil value.
-	// A pixel with odd winding count has stencil != 0 (inside), even count
-	// wraps back to 0 (outside). Same shader and layout as the non-zero variant.
+	// Even-odd fill rule: both front and back faces toggle the stencil parity bit.
+	// WriteMask=0x01 restricts writes to bit 0 only. IncrementWrap on a 1-bit field
+	// is equivalent to XOR/Invert: 0→1→0→... This avoids StencilOperationInvert,
+	// which has a driver bug on AMD Radeon 890M D3D12 (and similar GPUs) that
+	// causes the stencil to not be toggled correctly, making strokes render as solid
+	// fills (#374). Pixels inside an odd number of crossings have stencil=1 (inside),
+	// pixels inside an even number have stencil=0 (outside). Same shader and layout
+	// as the non-zero variant.
 	evenOddStencilPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "stencil_fill_even_odd_pipeline",
 		Layout: sr.stencilPipeLayout,
@@ -212,16 +219,16 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 				Compare:     gputypes.CompareFunctionAlways,
 				FailOp:      wgpu.StencilOperationKeep,
 				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationInvert,
+				PassOp:      wgpu.StencilOperationIncrementWrap,
 			},
 			StencilBack: wgpu.StencilFaceState{
 				Compare:     gputypes.CompareFunctionAlways,
 				FailOp:      wgpu.StencilOperationKeep,
 				DepthFailOp: wgpu.StencilOperationKeep,
-				PassOp:      wgpu.StencilOperationInvert,
+				PassOp:      wgpu.StencilOperationIncrementWrap,
 			},
 			StencilReadMask:  0xFF,
-			StencilWriteMask: 0xFF,
+			StencilWriteMask: 0x01,
 		},
 		Multisample: multisample,
 		Primitive:   primitive,
@@ -368,6 +375,8 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 	sr.pipelineWithDepthClipNZ = nzPipeline
 
 	// --- Even-odd stencil fill + depth clip ---
+	// Same IncrementWrap+WriteMask=0x01 approach as the base EvenOdd pipeline
+	// (avoids AMD D3D12 StencilOperationInvert bug, #374).
 	eoPipeline, err := sr.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Label:  "stencil_fill_even_odd_depth_clip_pipeline",
 		Layout: sr.stencilPipeLayout,
@@ -389,14 +398,14 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 			DepthCompare:      gputypes.CompareFunctionGreaterEqual,
 			StencilFront: wgpu.StencilFaceState{
 				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationInvert,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationIncrementWrap,
 			},
 			StencilBack: wgpu.StencilFaceState{
 				Compare: gputypes.CompareFunctionAlways, FailOp: wgpu.StencilOperationKeep,
-				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationInvert,
+				DepthFailOp: wgpu.StencilOperationKeep, PassOp: wgpu.StencilOperationIncrementWrap,
 			},
 			StencilReadMask:  0xFF,
-			StencilWriteMask: 0xFF,
+			StencilWriteMask: 0x01,
 		},
 		Multisample: multisample,
 		Primitive:   primitive,
