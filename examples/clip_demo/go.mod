@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/clip_demo
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.48.13
+	github.com/gogpu/gg v0.48.14
 	github.com/gogpu/gogpu v0.42.5
 	github.com/gogpu/gpucontext v0.21.0
 )
