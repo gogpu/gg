@@ -901,11 +901,10 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 
 // flushVello flushes Vello compute if it has pending paths.
 func (rc *GPURenderContext) flushVello(target gg.GPURenderTarget) error {
-	effectiveMode := rc.effectivePipelineMode()
 	rc.shared.mu.Lock()
 	va := rc.shared.velloAccel
 	rc.shared.mu.Unlock()
-	if va != nil && va.PendingCount() > 0 && effectiveMode == gg.PipelineModeCompute {
+	if va != nil && va.PendingCount() > 0 {
 		if err := va.Flush(target); err != nil {
 			slogger().Debug("vello compute flush failed", "err", err)
 		}
