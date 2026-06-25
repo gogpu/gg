@@ -21,9 +21,6 @@ import (
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-
-	// Import Vulkan backend so it registers via init().
-	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
 // VelloAccelerator provides GPU-accelerated scene rendering using the Vello-style
