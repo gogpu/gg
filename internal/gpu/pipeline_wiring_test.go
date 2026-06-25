@@ -482,3 +482,97 @@ func TestGPURenderContext_BaseLayer_DoesNotAffectOtherCounts(t *testing.T) {
 			shapes, images, gpuTex)
 	}
 }
+
+// TestStrokeRouting_AutoModeUsesStencil verifies that in PipelineModeAuto
+// (the default), StrokePath routes through stencil-then-cover, NOT through
+// Vello compute. Vello compute writes to target.Data (CPU pixmap) which is
+// ignored in GPU-direct mode (FlushGPUWithView). Stencil path uses the
+// render session which correctly handles target.View.
+//
+// Regression test for TASK-GG-STROKE-REGRESSION-374: PR #379 changed routing
+// to != PipelineModeRenderPass, breaking GPU-direct stroke rendering in ui.
+func TestStrokeRouting_AutoModeUsesStencil(t *testing.T) {
+	s := NewGPUShared()
+	s.gpuReady = true
+	s.velloAccel = &VelloAccelerator{gpuReady: true}
+	rc := &GPURenderContext{shared: s}
+	target := makeTestTarget(200, 200)
+
+	path := gg.NewPath()
+	path.Rectangle(40, 40, 120, 80)
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+	paint.SetStroke(gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinMiter, MiterLimit: 10.0})
+
+	if err := rc.StrokePath(target, path, paint); err != nil {
+		t.Fatalf("StrokePath: %v", err)
+	}
+
+	if s.velloAccel.PendingCount() != 0 {
+		t.Errorf("Auto mode: stroke routed to Vello (PendingCount=%d), want stencil path",
+			s.velloAccel.PendingCount())
+	}
+	if rc.PendingCount() == 0 {
+		t.Error("Auto mode: no pending stencil commands after StrokePath")
+	}
+}
+
+// TestStrokeRouting_ComputeModeUsesVello verifies that in PipelineModeCompute
+// (explicit), StrokePath routes through Vello compute pipeline.
+func TestStrokeRouting_ComputeModeUsesVello(t *testing.T) {
+	s := NewGPUShared()
+	s.gpuReady = true
+	s.velloAccel = &VelloAccelerator{
+		gpuReady:   true,
+		dispatcher: &VelloComputeDispatcher{initialized: true},
+	}
+	rc := &GPURenderContext{shared: s, pipelineMode: gg.PipelineModeCompute}
+	target := makeTestTarget(200, 200)
+
+	path := gg.NewPath()
+	path.Rectangle(40, 40, 120, 80)
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+	paint.SetStroke(gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinMiter, MiterLimit: 10.0})
+
+	if err := rc.StrokePath(target, path, paint); err != nil {
+		t.Fatalf("StrokePath: %v", err)
+	}
+
+	if s.velloAccel.PendingCount() != 1 {
+		t.Errorf("Compute mode: Vello PendingCount=%d, want 1",
+			s.velloAccel.PendingCount())
+	}
+}
+
+// TestEvenOddFillRouting_AutoModeUsesStencil verifies that EvenOdd fills
+// in PipelineModeAuto route through stencil, not Vello. Same GPU-direct
+// issue as strokes — Vello ignores target.View.
+func TestEvenOddFillRouting_AutoModeUsesStencil(t *testing.T) {
+	s := NewGPUShared()
+	s.gpuReady = true
+	s.velloAccel = &VelloAccelerator{gpuReady: true}
+	rc := &GPURenderContext{shared: s}
+	target := makeTestTarget(200, 200)
+
+	path := gg.NewPath()
+	path.MoveTo(10, 10)
+	path.LineTo(190, 10)
+	path.LineTo(100, 190)
+	path.Close()
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+	paint.FillRule = gg.FillRuleEvenOdd
+
+	if err := rc.FillPath(target, path, paint); err != nil {
+		t.Fatalf("FillPath: %v", err)
+	}
+
+	if s.velloAccel.PendingCount() != 0 {
+		t.Errorf("Auto mode: EvenOdd fill routed to Vello (PendingCount=%d), want stencil",
+			s.velloAccel.PendingCount())
+	}
+}

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.16] - 2026-06-25
+
+### Fixed
+
+- **GPU-direct stroke rendering regression** — v0.48.15 routed ALL strokes and
+  EvenOdd fills through Vello compute in `PipelineModeAuto`. Vello's `compositeOver()`
+  writes to `target.Data` (CPU pixmap), ignoring `target.View` (GPU texture). This
+  made strokes invisible when using `FlushGPUWithView()` — the primary rendering
+  path for ui RepaintBoundary textures. Affected: spinner arcs, chart lines,
+  dropdown borders/chevrons, any stroke through SceneCanvas replay.
+  Fix: revert routing to explicit `PipelineModeCompute` only. Stencil-then-cover
+  (with v0.48.15 IncrementWrap+WriteMask=0x01 hardening) handles `target.View`
+  correctly via render session `resolveActiveView()`. Proper GPU-direct Vello
+  output (storage texture + blit, Rust Vello pattern) tracked for v0.49.0.
+
 ## [0.48.15] - 2026-06-25
 
 ### Fixed
