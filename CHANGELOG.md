@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.17] - 2026-06-25
+
+### Fixed
+
+- **macOS Metal stencil rendering** (#390, @samyfodil) — adopt wgpu v0.30.4 which
+  fixes Metal HAL not translating stencil state into `MTLDepthStencilState`. Stencil
+  test was silently inert (`compare=Always`), causing stencil-then-cover fills to
+  flood the entire cover quad: rounded panels rendered as squares, clipped content
+  vanished. 3 Metal regression tests added (circle, rounded rect, even-odd ring).
+
+### Changed
+
+- **Architecture: remove HAL imports from production code** — gg no longer imports
+  `wgpu/hal/vulkan` directly. Backend registration belongs in the application
+  (gogpu registers all backends per-platform via `gpu/backend/native/`). gg is a
+  pure consumer of the wgpu WebGPU standard API. Metal test rewritten to use
+  `wgpu.CreateInstance(BackendsMetal)` public API instead of `hal/metal` import.
+
+- **Dependencies:** wgpu v0.30.3 → v0.30.4.
+
 ## [0.48.16] - 2026-06-25
 
 ### Fixed

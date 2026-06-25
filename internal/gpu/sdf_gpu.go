@@ -9,9 +9,6 @@ import (
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gpucontext"
-
-	// Import Vulkan backend so it registers via init().
-	_ "github.com/gogpu/wgpu/hal/vulkan"
 )
 
 // SDFAccelerator provides GPU-accelerated rendering using wgpu/hal render

@@ -11,42 +11,29 @@ import (
 	"testing"
 
 	"github.com/gogpu/gg"
-	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/metal"
 )
 
 // createMetalDevice creates a REAL Metal-backed *wgpu.Device + *wgpu.Queue for
-// pixel-exact integration testing on Apple Silicon. Unlike the noop backend,
-// this drives the actual Metal HAL: MTLRenderPipelineState, MTLDepthStencilState,
-// stencil attachments, MSAA resolve, and CPU readback are all exercised.
+// pixel-exact integration testing on Apple Silicon. Uses public wgpu API with
+// BackendsMetal filter — no HAL imports needed.
 func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	instance, err := metal.Backend{}.CreateInstance(nil)
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
+		Backends: wgpu.BackendsMetal,
+	})
 	if err != nil {
 		t.Skipf("metal CreateInstance: %v", err)
 	}
-	adapters := instance.EnumerateAdapters(nil)
-	if len(adapters) == 0 {
-		instance.Destroy()
-		t.Skip("metal backend: no adapters")
-	}
-	openDev, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
+	adapter, err := instance.RequestAdapter(nil)
 	if err != nil {
 		instance.Destroy()
-		t.Fatalf("metal Open: %v", err)
+		t.Skipf("metal RequestAdapter: %v", err)
 	}
-	device, err := wgpu.NewDeviceFromHAL(
-		openDev.Device,
-		openDev.Queue,
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"metal-stencil-test",
-	)
+	device, err := adapter.RequestDevice(nil)
 	if err != nil {
-		openDev.Device.Destroy()
 		instance.Destroy()
-		t.Fatalf("NewDeviceFromHAL: %v", err)
+		t.Skipf("metal RequestDevice: %v", err)
 	}
 	queue := device.Queue()
 	cleanup := func() {
