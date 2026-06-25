@@ -272,10 +272,18 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 
 	for _, glyph := range glyphs {
 		// Compute subpixel position (fractional part of absolute position).
+		// The fraction MUST be measured in device space: the mask is
+		// rasterized at device size (fontSize = face.Size()*deviceScale) and
+		// the quad is transformed to device pixels by deviceScale at flush.
+		// Using the user-space fraction misaligns the baked subpixel AA with
+		// the device pixel grid at deviceScale != 1, shifting each glyph
+		// independently and producing uneven horizontal spacing.
 		absX := x + glyph.X
 		absY := y + glyph.Y
-		fracX := absX - math.Floor(absX)
-		fracY := absY - math.Floor(absY)
+		devX := absX * deviceScale
+		devY := absY * deviceScale
+		fracX := devX - math.Floor(devX)
+		fracY := devY - math.Floor(devY)
 
 		// Size bucket quantization (Skia pattern): under atlas pressure,
 		// rasterize at a coarse bucket size and scale quads to actual size.

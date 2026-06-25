@@ -124,6 +124,14 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 
 	defer c.setGPUClipRect()()
 
+	// TextModeVector opts out of the glyph-mask accelerator and renders the
+	// pre-shaped glyphs as vector outlines (same glyph.X positions). Other
+	// modes need the original string to re-render, which we don't have here.
+	if c.textMode == TextModeVector {
+		c.drawShapedGlyphsAsOutlines(glyphs, face, x, y)
+		return
+	}
+
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
 
