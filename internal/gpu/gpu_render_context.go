@@ -593,20 +593,6 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 		}
 	}
 
-	// EvenOdd fills need the hole-carving that stencil-then-cover provides, but
-	// that path mis-renders on some drivers (AMD Radeon Vulkan, #374 — the hole
-	// fills solid). Prefer the compute (Vello) pipeline for EvenOdd whenever it
-	// is available (PipelineModeRenderPass forces the legacy stencil path).
-	if paint.FillRule == gg.FillRuleEvenOdd && rc.pipelineMode != gg.PipelineModeRenderPass {
-		rc.shared.mu.Lock()
-		va := rc.shared.velloAccel
-		rc.shared.mu.Unlock()
-		if va != nil && va.CanCompute() {
-			va.SetAntiAlias(rc.antiAlias)
-			return va.FillPath(target, path, paint)
-		}
-	}
-
 	// Fall back to stencil-then-cover.
 	tess := NewFanTessellator()
 	tess.TessellatePath(path)
@@ -635,15 +621,11 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 	rc.sceneStats.PathCount++
 	rc.sceneStats.ShapeCount++
 
-	// Stroke outlines expand to multi-contour EvenOdd fills. The stencil-then-
-	// cover fallback mis-renders these as solid boxes on some drivers (thin 1px
-	// round-rect/arc strokes fill solid on AMD Radeon Vulkan, #374) because the
-	// even-coverage hole pixels never collapse to stencil 0. The compute (Vello)
-	// pipeline renders them correctly, so prefer it whenever it is available —
-	// not only when explicitly requested via PipelineModeCompute. Falls through
-	// to stencil-then-cover when compute is unavailable (PipelineModeRenderPass
-	// forces the legacy path).
-	if rc.pipelineMode != gg.PipelineModeRenderPass {
+	// In PipelineModeCompute, delegate strokes to Vello compute pipeline.
+	// Default (Auto) uses stencil-then-cover which handles target.View correctly.
+	// Vello compute currently lacks GPU-direct output (writes to CPU pixmap only),
+	// so broad routing breaks FlushGPUWithView — see TASK-GG-STROKE-REGRESSION-374.
+	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel
 		rc.shared.mu.Unlock()
@@ -896,18 +878,34 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	return err
 }
 
-// flushVello flushes Vello compute if it has pending paths.
+// flushVello flushes Vello compute if it has pending paths and the effective
+// pipeline mode is Compute. In Auto mode with few shapes, SelectPipeline
+// returns RenderPass — Vello paths would be lost. Guard ensures Vello is
+// flushed only when the mode actually routes paths there.
 func (rc *GPURenderContext) flushVello(target gg.GPURenderTarget) error {
+	effectiveMode := rc.effectivePipelineMode()
 	rc.shared.mu.Lock()
 	va := rc.shared.velloAccel
 	rc.shared.mu.Unlock()
-	if va != nil && va.PendingCount() > 0 {
+	if va != nil && va.PendingCount() > 0 && effectiveMode == gg.PipelineModeCompute {
 		if err := va.Flush(target); err != nil {
 			slogger().Debug("vello compute flush failed", "err", err)
 		}
 	}
 	rc.sceneStats = gg.SceneStats{}
 	return nil
+}
+
+// effectivePipelineMode determines the actual mode for this flush.
+func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
+	mode := rc.pipelineMode
+	if mode == gg.PipelineModeAuto {
+		rc.shared.mu.Lock()
+		hasCompute := rc.shared.velloAccel != nil && rc.shared.velloAccel.CanCompute()
+		rc.shared.mu.Unlock()
+		mode = gg.SelectPipeline(rc.sceneStats, hasCompute)
+	}
+	return mode
 }
 
 // CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
