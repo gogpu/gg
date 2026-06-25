@@ -672,19 +672,16 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 
 	fillPath := strokeResultToPath(outVerbs, outCoords)
 
+	// EvenOdd correctly handles both stroke topologies:
+	//   - Smooth paths (round-rects, circles): 2-contour ring (outer CW + inner CCW).
+	//     Each pixel in the hollow center is toggled twice → stencil=0 → empty.
+	//   - Sharp paths (rectangles): inner-pivot V-shapes create self-intersections.
+	//     V-shape area is toggled twice → stencil=0 → correctly hollow.
+	// The stencil EvenOdd pipeline uses IncrementWrap+WriteMask=0x01 (parity toggle)
+	// instead of StencilOperationInvert, which has a driver bug on AMD D3D12 (#374).
+	// NonZero would miscount V-shape area as winding=2 → solid fill (wrong for sharp paths).
 	strokePaint := *paint
-	if expander.HadInnerJoin() {
-		// Inner-pivot V-shapes present (sharp corners): EvenOdd stencil (Invert op)
-		// cancels the self-intersections. NonZero would count V-shape area as winding=2
-		// and render it solid. Skia Ganesh pattern. Fixes ui#101 Thread F + issue #347.
-		strokePaint.FillRule = gg.FillRuleEvenOdd
-	} else {
-		// No V-shapes (all joins were skipped — smooth corners like round-rects, circles).
-		// The two contours from finishClosed are properly wound (outer CW, inner CCW),
-		// so NonZero correctly produces a hollow ring without relying on
-		// StencilOperationInvert, which has driver bugs on some AMD D3D12 GPUs (#374).
-		strokePaint.FillRule = gg.FillRuleNonZero
-	}
+	strokePaint.FillRule = gg.FillRuleEvenOdd
 	return rc.FillPath(target, fillPath, &strokePaint)
 }
 

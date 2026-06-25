@@ -154,95 +154,74 @@ func TestVelloAccelerator_StrokePathAccumulates(t *testing.T) {
 	}
 }
 
-// TestVelloAccelerator_StrokePathSmoothUsesNonZero verifies that smooth paths
-// (round-rects with cubic arcs, no inner-pivot V-shapes) use NonZero fill rule.
-// This avoids StencilOperationInvert which has driver bugs on AMD D3D12 (#374).
-// ADR-043, updated by PR #376.
-func TestVelloAccelerator_StrokePathSmoothUsesNonZero(t *testing.T) {
-	a := &VelloAccelerator{gpuReady: true}
-	target := makeTestTarget(200, 200)
-
-	// Closed round-rect — smooth cubic arcs, no handleInnerJoin triggered.
-	path := gg.NewPath()
-	path.RoundedRectangle(40, 40, 120, 80, 12)
-
-	paint := gg.NewPaint()
-	paint.SetBrush(gg.Solid(gg.RGBA{R: 0.5, G: 0.5, B: 0.5, A: 1}))
-	s := gg.Stroke{Width: 1.0, Cap: gg.LineCapButt, Join: gg.LineJoinRound, MiterLimit: 10.0}
-	paint.SetStroke(s)
-
-	if err := a.StrokePath(target, path, paint); err != nil {
-		t.Fatalf("StrokePath: unexpected error: %v", err)
-	}
-	if a.PendingCount() != 1 {
-		t.Fatalf("expected 1 pending, got %d", a.PendingCount())
-	}
-
-	pathDef := a.pendingPaths[0]
-	if pathDef.FillRule != tilecompute.FillRuleNonZero {
-		t.Errorf("smooth StrokePath fill rule = %v, want NonZero (%v)",
-			pathDef.FillRule, tilecompute.FillRuleNonZero)
-	}
-}
-
-// TestVelloAccelerator_StrokePathSharpUsesEvenOdd verifies that sharp-cornered
-// paths (rectangles with 90° corners, inner-pivot V-shapes) use EvenOdd fill rule.
-func TestVelloAccelerator_StrokePathSharpUsesEvenOdd(t *testing.T) {
-	a := &VelloAccelerator{gpuReady: true}
-	target := makeTestTarget(200, 200)
-
-	// Sharp rectangle — 90° corners trigger handleInnerJoin.
-	path := gg.NewPath()
-	path.Rectangle(40, 40, 120, 80)
-
-	paint := gg.NewPaint()
-	paint.SetBrush(gg.Solid(gg.Red))
-	s := gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinMiter, MiterLimit: 10.0}
-	paint.SetStroke(s)
-
-	if err := a.StrokePath(target, path, paint); err != nil {
-		t.Fatalf("StrokePath: unexpected error: %v", err)
-	}
-	if a.PendingCount() != 1 {
-		t.Fatalf("expected 1 pending, got %d", a.PendingCount())
+// TestVelloAccelerator_StrokeAlwaysUsesEvenOdd verifies that all stroke expansions
+// use EvenOdd fill rule regardless of path topology (smooth or sharp corners).
+// EvenOdd via IncrementWrap+WriteMask=0x01 correctly handles both topologies:
+//   - Smooth (round-rects, circles): 2-contour ring — center toggled twice → empty.
+//   - Sharp (rectangles): inner-pivot V-shapes — intersection toggled twice → empty.
+//
+// Using EvenOdd unconditionally also avoids any potential AMD D3D12 stencil issues
+// that may affect the NonZero IncrementWrap/DecrementWrap pipeline on ring paths (#374).
+// ADR-043, #369, #374.
+func TestVelloAccelerator_StrokeAlwaysUsesEvenOdd(t *testing.T) {
+	tests := []struct {
+		name string
+		path func() *gg.Path
+		join gg.LineJoin
+	}{
+		{
+			name: "smooth round-rect",
+			path: func() *gg.Path { p := gg.NewPath(); p.RoundedRectangle(40, 40, 120, 80, 12); return p },
+			join: gg.LineJoinRound,
+		},
+		{
+			name: "sharp rectangle",
+			path: func() *gg.Path { p := gg.NewPath(); p.Rectangle(40, 40, 120, 80); return p },
+			join: gg.LineJoinMiter,
+		},
 	}
 
-	pathDef := a.pendingPaths[0]
-	if pathDef.FillRule != tilecompute.FillRuleEvenOdd {
-		t.Errorf("sharp StrokePath fill rule = %v, want EvenOdd (%v)",
-			pathDef.FillRule, tilecompute.FillRuleEvenOdd)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &VelloAccelerator{gpuReady: true}
+			target := makeTestTarget(200, 200)
+
+			paint := gg.NewPaint()
+			paint.SetBrush(gg.Solid(gg.Red))
+			paint.SetStroke(gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: tc.join, MiterLimit: 10.0})
+
+			if err := a.StrokePath(target, tc.path(), paint); err != nil {
+				t.Fatalf("StrokePath: %v", err)
+			}
+			if a.PendingCount() != 1 {
+				t.Fatalf("expected 1 pending, got %d", a.PendingCount())
+			}
+			if got := a.pendingPaths[0].FillRule; got != tilecompute.FillRuleEvenOdd {
+				t.Errorf("%s: fill rule = %v, want EvenOdd", tc.name, got)
+			}
+		})
 	}
 }
 
-// TestVelloAccelerator_StrokeShapeSmoothUsesNonZero verifies that StrokeShape
-// for circles (smooth, no V-shapes) uses NonZero fill rule.
-func TestVelloAccelerator_StrokeShapeSmoothUsesNonZero(t *testing.T) {
+// TestVelloAccelerator_StrokeShapeUsesEvenOdd verifies that StrokeShape (which
+// delegates to StrokePath) also produces EvenOdd fill rule. ADR-043, #369, #374.
+func TestVelloAccelerator_StrokeShapeUsesEvenOdd(t *testing.T) {
 	a := &VelloAccelerator{gpuReady: true}
 	target := makeTestTarget(200, 200)
 
-	shape := gg.DetectedShape{
-		Kind:    gg.ShapeCircle,
-		CenterX: 100,
-		CenterY: 100,
-		RadiusX: 40,
-	}
-
+	shape := gg.DetectedShape{Kind: gg.ShapeCircle, CenterX: 100, CenterY: 100, RadiusX: 40}
 	paint := gg.NewPaint()
 	paint.SetBrush(gg.Solid(gg.Red))
-	s := gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinRound, MiterLimit: 10.0}
-	paint.SetStroke(s)
+	paint.SetStroke(gg.Stroke{Width: 2.0, Cap: gg.LineCapButt, Join: gg.LineJoinRound, MiterLimit: 10.0})
 
 	if err := a.StrokeShape(target, shape, paint); err != nil {
-		t.Fatalf("StrokeShape: unexpected error: %v", err)
+		t.Fatalf("StrokeShape: %v", err)
 	}
 	if a.PendingCount() != 1 {
 		t.Fatalf("expected 1 pending, got %d", a.PendingCount())
 	}
-
-	pathDef := a.pendingPaths[0]
-	if pathDef.FillRule != tilecompute.FillRuleNonZero {
-		t.Errorf("smooth StrokeShape fill rule = %v, want NonZero (%v)",
-			pathDef.FillRule, tilecompute.FillRuleNonZero)
+	if got := a.pendingPaths[0].FillRule; got != tilecompute.FillRuleEvenOdd {
+		t.Errorf("StrokeShape fill rule = %v, want EvenOdd", got)
 	}
 }
 

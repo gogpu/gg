@@ -260,19 +260,12 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	// Build a gg.Path from the expanded outline.
 	fillPath := strokeResultToPath(outVerbs, outCoords)
 
+	// EvenOdd correctly handles both stroke topologies:
+	//   - Smooth paths: 2-contour ring, center toggled twice → empty.
+	//   - Sharp paths: V-shape intersections toggled twice → correctly hollow.
+	// Mirrors GPURenderContext.StrokePath. ADR-043, #369, #374.
 	strokePaint := *paint
-	if expander.HadInnerJoin() {
-		// Inner-pivot V-shapes present (sharp corners): EvenOdd cancels them.
-		// NonZero would count V-shape area as winding=2 and render solid.
-		// ADR-043, #369.
-		strokePaint.FillRule = gg.FillRuleEvenOdd
-	} else {
-		// No V-shapes (smooth corners — round-rects, circles, etc.).
-		// The two contours from finishClosed are properly wound (outer CW, inner CCW),
-		// so NonZero produces a hollow ring without StencilOperationInvert.
-		// Mirrors GPURenderContext.StrokePath. Fixes #374.
-		strokePaint.FillRule = gg.FillRuleNonZero
-	}
+	strokePaint.FillRule = gg.FillRuleEvenOdd
 	return a.FillPath(target, fillPath, &strokePaint)
 }
 
