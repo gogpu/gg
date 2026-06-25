@@ -913,18 +913,6 @@ func (rc *GPURenderContext) flushVello(target gg.GPURenderTarget) error {
 	return nil
 }
 
-// effectivePipelineMode determines the actual mode for this flush.
-func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
-	mode := rc.pipelineMode
-	if mode == gg.PipelineModeAuto {
-		rc.shared.mu.Lock()
-		hasCompute := rc.shared.velloAccel != nil && rc.shared.velloAccel.CanCompute()
-		rc.shared.mu.Unlock()
-		mode = gg.SelectPipeline(rc.sceneStats, hasCompute)
-	}
-	return mode
-}
-
 // CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
 // The texture has usage flags suitable for both FlushGPUWithView (render to)
 // and DrawGPUTexture (sample from). Returns view + release function.
