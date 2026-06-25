@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.15] - 2026-06-25
+
+### Fixed
+
+- **AMD Vulkan: strokes render as solid fills** (#374, @TimLai666, @lkmavi) — route
+  expanded strokes and EvenOdd fills through Vello compute pipeline, bypassing stencil
+  entirely. AMD NAVI Vulkan drivers execute stencil per-fragment instead of per-sample
+  under MSAA (RPCS3 #6999), breaking even-odd parity counting. Compute pipeline renders
+  correctly on all backends. Stencil-then-cover remains as fallback when compute is
+  unavailable (Software/GLES backends, explicit `PipelineModeRenderPass`).
+
+- **Stencil EvenOdd hardening** (#378, @lkmavi) — replace `StencilOperationInvert` with
+  `IncrementWrap + WriteMask=0x01` (Skia Graphite kToggle parity pattern). Restricts
+  stencil writes to bit 0 only — mathematically equivalent but avoids full 8-bit Invert.
+  Applied to both base and depth-clipped EvenOdd pipelines. Strokes now unconditionally
+  use EvenOdd fill rule (HadInnerJoin conditional removed).
+
+### Changed
+
+- **Dependencies:** wgpu v0.30.2 → v0.30.3.
+
 ## [0.48.14] - 2026-06-24
 
 ### Changed
