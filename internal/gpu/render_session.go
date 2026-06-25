@@ -10,7 +10,33 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 	"image"
+	"os"
 )
+
+// glyphMaskDebugCount caps the GOGPU_TEXT_DEBUG dump to the first handful of
+// batches so it captures one frame's text layers without spamming. Used to
+// diagnose text quality issues downstream of the (verified-correct) masks.
+var glyphMaskDebugCount int
+
+// gg.Matrix convention (see makeGlyphMaskUniform): x' = A*x + B*y + C,
+// y' = D*x + E*y + F. A,E carry scale; C,F carry translation.
+func glyphMaskDebugLog(viewportW, viewportH, batchIdx int, b GlyphMaskBatch) {
+	if glyphMaskDebugCount >= 20 {
+		return
+	}
+	if glyphMaskDebugCount == 0 {
+		fmt.Fprintf(os.Stderr, "[GOGPU_TEXT_DEBUG] viewport=%dx%d\n", viewportW, viewportH)
+	}
+	glyphMaskDebugCount++
+	t := b.Transform
+	q := b.Quads[0]
+	devX := t.A*float64(q.X0) + t.B*float64(q.Y0) + t.C
+	devY := t.D*float64(q.X0) + t.E*float64(q.Y0) + t.F
+	fmt.Fprintf(os.Stderr,
+		"  batch %d: T{A=%.4f B=%.4f C=%.2f D=%.4f E=%.4f F=%.2f} quads=%d  quad0 user=(%.2f,%.2f) w=%.2f h=%.2f -> device=(%.3f,%.3f)\n",
+		batchIdx, t.A, t.B, t.C, t.D, t.E, t.F, len(b.Quads),
+		q.X0, q.Y0, float64(q.X1-q.X0), float64(q.Y1-q.Y0), devX, devY)
+}
 
 // ScissorGroup holds a subset of draw commands that share the same scissor
 // rect. During rendering, the scissor rect is applied before recording the
@@ -2179,6 +2205,12 @@ func (s *GPURenderSession) buildGlyphMaskDrawCalls(batches []GlyphMaskBatch, vie
 
 		// Compose ortho with device-space CTM at flush time.
 		finalTransform := ortho.Multiply(batch.Transform)
+
+		if os.Getenv("GOGPU_TEXT_DEBUG") != "" {
+			bi := i
+			b := batch // capture
+			glyphMaskDebugLog(viewportW, viewportH, bi, b)
+		}
 
 		// Write uniform data for this batch.
 		var uniformData []byte

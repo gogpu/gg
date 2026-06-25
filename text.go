@@ -3,10 +3,31 @@ package gg
 import (
 	"fmt"
 	"hash/fnv"
+	"os"
 	"strings"
 
 	"github.com/gogpu/gg/text"
 )
+
+// forceTextMode lets a developer override text rendering globally via the
+// GOGPU_TEXT_MODE env var (vector|glyphmask|msdf|bitmap|aliased) to A/B the
+// rendering paths without a code change. Empty = no override.
+func forceTextMode() (TextMode, bool) {
+	switch os.Getenv("GOGPU_TEXT_MODE") {
+	case "vector":
+		return TextModeVector, true
+	case "glyphmask":
+		return TextModeGlyphMask, true
+	case "msdf":
+		return TextModeMSDF, true
+	case "bitmap":
+		return TextModeBitmap, true
+	case "aliased":
+		return TextModeAliased, true
+	default:
+		return TextModeAuto, false
+	}
+}
 
 // Align specifies text horizontal alignment.
 // This is a type alias for text.Alignment, provided for fogleman/gg compatibility.
@@ -127,7 +148,12 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 	// TextModeVector opts out of the glyph-mask accelerator and renders the
 	// pre-shaped glyphs as vector outlines (same glyph.X positions). Other
 	// modes need the original string to re-render, which we don't have here.
-	if c.textMode == TextModeVector {
+	// The GOGPU_TEXT_MODE=vector env override also routes here.
+	mode := c.textMode
+	if m, ok := forceTextMode(); ok {
+		mode = m
+	}
+	if mode == TextModeVector {
 		c.drawShapedGlyphsAsOutlines(glyphs, face, x, y)
 		return
 	}
@@ -287,6 +313,9 @@ func (c *Context) tryGPUGlyphMaskTextAliased(s string, x, y float64) bool {
 //
 // Explicit modes (MSDF, Vector, Bitmap, GlyphMask) are returned as-is.
 func (c *Context) selectTextStrategy() TextMode {
+	if m, ok := forceTextMode(); ok {
+		return m
+	}
 	if c.textMode != TextModeAuto {
 		return c.textMode
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"os"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -606,6 +607,10 @@ const glyphMaskLCDMaxSize = 48.0
 // font size (same conditions as hinting, since ClearType depends on the
 // subpixel grid being axis-aligned).
 func selectGlyphMaskLCD(fontSize float64, matrix gg.Matrix) bool {
+	// Dev override: force grayscale (disable LCD subpixel) for A/B testing.
+	if os.Getenv("GOGPU_TEXT_NO_LCD") != "" {
+		return false
+	}
 	// Rotated/skewed text: subpixel grid is not axis-aligned.
 	if matrix.B != 0 || matrix.D != 0 {
 		return false
