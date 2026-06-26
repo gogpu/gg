@@ -271,20 +271,55 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
 
-	for _, glyph := range glyphs {
+	// Full hinting grid-fits stems to the integer pixel grid, so a fully hinted
+	// glyph must be placed at an integer device pixel or the grid-fit stem is
+	// displaced and spreads across two pixels (faded, uneven). Placing at
+	// integers requires choosing how to round. Rounding each glyph's ABSOLUTE
+	// position independently makes adjacent advances jitter by ±1px and opens
+	// visible gaps inside words ("anyway" -> "an yway"). Instead accumulate
+	// ROUNDED ADVANCES: every like-advance becomes the same integer, so spacing
+	// is uniform and stems stay pixel-aligned and crisp. This is the standard
+	// hinted-text layout (FreeType/GDI integer advances). LCD keeps sub-pixel X
+	// (it selects the R/G/B phase), so it is excluded.
+	snapX := hinting == text.HintingFull && !useLCD
+	var snappedDevX []float64
+	if snapX && len(glyphs) > 0 {
+		snappedDevX = make([]float64, len(glyphs))
+		pen := math.Round((x + glyphs[0].X) * deviceScale)
+		for i := range glyphs {
+			snappedDevX[i] = pen
+			if i+1 < len(glyphs) {
+				pen += math.Round((glyphs[i+1].X - glyphs[i].X) * deviceScale)
+			}
+		}
+	}
+
+	for i := range glyphs {
+		glyph := glyphs[i]
 		// Compute subpixel position (fractional part of absolute position).
 		// The fraction MUST be measured in device space: the mask is
 		// rasterized at device size (fontSize = face.Size()*deviceScale) and
 		// the quad is transformed to device pixels by deviceScale at flush.
-		// Using the user-space fraction misaligns the baked subpixel AA with
-		// the device pixel grid at deviceScale != 1, shifting each glyph
-		// independently and producing uneven horizontal spacing.
 		absX := x + glyph.X
 		absY := y + glyph.Y
 		devX := absX * deviceScale
 		devY := absY * deviceScale
 		fracX := devX - math.Floor(devX)
 		fracY := devY - math.Floor(devY)
+
+		// Snap Y for any hinting (baseline / horizontal stems grid-fit to the
+		// pixel grid). Snap X to the rounded-advance grid for full hinting so
+		// vertical stems stay crisp while spacing remains even.
+		if hinting != text.HintingNone {
+			devY = math.Round(devY)
+			fracY = 0
+			absY = devY / deviceScale
+		}
+		if snapX {
+			devX = snappedDevX[i]
+			fracX = 0
+			absX = devX / deviceScale
+		}
 
 		// Size bucket quantization (Skia pattern): under atlas pressure,
 		// rasterize at a coarse bucket size and scale quads to actual size.
@@ -593,6 +628,9 @@ func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix, isCJK bool, devi
 		return text.HintingVertical
 	}
 
+	// Full hinting grid-fits stems for crisp rendering. layoutGlyphs places
+	// fully hinted glyphs on integer device pixels using rounded advances, so
+	// the grid-fit stems stay pixel-aligned (crisp) while spacing stays even.
 	return text.HintingFull
 }
 

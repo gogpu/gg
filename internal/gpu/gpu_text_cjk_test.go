@@ -141,12 +141,12 @@ func TestSelectGlyphMaskHinting_CJKEnterprise(t *testing.T) {
 		{
 			name: "latin_1x_full", isCJK: false, deviceScale: 1.0,
 			want:   text.HintingFull,
-			reason: "Latin: full grid-fitting for crisp stems",
+			reason: "Latin: full grid-fitting for crisp stems (integer rounded-advance placement keeps spacing even)",
 		},
 		{
 			name: "latin_2x_full", isCJK: false, deviceScale: 2.0,
 			want:   text.HintingFull,
-			reason: "Latin on Retina: still benefits from full hinting",
+			reason: "Latin on Retina: full hinting; rounded-advance placement keeps spacing even",
 		},
 	}
 	for _, tt := range tests {

@@ -543,6 +543,11 @@ func (s *GPURenderSession) RenderFrame(
 		"effective_w", w, "effective_h", h,
 		"surface", activeView != nil,
 	)
+	// Record the frame dimensions so flush-time ortho projection (Tier 4/6
+	// text) divides by the real viewport size. Without this the glyph-mask /
+	// MSDF ortho computed 2.0/0 and produced NaN/Inf clip positions, so text
+	// vanished on the non-grouped path. RenderFrameGrouped already does this.
+	s.frameW, s.frameH = int(w), int(h)
 	if err := s.ensureTexturesForView(activeView, w, h); err != nil {
 		return fmt.Errorf("ensure textures: %w", err)
 	}
