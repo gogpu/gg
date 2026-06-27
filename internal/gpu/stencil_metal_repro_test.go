@@ -27,18 +27,18 @@ func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	}
 	adapter, err := instance.RequestAdapter(nil)
 	if err != nil {
-		instance.Destroy()
+		instance.Release()
 		t.Skipf("metal RequestAdapter: %v", err)
 	}
 	device, err := adapter.RequestDevice(nil)
 	if err != nil {
-		instance.Destroy()
+		instance.Release()
 		t.Skipf("metal RequestDevice: %v", err)
 	}
 	queue := device.Queue()
 	cleanup := func() {
 		device.Release()
-		instance.Destroy()
+		instance.Release()
 	}
 	return device, queue, cleanup
 }

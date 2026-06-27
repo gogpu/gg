@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"os"
 	"sync"
 
 	"github.com/gogpu/gg"
@@ -245,6 +246,48 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
 }
 
+// snapXGrid precomputes the integer device-space X position for each glyph by
+// accumulating ROUNDED advances. Rounding each glyph's absolute position
+// independently would make adjacent advances jitter by ±1px and open visible
+// gaps inside words ("anyway" -> "an yway"); rounding the advance makes every
+// like-advance the same integer, so spacing is uniform while stems stay
+// pixel-aligned and crisp. This is the standard hinted-text layout
+// (FreeType/GDI integer advances).
+func snapXGrid(glyphs []text.ShapedGlyph, x, deviceScale float64) []float64 {
+	out := make([]float64, len(glyphs))
+	pen := math.Round((x + glyphs[0].X) * deviceScale)
+	for i := range glyphs {
+		out[i] = pen
+		if i+1 < len(glyphs) {
+			pen += math.Round((glyphs[i+1].X - glyphs[i].X) * deviceScale)
+		}
+	}
+	return out
+}
+
+// glyphPlacement computes the device-space position (returned in user space as
+// absX/absY) and sub-pixel fraction for one glyph, applying hinting
+// pixel-snapping. Y is snapped for any hinting (baseline / horizontal stems
+// grid-fit to the pixel grid). X is snapped to the precomputed rounded-advance
+// grid (snappedDevX) when snapX is set, so vertical stems stay crisp while
+// spacing remains even. The fraction MUST be measured in device space: the mask
+// is rasterized at device size and the quad is scaled by deviceScale at flush.
+func glyphPlacement(absX, absY, deviceScale float64, hinting text.Hinting, snappedDevX float64, snapX bool) (px, py, fracX, fracY float64) {
+	devX := absX * deviceScale
+	devY := absY * deviceScale
+	fracX = devX - math.Floor(devX)
+	fracY = devY - math.Floor(devY)
+	if hinting != text.HintingNone {
+		fracY = 0
+		absY = math.Round(devY) / deviceScale
+	}
+	if snapX {
+		fracX = 0
+		absX = snappedDevX / deviceScale
+	}
+	return absX, absY, fracX, fracY
+}
+
 // layoutGlyphs is the common implementation for LayoutText, LayoutTextAliased,
 // and LayoutShapedGlyphs. Must be called with e.mu held.
 //
@@ -270,12 +313,25 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
 
-	for _, glyph := range glyphs {
-		// Compute subpixel position (fractional part of absolute position).
-		absX := x + glyph.X
-		absY := y + glyph.Y
-		fracX := absX - math.Floor(absX)
-		fracY := absY - math.Floor(absY)
+	// Full hinting grid-fits stems to the integer pixel grid, so fully hinted
+	// glyphs must be placed at integer device pixels (snapXGrid). LCD keeps
+	// sub-pixel X (it selects the R/G/B phase), so it is excluded.
+	snapX := hinting == text.HintingFull && !useLCD
+	var snappedDevX []float64
+	if snapX && len(glyphs) > 0 {
+		snappedDevX = snapXGrid(glyphs, x, deviceScale)
+	}
+
+	for i := range glyphs {
+		glyph := glyphs[i]
+		// Compute the device-space placement and sub-pixel fraction for this
+		// glyph, applying hinting pixel-snapping (see glyphPlacement). snapped
+		// is only consulted when snapX is set.
+		var snapped float64
+		if snapX {
+			snapped = snappedDevX[i]
+		}
+		absX, absY, fracX, fracY := glyphPlacement(x+glyph.X, y+glyph.Y, deviceScale, hinting, snapped, snapX)
 
 		// Size bucket quantization (Skia pattern): under atlas pressure,
 		// rasterize at a coarse bucket size and scale quads to actual size.
@@ -584,6 +640,9 @@ func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix, isCJK bool, devi
 		return text.HintingVertical
 	}
 
+	// Full hinting grid-fits stems for crisp rendering. layoutGlyphs places
+	// fully hinted glyphs on integer device pixels using rounded advances, so
+	// the grid-fit stems stay pixel-aligned (crisp) while spacing stays even.
 	return text.HintingFull
 }
 
@@ -598,6 +657,10 @@ const glyphMaskLCDMaxSize = 48.0
 // font size (same conditions as hinting, since ClearType depends on the
 // subpixel grid being axis-aligned).
 func selectGlyphMaskLCD(fontSize float64, matrix gg.Matrix) bool {
+	// Dev override: force grayscale (disable LCD subpixel) for A/B testing.
+	if os.Getenv("GOGPU_TEXT_NO_LCD") != "" {
+		return false
+	}
 	// Rotated/skewed text: subpixel grid is not axis-aligned.
 	if matrix.B != 0 || matrix.D != 0 {
 		return false
