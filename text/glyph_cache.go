@@ -1,6 +1,9 @@
 package text
 
 import (
+	"encoding/binary"
+	"hash/fnv"
+	"math"
 	"sync"
 	"sync/atomic"
 )
@@ -39,6 +42,29 @@ type OutlineCacheKey struct {
 
 	// Hinting indicates the hinting mode used.
 	Hinting Hinting
+
+	// VariationHash distinguishes cache entries for different font variations.
+	// Zero means no variations (static font or default instance).
+	// Computed via [VariationHash].
+	VariationHash uint64
+}
+
+// VariationHash computes an FNV-1a hash of font variation settings.
+// Returns 0 for nil or empty variations (no extra cost for static fonts).
+// Different variation coordinates produce different glyph outlines,
+// so they must be cached separately.
+func VariationHash(vars []FontVariation) uint64 {
+	if len(vars) == 0 {
+		return 0
+	}
+	h := fnv.New64a()
+	for _, v := range vars {
+		_, _ = h.Write(v.Tag[:])
+		var buf [4]byte
+		binary.LittleEndian.PutUint32(buf[:], math.Float32bits(v.Value))
+		_, _ = h.Write(buf[:])
+	}
+	return h.Sum64()
 }
 
 // glyphEntry is an internal cache entry.
@@ -362,6 +388,7 @@ func (c *GlyphCache) getShard(key OutlineCacheKey) *glyphShard {
 	// Size can be negative but we only use it for hashing, so cast is safe
 	h = h*31 + uint64(int64(key.Size)) //#nosec G115 -- hash only, value can be negative
 	h = h*31 + uint64(key.Hinting)     //#nosec G115 -- Hinting is a small enum value
+	h = h*31 + key.VariationHash
 	return c.shards[h%numShards]
 }
 

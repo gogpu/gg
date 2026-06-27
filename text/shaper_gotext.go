@@ -87,6 +87,13 @@ func (s *GoTextShaper) Shape(text string, face Face) []ShapedGlyph {
 	// thread-safe *Font and initializes glyph caches.
 	goTextFace := font.NewFace(goTextFont)
 
+	// Apply font variations if configured. SetVariations() must be called
+	// per-face since font.Face is created fresh each call (not concurrent-safe).
+	// go-text handles all fvar/gvar/avar/HVAR/MVAR interpolation internally.
+	if vars := face.Variations(); len(vars) > 0 {
+		goTextFace.SetVariations(convertVariations(vars))
+	}
+
 	size := face.Size()
 	runes := []rune(text)
 
@@ -269,6 +276,24 @@ func convertFeatures(features []FontFeature) []shaping.FontFeature {
 		out[i] = shaping.FontFeature{
 			Tag:   ot.NewTag(f.Tag[0], f.Tag[1], f.Tag[2], f.Tag[3]),
 			Value: f.Value,
+		}
+	}
+
+	return out
+}
+
+// convertVariations converts text.FontVariation to font.Variation for go-text.
+func convertVariations(variations []FontVariation) []font.Variation {
+	if len(variations) == 0 {
+		return nil
+	}
+
+	out := make([]font.Variation, len(variations))
+
+	for i, v := range variations {
+		out[i] = font.Variation{
+			Tag:   ot.NewTag(v.Tag[0], v.Tag[1], v.Tag[2], v.Tag[3]),
+			Value: v.Value,
 		}
 	}
 

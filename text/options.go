@@ -61,6 +61,61 @@ var (
 	OldstyleNums = FontFeature{Tag: [4]byte{'o', 'n', 'u', 'm'}, Value: 1}
 )
 
+// FontVariation sets a font variation axis value for variable fonts.
+// Variable fonts define design-space axes (weight, width, slant, etc.)
+// that allow continuous interpolation between styles.
+//
+// See https://learn.microsoft.com/en-us/typography/opentype/spec/fvar
+type FontVariation struct {
+	Tag   [4]byte // OpenType axis tag (e.g., "wght", "wdth", "slnt")
+	Value float32 // Design-space value (e.g., 700 for Bold weight)
+}
+
+// NewFontVariation creates a FontVariation from a 4-character axis tag string
+// and a design-space value. The tag must be exactly 4 ASCII characters
+// (e.g., "wght", "wdth", "slnt"). Panics if the tag is not exactly 4 bytes.
+//
+// Example:
+//
+//	bold := text.NewFontVariation("wght", 700)
+//	wide := text.NewFontVariation("wdth", 125)
+func NewFontVariation(tag string, value float32) FontVariation {
+	if len(tag) != 4 {
+		panic("text.NewFontVariation: tag must be exactly 4 bytes, got " + tag)
+	}
+	return FontVariation{
+		Tag:   [4]byte{tag[0], tag[1], tag[2], tag[3]},
+		Value: value,
+	}
+}
+
+// Standard registered axis tag constants.
+// These are the five axes defined in the OpenType specification.
+// Custom fonts may define additional axes.
+//
+// See https://learn.microsoft.com/en-us/typography/opentype/spec/dvaraxistag
+var (
+	// AxisWeight is the "wght" axis — controls stroke thickness.
+	// Typical range: 100 (Thin) to 900 (Black). Default: 400 (Regular).
+	AxisWeight = [4]byte{'w', 'g', 'h', 't'}
+
+	// AxisWidth is the "wdth" axis — controls horizontal character width.
+	// Typical range: 75 (Condensed) to 125 (Expanded). Default: 100 (Normal).
+	AxisWidth = [4]byte{'w', 'd', 't', 'h'}
+
+	// AxisItalic is the "ital" axis — selects italic style.
+	// Values: 0 (Upright) or 1 (Italic). Default: 0.
+	AxisItalic = [4]byte{'i', 't', 'a', 'l'}
+
+	// AxisSlant is the "slnt" axis — controls oblique angle in degrees.
+	// Typical range: -90 to 90. Default: 0.
+	AxisSlant = [4]byte{'s', 'l', 'n', 't'}
+
+	// AxisOpticalSize is the "opsz" axis — adjusts for display size.
+	// Typical range: 6 to 144 (points). Default: varies by font.
+	AxisOpticalSize = [4]byte{'o', 'p', 's', 'z'}
+)
+
 // SourceOption configures FontSource creation.
 type SourceOption func(*sourceConfig)
 
@@ -114,10 +169,11 @@ type FaceOption func(*faceConfig)
 
 // faceConfig holds configuration for Face.
 type faceConfig struct {
-	direction Direction
-	hinting   Hinting
-	language  string
-	features  []FontFeature // OpenType features (tnum, liga, etc.)
+	direction  Direction
+	hinting    Hinting
+	language   string
+	features   []FontFeature   // OpenType features (tnum, liga, etc.)
+	variations []FontVariation // Font variation axes (wght, wdth, etc.)
 }
 
 // defaultFaceConfig returns the default face configuration.
@@ -164,5 +220,26 @@ func WithLanguage(lang string) FaceOption {
 func WithFeatures(features ...FontFeature) FaceOption {
 	return func(c *faceConfig) {
 		c.features = features
+	}
+}
+
+// WithVariations sets font variation axis values for the face.
+// Variations are applied during shaping when using [GoTextShaper] with
+// a variable font. The [BuiltinShaper] and static fonts ignore variations.
+//
+// Variable fonts define continuous design axes (weight, width, slant, etc.)
+// that allow smooth interpolation between styles without separate font files.
+// Use [FontSource.IsVariable] to check if a font supports variations, and
+// [FontSource.VariationAxes] to discover available axes and their ranges.
+//
+// Example — set weight to Bold (700) and width to Condensed (75):
+//
+//	face := source.Face(16, text.WithVariations(
+//	    text.NewFontVariation("wght", 700),
+//	    text.NewFontVariation("wdth", 75),
+//	))
+func WithVariations(variations ...FontVariation) FaceOption {
+	return func(c *faceConfig) {
+		c.variations = variations
 	}
 }

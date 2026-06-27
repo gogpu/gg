@@ -144,6 +144,11 @@ func (f *FilteredFace) Language() string {
 	return f.face.Language()
 }
 
+// Variations implements Face.Variations.
+func (f *FilteredFace) Variations() []FontVariation {
+	return f.face.Variations()
+}
+
 // private implements the Face interface.
 func (f *FilteredFace) private() {}
 
