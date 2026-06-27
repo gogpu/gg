@@ -26,12 +26,11 @@ import (
 // window, so you can attach a GPU frame debugger to the test binary.
 //
 // To capture a Metal frame on macOS:
-//   1. Build the test binary:  go test -c ./internal/gpu/ -o gmrepro.test
-//   2. In Xcode: Debug > Capture GPU Frame while running ./gmrepro.test
-//      (or: xcrun ... ; see fix-gg/INSTRUCTIONS.md)
-//   Inspect the glyph-mask DrawIndexed calls: bound pipeline, vertex/index
-//   buffers, the R8 atlas texture contents, viewport/scissor, and why the
-//   fragments are discarded.
+//  1. Build the test binary:  go test -c ./internal/gpu/ -o gmrepro.test
+//  2. In Xcode: Debug > Capture GPU Frame while running ./gmrepro.test
+//     (or use xcrun / the Metal HUD). Inspect the glyph-mask DrawIndexed
+//     calls: bound pipeline, vertex/index buffers, the R8 atlas texture
+//     contents, viewport/scissor, and why the fragments are discarded.
 //
 // Output PNG: $GMREPRO_OUT or ./glyph_mask_gpu_repro.png
 func TestGlyphMaskGPURepro(t *testing.T) {
@@ -163,7 +162,8 @@ func reproRealDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	if err != nil {
 		t.Skipf("no device: %v", err)
 	}
-	return dev, dev.Queue(), func() { dev.Release() }
+	queue := dev.Queue()
+	return dev, queue, func() { dev.Release() }
 }
 
 func reproFont(t *testing.T) text.Face {
@@ -173,6 +173,7 @@ func reproFont(t *testing.T) text.Face {
 		"/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
 		"/System/Library/Fonts/Supplemental/Arial.ttf",
 		"/Library/Fonts/Arial.ttf",
+		`C:\Windows\Fonts\arial.ttf`,
 		filepath.Join("testdata", "test.ttf"),
 	} {
 		if _, err := os.Stat(p); err == nil {

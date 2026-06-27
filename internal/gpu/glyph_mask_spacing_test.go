@@ -45,7 +45,7 @@ func glyphMaskTestFont(t *testing.T, size float64) text.Face {
 // The glyph mask is rasterized at integer device-pixel resolution and the GPU
 // samples the atlas with a Nearest filter. If a quad's left edge does not fall
 // on a device pixel boundary, nearest sampling drops/duplicates texel columns
-// per glyph, so each glyph renders a pixel wider or narrower than its neighbour
+// per glyph, so each glyph renders a pixel wider or narrower than its neighbor
 // — visible as uneven horizontal spacing (letters overlap/gap). Before the fix
 // the subpixel offset was computed in user space; that only aligns the grid at
 // integer deviceScale. The real-world trigger is FRACTIONAL deviceScale — e.g.
