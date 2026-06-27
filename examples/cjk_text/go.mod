@@ -2,7 +2,7 @@ module cjk_text
 
 go 1.25.5
 
-require github.com/gogpu/gg v0.48.17
+require github.com/gogpu/gg v0.49.0
 
 require (
 	github.com/go-text/typesetting v0.3.4 // indirect
