@@ -163,6 +163,12 @@ func (m *MultiFace) Language() string {
 	return m.faces[0].Language()
 }
 
+// Variations implements Face.Variations.
+// Returns variations from the first face.
+func (m *MultiFace) Variations() []FontVariation {
+	return m.faces[0].Variations()
+}
+
 // private implements the Face interface.
 func (m *MultiFace) private() {}
 

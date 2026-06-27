@@ -47,6 +47,11 @@ type Face interface {
 	// Language is set via [WithLanguage] when creating the face; defaults to "en".
 	Language() string
 
+	// Variations returns the font variation axis values configured for this face.
+	// Variations are set via [WithVariations] when creating the face.
+	// Returns nil for faces created without variations.
+	Variations() []FontVariation
+
 	// private prevents external implementation
 	private()
 }
@@ -228,6 +233,11 @@ func (f *sourceFace) Features() []FontFeature {
 // Language implements Face.Language.
 func (f *sourceFace) Language() string {
 	return f.config.language
+}
+
+// Variations implements Face.Variations.
+func (f *sourceFace) Variations() []FontVariation {
+	return f.config.variations
 }
 
 // private implements the Face interface.

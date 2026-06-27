@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] - 2026-06-27
+
+### Added
+
+- **Variable font support** (#385, ADR-044) — expose go-text/typesetting's OpenType
+  variable font capabilities through gg's text API. Single font file, multiple styles:
+  - `FontVariation` type + `NewFontVariation(tag, value)` constructor
+  - `WithVariations()` `FaceOption` — set axis values at face creation time
+  - `Face.Variations()` accessor
+  - `FontSource.IsVariable()` — check if font has variation axes
+  - `FontSource.VariationAxes()` — query axes with min/default/max ranges
+  - `FontSource.NamedInstances()` — discover predefined instances ("Bold", "Light")
+  - 5 axis constants: `AxisWeight`, `AxisWidth`, `AxisItalic`, `AxisSlant`, `AxisOpticalSize`
+  - Glyph cache key includes variation hash — different axes produce distinct cache entries
+  - 32 tests covering types, options, font queries, cache keys, shaper integration, and end-to-end verification
+  - Example: `examples/variable_font/`
+
+### Changed
+
+- **Dependencies:** wgpu v0.30.4 → v0.30.5 (software backend text rendering fix, @samyfodil).
+
 ## [0.48.17] - 2026-06-25
 
 ### Fixed
