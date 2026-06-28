@@ -120,11 +120,8 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 		},
 	}
 
-	// Shared multisample state: 4x MSAA.
-	multisample := gputypes.MultisampleState{
-		Count: sampleCount,
-		Mask:  0xFFFFFFFF,
-	}
+	// Shared multisample state: MSAA sample count from GPUShared (4x or 1x).
+	multisample := multisampleState(sr.sampleCount)
 
 	// Shared primitive state: triangle list, no culling.
 	primitive := gputypes.PrimitiveState{
@@ -329,7 +326,7 @@ func (sr *StencilRenderer) ensureDepthClipPipelines() error { //nolint:funlen //
 			},
 		},
 	}
-	multisample := gputypes.MultisampleState{Count: sampleCount, Mask: 0xFFFFFFFF}
+	multisample := multisampleState(sr.sampleCount)
 	primitive := gputypes.PrimitiveState{
 		Topology: gputypes.PrimitiveTopologyTriangleList,
 		CullMode: gputypes.CullModeNone,

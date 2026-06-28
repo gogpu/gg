@@ -14,7 +14,7 @@ func TestRenderPathTriangle(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Build a simple triangle path.
@@ -45,7 +45,7 @@ func TestRenderPathEmpty(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -72,7 +72,7 @@ func TestRenderPathCircle(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Build a circle path using gg.Path.Circle.
@@ -97,7 +97,7 @@ func TestRenderPathEvenOdd(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Build a simple triangle path.
@@ -130,7 +130,7 @@ func TestRenderPathBothFillRules(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	path := gg.NewPath()
@@ -174,7 +174,7 @@ func TestRenderPathPipelinesCreatedOnce(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	path := gg.NewPath()
@@ -217,7 +217,7 @@ func TestRenderPathResizesTextures(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	path := gg.NewPath()

@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.1] - 2026-06-28
+
+### Fixed
+
+- **MSAA runtime fallback** (BUG-GPU-001, Skia Graphite pattern) — replace hardcoded
+  `sampleCount=4` with runtime probe via `resolveSampleCount()`. Try 4x MSAA, fall back
+  to 1x on software backends (llvmpipe, SwiftShader). Threaded through 14 production
+  files (~30 usage sites).
+
+- **Offscreen render pass direct rendering** (BUG-GPU-002) — when `sampleCount=1`,
+  render directly to target view without MSAA indirection. Fixes WebGPU spec violation:
+  `ResolveTarget` with `sampleCount=1` causes Vulkan HAL to skip resolve, leaving
+  offscreen boundary textures empty. Text in child boundaries now visible on llvmpipe.
+
+- **Glyph mask bind group lifecycle** — defer bind group creation to after pipeline
+  stabilization (`materializeGlyphMaskBindGroups`). On first frame, `ensureClipBindLayout`
+  triggers `destroyPipeline` which releases `uniformLayout`; bind groups created before
+  this point referenced the destroyed layout (undefined behavior, strict on llvmpipe).
+
+### Changed
+
+- **Dependencies:** gputypes v0.5.0 → v0.5.1, wgpu v0.30.5 → v0.30.7 (FEAT-GPUTYPES-001 cascade).
+- **Examples:** gogpu v0.42.7 → v0.42.10.
+
 ## [0.49.0] - 2026-06-27
 
 ### Added

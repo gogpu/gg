@@ -78,8 +78,9 @@ const depthClipUniformSize = 16
 //	  Phase 1: reuses stencil fill pipeline (IncrWrap/DecrWrap, no depth write)
 //	  Phase 2: depthCoverPipeline (stencil NotEqual, depth write, stencil zero)
 type DepthClipPipeline struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// shader is the vertex/fragment shader for the cover-to-depth pass.
 	// Reuses the same depth_clip.wgsl (vertex: NDC transform, Z=0.0; fragment: no-op).
@@ -113,10 +114,11 @@ type DepthClipPipeline struct {
 
 // NewDepthClipPipeline creates a new depth clip pipeline for the given device.
 // The pipelines are not created until ensurePipeline() is called.
-func NewDepthClipPipeline(device *wgpu.Device, queue *wgpu.Queue) *DepthClipPipeline {
+func NewDepthClipPipeline(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *DepthClipPipeline {
 	return &DepthClipPipeline{
 		device:      device,
 		queue:       queue,
+		sampleCount: sampleCount,
 		tessellator: NewFanTessellator(),
 	}
 }
@@ -181,7 +183,7 @@ func (p *DepthClipPipeline) ensurePipeline() error { //nolint:funlen // GPU pipe
 			},
 		},
 	}
-	multisample := gputypes.MultisampleState{Count: sampleCount, Mask: 0xFFFFFFFF}
+	multisample := multisampleState(p.sampleCount)
 	primitive := gputypes.PrimitiveState{
 		Topology: gputypes.PrimitiveTopologyTriangleList,
 		CullMode: gputypes.CullModeNone,

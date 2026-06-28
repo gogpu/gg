@@ -32,7 +32,15 @@ type textureSet struct {
 // differ from the current size. If dimensions match and textures exist,
 // this is a no-op. The labelPrefix parameter distinguishes GPU debug labels
 // between different owners (e.g., "session" vs "stencil").
-func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPrefix string) error {
+//
+// The samples parameter sets the MSAA sample count for color and depth/stencil
+// textures (typically 4 for MSAA, 1 for non-MSAA fallback).
+func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPrefix string, samples ...uint32) error {
+	sc := uint32(4) // default MSAA sample count
+	if len(samples) > 0 && samples[0] > 0 {
+		sc = samples[0]
+	}
+
 	if ts.width == w && ts.height == h && ts.msaaTex != nil {
 		return nil
 	}
@@ -40,12 +48,12 @@ func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPref
 
 	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
-	// MSAA color texture (4x samples, BGRA8Unorm).
+	// MSAA color texture (sc samples, BGRA8Unorm).
 	msaaTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_msaa_color",
 		Size:          size,
 		MipLevelCount: 1,
-		SampleCount:   sampleCount,
+		SampleCount:   sc,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Usage:         gputypes.TextureUsageRenderAttachment,
@@ -68,12 +76,12 @@ func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPref
 	}
 	ts.msaaView = msaaView
 
-	// Depth/stencil texture (4x samples, Depth24PlusStencil8).
+	// Depth/stencil texture (sc samples, Depth24PlusStencil8).
 	stencilTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_depth_stencil",
 		Size:          size,
 		MipLevelCount: 1,
-		SampleCount:   sampleCount,
+		SampleCount:   sc,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatDepth24PlusStencil8,
 		Usage:         gputypes.TextureUsageRenderAttachment,
@@ -131,7 +139,7 @@ func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPref
 	slogger().Info("created offscreen textures",
 		"label", labelPrefix,
 		"width", w, "height", h,
-		"msaa_samples", sampleCount,
+		"msaa_samples", sc,
 	)
 	return nil
 }
@@ -143,20 +151,25 @@ func (ts *textureSet) ensureTextures(device *wgpu.Device, w, h uint32, labelPref
 //
 // If a resolve texture exists from a previous offscreen mode, it is destroyed.
 // If dimensions match and textures exist, this is a no-op.
-func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, labelPrefix string) error {
+func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, labelPrefix string, samples ...uint32) error {
 	if ts.width == w && ts.height == h && ts.msaaTex != nil {
 		return nil
 	}
 	ts.destroyTextures()
 
+	sc := uint32(4) // default MSAA sample count
+	if len(samples) > 0 && samples[0] > 0 {
+		sc = samples[0]
+	}
+
 	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
-	// MSAA color texture (4x samples, BGRA8Unorm).
+	// MSAA color texture (BGRA8Unorm, sample count from GPUShared).
 	msaaTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_msaa_color",
 		Size:          size,
 		MipLevelCount: 1,
-		SampleCount:   sampleCount,
+		SampleCount:   sc,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Usage:         gputypes.TextureUsageRenderAttachment,
@@ -179,12 +192,12 @@ func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, la
 	}
 	ts.msaaView = msaaView
 
-	// Depth/stencil texture (4x samples, Depth24PlusStencil8).
+	// Depth/stencil texture (Depth24PlusStencil8, sample count from GPUShared).
 	stencilTex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         labelPrefix + "_depth_stencil",
 		Size:          size,
 		MipLevelCount: 1,
-		SampleCount:   sampleCount,
+		SampleCount:   sc,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatDepth24PlusStencil8,
 		Usage:         gputypes.TextureUsageRenderAttachment,
@@ -214,7 +227,7 @@ func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, la
 	slogger().Info("created surface textures",
 		"label", labelPrefix,
 		"width", w, "height", h,
-		"msaa_samples", sampleCount,
+		"msaa_samples", sc,
 	)
 	return nil
 }

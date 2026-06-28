@@ -613,7 +613,7 @@ func TestMSDFTextPipelineCreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewMSDFTextPipeline(device, queue)
+	p := NewMSDFTextPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	if err := p.createPipeline(); err != nil {
@@ -641,7 +641,7 @@ func TestMSDFTextPipelineWithStencil(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewMSDFTextPipeline(device, queue)
+	p := NewMSDFTextPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	if err := p.ensurePipelineWithStencil(); err != nil {
@@ -662,7 +662,7 @@ func TestMSDFTextPipelineDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewMSDFTextPipeline(device, queue)
+	p := NewMSDFTextPipeline(device, queue, 4)
 	_ = p.ensurePipelineWithStencil()
 	p.Destroy()
 

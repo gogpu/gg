@@ -134,8 +134,9 @@ const (
 //	  +-- Single submit + fence wait
 //	  +-- Single readback (offscreen) or resolve to surface (direct)
 type GPURenderSession struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// Shared textures (MSAA 4x color + depth/stencil + 1x resolve).
 	textures textureSet
@@ -191,13 +192,14 @@ type GPURenderSession struct {
 	textAtlasView *wgpu.TextureView
 
 	// Tier 6: Glyph mask text persistent buffers.
-	glyphMaskPipeline    *GlyphMaskPipeline
-	glyphMaskVertBuf     *wgpu.Buffer
-	glyphMaskVertBufCap  uint64
-	glyphMaskIdxBuf      *wgpu.Buffer
-	glyphMaskIdxBufCap   uint64
-	glyphMaskUniformBufs []*wgpu.Buffer
-	glyphMaskBindGroups  []*wgpu.BindGroup
+	glyphMaskPipeline     *GlyphMaskPipeline
+	glyphMaskVertBuf      *wgpu.Buffer
+	glyphMaskVertBufCap   uint64
+	glyphMaskIdxBuf       *wgpu.Buffer
+	glyphMaskIdxBufCap    uint64
+	glyphMaskUniformBufs  []*wgpu.Buffer
+	glyphMaskBindGroups   []*wgpu.BindGroup
+	glyphMaskPendingViews []glyphMaskPendingView // deferred bind group creation (BUG-GPU-001)
 
 	// Tier 3b: GPU texture compositing persistent buffers.
 	// Overlay and base layer use SEPARATE vertex buffers to prevent
@@ -276,13 +278,15 @@ type GPURenderSession struct {
 	clipPoolUsed    int // number of pool entries used in current frame
 }
 
-// NewGPURenderSession creates a new render session with the given device and
-// queue. Textures and pipelines are not allocated until RenderFrame is called.
-func NewGPURenderSession(device *wgpu.Device, queue *wgpu.Queue) *GPURenderSession {
+// NewGPURenderSession creates a new render session with the given device,
+// queue, and MSAA sample count. Textures and pipelines are not allocated
+// until RenderFrame is called.
+func NewGPURenderSession(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *GPURenderSession {
 	return &GPURenderSession{
-		device:    device,
-		queue:     queue,
-		antiAlias: true,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
+		antiAlias:   true,
 	}
 }
 
@@ -410,6 +414,30 @@ func extractTextureView(view gpucontext.TextureView) *wgpu.TextureView {
 	return (*wgpu.TextureView)(view.Pointer())
 }
 
+// colorAttachment returns the render pass color attachment descriptor.
+// When sampleCount > 1 (MSAA), renders to msaaView and resolves to targetView.
+// When sampleCount == 1, renders DIRECTLY to targetView (no MSAA indirection).
+// This fixes BUG-GPU-002: on llvmpipe, ResolveTarget with sampleCount=1 is
+// spec-invalid (Vulkan HAL skips resolve → content stays in msaaView, target empty).
+// Also avoids Mesa 23.2.1 lavapipe MSAA resolve regression for offscreen textures.
+func (s *GPURenderSession) colorAttachment(targetView *wgpu.TextureView, loadOp gputypes.LoadOp) wgpu.RenderPassColorAttachment {
+	if s.sampleCount > 1 && s.textures.msaaView != nil {
+		return wgpu.RenderPassColorAttachment{
+			View:          s.textures.msaaView,
+			ResolveTarget: targetView,
+			LoadOp:        loadOp,
+			StoreOp:       gputypes.StoreOpStore,
+			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}
+	}
+	return wgpu.RenderPassColorAttachment{
+		View:       targetView,
+		LoadOp:     loadOp,
+		StoreOp:    gputypes.StoreOpStore,
+		ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+	}
+}
+
 // effectiveDimensions returns the width and height to use for MSAA textures
 // and viewport. When rendering to a view, uses the view dimensions; otherwise
 // uses the CPU readback target dimensions.
@@ -455,9 +483,9 @@ func (s *GPURenderSession) ensureTexturesForView(activeView *wgpu.TextureView, w
 	}
 
 	if activeView != nil {
-		return s.textures.ensureSurfaceTextures(s.device, w, h, "session")
+		return s.textures.ensureSurfaceTextures(s.device, w, h, "session", s.sampleCount)
 	}
-	return s.textures.ensureTextures(s.device, w, h, "session")
+	return s.textures.ensureTextures(s.device, w, h, "session", s.sampleCount)
 }
 
 // SetScissorRect sets the scissor rect for subsequent GPU draw commands.
@@ -498,9 +526,9 @@ func (s *GPURenderSession) RenderMode() RenderMode {
 // texture is skipped because the surface view serves as the resolve target.
 func (s *GPURenderSession) EnsureTextures(w, h uint32) error {
 	if s.surfaceView != nil {
-		return s.textures.ensureSurfaceTextures(s.device, w, h, "session")
+		return s.textures.ensureSurfaceTextures(s.device, w, h, "session", s.sampleCount)
 	}
-	return s.textures.ensureTextures(s.device, w, h, "session")
+	return s.textures.ensureTextures(s.device, w, h, "session", s.sampleCount)
 }
 
 // RenderFrame renders all draw commands (SDF shapes + convex polygons +
@@ -1156,7 +1184,7 @@ type sdfFrameResources struct {
 // (see ensureTextPipeline).
 func (s *GPURenderSession) ensurePipelines() error {
 	if s.sdfPipeline == nil {
-		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue)
+		s.sdfPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	}
 	s.sdfPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.sdfPipeline.ensurePipelineWithStencil(); err != nil {
@@ -1164,7 +1192,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 	}
 
 	if s.convexRenderer == nil {
-		s.convexRenderer = NewConvexRenderer(s.device, s.queue)
+		s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
 	}
 	s.convexRenderer.SetClipBindLayout(s.clipBindLayout)
 	if err := s.convexRenderer.ensurePipelineWithStencil(); err != nil {
@@ -1172,7 +1200,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 	}
 
 	if s.stencilRenderer == nil {
-		s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
+		s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
 	}
 	s.stencilRenderer.SetClipBindLayout(s.clipBindLayout)
 	// Recreate stencil pipelines if cover layout was created without clip.
@@ -1186,7 +1214,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 
 	// Image pipeline (Tier 3) — lazily created alongside other pipelines.
 	if s.imagePipeline == nil {
-		s.imagePipeline = NewTexturedQuadPipeline(s.device, s.queue)
+		s.imagePipeline = NewTexturedQuadPipeline(s.device, s.queue, s.sampleCount)
 	}
 	s.imagePipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.imagePipeline.ensurePipelineWithStencil(); err != nil {
@@ -1198,7 +1226,7 @@ func (s *GPURenderSession) ensurePipelines() error {
 
 	// Depth clip pipeline (GPU-CLIP-003a) — lazily created alongside others.
 	if s.depthClipPipeline == nil {
-		s.depthClipPipeline = NewDepthClipPipeline(s.device, s.queue)
+		s.depthClipPipeline = NewDepthClipPipeline(s.device, s.queue, s.sampleCount)
 	}
 	if err := s.depthClipPipeline.ensurePipeline(); err != nil {
 		return fmt.Errorf("depth clip pipeline: %w", err)
@@ -1360,7 +1388,7 @@ func (s *GPURenderSession) ClipBindLayout() *wgpu.BindGroupLayout {
 // when text batches are present. Returns error if shader compilation fails.
 func (s *GPURenderSession) ensureTextPipeline() error {
 	if s.textPipeline == nil {
-		s.textPipeline = NewMSDFTextPipeline(s.device, s.queue)
+		s.textPipeline = NewMSDFTextPipeline(s.device, s.queue, s.sampleCount)
 	}
 	s.textPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.textPipeline.ensurePipelineWithStencil(); err != nil {
@@ -1814,6 +1842,12 @@ func (s *GPURenderSession) prepareGlyphMaskResources(batches []GlyphMaskBatch) (
 		slogger().Warn("glyph mask pipeline init failed", "err", err)
 		return nil, nil //nolint:nilnil // non-fatal, skip glyph mask text
 	}
+	// Create bind groups from deferred atlas views NOW — after pipeline
+	// stabilization. ensureGlyphMaskPipeline above may have triggered
+	// destroyPipeline + recreate (clip layout change on first frame).
+	// Bind groups created before this point would reference the destroyed
+	// uniformLayout. BUG-GPU-001.
+	s.materializeGlyphMaskBindGroups()
 	res, err := s.buildGlyphMaskResources(batches)
 	if err != nil {
 		return nil, fmt.Errorf("build glyph mask resources: %w", err)
@@ -2064,7 +2098,7 @@ func (s *GPURenderSession) sliceImageResources(
 // the LCD pipeline variant for ClearType rendering.
 func (s *GPURenderSession) ensureGlyphMaskPipeline(hasLCD bool) error {
 	if s.glyphMaskPipeline == nil {
-		s.glyphMaskPipeline = NewGlyphMaskPipeline(s.device, s.queue)
+		s.glyphMaskPipeline = NewGlyphMaskPipeline(s.device, s.queue, s.sampleCount)
 	}
 	s.glyphMaskPipeline.SetClipBindLayout(s.clipBindLayout)
 	if err := s.glyphMaskPipeline.ensurePipelineWithStencil(); err != nil {
@@ -2270,54 +2304,76 @@ func (s *GPURenderSession) ensureGlyphMaskBatchPools(n int) {
 	}
 }
 
-// SetGlyphMaskAtlasView creates or updates the bind group for a glyph mask
-// batch at the given index, binding the provided atlas texture view. This must
-// be called after syncing atlas textures and before RenderFrame.
-//
-// When isLCD is true and the LCD pipeline is available, the bind group uses
-// the LCD uniform layout (96 bytes with atlas_size) for per-channel alpha
-// compositing. Otherwise, the grayscale layout (80 bytes) is used.
+// glyphMaskPendingView stores an atlas view for deferred bind group creation.
+// Bind groups must be created AFTER pipeline stabilization (ensureClipBindLayout
+// may trigger destroyPipeline → uniformLayout released → stale bind groups).
+// BUG-GPU-001: on llvmpipe (strict), stale bind groups cause text to be invisible.
+type glyphMaskPendingView struct {
+	batchIndex int
+	atlasView  *wgpu.TextureView
+	isLCD      bool
+}
+
+// SetGlyphMaskAtlasView records an atlas view for deferred bind group creation.
+// The actual bind group is created in materializeGlyphMaskBindGroups() which runs
+// AFTER pipeline stabilization inside RenderFrameGrouped/RenderFrame. This prevents
+// the stale bind group bug where destroyPipeline releases uniformLayout but bind
+// groups still reference the old layout (BUG-GPU-001).
 func (s *GPURenderSession) SetGlyphMaskAtlasView(batchIndex int, atlasView *wgpu.TextureView, isLCD bool) {
-	if s.glyphMaskPipeline == nil {
-		slogger().Warn("SetGlyphMaskAtlasView: pipeline not initialized", "batchIndex", batchIndex)
-		return
-	}
 	if atlasView == nil {
 		slogger().Warn("SetGlyphMaskAtlasView: nil atlas view", "batchIndex", batchIndex)
 		return
 	}
-	s.ensureGlyphMaskBatchPools(batchIndex + 1)
-	if batchIndex >= len(s.glyphMaskBindGroups) {
-		return
-	}
-	// Destroy old bind group if it exists.
-	if s.glyphMaskBindGroups[batchIndex] != nil {
-		s.glyphMaskBindGroups[batchIndex].Release()
-		s.glyphMaskBindGroups[batchIndex] = nil
-	}
-
-	// Select layout and uniform size based on LCD mode.
-	layout := s.glyphMaskPipeline.uniformLayout
-	uniformSize := uint64(glyphMaskUniformSize)
-	if isLCD && s.glyphMaskPipeline.lcdUniformLayout != nil {
-		layout = s.glyphMaskPipeline.lcdUniformLayout
-		uniformSize = glyphMaskLCDUniformSize
-	}
-
-	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-		Label:  fmt.Sprintf("session_glyph_mask_bind_%d", batchIndex),
-		Layout: layout,
-		Entries: []wgpu.BindGroupEntry{
-			{Binding: 0, Buffer: s.glyphMaskUniformBufs[batchIndex], Offset: 0, Size: uniformSize},
-			{Binding: 1, TextureView: atlasView},
-			{Binding: 2, Sampler: s.glyphMaskPipeline.sampler},
-		},
+	s.glyphMaskPendingViews = append(s.glyphMaskPendingViews, glyphMaskPendingView{
+		batchIndex: batchIndex,
+		atlasView:  atlasView,
+		isLCD:      isLCD,
 	})
-	if err != nil {
-		slogger().Warn("failed to create glyph mask bind group", "index", batchIndex, "err", err)
+}
+
+// materializeGlyphMaskBindGroups creates bind groups from pending atlas views.
+// Must be called AFTER pipeline stabilization (ensureGlyphMaskPipeline with
+// final clip layout). This is the fix for BUG-GPU-001: on the first frame,
+// ensureClipBindLayout triggers pipeline recreation which destroys uniformLayout;
+// bind groups created before that point reference the destroyed layout.
+func (s *GPURenderSession) materializeGlyphMaskBindGroups() {
+	if len(s.glyphMaskPendingViews) == 0 || s.glyphMaskPipeline == nil {
 		return
 	}
-	s.glyphMaskBindGroups[batchIndex] = bg
+
+	for _, pv := range s.glyphMaskPendingViews {
+		s.ensureGlyphMaskBatchPools(pv.batchIndex + 1)
+		if pv.batchIndex >= len(s.glyphMaskBindGroups) {
+			continue
+		}
+		if s.glyphMaskBindGroups[pv.batchIndex] != nil {
+			s.glyphMaskBindGroups[pv.batchIndex].Release()
+			s.glyphMaskBindGroups[pv.batchIndex] = nil
+		}
+
+		layout := s.glyphMaskPipeline.uniformLayout
+		uniformSize := uint64(glyphMaskUniformSize)
+		if pv.isLCD && s.glyphMaskPipeline.lcdUniformLayout != nil {
+			layout = s.glyphMaskPipeline.lcdUniformLayout
+			uniformSize = glyphMaskLCDUniformSize
+		}
+
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+			Label:  fmt.Sprintf("session_glyph_mask_bind_%d", pv.batchIndex),
+			Layout: layout,
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: s.glyphMaskUniformBufs[pv.batchIndex], Offset: 0, Size: uniformSize},
+				{Binding: 1, TextureView: pv.atlasView},
+				{Binding: 2, Sampler: s.glyphMaskPipeline.sampler},
+			},
+		})
+		if err != nil {
+			slogger().Warn("failed to create glyph mask bind group", "index", pv.batchIndex, "err", err)
+			continue
+		}
+		s.glyphMaskBindGroups[pv.batchIndex] = bg
+	}
+	s.glyphMaskPendingViews = nil
 }
 
 // encodeSubmitReadback encodes the unified render pass, copies the resolve
@@ -2356,14 +2412,8 @@ func (s *GPURenderSession) encodeSubmitReadback(
 
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
 	rpDesc := &wgpu.RenderPassDescriptor{
-		Label: "session_unified_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View:          s.textures.msaaView,
-			ResolveTarget: s.textures.resolveView,
-			LoadOp:        gputypes.LoadOpClear,
-			StoreOp:       gputypes.StoreOpStore,
-			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-		}},
+		Label:            "session_unified_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(s.textures.resolveView, gputypes.LoadOpClear)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
@@ -2602,14 +2652,8 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	depthLoadOp := gputypes.LoadOpClear
 
 	rpDesc := &wgpu.RenderPassDescriptor{
-		Label: "session_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View:          s.textures.msaaView,
-			ResolveTarget: view,
-			LoadOp:        colorLoadOp,
-			StoreOp:       gputypes.StoreOpStore,
-			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-		}},
+		Label:            "session_surface_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       depthLoadOp,
@@ -2890,14 +2934,8 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 
 	// Unified render pass descriptor with MSAA color + stencil + resolve.
 	rpDesc := &wgpu.RenderPassDescriptor{
-		Label: "session_unified_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View:          s.textures.msaaView,
-			ResolveTarget: s.textures.resolveView,
-			LoadOp:        gputypes.LoadOpClear,
-			StoreOp:       gputypes.StoreOpStore,
-			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-		}},
+		Label:            "session_unified_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(s.textures.resolveView, gputypes.LoadOpClear)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       gputypes.LoadOpClear,
@@ -3120,14 +3158,8 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	depthLoadOp := gputypes.LoadOpClear
 
 	rpDesc := &wgpu.RenderPassDescriptor{
-		Label: "session_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View:          s.textures.msaaView,
-			ResolveTarget: view,
-			LoadOp:        colorLoadOp,
-			StoreOp:       gputypes.StoreOpStore,
-			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-		}},
+		Label:            "session_surface_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       depthLoadOp,

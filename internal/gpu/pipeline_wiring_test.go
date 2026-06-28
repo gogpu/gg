@@ -367,7 +367,7 @@ func TestTexturePool_AcquireRelease(t *testing.T) {
 	}
 
 	// Release a textureSet.
-	pool.Release(&textureSet{width: 1920, height: 1080})
+	pool.Release(&textureSet{width: 1920, height: 1080}, 4)
 
 	// Now acquire should return it.
 	ts = pool.Acquire(1920, 1080, 4)
@@ -390,7 +390,7 @@ func TestTexturePool_EndFrame(t *testing.T) {
 
 	// Add 5 texture sets with same key.
 	for i := 0; i < 5; i++ {
-		pool.Release(&textureSet{width: 800, height: 600})
+		pool.Release(&textureSet{width: 800, height: 600}, 4)
 	}
 	if pool.PooledCount() != 5 {
 		t.Errorf("expected 5 pooled, got %d", pool.PooledCount())
@@ -574,5 +574,113 @@ func TestEvenOddFillRouting_AutoModeUsesStencil(t *testing.T) {
 	if s.velloAccel.PendingCount() != 0 {
 		t.Errorf("Auto mode: EvenOdd fill routed to Vello (PendingCount=%d), want stencil",
 			s.velloAccel.PendingCount())
+	}
+}
+
+// TestResolveSampleCount_NoopDevice verifies that resolveSampleCount returns 4
+// on a noop device (which accepts any texture descriptor).
+func TestResolveSampleCount_NoopDevice(t *testing.T) {
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	sc := resolveSampleCount(device)
+	if sc != 4 {
+		t.Errorf("resolveSampleCount(noop) = %d, want 4", sc)
+	}
+}
+
+// TestGPUShared_SampleCount_Default verifies the SampleCount accessor returns 4
+// before GPU initialization (safe default for pipeline descriptors).
+func TestGPUShared_SampleCount_Default(t *testing.T) {
+	s := NewGPUShared()
+	defer s.Close()
+
+	if sc := s.SampleCount(); sc != 4 {
+		t.Errorf("SampleCount() before init = %d, want 4", sc)
+	}
+}
+
+// TestGPUShared_SampleCount_AfterInit verifies that SampleCount is properly
+// resolved after GPU initialization.
+func TestGPUShared_SampleCount_AfterInit(t *testing.T) {
+	s := NewGPUShared()
+	defer s.Close()
+
+	// Manually set sampleCount to simulate resolved value.
+	s.sampleCount = 4
+	if sc := s.SampleCount(); sc != 4 {
+		t.Errorf("SampleCount() = %d, want 4", sc)
+	}
+
+	// Simulate 1x fallback.
+	s.sampleCount = 1
+	if sc := s.SampleCount(); sc != 1 {
+		t.Errorf("SampleCount() = %d, want 1", sc)
+	}
+}
+
+// TestMultisampleState verifies that multisampleState produces correct values
+// for both MSAA and non-MSAA sample counts.
+func TestMultisampleState(t *testing.T) {
+	tests := []struct {
+		name  string
+		count uint32
+	}{
+		{"4x MSAA", 4},
+		{"1x no MSAA", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := multisampleState(tt.count)
+			if ms.Count != tt.count {
+				t.Errorf("Count = %d, want %d", ms.Count, tt.count)
+			}
+			if ms.Mask != 0xFFFFFFFF {
+				t.Errorf("Mask = %#x, want 0xFFFFFFFF", ms.Mask)
+			}
+		})
+	}
+}
+
+// TestConstructors_WithSampleCount verifies that pipeline constructors
+// propagate the sampleCount field correctly for both 4x and 1x.
+func TestConstructors_WithSampleCount(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	tests := []struct {
+		name  string
+		count uint32
+	}{
+		{"4x MSAA", 4},
+		{"1x fallback", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := NewStencilRenderer(device, queue, tt.count)
+			if sr.sampleCount != tt.count {
+				t.Errorf("StencilRenderer.sampleCount = %d, want %d", sr.sampleCount, tt.count)
+			}
+
+			sdf := NewSDFRenderPipeline(device, queue, tt.count)
+			if sdf.sampleCount != tt.count {
+				t.Errorf("SDFRenderPipeline.sampleCount = %d, want %d", sdf.sampleCount, tt.count)
+			}
+
+			cr := NewConvexRenderer(device, queue, tt.count)
+			if cr.sampleCount != tt.count {
+				t.Errorf("ConvexRenderer.sampleCount = %d, want %d", cr.sampleCount, tt.count)
+			}
+
+			dc := NewDepthClipPipeline(device, queue, tt.count)
+			if dc.sampleCount != tt.count {
+				t.Errorf("DepthClipPipeline.sampleCount = %d, want %d", dc.sampleCount, tt.count)
+			}
+
+			session := NewGPURenderSession(device, queue, tt.count)
+			if session.sampleCount != tt.count {
+				t.Errorf("GPURenderSession.sampleCount = %d, want %d", session.sampleCount, tt.count)
+			}
+		})
 	}
 }
