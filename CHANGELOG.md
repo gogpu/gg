@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.2] - 2026-06-28
+
+### Fixed
+
+- **Variable font rendering** (#385) — variations (weight, width, etc.) were stored and
+  shaped correctly but not applied during glyph rasterization. The rendering pipeline
+  used `golang.org/x/image/font/sfnt` which lacks gvar/HVAR support, so all weights
+  rendered with default outlines. Fix: when a face has variations, extract outlines via
+  go-text/typesetting (`font.Face.GlyphData`) which interpolates gvar deltas and applies
+  HVAR advance adjustments. Both `drawGlyphs` (CPU bitmap) and `drawShapedGlyphsAsOutlines`
+  (CPU vector fallback) now route through go-text for variable fonts. 3 rendering
+  tests added: ink-pixel comparison (bold/light ratio), outline extraction validation,
+  and non-variable regression check.
+
+- **GPU features on software adapters** (BUG-GPU-003, ADR-046) — `SetDeviceProvider`
+  blanket-disabled GPU when `DeviceType == CPU`, nullifying device/queue/instance. This
+  prevented offscreen texture creation on llvmpipe (`blitCount=0` → boundary textures
+  never composited → ListView items invisible). Enterprise research (Skia Graphite,
+  wgpu, Vello, Flutter Impeller) unanimously confirms software adapters should be treated
+  as full GPU implementations. Fix: `softwareMode` is now informational only — device
+  kept, GPU features available. Capability differences handled via MSAA probing. Verified
+  on llvmpipe: `blitCount=10`, all items at correct positions.
+
+- **CreateOffscreenTexture error logging** — all error paths in `CreateOffscreenTexture`
+  (gpu_render_context.go) now log via slog with context (error, dimensions, format, usage).
+  Previously 3 error paths silently returned nil TextureView with no diagnostics.
+
 ## [0.49.1] - 2026-06-28
 
 ### Fixed

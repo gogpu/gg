@@ -61,7 +61,7 @@ type GPUShared struct {
 	sampleCount uint32
 
 	gpuReady       bool
-	softwareMode   bool // true when software/CPU adapter detected — prevents GPU init
+	softwareMode   bool // true when software/CPU adapter detected (informational, does not disable GPU)
 	externalDevice bool // true when using shared device (don't destroy on Close)
 }
 
@@ -129,19 +129,21 @@ func (s *GPUShared) SetForceSDF(force bool) {
 
 // SetDeviceProvider switches to a shared GPU device from an external provider
 // (e.g., gogpu). The provider's Device() must return a *wgpu.Device.
+//
+// Software adapters (llvmpipe, SwiftShader, WARP) are treated as full GPU
+// implementations per enterprise pattern (ADR-046): Skia Graphite runs CI on
+// SwiftShader, wgpu treats CPU adapters identically, Flutter Impeller uses
+// SwiftShader for testing. Capability differences are handled via probing
+// (e.g., MSAA fallback to 1x), not blanket disabling.
 func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
-	// Check if adapter is software/CPU — GPU shaders don't work on CPU backends.
 	if adapter := provider.Adapter(); !adapter.IsNil() {
 		wgpuAdapter := wgpu.AdapterFromHandle(adapter)
 		if wgpuAdapter != nil && wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
-			slogger().Info("gpu-shared: software adapter detected, GPU acceleration disabled")
+			slogger().Info("gpu-shared: software adapter detected — GPU features available, performance may be reduced",
+				"adapter", wgpuAdapter.Info().Name)
 			s.mu.Lock()
 			s.softwareMode = true
-			s.device = nil
-			s.queue = nil
-			s.instance = nil
 			s.mu.Unlock()
-			return nil
 		}
 	}
 
@@ -305,9 +307,6 @@ func resolveSampleCount(device *wgpu.Device) uint32 {
 func (s *GPUShared) ensureGPU() error {
 	if s.device != nil {
 		return nil
-	}
-	if s.softwareMode {
-		return fmt.Errorf("GPU disabled: software backend active")
 	}
 	return s.initGPU()
 }
