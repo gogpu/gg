@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Dependencies:** wgpu v0.30.4 → v0.30.5 (software backend text rendering fix, @samyfodil).
+- **Examples:** gogpu v0.42.7 → v0.42.9 (Wayland frame callback gating).
 
 ## [0.48.17] - 2026-06-25
 
