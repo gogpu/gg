@@ -30,8 +30,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Scene GPU Rendering — ARCH-GG-001").
-		WithSize(width, height).
-		WithContinuousRender(false))
+		WithSize(width, height))
 
 	var (
 		canvas       *ggcanvas.Canvas

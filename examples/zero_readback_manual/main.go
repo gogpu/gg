@@ -33,8 +33,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Manual Zero-Readback Pipeline").
-		WithSize(width, height).
-		WithContinuousRender(false))
+		WithSize(width, height))
 
 	var fontFace text.Face
 	if src, err := text.NewFontSourceFromFile("C:/Windows/Fonts/arial.ttf"); err == nil {

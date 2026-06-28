@@ -14,8 +14,8 @@
 //	Labels:     "No Clip" and "Clipped Region" above each section
 //
 // Rendering mode: event-driven with animation token.
-// Uses ContinuousRender=false + StartAnimation() to render at VSync
-// only while animation is active. Press Space to pause/resume.
+// Uses StartAnimation() to render at VSync while animation is active.
+// Press Space to pause/resume.
 //
 // Requirements:
 //   - gogpu v0.26.4+
@@ -42,8 +42,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GoGPU + gg: Clip Demo").
-		WithSize(width, height).
-		WithContinuousRender(false)) // Event-driven: 0% CPU when paused
+		WithSize(width, height))
 
 	// Load system font for text labels.
 	fontSource := loadFontSource()

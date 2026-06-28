@@ -31,8 +31,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Damage Pipeline Demo (ADR-021)").
-		WithSize(width, height).
-		WithContinuousRender(false))
+		WithSize(width, height))
 
 	var (
 		canvas       *ggcanvas.Canvas
