@@ -3243,14 +3243,8 @@ func (s *GPURenderSession) encodeToEncoder(
 	depthLoadOp := gputypes.LoadOpClear
 
 	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		Label: "session_shared_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{{
-			View:          s.textures.msaaView,
-			ResolveTarget: view,
-			LoadOp:        colorLoadOp,
-			StoreOp:       gputypes.StoreOpStore,
-			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
-		}},
+		Label:            "session_shared_surface_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
 			DepthLoadOp:       depthLoadOp,
