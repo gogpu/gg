@@ -1,6 +1,9 @@
 package text
 
 import (
+	"image"
+	"image/color"
+	"image/draw"
 	"os"
 	"testing"
 
@@ -506,14 +509,9 @@ func TestVariationCacheKey_DifferentVariations(t *testing.T) {
 // wght=300 and wght=700 — advance widths must differ because heavier weight
 // produces wider glyphs in most variable fonts.
 //
-// Uses GoTextShaper.Shape() directly because Face.Glyphs() uses the
-// BuiltinShaper (x/image/font/sfnt) which does not support OpenType
-// variations. Variations are applied through go-text/typesetting's
-// Face.SetVariations() which is called by GoTextShaper.Shape().
-//
-// Known limitation: Face.Glyphs() and Face.Advance() do not apply variations.
-// Tracked as VARFONT-013 for future work (requires either sfnt variation
-// support or switching Glyphs() to use GoTextShaper when variations are set).
+// Note: Face.Glyphs() and Face.Advance() still use sfnt (no gvar support).
+// Rendering (Draw/drawGlyphs) detects variations and routes through go-text
+// for both outline extraction and advance calculation.
 func TestVariations_AffectShaping(t *testing.T) {
 	source := requireVariableFont(t)
 	defer func() { _ = source.Close() }()
@@ -630,4 +628,150 @@ func TestConvertVariations_Values(t *testing.T) {
 	if out[1].Value != 125 {
 		t.Errorf("out[1].Value = %v, want 125", out[1].Value)
 	}
+}
+
+// --------------------------------------------------------------------------
+// Variable font RENDERING tests
+// --------------------------------------------------------------------------
+
+// TestVariations_AffectRendering verifies that different weight values produce
+// visually different output. This is the critical test that was missing in v0.49.0
+// — we tested that variations were stored on faces, but not that they actually
+// changed the rendered pixels.
+func TestVariations_AffectRendering(t *testing.T) {
+	source := requireVariableFont(t)
+	defer func() { _ = source.Close() }()
+
+	lightFace := source.Face(28, WithVariations(NewFontVariation("wght", 300)))
+	boldFace := source.Face(28, WithVariations(NewFontVariation("wght", 700)))
+
+	text := "Hello World"
+	w, h := 300, 50
+	lightImg := image.NewRGBA(image.Rect(0, 0, w, h))
+	boldImg := image.NewRGBA(image.Rect(0, 0, w, h))
+
+	white := color.RGBA{255, 255, 255, 255}
+	draw.Draw(lightImg, lightImg.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+	draw.Draw(boldImg, boldImg.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+
+	black := color.RGBA{0, 0, 0, 255}
+	Draw(lightImg, text, lightFace, 10, 35, black)
+	Draw(boldImg, text, boldFace, 10, 35, black)
+
+	// Count non-white pixels in each image.
+	lightInk := countInkPixels(lightImg)
+	boldInk := countInkPixels(boldImg)
+
+	t.Logf("wght=300: %d ink pixels, wght=700: %d ink pixels", lightInk, boldInk)
+
+	if lightInk == 0 {
+		t.Fatal("wght=300 rendered zero ink pixels — text not rendered")
+	}
+	if boldInk == 0 {
+		t.Fatal("wght=700 rendered zero ink pixels — text not rendered")
+	}
+
+	// Bold text must have more ink pixels than light text (thicker strokes).
+	if boldInk <= lightInk {
+		t.Errorf("bold (%d pixels) should have MORE ink than light (%d pixels) — variations not applied to rendering",
+			boldInk, lightInk)
+	}
+
+	ratio := float64(boldInk) / float64(lightInk)
+	t.Logf("bold/light ink ratio: %.2f (expected >1.0 for working variations)", ratio)
+}
+
+// TestVariations_NoVariation_UsesDefaultPath verifies that faces without
+// variations still render correctly through the standard sfnt path.
+func TestVariations_NoVariation_UsesDefaultPath(t *testing.T) {
+	source, err := NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(20)
+	img := image.NewRGBA(image.Rect(0, 0, 200, 40))
+	white := color.RGBA{255, 255, 255, 255}
+	draw.Draw(img, img.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+
+	Draw(img, "Test", face, 10, 25, color.Black)
+
+	ink := countInkPixels(img)
+	if ink == 0 {
+		t.Error("standard font rendered zero ink pixels — regression in non-variable path")
+	}
+	t.Logf("standard font: %d ink pixels", ink)
+}
+
+// TestVariations_OutlineExtraction verifies that go-text outline extraction
+// produces valid outlines with variation-aware geometry.
+func TestVariations_OutlineExtraction(t *testing.T) {
+	source := requireVariableFont(t)
+	defer func() { _ = source.Close() }()
+
+	gtFont, err := GetGoTextFont(source)
+	if err != nil {
+		t.Fatalf("GetGoTextFont: %v", err)
+	}
+
+	lightVars := []FontVariation{NewFontVariation("wght", 300)}
+	boldVars := []FontVariation{NewFontVariation("wght", 700)}
+
+	parsed := source.Parsed()
+	gid := GlyphID(parsed.GlyphIndex('H'))
+	if gid == 0 {
+		t.Skip("font doesn't have 'H' glyph")
+	}
+
+	lightOutline := ExtractOutlineGoText(gtFont, gid, 28, lightVars)
+	boldOutline := ExtractOutlineGoText(gtFont, gid, 28, boldVars)
+
+	if lightOutline == nil || lightOutline.IsEmpty() {
+		t.Fatal("light outline is empty")
+	}
+	if boldOutline == nil || boldOutline.IsEmpty() {
+		t.Fatal("bold outline is empty")
+	}
+
+	// Both outlines should have segments (the glyph exists in both weights).
+	t.Logf("light: %d segments, advance=%.2f", len(lightOutline.Segments), lightOutline.Advance)
+	t.Logf("bold:  %d segments, advance=%.2f", len(boldOutline.Segments), boldOutline.Advance)
+
+	// Outlines should differ — bold has different control points (thicker strokes).
+	if outlineSegmentsEqual(lightOutline, boldOutline) {
+		t.Error("light and bold outlines are identical — gvar variations not applied")
+	}
+}
+
+func countInkPixels(img *image.RGBA) int {
+	count := 0
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bb, _ := img.At(x, y).RGBA()
+			if r < 0xF000 || g < 0xF000 || bb < 0xF000 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func outlineSegmentsEqual(a, b *GlyphOutline) bool {
+	if len(a.Segments) != len(b.Segments) {
+		return false
+	}
+	for i, sa := range a.Segments {
+		sb := b.Segments[i]
+		if sa.Op != sb.Op {
+			return false
+		}
+		for j := range sa.Points {
+			if sa.Points[j] != sb.Points[j] {
+				return false
+			}
+		}
+	}
+	return true
 }

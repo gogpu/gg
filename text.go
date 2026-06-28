@@ -185,17 +185,39 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 
 // drawShapedGlyphsAsOutlines renders pre-shaped glyphs as vector outlines.
 // CPU fallback when GPU shaped text is unavailable.
+// When the face has variations, uses go-text for outline extraction (gvar support).
 func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
 	source := face.Source()
 	if source == nil {
 		return
 	}
-	parsed := source.Parsed()
-	extractor := text.NewOutlineExtractor()
+
+	vars := face.Variations()
+	var outlineFunc func(gid text.GlyphID) *text.GlyphOutline
+
+	if len(vars) > 0 {
+		gtFont, err := text.GetGoTextFont(source)
+		if err != nil {
+			return
+		}
+		outlineFunc = func(gid text.GlyphID) *text.GlyphOutline {
+			return text.ExtractOutlineGoText(gtFont, gid, face.Size(), vars)
+		}
+	} else {
+		parsed := source.Parsed()
+		extractor := text.NewOutlineExtractor()
+		outlineFunc = func(gid text.GlyphID) *text.GlyphOutline {
+			outline, err := extractor.ExtractOutline(parsed, gid, face.Size())
+			if err != nil {
+				return nil
+			}
+			return outline
+		}
+	}
 
 	for _, glyph := range glyphs {
-		outline, err := extractor.ExtractOutline(parsed, glyph.GID, face.Size())
-		if err != nil || outline == nil || outline.IsEmpty() {
+		outline := outlineFunc(glyph.GID)
+		if outline == nil || outline.IsEmpty() {
 			continue
 		}
 

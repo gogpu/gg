@@ -60,6 +60,11 @@ func drawGlyphs(
 	col color.Color,
 	rasterize glyphRasterizeFunc,
 ) {
+	if vars := sf.Variations(); len(vars) > 0 {
+		drawGlyphsVariable(dst, sf, text, x, y, col, vars)
+		return
+	}
+
 	parsed := sf.source.Parsed()
 	ppem := sf.size
 	hinting := sf.config.hinting
@@ -97,6 +102,78 @@ func drawGlyphs(
 
 		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
 		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
+	}
+}
+
+// drawGlyphsVariable renders text using go-text/typesetting for outline extraction,
+// which supports variable font tables (gvar/HVAR). This path is used when
+// the face has font variations configured via WithVariations.
+func drawGlyphsVariable(
+	dst draw.Image,
+	sf *sourceFace,
+	text string,
+	x, y float64,
+	col color.Color,
+	variations []FontVariation,
+) {
+	source := sf.source
+	gtFont, err := GetGoTextFont(source)
+	if err != nil {
+		return
+	}
+
+	parsed := source.Parsed()
+	ppem := sf.size
+	rast := NewGlyphMaskRasterizer()
+	src := image.NewUniform(col)
+
+	advanceX := 0.0
+	for _, r := range text {
+		if r < 0x20 && r != '\t' {
+			continue
+		}
+
+		gid := GlyphID(parsed.GlyphIndex(r))
+		if gid == 0 {
+			advanceX += goTextGlyphAdvance(gtFont, gid, ppem, variations)
+			continue
+		}
+
+		glyphX := x + advanceX
+		glyphY := y
+
+		intX := math.Floor(glyphX)
+		intY := math.Floor(glyphY)
+		subpixelX := glyphX - intX
+		subpixelY := glyphY - intY
+
+		outline := ExtractOutlineGoText(gtFont, gid, ppem, variations)
+		if outline == nil || outline.IsEmpty() {
+			if outline != nil {
+				advanceX += float64(outline.Advance)
+			}
+			continue
+		}
+
+		result, err := rast.RasterizeOutline(outline, subpixelX, subpixelY)
+		if err != nil || result == nil {
+			advanceX += float64(outline.Advance)
+			continue
+		}
+
+		maskImg := &image.Alpha{
+			Pix:    result.Mask,
+			Stride: result.Width,
+			Rect:   image.Rect(0, 0, result.Width, result.Height),
+		}
+
+		dstX := int(intX) + int(math.Round(float64(result.BearingX)))
+		dstY := int(intY) - int(math.Round(float64(result.BearingY)))
+
+		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
+		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
+
+		advanceX += float64(outline.Advance)
 	}
 }
 

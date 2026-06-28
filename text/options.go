@@ -224,8 +224,9 @@ func WithFeatures(features ...FontFeature) FaceOption {
 }
 
 // WithVariations sets font variation axis values for the face.
-// Variations are applied during shaping when using [GoTextShaper] with
-// a variable font. The [BuiltinShaper] and static fonts ignore variations.
+// Variations are applied to both shaping and rendering via go-text/typesetting,
+// which handles gvar/HVAR/avar interpolation for TrueType variable fonts.
+// Static fonts ignore variations.
 //
 // Variable fonts define continuous design axes (weight, width, slant, etc.)
 // that allow smooth interpolation between styles without separate font files.
