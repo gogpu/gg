@@ -15,7 +15,7 @@ func TestSDFRenderPipelineCreation(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	err := p.createPipeline()
@@ -41,7 +41,7 @@ func TestSDFRenderPipelineDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 
 	err := p.createPipeline()
 	if err != nil {
@@ -75,7 +75,7 @@ func TestSDFRenderPipelineDestroyBeforeCreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 
 	// Destroying a pipeline that was never created should not panic.
 	p.destroyPipeline()
@@ -85,7 +85,7 @@ func TestSDFRenderPipelineTextures(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	err := p.ensureTextures(800, 600)
@@ -116,7 +116,7 @@ func TestSDFRenderPipelineTexturesIdempotent(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	err := p.ensureTextures(640, 480)
@@ -145,7 +145,7 @@ func TestSDFRenderPipelineTexturesResize(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	err := p.ensureTextures(800, 600)
@@ -178,7 +178,7 @@ func TestSDFRenderPipelineFullDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 
 	err := p.ensureTextures(512, 512)
 	if err != nil {
@@ -214,7 +214,7 @@ func TestSDFRenderPipelineRecreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	// Create, destroy, recreate.
@@ -612,7 +612,7 @@ func TestSDFRenderPipelineRenderShapesEmpty(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -643,7 +643,7 @@ func TestSDFRenderPipelineEnsureReady(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	// Before ensureReady, nothing is allocated.
@@ -673,7 +673,7 @@ func TestSDFRenderPipelineTexturesAfterDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewSDFRenderPipeline(device, queue)
+	p := NewSDFRenderPipeline(device, queue, 4)
 
 	// Create, destroy, recreate.
 	err := p.ensureTextures(256, 256)

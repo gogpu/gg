@@ -60,7 +60,7 @@ func TestMetalStencilCoverMasksToShape(t *testing.T) {
 	device, queue, cleanup := createMetalDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	const (
@@ -122,7 +122,7 @@ func TestMetalStencilRoundedRectMasking(t *testing.T) {
 	device, queue, cleanup := createMetalDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	const W, H = 64, 64
@@ -171,7 +171,7 @@ func TestMetalStencilEvenOddMasking(t *testing.T) {
 	device, queue, cleanup := createMetalDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	const W, H = 64, 64

@@ -12,7 +12,7 @@ func TestStencilPipelineCreation(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Pipelines only need the device, not textures.
@@ -56,7 +56,7 @@ func TestStencilPipelineDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	err := sr.createPipelines()
 	if err != nil {
@@ -104,7 +104,7 @@ func TestStencilPipelineDestroyBeforeCreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	// Destroying pipelines that were never created should not panic.
 	sr.destroyPipelines()
@@ -114,7 +114,7 @@ func TestStencilPipelineFullDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	// Create textures and pipelines.
 	err := sr.EnsureTextures(800, 600)
@@ -191,7 +191,7 @@ func TestStencilPipelineRecreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Create, destroy, recreate -- simulates device reset scenario.

@@ -61,8 +61,9 @@ type ConvexDrawCommand struct {
 // which includes a depth/stencil state that ignores the stencil buffer
 // (Compare=Always, all ops=Keep, masks=0x00).
 type ConvexRenderer struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// GPU objects for the render pipeline.
 	shader        *wgpu.ShaderModule
@@ -98,10 +99,11 @@ func (cr *ConvexRenderer) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 // NewConvexRenderer creates a new convex polygon renderer with the given
 // device and queue. Pipelines are not created until ensurePipeline or
 // ensurePipelineWithStencil is called.
-func NewConvexRenderer(device *wgpu.Device, queue *wgpu.Queue) *ConvexRenderer {
+func NewConvexRenderer(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *ConvexRenderer {
 	return &ConvexRenderer{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -166,7 +168,7 @@ func (cr *ConvexRenderer) ensurePipelineWithStencil() error { // Ensure base res
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(cr.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create convex pipeline with stencil: %w", err)
@@ -215,7 +217,7 @@ func (cr *ConvexRenderer) ensureDepthClipPipeline() error {
 		},
 		DepthStencil: depthClipDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(cr.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create convex pipeline with depth clip: %w", err)
@@ -312,7 +314,7 @@ func (cr *ConvexRenderer) createPipeline() error {
 			},
 		},
 		Primitive:   triangleListPrimitive(),
-		Multisample: defaultMultisample(),
+		Multisample: multisampleState(cr.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create convex pipeline: %w", err)

@@ -240,7 +240,7 @@ func TestIsBlitOnly_BaseLayerOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{
@@ -256,7 +256,7 @@ func TestIsBlitOnly_NoBaseLayer(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	if s.isBlitOnly(nil, nil) {
@@ -268,7 +268,7 @@ func TestIsBlitOnly_WithSDFShapes(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{
@@ -292,7 +292,7 @@ func TestRenderFrameGrouped_BaseLayerOnlyGuard(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	// Verify: nil groups + nil baseLayer → should return nil (skip).
@@ -374,7 +374,7 @@ func TestBlitLoadOp_DamageRectWithoutFrameRendered(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	// Simulate: BeginGPUFrame was called → frameRendered = false
@@ -405,7 +405,7 @@ func TestBlitLoadOp_NoDamageRect(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	damageRect := image.Rectangle{} // empty
@@ -429,7 +429,7 @@ func TestBuildGPUTextureResources_SeparateVertexBuffers(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	overlayCmd := GPUTextureDrawCommand{
@@ -477,7 +477,7 @@ func TestIsBlitOnly_BaseOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
@@ -492,7 +492,7 @@ func TestIsBlitOnly_OverlayOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	grpRes := []groupResources{{
@@ -508,7 +508,7 @@ func TestIsBlitOnly_BaseAndOverlay(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
@@ -525,7 +525,7 @@ func TestIsBlitOnly_VectorShapesRejectsBlit(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{drawCalls: []imageDrawCall{{firstVertex: 0}}}
@@ -555,7 +555,7 @@ func TestIsBlitOnly_EmptyFrame(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	grpRes := []groupResources{{}}
@@ -569,7 +569,7 @@ func TestRenderFrameGrouped_OverlayOnlyNotSkipped(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	groups := []ScissorGroup{{

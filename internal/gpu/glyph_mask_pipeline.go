@@ -67,8 +67,9 @@ const glyphMaskLCDUniformSize = 96
 //	GlyphMaskPipeline owns shader, layout, pipeline, sampler
 //	bind groups are created per atlas texture (uniform + texture + sampler)
 type GlyphMaskPipeline struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// GPU objects for the render pipeline.
 	shader        *wgpu.ShaderModule
@@ -115,10 +116,11 @@ type GlyphMaskPipeline struct {
 // NewGlyphMaskPipeline creates a new glyph mask pipeline with the given device
 // and queue. The render pipeline and GPU objects are not created until
 // ensurePipelineWithStencil is called.
-func NewGlyphMaskPipeline(device *wgpu.Device, queue *wgpu.Queue) *GlyphMaskPipeline {
+func NewGlyphMaskPipeline(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *GlyphMaskPipeline {
 	return &GlyphMaskPipeline{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -277,7 +279,7 @@ func (p *GlyphMaskPipeline) ensurePipelineWithStencil() error {
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create glyph mask pipeline with stencil: %w", err)
@@ -319,7 +321,7 @@ func (p *GlyphMaskPipeline) ensureDepthClipPipeline() error {
 		},
 		DepthStencil: depthClipDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create glyph mask pipeline with depth clip: %w", err)
@@ -472,7 +474,7 @@ func (p *GlyphMaskPipeline) ensureLCDPipelineWithStencil() error {
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create glyph mask LCD pipeline with stencil: %w", err)

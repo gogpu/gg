@@ -17,7 +17,7 @@ func TestDepthClipPipeline_Lifecycle(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewDepthClipPipeline(device, queue)
+	p := NewDepthClipPipeline(device, queue, 4)
 	if p == nil {
 		t.Fatal("expected non-nil DepthClipPipeline")
 	}
@@ -104,7 +104,7 @@ func TestDepthClipPipeline_BuildClipResources_NilPath(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewDepthClipPipeline(device, queue)
+	p := NewDepthClipPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	if err := p.ensurePipeline(); err != nil {
@@ -127,7 +127,7 @@ func TestDepthClipPipeline_BuildClipResources_EmptyPath(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	p := NewDepthClipPipeline(device, queue)
+	p := NewDepthClipPipeline(device, queue, 4)
 	defer p.Destroy()
 
 	if err := p.ensurePipeline(); err != nil {
@@ -220,7 +220,7 @@ func TestHasAnyDepthClip(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	tests := []struct {
@@ -290,7 +290,7 @@ func TestRecordGroupDraws_NoDepthClip_Regression(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	if err := s.EnsureTextures(200, 200); err != nil {
@@ -364,7 +364,7 @@ func TestStencilRenderer_EnsureDepthClipPipelines(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Base pipelines must be created first (or ensureDepthClipPipelines handles it).
@@ -421,7 +421,7 @@ func TestDepthLoadOp_AlwaysClear_Regression(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	if err := s.EnsureTextures(200, 200); err != nil {

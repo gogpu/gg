@@ -57,8 +57,9 @@ const sdfRenderAAMargin = 1.5
 // For unified rendering via GPURenderSession, pipelineWithStencil is used
 // when the render pass includes a depth/stencil attachment.
 type SDFRenderPipeline struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// GPU objects for the render pipeline.
 	shader        *wgpu.ShaderModule
@@ -105,10 +106,11 @@ func (p *SDFRenderPipeline) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 // NewSDFRenderPipeline creates a new SDF render pipeline with the given device
 // and queue. The render pipeline and textures are not created until
 // ensureReady is called with the desired dimensions.
-func NewSDFRenderPipeline(device *wgpu.Device, queue *wgpu.Queue) *SDFRenderPipeline {
+func NewSDFRenderPipeline(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *SDFRenderPipeline {
 	return &SDFRenderPipeline{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -198,12 +200,12 @@ func (p *SDFRenderPipeline) ensureTextures(w, h uint32) error {
 
 	size := wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1}
 
-	// MSAA color texture (4x samples, BGRA8Unorm).
+	// MSAA color texture (BGRA8Unorm, sample count from GPUShared).
 	msaaTex, err := p.device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "sdf_render_msaa",
 		Size:          size,
 		MipLevelCount: 1,
-		SampleCount:   sampleCount,
+		SampleCount:   p.sampleCount,
 		Dimension:     gputypes.TextureDimension2D,
 		Format:        gputypes.TextureFormatBGRA8Unorm,
 		Usage:         gputypes.TextureUsageRenderAttachment,
@@ -349,7 +351,7 @@ func (p *SDFRenderPipeline) createPipeline() error {
 			},
 		},
 		Primitive:   triangleListPrimitive(),
-		Multisample: defaultMultisample(),
+		Multisample: multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create render pipeline: %w", err)
@@ -408,7 +410,7 @@ func (p *SDFRenderPipeline) ensurePipelineWithStencil() error { // Ensure base r
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create SDF pipeline with stencil: %w", err)
@@ -453,7 +455,7 @@ func (p *SDFRenderPipeline) ensureDepthClipPipeline() error {
 		},
 		DepthStencil: depthClipDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create SDF pipeline with depth clip: %w", err)

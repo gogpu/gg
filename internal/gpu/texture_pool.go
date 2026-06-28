@@ -69,14 +69,15 @@ func (tp *TexturePool) Acquire(w, h, samples uint32) *textureSet { //nolint:revi
 }
 
 // Release returns a textureSet to the pool for reuse. The caller must not
-// use the textureSet after calling Release.
-func (tp *TexturePool) Release(ts *textureSet) {
+// use the textureSet after calling Release. The samples parameter is the
+// MSAA sample count used when the texture was created (4 or 1).
+func (tp *TexturePool) Release(ts *textureSet, samples uint32) {
 	if ts == nil {
 		return
 	}
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
-	key := textureKey{width: ts.width, height: ts.height, sampleCount: sampleCount}
+	key := textureKey{width: ts.width, height: ts.height, sampleCount: samples}
 	tp.pool[key] = append(tp.pool[key], ts)
 	if tp.inUse[key] > 0 {
 		tp.inUse[key]--
@@ -117,13 +118,15 @@ func (tp *TexturePool) DestroyAll() {
 }
 
 // textureSetEstimatedBytes returns the estimated GPU memory usage for a
-// textureSet at the given dimensions. Used for budget calculations.
-func textureSetEstimatedBytes(w, h uint32) uint64 {
-	// MSAA 4x BGRA8 = w * h * 4 * 4
-	// Depth/stencil 4x = w * h * 4 * 4 (approx)
+// textureSet at the given dimensions and sample count. Used for budget
+// calculations.
+func textureSetEstimatedBytes(w, h, samples uint32) uint64 {
+	// MSAA BGRA8 = w * h * 4 * samples
+	// Depth/stencil = w * h * 4 * samples (approx)
 	// Resolve 1x BGRA8 = w * h * 4
 	pixels := uint64(w) * uint64(h)
-	return pixels*4*uint64(sampleCount) + pixels*4*uint64(sampleCount) + pixels*4
+	sc := uint64(samples)
+	return pixels*4*sc + pixels*4*sc + pixels*4
 }
 
 // EstimatedUsageMB returns the estimated GPU memory used by all pooled textures in MB.
@@ -131,9 +134,9 @@ func (tp *TexturePool) EstimatedUsageMB() int {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 	var total uint64
-	for _, sets := range tp.pool {
-		for _, ts := range sets {
-			total += textureSetEstimatedBytes(ts.width, ts.height)
+	for key, sets := range tp.pool {
+		for range sets {
+			total += textureSetEstimatedBytes(key.width, key.height, key.sampleCount)
 		}
 	}
 	return int(total / (1024 * 1024))

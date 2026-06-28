@@ -14,10 +14,6 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// sampleCount is the MSAA sample count used for stencil-then-cover rendering.
-// 4x MSAA provides good quality antialiasing at reasonable cost.
-const sampleCount = 4
-
 // StencilRenderer manages GPU resources for stencil-then-cover path rendering.
 // It creates and maintains MSAA color, stencil, and resolve textures that are
 // resized automatically when the surface dimensions change.
@@ -34,8 +30,9 @@ const sampleCount = 4
 // attachment resolves to the single-sample resolve texture, which can be read back
 // to the CPU via CopySrc usage.
 type StencilRenderer struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// Shared MSAA color + depth/stencil + resolve textures.
 	textures textureSet
@@ -80,12 +77,14 @@ type StencilRenderer struct {
 	pipelineWithDepthClipCover *wgpu.RenderPipeline // cover + depth test
 }
 
-// NewStencilRenderer creates a new StencilRenderer with the given device and queue.
-// Textures are not allocated until EnsureTextures is called with the desired dimensions.
-func NewStencilRenderer(device *wgpu.Device, queue *wgpu.Queue) *StencilRenderer {
+// NewStencilRenderer creates a new StencilRenderer with the given device, queue,
+// and MSAA sample count. Textures are not allocated until EnsureTextures is
+// called with the desired dimensions.
+func NewStencilRenderer(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *StencilRenderer {
 	return &StencilRenderer{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -104,7 +103,7 @@ func (sr *StencilRenderer) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 // GPU memory leaks. Returns an error if any texture or view creation fails;
 // in that case, partially created resources are cleaned up.
 func (sr *StencilRenderer) EnsureTextures(width, height uint32) error {
-	return sr.textures.ensureTextures(sr.device, width, height, "stencil")
+	return sr.textures.ensureTextures(sr.device, width, height, "stencil", sr.sampleCount)
 }
 
 // Destroy releases all GPU resources held by the renderer: pipelines, shaders,

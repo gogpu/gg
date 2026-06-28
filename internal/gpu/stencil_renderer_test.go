@@ -52,7 +52,7 @@ func TestStencilRendererNew(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	if sr == nil {
 		t.Fatal("expected non-nil StencilRenderer")
 	}
@@ -82,7 +82,7 @@ func TestStencilRendererEnsureTextures(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	err := sr.EnsureTextures(800, 600)
@@ -123,7 +123,7 @@ func TestStencilRendererEnsureTexturesIdempotent(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	err := sr.EnsureTextures(640, 480)
@@ -162,7 +162,7 @@ func TestStencilRendererEnsureTexturesResize(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Create initial textures at 800x600.
@@ -202,7 +202,7 @@ func TestStencilRendererDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	err := sr.EnsureTextures(512, 512)
 	if err != nil {
@@ -248,7 +248,7 @@ func TestStencilRendererDestroyBeforeEnsure(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	// Destroy without ever calling EnsureTextures — should not panic.
 	sr.Destroy()
@@ -258,7 +258,7 @@ func TestStencilRendererRenderPassDescriptor(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	// Before EnsureTextures, descriptor should be nil.
@@ -335,7 +335,7 @@ func TestStencilRendererResolveTextureNilBeforeEnsure(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 	defer sr.Destroy()
 
 	if sr.ResolveTexture() != nil {
@@ -347,7 +347,7 @@ func TestStencilRendererEnsureAfterDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sr := NewStencilRenderer(device, queue)
+	sr := NewStencilRenderer(device, queue, 4)
 
 	// Create, destroy, then recreate.
 	err := sr.EnsureTextures(256, 256)

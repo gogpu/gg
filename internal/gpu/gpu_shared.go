@@ -54,6 +54,12 @@ type GPUShared struct {
 	// CPU SDF fallback accelerator.
 	cpuFallback gg.SDFAccelerator
 
+	// sampleCount is the MSAA sample count resolved at GPU init time.
+	// Normally 4 (4x MSAA). Falls back to 1 on backends that don't
+	// support multisampled textures (e.g., software Vulkan / llvmpipe).
+	// Resolved via resolveSampleCount() which probes the device.
+	sampleCount uint32
+
 	gpuReady       bool
 	softwareMode   bool // true when software/CPU adapter detected — prevents GPU init
 	externalDevice bool // true when using shared device (don't destroy on Close)
@@ -171,10 +177,13 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	s.queue = wgpuQueue
 	s.externalDevice = true
 
+	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
+	s.sampleCount = resolveSampleCount(s.device)
+
 	// Create pipelines with shared device.
-	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue)
-	s.convexRenderer = NewConvexRenderer(s.device, s.queue)
-	s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
+	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
+	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
+	s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
 
 	s.gpuReady = true
 
@@ -183,6 +192,7 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 
 	slogger().Info("gpu-shared: switched to shared GPU device",
 		"adapter", fmt.Sprintf("%T", s.device),
+		"msaa_samples", s.sampleCount,
 	)
 	return nil
 }
@@ -255,6 +265,41 @@ func (s *GPUShared) Close() {
 	s.externalDevice = false
 }
 
+// SampleCount returns the resolved MSAA sample count (4 or 1).
+// Returns 4 before GPU initialization (safe default for pipeline descriptors).
+func (s *GPUShared) SampleCount() uint32 {
+	if s.sampleCount == 0 {
+		return 4 // default before init
+	}
+	return s.sampleCount
+}
+
+// resolveSampleCount probes the device for 4x MSAA support by attempting
+// to create a small multisampled texture. If creation fails (e.g., software
+// Vulkan / llvmpipe), falls back to 1x. This follows the Skia Graphite
+// pattern (Caps::getCompatibleMSAASampleCount): try preferred, downgrade
+// on failure.
+//
+// The WebGPU spec guarantees sampleCount=4 for standard formats on compliant
+// implementations, but software backends may not be fully compliant.
+func resolveSampleCount(device *wgpu.Device) uint32 {
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "msaa_probe",
+		Size:          wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   4,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment,
+	})
+	if err != nil {
+		slogger().Info("4x MSAA not supported, falling back to 1x", "error", err)
+		return 1
+	}
+	tex.Release()
+	return 4
+}
+
 // ensureGPU lazily initializes a standalone GPU device if no shared device
 // was provided. Must be called with s.mu held.
 func (s *GPUShared) ensureGPU() error {
@@ -271,13 +316,13 @@ func (s *GPUShared) ensureGPU() error {
 // Must be called with s.mu held and device initialized.
 func (s *GPUShared) ensurePipelines() {
 	if s.sdfRenderPipeline == nil {
-		s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue)
+		s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	}
 	if s.convexRenderer == nil {
-		s.convexRenderer = NewConvexRenderer(s.device, s.queue)
+		s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
 	}
 	if s.stencilRenderer == nil {
-		s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
+		s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
 	}
 }
 
@@ -319,17 +364,23 @@ func (s *GPUShared) initGPU() error {
 	s.device = device
 	s.queue = device.Queue()
 
+	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
+	s.sampleCount = resolveSampleCount(s.device)
+
 	// Create pipelines.
-	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue)
-	s.convexRenderer = NewConvexRenderer(s.device, s.queue)
-	s.stencilRenderer = NewStencilRenderer(s.device, s.queue)
+	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
+	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
+	s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
 
 	s.gpuReady = true
 
 	// Initialize internal VelloAccelerator for compute routing.
 	s.initVelloAccelerator(s.device, s.queue)
 
-	slogger().Info("gpu-shared: GPU initialized", "adapter", adapter.Info().Name)
+	slogger().Info("gpu-shared: GPU initialized",
+		"adapter", adapter.Info().Name,
+		"msaa_samples", s.sampleCount,
+	)
 	return nil
 }
 

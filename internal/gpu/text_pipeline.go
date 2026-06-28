@@ -70,8 +70,9 @@ const textUniformSize = 96
 //	MSDFTextPipeline owns shader, layout, pipeline, sampler
 //	bind groups are created per atlas texture (uniform + texture + sampler)
 type MSDFTextPipeline struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// GPU objects for the render pipeline.
 	shader        *wgpu.ShaderModule
@@ -103,10 +104,11 @@ type MSDFTextPipeline struct {
 // NewMSDFTextPipeline creates a new MSDF text pipeline with the given device
 // and queue. The render pipeline and GPU objects are not created until
 // ensurePipeline or ensurePipelineWithStencil is called.
-func NewMSDFTextPipeline(device *wgpu.Device, queue *wgpu.Queue) *MSDFTextPipeline {
+func NewMSDFTextPipeline(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *MSDFTextPipeline {
 	return &MSDFTextPipeline{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -228,7 +230,7 @@ func (p *MSDFTextPipeline) createPipeline() error {
 			},
 		},
 		Primitive:   triangleListPrimitive(),
-		Multisample: defaultMultisample(),
+		Multisample: multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create msdf_text pipeline: %w", err)
@@ -286,7 +288,7 @@ func (p *MSDFTextPipeline) ensurePipelineWithStencil() error { // Ensure base re
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create MSDF text pipeline with stencil: %w", err)
@@ -326,7 +328,7 @@ func (p *MSDFTextPipeline) ensureDepthClipPipeline() error {
 		},
 		DepthStencil: depthClipDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create MSDF text pipeline with depth clip: %w", err)
@@ -698,8 +700,9 @@ type TextPipeline struct {
 	mu sync.RWMutex
 
 	// GPU device and queue references (hal interfaces)
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// Underlying real pipeline (nil until Init)
 	real *MSDFTextPipeline
@@ -725,9 +728,10 @@ func NewTextPipeline(device *wgpu.Device, queue *wgpu.Queue, config TextPipeline
 	}
 
 	return &TextPipeline{
-		device: device,
-		queue:  queue,
-		config: config,
+		device:      device,
+		queue:       queue,
+		sampleCount: 4, // default; overridden when created via GPURenderSession
+		config:      config,
 	}, nil
 }
 
@@ -749,7 +753,7 @@ func (p *TextPipeline) Init() error {
 		return errors.New("wgpu: MSDF text shader source is empty")
 	}
 
-	msdfPipe := NewMSDFTextPipeline(p.device, p.queue)
+	msdfPipe := NewMSDFTextPipeline(p.device, p.queue, p.sampleCount)
 	if err := msdfPipe.createPipeline(); err != nil {
 		return fmt.Errorf("init text pipeline: %w", err)
 	}

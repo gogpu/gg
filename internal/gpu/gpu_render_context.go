@@ -745,7 +745,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 
 	// Ensure session exists with all renderers.
 	if rc.session == nil {
-		rc.session = NewGPURenderSession(device, queue)
+		rc.session = NewGPURenderSession(device, queue, rc.shared.SampleCount())
 		rc.session.SetSDFPipeline(sdfPipeline)
 		rc.session.SetConvexRenderer(convexRend)
 		rc.session.SetStencilRenderer(stencilRend)

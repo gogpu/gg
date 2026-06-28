@@ -17,7 +17,7 @@ func TestBuildGlyphMaskDrawCalls_QuadOffsetOnNilBindGroup(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	// Create 3 batches: batch 0 (5 quads), batch 1 (3 quads), batch 2 (4 quads).
@@ -77,7 +77,7 @@ func TestBuildGlyphMaskDrawCalls_AllBindGroupsValid(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	batches := []GlyphMaskBatch{
@@ -125,7 +125,7 @@ func TestBuildGlyphMaskDrawCalls_EmptyBatchSkipped(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	batches := []GlyphMaskBatch{
@@ -195,10 +195,11 @@ func createMockBindGroup(t *testing.T, device *wgpu.Device, s *GPURenderSession)
 	t.Cleanup(func() { view.Release() })
 
 	s.SetGlyphMaskAtlasView(0, view, false)
+	s.materializeGlyphMaskBindGroups()
 
 	bg := s.glyphMaskBindGroups[0]
 	if bg == nil {
-		t.Fatal("bind group not created by SetGlyphMaskAtlasView")
+		t.Fatal("bind group not created after materializeGlyphMaskBindGroups")
 	}
 	return bg
 }

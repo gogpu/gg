@@ -50,7 +50,7 @@ func BenchmarkTexturePool_AcquireRelease(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ts := pool.Acquire(1920, 1080, 4)
 		if ts != nil {
-			pool.Release(ts)
+			pool.Release(ts, 4)
 		}
 	}
 }

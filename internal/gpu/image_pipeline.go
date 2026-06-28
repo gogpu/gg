@@ -69,8 +69,9 @@ type ImageDrawCommand struct {
 //	ImageCache (on GPUShared) owns per-image GPU textures
 //	Bind groups are created per-batch (uniform + texture + sampler)
 type TexturedQuadPipeline struct {
-	device *wgpu.Device
-	queue  *wgpu.Queue
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	sampleCount uint32 // MSAA sample count (4 or 1), from GPUShared
 
 	// GPU objects for the render pipeline.
 	shader        *wgpu.ShaderModule
@@ -103,10 +104,11 @@ type TexturedQuadPipeline struct {
 }
 
 // NewTexturedQuadPipeline creates a new textured quad pipeline.
-func NewTexturedQuadPipeline(device *wgpu.Device, queue *wgpu.Queue) *TexturedQuadPipeline {
+func NewTexturedQuadPipeline(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint32) *TexturedQuadPipeline {
 	return &TexturedQuadPipeline{
-		device: device,
-		queue:  queue,
+		device:      device,
+		queue:       queue,
+		sampleCount: sampleCount,
 	}
 }
 
@@ -161,7 +163,7 @@ func (p *TexturedQuadPipeline) ensurePipelineWithStencil() error {
 		},
 		DepthStencil: stencilPassthroughDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create textured quad pipeline with stencil: %w", err)
@@ -201,7 +203,7 @@ func (p *TexturedQuadPipeline) ensureDepthClipPipeline() error {
 		},
 		DepthStencil: depthClipDepthStencil(),
 		Primitive:    triangleListPrimitive(),
-		Multisample:  defaultMultisample(),
+		Multisample:  multisampleState(p.sampleCount),
 	})
 	if err != nil {
 		return fmt.Errorf("create textured quad pipeline with depth clip: %w", err)

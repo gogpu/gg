@@ -15,7 +15,7 @@ func TestConvexRendererCreation(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 	defer cr.Destroy()
 
 	if cr.device == nil {
@@ -38,7 +38,7 @@ func TestConvexRendererPipeline(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 	defer cr.Destroy()
 
 	err := cr.ensurePipeline()
@@ -74,7 +74,7 @@ func TestConvexRendererPipelineWithStencil(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 	defer cr.Destroy()
 
 	err := cr.ensurePipelineWithStencil()
@@ -105,7 +105,7 @@ func TestConvexRendererDestroy(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 
 	err := cr.ensurePipelineWithStencil()
 	if err != nil {
@@ -138,7 +138,7 @@ func TestConvexRendererDestroyBeforeCreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 
 	// Destroying without creating should not panic.
 	cr.Destroy()
@@ -168,7 +168,7 @@ func TestConvexRendererRecordDrawsEmpty(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 	defer cr.Destroy()
 
 	err := cr.ensurePipelineWithStencil()
@@ -755,7 +755,7 @@ func TestRenderSessionConvexOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -792,7 +792,7 @@ func TestRenderSessionMixedWithConvex(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -842,14 +842,14 @@ func TestRenderSessionConvexRendererSetter(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue)
+	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
 
 	if s.ConvexRendererRef() != nil {
 		t.Error("expected nil convex renderer initially")
 	}
 
-	cr := NewConvexRenderer(device, queue)
+	cr := NewConvexRenderer(device, queue, 4)
 	defer cr.Destroy()
 
 	s.SetConvexRenderer(cr)

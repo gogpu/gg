@@ -79,10 +79,11 @@ func depthClipDepthStencil() *wgpu.DepthStencilState {
 	}
 }
 
-// defaultMultisample returns the standard MultisampleState (4x MSAA).
-func defaultMultisample() gputypes.MultisampleState {
+// multisampleState returns a MultisampleState for the given sample count.
+// Typical values: 4 (4x MSAA) or 1 (no MSAA, software fallback).
+func multisampleState(count uint32) gputypes.MultisampleState {
 	return gputypes.MultisampleState{
-		Count: sampleCount,
+		Count: count,
 		Mask:  0xFFFFFFFF,
 	}
 }
