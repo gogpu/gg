@@ -26,8 +26,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("LCD ClearType Text — ADR-024").
-		WithSize(700, 400).
-		WithContinuousRender(false))
+		WithSize(700, 400))
 
 	var canvas *ggcanvas.Canvas
 

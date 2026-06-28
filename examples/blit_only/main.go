@@ -32,8 +32,7 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Blit-Only Path (ADR-016, non-MSAA)").
-		WithSize(width, height).
-		WithContinuousRender(false))
+		WithSize(width, height))
 
 	var (
 		canvas       *ggcanvas.Canvas
