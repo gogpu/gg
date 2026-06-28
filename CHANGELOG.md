@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests added: ink-pixel comparison (bold/light ratio), outline extraction validation,
   and non-variable regression check.
 
+- **CreateOffscreenTexture error swallowing** (BUG-GPU-003) — `CreateOffscreenTexture`
+  silently returned nil TextureView when GPU texture or view creation failed, with no
+  logging or error propagation. On llvmpipe (software Vulkan), this caused `blitCount=0`
+  — child boundary textures never composited. All error paths now log via slog with
+  context (error message, dimensions, format, usage flags). Root cause of actual texture
+  creation failure on llvmpipe still under investigation — logging will expose it.
+
 ## [0.49.1] - 2026-06-28
 
 ### Fixed

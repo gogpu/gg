@@ -913,18 +913,25 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 // and DrawGPUTexture (sample from). Returns view + release function.
 func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
 	if rc.shared == nil {
+		slogger().Warn("CreateOffscreenTexture: shared is nil")
 		return gpucontext.TextureView{}, nil
 	}
 	if !rc.shared.gpuReady {
 		rc.shared.mu.Lock()
 		err := rc.shared.ensureGPU()
 		rc.shared.mu.Unlock()
-		if err != nil || !rc.shared.gpuReady {
+		if err != nil {
+			slogger().Warn("CreateOffscreenTexture: ensureGPU failed", "error", err)
+			return gpucontext.TextureView{}, nil
+		}
+		if !rc.shared.gpuReady {
+			slogger().Warn("CreateOffscreenTexture: GPU not ready after ensureGPU")
 			return gpucontext.TextureView{}, nil
 		}
 	}
 	device := rc.shared.Device()
 	if device == nil {
+		slogger().Warn("CreateOffscreenTexture: device is nil")
 		return gpucontext.TextureView{}, nil
 	}
 
@@ -938,6 +945,9 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageCopySrc | gputypes.TextureUsageTextureBinding,
 	})
 	if err != nil {
+		slogger().Warn("CreateOffscreenTexture: CreateTexture failed",
+			"error", err, "width", w, "height", h,
+			"format", "BGRA8Unorm", "usage", "RenderAttachment|CopySrc|TextureBinding")
 		return gpucontext.TextureView{}, nil
 	}
 
@@ -949,6 +959,8 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 		MipLevelCount: 1,
 	})
 	if err != nil {
+		slogger().Warn("CreateOffscreenTexture: CreateTextureView failed",
+			"error", err, "width", w, "height", h)
 		tex.Release()
 		return gpucontext.TextureView{}, nil
 	}
