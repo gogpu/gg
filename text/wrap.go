@@ -30,7 +30,7 @@ const (
 func (m WrapMode) String() string {
 	switch m {
 	case WrapNone:
-		return "None"
+		return noneStr
 	case WrapWord:
 		return "Word"
 	case WrapChar:

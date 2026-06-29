@@ -24,7 +24,7 @@ func (p *ximageParser) ParseIndex(data []byte, index int) (ParsedFont, error) {
 	// Try single font first (most common case).
 	f, err := opentype.Parse(data)
 	if err == nil {
-		return &ximageParsedFont{font: f}, nil
+		return &ximageParsedFont{font: f, rawData: data}, nil
 	}
 
 	// Single parse failed — try as collection (.ttc/.otc).
@@ -41,12 +41,22 @@ func (p *ximageParser) ParseIndex(data []byte, index int) (ParsedFont, error) {
 	if cfErr != nil {
 		return nil, fmt.Errorf("text: failed to get font %d from collection: %w", index, cfErr)
 	}
-	return &ximageParsedFont{font: cf}, nil
+	// For collections, store the entire collection data — ParseGlyfContours
+	// handles individual glyph extraction from the collection-level glyf table.
+	return &ximageParsedFont{font: cf, rawData: data}, nil
 }
 
 // ximageParsedFont implements ParsedFont using sfnt.Font.
 type ximageParsedFont struct {
-	font *opentype.Font
+	font    *opentype.Font
+	rawData []byte // raw font file bytes (for contour-based auto-hinter)
+}
+
+// RawFontData implements RawFontDataProvider, returning the raw font file
+// bytes. This enables the contour-based auto-hinter path for FreeType/skrifa
+// coordinate parity.
+func (f *ximageParsedFont) RawFontData() []byte {
+	return f.rawData
 }
 
 // Name implements ParsedFont.Name.

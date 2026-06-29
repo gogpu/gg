@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.6] - 2026-06-29
+
+### Added
+
+- **Enterprise auto-hinter: skrifa golden test parity** (#405) — 17/19 golden tests
+  pass with diff=0 against Google skrifa (fontations). Complete auto-hinter pipeline
+  ported from skrifa: segments, edges, hinting, point alignment.
+  - **Script-aware detection** — Hebrew, CJK, Cyrillic, Greek, Arabic character lists
+    for blue zones and standard widths (6 scripts supported).
+  - **Hebrew LONG blue zones** — skrifa long segment detection algorithm for vertical
+    serif avoidance in Hebrew letterforms.
+  - **CJK full pipeline** — segment linking, edge detection, edge hinting, stem width
+    quantization. 114/114 coordinates diff=0 on NotoSerifTC.
+  - **Hinted advance widths** (ADR-049) — auto-hinter edge-based advance adjustment
+    matching skrifa `instance.rs`. Fixes uneven letter spacing at 12-16px.
+  - **4 test fonts** from skrifa: Ahem (Skia regression), NotoSerifTC (CJK),
+    autohint_cmap (script classification), cubic_glyf (edge cases).
+
+### Fixed
+
+- **Letter spacing** (#405) — auto-hinter EdgeMetrics advance adjustment (skrifa
+  `instance.rs` parity). Computes adjusted advance from hinted edge positions,
+  eliminating spacing drift. Layout→rendering advance consistency planned for
+  TASK-FONT-005 (TrueType interpreter with phantom points).
+- **adjustSegmentHeights** — integer right-shift `>>1` matching skrifa (was float `/2`).
+- **isCornerFlat** — skrifa JIT triangle inequality formula (was cross/dot parallelism).
+- **CJK alignEdgePoints** — delta mode for CJK (was snap mode for all scripts).
+- **Fixed-point arithmetic** — sign-aware `fixedMul26dot6`/`fixedDiv26dot6` matching
+  skrifa `Fixed::Mul`/`Fixed::Div`.
+- **Scale computation** — truncation matching skrifa integer division (was `math.Round`).
+- **Blue zone direction matching** — V-dimension uses `dirLeft` (was hardcoded `dirUp`).
+- **wrap.go** goconst lint fix (`"None"` → `noneStr`).
+
 ## [0.49.5] - 2026-06-29
 
 ### Fixed
