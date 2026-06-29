@@ -744,6 +744,85 @@ func TestVariations_OutlineExtraction(t *testing.T) {
 	}
 }
 
+// TestVariations_AliasedRendering verifies that DrawAliased produces binary
+// (0 or 255) coverage with variable fonts — no intermediate alpha values.
+// This is the regression test for @tsl0922's report that TextModeAliased
+// didn't work with variable fonts.
+func TestVariations_AliasedRendering(t *testing.T) {
+	source := requireVariableFont(t)
+	defer func() { _ = source.Close() }()
+
+	boldFace := source.Face(28, WithVariations(NewFontVariation("wght", 700)))
+
+	w, h := 300, 50
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	white := color.RGBA{255, 255, 255, 255}
+	draw.Draw(img, img.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+
+	DrawAliased(img, "Hello World", boldFace, 10, 35, color.Black)
+
+	ink := countInkPixels(img)
+	if ink == 0 {
+		t.Fatal("aliased variable font rendered zero ink pixels")
+	}
+	t.Logf("aliased variable font: %d ink pixels", ink)
+
+	// Verify binary coverage: every pixel must be either fully white or fully black.
+	hasIntermediate := false
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bb, _ := img.At(x, y).RGBA()
+			isWhite := r >= 0xF000 && g >= 0xF000 && bb >= 0xF000
+			isBlack := r < 0x1000 && g < 0x1000 && bb < 0x1000
+			if !isWhite && !isBlack {
+				hasIntermediate = true
+				break
+			}
+		}
+		if hasIntermediate {
+			break
+		}
+	}
+
+	if hasIntermediate {
+		t.Error("aliased variable font has intermediate alpha — expected binary (0 or 255) coverage only")
+	}
+}
+
+// TestVariations_AliasedVsAA verifies that aliased and AA rendering of variable
+// fonts produce different output — aliased should have fewer ink pixels (no fringe).
+func TestVariations_AliasedVsAA(t *testing.T) {
+	source := requireVariableFont(t)
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(28, WithVariations(NewFontVariation("wght", 500)))
+
+	w, h := 300, 50
+	aaImg := image.NewRGBA(image.Rect(0, 0, w, h))
+	aliasedImg := image.NewRGBA(image.Rect(0, 0, w, h))
+	white := color.RGBA{255, 255, 255, 255}
+	draw.Draw(aaImg, aaImg.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+	draw.Draw(aliasedImg, aliasedImg.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
+
+	Draw(aaImg, "Test", face, 10, 35, color.Black)
+	DrawAliased(aliasedImg, "Test", face, 10, 35, color.Black)
+
+	aaInk := countInkPixels(aaImg)
+	aliasedInk := countInkPixels(aliasedImg)
+
+	t.Logf("variable font AA: %d ink, aliased: %d ink", aaInk, aliasedInk)
+
+	if aaInk == 0 || aliasedInk == 0 {
+		t.Fatalf("rendering failed: AA=%d, aliased=%d ink pixels", aaInk, aliasedInk)
+	}
+
+	// AA produces more ink pixels due to anti-aliased fringe.
+	if aaInk <= aliasedInk {
+		t.Errorf("AA (%d) should have more ink than aliased (%d) — AA fringe adds partial coverage pixels", aaInk, aliasedInk)
+	}
+}
+
 func countInkPixels(img *image.RGBA) int {
 	count := 0
 	b := img.Bounds()

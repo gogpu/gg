@@ -32,6 +32,16 @@ func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color)
 	}
 }
 
+// glyphRasterMode selects the rasterization coverage mode.
+// Outline extraction (sfnt or go-text) and rasterization mode are orthogonal
+// concerns (Skia pattern: SkFont::Edging is independent of font variations).
+type glyphRasterMode int
+
+const (
+	rasterModeAA      glyphRasterMode = iota // 256-level analytic AA coverage
+	rasterModeAliased                        // binary 0/255 coverage (Skia kAlias)
+)
+
 // glyphRasterizeFunc is the per-glyph rasterization callback used by drawGlyphs.
 // It abstracts the difference between RasterizeHinted (256-level AA) and
 // RasterizeAliased (binary coverage), allowing drawSourceFace and DrawAliased
@@ -61,7 +71,7 @@ func drawGlyphs(
 	rasterize glyphRasterizeFunc,
 ) {
 	if vars := sf.Variations(); len(vars) > 0 {
-		drawGlyphsVariable(dst, sf, text, x, y, col, vars)
+		drawGlyphsVariable(dst, sf, text, x, y, col, vars, rasterModeAA)
 		return
 	}
 
@@ -108,6 +118,9 @@ func drawGlyphs(
 // drawGlyphsVariable renders text using go-text/typesetting for outline extraction,
 // which supports variable font tables (gvar/HVAR). This path is used when
 // the face has font variations configured via WithVariations.
+//
+// The mode parameter selects coverage computation (Skia pattern: outline source
+// and rasterization mode are orthogonal — variable fonts don't affect AA choice).
 func drawGlyphsVariable(
 	dst draw.Image,
 	sf *sourceFace,
@@ -115,6 +128,7 @@ func drawGlyphsVariable(
 	x, y float64,
 	col color.Color,
 	variations []FontVariation,
+	mode glyphRasterMode,
 ) {
 	source := sf.source
 	gtFont, err := GetGoTextFont(source)
@@ -155,8 +169,15 @@ func drawGlyphsVariable(
 			continue
 		}
 
-		result, err := rast.RasterizeOutline(outline, subpixelX, subpixelY)
-		if err != nil || result == nil {
+		var result *GlyphMaskResult
+		var rErr error
+		switch mode {
+		case rasterModeAliased:
+			result, rErr = rast.RasterizeOutlineAliased(outline, subpixelX, subpixelY)
+		default:
+			result, rErr = rast.RasterizeOutline(outline, subpixelX, subpixelY)
+		}
+		if rErr != nil || result == nil {
 			advanceX += float64(outline.Advance)
 			continue
 		}
