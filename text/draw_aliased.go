@@ -27,5 +27,10 @@ func DrawAliased(dst draw.Image, text string, face Face, x, y float64, col color
 
 	text = expandTabs(text)
 
+	if vars := sf.Variations(); len(vars) > 0 {
+		drawGlyphsVariable(dst, sf, text, x, y, col, vars, rasterModeAliased)
+		return
+	}
+
 	drawGlyphs(dst, sf, text, x, y, col, rasterizeAliasedGlyph)
 }

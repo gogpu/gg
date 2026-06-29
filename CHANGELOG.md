@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.4] - 2026-06-29
+
+### Fixed
+
+- **Aliased text with variable fonts** (#385) — `TextModeAliased` / `DrawAliased` ignored
+  variable font variations, rendering with 256-level AA instead of binary (0/255) coverage.
+  Root cause: `drawGlyphsVariable` hardcoded AA rasterization, discarding the aliased callback.
+  Fix: outline extraction and rasterization mode are now orthogonal (Skia `SkFont::Edging` pattern).
+  New `RasterizeOutlineAliased` public method, `glyphRasterMode` enum, mode propagated through
+  variable font rendering path. 2 tests: binary-only coverage validation, AA vs aliased ink comparison.
+
 ## [0.49.3] - 2026-06-29
 
 ### Changed
