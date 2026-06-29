@@ -141,6 +141,14 @@ func drawGlyphsVariable(
 	rast := NewGlyphMaskRasterizer()
 	src := image.NewUniform(col)
 
+	// Hinting only for aliased mode (Skia pattern: FT_LOAD_TARGET_MONO for kAlias,
+	// FT_LOAD_TARGET_NORMAL for kAntiAlias). AA rendering benefits from smooth
+	// unhinted outlines; aliased needs grid-fitting for crisp stems.
+	var hintingOpts []Hinting
+	if mode == rasterModeAliased {
+		hintingOpts = []Hinting{sf.config.hinting}
+	}
+
 	advanceX := 0.0
 	for _, r := range text {
 		if r < 0x20 && r != '\t' {
@@ -161,7 +169,7 @@ func drawGlyphsVariable(
 		subpixelX := glyphX - intX
 		subpixelY := glyphY - intY
 
-		outline := ExtractOutlineGoText(gtFont, gid, ppem, variations)
+		outline := ExtractOutlineGoText(gtFont, gid, ppem, variations, hintingOpts...)
 		if outline == nil || outline.IsEmpty() {
 			if outline != nil {
 				advanceX += float64(outline.Advance)

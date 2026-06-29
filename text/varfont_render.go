@@ -44,11 +44,16 @@ func GetGoTextFont(source *FontSource) (*font.Font, error) {
 
 // ExtractOutlineGoText extracts a glyph outline using go-text with variations applied.
 // Coordinates are returned in pixel units (scaled by ppem/upem), matching sfnt output.
+//
+// When hinting is not HintingNone, gridFitOutline is applied after scaling
+// (Skia/FreeType pattern: hinting AFTER variation interpolation). This snaps
+// horizontal stems to pixel boundaries for crisp rendering at small sizes.
 func ExtractOutlineGoText(
 	goTextFont *font.Font,
 	gid GlyphID,
 	ppem float64,
 	variations []FontVariation,
+	hinting ...Hinting,
 ) *GlyphOutline {
 	face := font.NewFace(goTextFont)
 	if len(variations) > 0 {
@@ -120,6 +125,13 @@ func ExtractOutlineGoText(
 
 	advance := float64(face.HorizontalAdvance(font.GID(gid)))
 	outline.Advance = float32(advance * scale)
+
+	// Apply grid-fitting after scaling (Skia/FreeType pattern: hint AFTER variation
+	// interpolation). go-text returns unhinted outlines; our auto-hinter snaps
+	// horizontal stems to pixel boundaries for crisp rendering at small sizes.
+	if len(hinting) > 0 && hinting[0] != HintingNone {
+		gridFitOutline(outline, hinting[0])
+	}
 
 	return outline
 }

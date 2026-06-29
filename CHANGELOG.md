@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.5] - 2026-06-29
+
+### Fixed
+
+- **Aliased variable font hinting** (#385, #405) — apply `gridFitOutline` to go-text
+  extracted outlines for aliased mode only. AA uses unhinted outlines (Skia pattern:
+  `FT_LOAD_TARGET_MONO` for kAlias, lighter hinting for kAntiAlias). Enterprise
+  auto-hinter upgrade (FreeType parity) tracked in #405.
+
 ## [0.49.4] - 2026-06-29
 
 ### Fixed
