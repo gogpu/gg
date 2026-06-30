@@ -399,6 +399,12 @@ func (e *ttEngine) opGc(opcode byte) error {
 
 // opScfs implements SCFS[] (0x48).
 // Sets coordinate from stack.
+//
+// For twilight zone points, after moving, the current position is copied
+// back to the original position. This ensures subsequent instructions
+// see the correct original values for distance computation.
+//
+// Reference: skrifa hint/engine/data.rs:58-69
 func (e *ttEngine) opScfs() error {
 	value, err := e.valueStack.pop()
 	if err != nil {
@@ -417,7 +423,17 @@ func (e *ttEngine) opScfs() error {
 		return nil
 	}
 	curDist := e.graphics.project(pt[0], pt[1], 0, 0)
-	return z.movePoint(&e.graphics, pointIdx, value-curDist)
+	if err := z.movePoint(&e.graphics, pointIdx, value-curDist); err != nil {
+		return err
+	}
+	// Twilight zone: copy current point to original after move.
+	// Reference: skrifa hint/engine/data.rs:64-67
+	if e.graphics.zp2 == ttZoneTwilight {
+		if pointIdx >= 0 && pointIdx < len(z.points) && pointIdx < len(z.original) {
+			z.original[pointIdx] = z.points[pointIdx]
+		}
+	}
+	return nil
 }
 
 // opMd implements MD[a] (0x49-0x4A).
@@ -449,19 +465,29 @@ func (e *ttEngine) opMd(opcode byte) error {
 		d := e.graphics.project(pt1[0], pt1[1], pt2[0], pt2[1])
 		return e.valueStack.push(d)
 	}
-	// Original positions
-	pt1, e1 := z0.originalPoint(p1Idx)
-	pt2, e2 := z1.originalPoint(p2Idx)
-	if e1 != nil || e2 != nil {
-		if e.graphics.isPedantic {
-			if e1 != nil {
-				return e1
+	// Original positions.
+	// In twilight zone, use scaled original points.
+	// In glyph zone, use UNSCALED font-unit points then multiply by scale.
+	// This matches skrifa hint/engine/data.rs:101-111 exactly.
+	if e.graphics.zp0 == ttZoneTwilight || e.graphics.zp1 == ttZoneTwilight {
+		pt1, e1 := z0.originalPoint(p1Idx)
+		pt2, e2 := z1.originalPoint(p2Idx)
+		if e1 != nil || e2 != nil {
+			if e.graphics.isPedantic {
+				if e1 != nil {
+					return e1
+				}
+				return e2
 			}
-			return e2
+			return e.valueStack.push(0)
 		}
-		return e.valueStack.push(0)
+		d := e.graphics.dualProject(pt1[0], pt1[1], pt2[0], pt2[1])
+		return e.valueStack.push(d)
 	}
-	d := e.graphics.dualProject(pt1[0], pt1[1], pt2[0], pt2[1])
+	v1x, v1y := z0.unscaledPoint(p1Idx)
+	v2x, v2y := z1.unscaledPoint(p2Idx)
+	dist := e.graphics.dualProjectUnscaled(v1x, v1y, v2x, v2y)
+	d := ttMul16Dot16(dist, e.graphics.unscaledToPixels())
 	return e.valueStack.push(d)
 }
 

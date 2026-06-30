@@ -105,6 +105,17 @@ func (z *ttZone) unscaledPoint(index int) (int32, int32) {
 	return z.unscaled[i], z.unscaled[i+1]
 }
 
+// unscaledCoord returns a single coordinate from the unscaled array.
+// axis: 0 = x, 1 = y.
+// If the index is out of range, returns 0.
+func (z *ttZone) unscaledCoord(index, axis int) int32 {
+	i := index*2 + axis
+	if i < 0 || i >= len(z.unscaled) {
+		return 0
+	}
+	return z.unscaled[i]
+}
+
 // touchX marks a point as touched in the X direction.
 func (z *ttZone) touchX(index int) {
 	if index >= 0 && index < len(z.flags) {
@@ -213,20 +224,20 @@ func (z *ttZone) movePoint(gs *ttGraphicsState, index int, distance int32) error
 		}
 		z.touchY(index)
 	default:
+		// Non-axis-aligned freedom vector: decompose distance along each axis
+		// using mul_div(distance, fv_component, fdotp) = distance * fv / fdotp.
+		// This matches skrifa zone.rs:448-464 exactly.
 		fv := gs.freedomVector
 		fdotp := gs.fdotp
-		if fdotp != 0x4000 {
-			distance = ttMul14(distance, fdotp)
-		}
 		if fv[0] != 0 {
 			if !backCompat {
-				z.points[index][0] += ttMul14(distance, fv[0])
+				z.points[index][0] += ttMulDiv(distance, fv[0], fdotp)
 			}
 			z.touchX(index)
 		}
 		if fv[1] != 0 {
 			if !backCompatAndDidIUP {
-				z.points[index][1] += ttMul14(distance, fv[1])
+				z.points[index][1] += ttMulDiv(distance, fv[1], fdotp)
 			}
 			z.touchY(index)
 		}

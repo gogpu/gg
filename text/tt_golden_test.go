@@ -1112,11 +1112,7 @@ func TestTTGolden_SkrifaParity_24ppem(t *testing.T) {
 // ttGoldenCompareCoords compares hinted glyph coordinates from our TT
 // interpreter against golden data from skrifa.
 //
-// Strategy: X coordinates must match diff=0 (hard fail on regression).
-// Y coordinates are tracked for progress toward diff=0 — logged but not
-// failed, since the interpreter instruction dispatch is still being debugged.
-// Once Y parity is achieved, the Y check will become a hard assertion.
-//
+// Both X and Y coordinates must match diff=0 (hard fail on regression).
 // This is the TT interpreter equivalent of the auto-hinter's
 // TestAutoHintGolden_HintedCoords_* tests.
 func ttGoldenCompareCoords(
@@ -1161,6 +1157,7 @@ func ttGoldenCompareCoords(
 			xMismatches++
 		}
 		if dy != 0 {
+			t.Errorf("pt[%d] Y: got %d, want %d [dy=%d]", i, got[1], want[1], dy)
 			yMismatches++
 		}
 	}
@@ -1168,19 +1165,24 @@ func ttGoldenCompareCoords(
 	if xMismatches > 0 {
 		t.Errorf("X REGRESSION: %d/%d X coordinates differ from skrifa", xMismatches, numPoints)
 	}
+	if yMismatches > 0 {
+		t.Errorf("Y REGRESSION: %d/%d Y coordinates differ from skrifa", yMismatches, numPoints)
+	}
 
-	// Phantom X must match (advance width).
+	// Phantom points must match (advance width and vertical metrics).
 	for i := range 4 {
 		got := outline.points[numPoints+i]
 		want := expectedPhantoms[i]
 		if got[0] != want[0] {
 			t.Errorf("phantom[%d] X: got %d, want %d", i, got[0], want[0])
 		}
+		if got[1] != want[1] {
+			t.Errorf("phantom[%d] Y: got %d, want %d", i, got[1], want[1])
+		}
 	}
 
-	matched := numPoints - yMismatches
-	t.Logf("skrifa parity ppem=%d: X=%d/%d diff=0, Y=%d/%d diff=0 (%d remain)",
-		ppem, numPoints-xMismatches, numPoints, matched, numPoints, yMismatches)
+	t.Logf("skrifa parity ppem=%d: X=%d/%d diff=0, Y=%d/%d diff=0",
+		ppem, numPoints-xMismatches, numPoints, numPoints-yMismatches, numPoints)
 }
 
 // --- Test 25: Pre-hinting coordinate scaling parity ---

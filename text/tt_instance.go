@@ -43,6 +43,14 @@ type ttHintInstance struct {
 	twilightOriginalScaled [][2]int32
 	twilightFlags          []ttPointFlags
 
+	// Raw bytecodes — needed for glyph programs that CALL functions
+	// defined in fpgm. The glyph engine must have access to all three
+	// bytecodes (fpgm, prep, glyph) so that function calls can switch
+	// to the correct bytecode stream.
+	// Reference: skrifa hint/instance.rs:140-145
+	fpgm []byte
+	prep []byte
+
 	// maxStack for value stack allocation.
 	maxStack int
 
@@ -83,6 +91,8 @@ func newTTHintInstance(font *ttFontProgram, ppem int32, target ttTarget) (*ttHin
 		scale:    scale,
 		ppem:     ppem,
 		maxStack: font.maxStack,
+		fpgm:     font.fpgm,
+		prep:     font.prep,
 	}
 
 	h.setup(font, scale)
@@ -241,8 +251,11 @@ func (h *ttHintInstance) hintGlyph(outline *ttGlyphOutline) error {
 		instructions: newTTDefinitionMapReadonly(h.instructions),
 	}
 
-	// Create program state with glyph bytecode.
-	program := newTTProgramState(nil, nil, outline.bytecode, ttProgramGlyph)
+	// Create program state with ALL bytecodes — the glyph program may CALL
+	// functions defined in fpgm. Without fpgm bytecode, CALL instructions
+	// would switch to an empty decoder and silently fail.
+	// Reference: skrifa hint/instance.rs:140-145 passes outlines.fpgm + outlines.prep + outline.bytecode
+	program := newTTProgramState(h.fpgm, h.prep, outline.bytecode, ttProgramGlyph)
 
 	// Create and run engine.
 	engine := newTTEngine(
