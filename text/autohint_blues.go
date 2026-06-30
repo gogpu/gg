@@ -111,20 +111,32 @@ func computeBlueZones(font ParsedFont, script *scriptClass) []blueZone {
 // See FreeType aflatin.c:314-800 af_latin_metrics_init_blues.
 // See skrifa metrics/blues.rs compute_default_blues.
 //
-//nolint:gocognit // FreeType aflatin.c port — algorithmic complexity is inherent
+//nolint:gocognit,gocyclo,cyclop // FreeType aflatin.c port — algorithmic complexity is inherent
 func computeDefaultBlues(font ParsedFont, script *scriptClass) []blueZone {
-	xiFont, ok := font.(*ximageParsedFont)
-	if !ok {
+	// Determine UPM and whether we have sfnt (ximage) access.
+	xiFont, isXimage := font.(*ximageParsedFont)
+
+	var upm int
+	if isXimage {
+		upm = int(xiFont.font.UnitsPerEm())
+	} else {
+		upm = font.UnitsPerEm()
+	}
+	if upm == 0 {
 		return nil
 	}
-
-	upm := int(xiFont.font.UnitsPerEm())
 	flatThreshold := int32(upm / 14)
 
-	// Get raw font data for contour-based analysis (needed for LONG zones).
+	// Get raw font data for contour-based analysis (needed for LONG zones
+	// and as the sole path for ownParsedFont).
 	var rawFontData []byte
 	if provider, ok := font.(RawFontDataProvider); ok {
 		rawFontData = provider.RawFontData()
+	}
+
+	// ownParsedFont requires raw data for outline extraction.
+	if !isXimage && rawFontData == nil {
+		return nil
 	}
 
 	// Determine if any zone needs LONG processing.
@@ -157,18 +169,21 @@ func computeDefaultBlues(font ParsedFont, script *scriptClass) []blueZone {
 				continue
 			}
 
-			gid, err := xiFont.font.GlyphIndex(&buf, r[0])
-			if err != nil || gid == 0 {
+			gid := font.GlyphIndex(r[0])
+			if gid == 0 {
 				continue
 			}
 
 			// Measure blue character — use contour path for LONG zones, sfnt for others.
 			var bestY int32
 			var isRound, measured bool
-			if useContours && isLong {
+			if isXimage && (!useContours || !isLong) {
+				// sfnt path: use LoadGlyph for fast Y-extremum extraction.
+				bestY, isRound, measured = measureBlueCharSfnt(xiFont, &buf, sfnt.GlyphIndex(gid), ppem, isTop, flatThreshold)
+			} else if rawFontData != nil {
+				// Contour path: used for LONG zones (both parsers) and
+				// all zones for ownParsedFont.
 				bestY, isRound, measured = measureBlueCharContour(rawFontData, GlyphID(gid), isTop, flatThreshold, int32(upm))
-			} else {
-				bestY, isRound, measured = measureBlueCharSfnt(xiFont, &buf, gid, ppem, isTop, flatThreshold)
 			}
 			if !measured {
 				continue
@@ -659,12 +674,27 @@ func classifyRoundFlatContour(contour []ContourPoint,
 //
 //nolint:gocognit,gocyclo,cyclop // FreeType afcjk.c port — CJK blue zone detection
 func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
-	xiFont, ok := font.(*ximageParsedFont)
-	if !ok {
+	xiFont, isXimage := font.(*ximageParsedFont)
+
+	var upm int
+	if isXimage {
+		upm = int(xiFont.font.UnitsPerEm())
+	} else {
+		upm = font.UnitsPerEm()
+	}
+	if upm == 0 {
 		return nil
 	}
 
-	upm := int(xiFont.font.UnitsPerEm())
+	// Get raw font data for contour-based measurement (ownParsedFont path).
+	var rawFontData []byte
+	if provider, ok := font.(RawFontDataProvider); ok {
+		rawFontData = provider.RawFontData()
+	}
+	if !isXimage && rawFontData == nil {
+		return nil
+	}
+
 	ppem := fixed.Int26_6(upm * 64)
 	var buf sfnt.Buffer
 
@@ -689,16 +719,11 @@ func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
 			if len(r) == 0 {
 				continue
 			}
-			gid, err := xiFont.font.GlyphIndex(&buf, r[0])
-			if err != nil || gid == 0 {
+			gid := font.GlyphIndex(r[0])
+			if gid == 0 {
 				continue
 			}
-			segments, err := xiFont.font.LoadGlyph(&buf, gid, ppem, nil)
-			if err != nil || len(segments) == 0 {
-				continue
-			}
-			bestY, hasPoints := findBestY(segments, isTop)
-			if hasPoints {
+			if bestY, ok := measureCJKCharY(isXimage, xiFont, &buf, rawFontData, gid, ppem, isTop); ok {
 				fills = append(fills, bestY)
 			}
 		}
@@ -708,16 +733,11 @@ func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
 			if len(r) == 0 {
 				continue
 			}
-			gid, err := xiFont.font.GlyphIndex(&buf, r[0])
-			if err != nil || gid == 0 {
+			gid := font.GlyphIndex(r[0])
+			if gid == 0 {
 				continue
 			}
-			segments, err := xiFont.font.LoadGlyph(&buf, gid, ppem, nil)
-			if err != nil || len(segments) == 0 {
-				continue
-			}
-			bestY, hasPoints := findBestY(segments, isTop)
-			if hasPoints {
+			if bestY, ok := measureCJKCharY(isXimage, xiFont, &buf, rawFontData, gid, ppem, isTop); ok {
 				flatsSlice = append(flatsSlice, bestY)
 			}
 		}
@@ -798,6 +818,55 @@ func findBestY(segments []sfnt.Segment, isTop bool) (int32, bool) {
 			case !isTop && y < bestY:
 				bestY = y
 			}
+		}
+	}
+
+	return bestY, hasPoints
+}
+
+// measureCJKCharY measures the Y-extremum for a CJK blue zone character.
+// Uses sfnt.LoadGlyph when available (ximage), otherwise falls back to
+// raw contour points (own parser). Returns (bestY, ok).
+func measureCJKCharY(isXimage bool, xiFont *ximageParsedFont, buf *sfnt.Buffer,
+	rawFontData []byte, gid uint16, ppem fixed.Int26_6, isTop bool) (int32, bool) {
+	if isXimage {
+		segments, err := xiFont.font.LoadGlyph(buf, sfnt.GlyphIndex(gid), ppem, nil)
+		if err != nil || len(segments) == 0 {
+			return 0, false
+		}
+		return findBestY(segments, isTop)
+	}
+	if rawFontData != nil {
+		return findBestYContour(rawFontData, GlyphID(gid), isTop)
+	}
+	return 0, false
+}
+
+// findBestYContour finds the Y-extremum from raw glyf contour points.
+// This is the contour-based equivalent of findBestY (which uses sfnt segments).
+// Coordinates are in Y-UP font units (raw glyf data, no conversion needed).
+func findBestYContour(fontData []byte, gid GlyphID, isTop bool) (int32, bool) {
+	contours, err := ParseGlyfContours(fontData, gid)
+	if err != nil || contours == nil || len(contours.Points) == 0 {
+		return 0, false
+	}
+
+	bestY := int32(0)
+	hasPoints := false
+
+	for _, pt := range contours.Points {
+		if !pt.OnCurve {
+			continue // Only on-curve points, matching findBestY behavior.
+		}
+		y := int32(pt.Y) // Y-UP font units (same as sfnt path after negation+div64)
+		switch {
+		case !hasPoints:
+			bestY = y
+			hasPoints = true
+		case isTop && y > bestY:
+			bestY = y
+		case !isTop && y < bestY:
+			bestY = y
 		}
 	}
 

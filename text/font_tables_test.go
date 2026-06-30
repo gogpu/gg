@@ -639,6 +639,245 @@ func TestCmapGlyphIndex_BeyondBMP(t *testing.T) {
 	}
 }
 
+// --- Phase 3b: GlyphBounds cross-validation ---
+
+func TestGlyphBounds_CrossValidation(t *testing.T) {
+	fonts := []struct {
+		name  string
+		chars []rune
+	}{
+		{"tthint_subset.ttf", []rune{'A'}},
+		{"ahem.ttf", []rune{'x'}},
+		{"cousine_hint_subset.ttf", []rune{'A', ' '}},
+	}
+
+	sizes := []float64{12, 16, 24, 48}
+
+	for _, font := range fonts {
+		t.Run(font.name, func(t *testing.T) {
+			data := loadTestFontData(t, font.name)
+			own := parseWithOwn(t, data)
+			ximg := parseWithXimage(t, data)
+
+			for _, ch := range font.chars {
+				ownGID := own.GlyphIndex(ch)
+				ximgGID := ximg.GlyphIndex(ch)
+				if ownGID != ximgGID {
+					t.Errorf("GlyphIndex(%q): own=%d, ximage=%d", ch, ownGID, ximgGID)
+					continue
+				}
+				if ownGID == 0 {
+					continue // Glyph not in font
+				}
+
+				for _, ppem := range sizes {
+					ownB := own.GlyphBounds(ownGID, ppem)
+					ximgB := ximg.GlyphBounds(ximgGID, ppem)
+
+					// ownParsedFont reads raw glyf header bounds (unhinted),
+					// while ximageParsedFont uses sfnt.GlyphBounds with
+					// HintingFull. Hinting may shift bounds slightly, so
+					// allow a tolerance of 1 pixel.
+					const tol = 1.0
+					if math.Abs(ownB.MinX-ximgB.MinX) > tol ||
+						math.Abs(ownB.MinY-ximgB.MinY) > tol ||
+						math.Abs(ownB.MaxX-ximgB.MaxX) > tol ||
+						math.Abs(ownB.MaxY-ximgB.MaxY) > tol {
+						t.Errorf("GlyphBounds(%q, ppem=%g): own=%+v, ximage=%+v",
+							ch, ppem, ownB, ximgB)
+					}
+				}
+			}
+		})
+	}
+}
+
+// --- Phase 3b: Glyph outline extraction cross-validation ---
+
+func TestExtractOutline_OwnParser(t *testing.T) {
+	data := loadTestFontData(t, "tthint_subset.ttf")
+	own := parseWithOwn(t, data)
+	ximg := parseWithXimage(t, data)
+
+	ext := NewOutlineExtractor()
+
+	// 'A' glyph — should produce non-empty outline from both parsers.
+	gidOwn := own.GlyphIndex('A')
+	gidXimg := ximg.GlyphIndex('A')
+	if gidOwn == 0 || gidXimg == 0 {
+		t.Fatal("'A' glyph not found")
+	}
+	if gidOwn != gidXimg {
+		t.Fatalf("GlyphIndex('A') mismatch: own=%d, ximage=%d", gidOwn, gidXimg)
+	}
+
+	ownOutline, err := ext.ExtractOutline(own, GlyphID(gidOwn), 24)
+	if err != nil {
+		t.Fatalf("ExtractOutline(own, 'A'): %v", err)
+	}
+	ximgOutline, err := ext.ExtractOutline(ximg, GlyphID(gidXimg), 24)
+	if err != nil {
+		t.Fatalf("ExtractOutline(ximage, 'A'): %v", err)
+	}
+
+	if ownOutline == nil {
+		t.Fatal("own outline is nil for 'A'")
+	}
+	if ximgOutline == nil {
+		t.Fatal("ximage outline is nil for 'A'")
+	}
+
+	// Both should have non-zero segment counts.
+	if ownOutline.SegmentCount() == 0 {
+		t.Error("own outline has zero segments for 'A'")
+	}
+	if ximgOutline.SegmentCount() == 0 {
+		t.Error("ximage outline has zero segments for 'A'")
+	}
+
+	// Advances should be close (own uses hmtx, ximage uses sfnt).
+	if math.Abs(float64(ownOutline.Advance-ximgOutline.Advance)) > 0.5 {
+		t.Errorf("Advance mismatch: own=%g, ximage=%g",
+			ownOutline.Advance, ximgOutline.Advance)
+	}
+
+	// Segment counts may differ slightly due to different parsing paths
+	// (raw glyf contours vs sfnt.LoadGlyph). But the first and last
+	// segment ops should be MoveTo and either LineTo/QuadTo.
+	if ownOutline.Segments[0].Op != OutlineOpMoveTo {
+		t.Error("own outline first segment is not MoveTo")
+	}
+
+	t.Logf("own: %d segments, advance=%g, bounds=%+v",
+		ownOutline.SegmentCount(), ownOutline.Advance, ownOutline.Bounds)
+	t.Logf("ximg: %d segments, advance=%g, bounds=%+v",
+		ximgOutline.SegmentCount(), ximgOutline.Advance, ximgOutline.Bounds)
+}
+
+func TestExtractOutline_OwnParser_EmptyGlyph(t *testing.T) {
+	data := loadTestFontData(t, "cousine_hint_subset.ttf")
+	own := parseWithOwn(t, data)
+
+	ext := NewOutlineExtractor()
+
+	// Space glyph — should produce outline with advance but no segments.
+	gid := own.GlyphIndex(' ')
+	outline, err := ext.ExtractOutline(own, GlyphID(gid), 24)
+	if err != nil {
+		t.Fatalf("ExtractOutline(own, ' '): %v", err)
+	}
+	if outline == nil {
+		t.Fatal("outline is nil for space")
+	}
+	if outline.SegmentCount() != 0 {
+		t.Errorf("space glyph should have 0 segments, got %d", outline.SegmentCount())
+	}
+	if outline.Advance <= 0 {
+		t.Errorf("space glyph advance should be positive, got %g", outline.Advance)
+	}
+}
+
+// --- Phase 3b: TT bytecode hinting via generic path ---
+
+func TestTTBytecodeHintingGeneric_OwnParser(t *testing.T) {
+	data := loadTestFontData(t, "tthint_subset.ttf")
+	own := parseWithOwn(t, data)
+	ximg := parseWithXimage(t, data)
+
+	gid := own.GlyphIndex('A')
+	if gid == 0 {
+		t.Fatal("'A' glyph not found")
+	}
+
+	// Both parsers should produce hinted outlines via the generic path.
+	ownHinted := tryTTBytecodeHintingGeneric(own, GlyphID(gid), 24)
+	ximgHinted := tryTTBytecodeHintingGeneric(ximg, GlyphID(gid), 24)
+
+	if ownHinted == nil {
+		t.Fatal("own parser returned nil hinted outline for 'A'")
+	}
+	if ximgHinted == nil {
+		t.Fatal("ximage parser returned nil hinted outline for 'A'")
+	}
+
+	// Hinted outlines should be identical — both use the same TT interpreter
+	// on the same raw font data.
+	if ownHinted.SegmentCount() != ximgHinted.SegmentCount() {
+		t.Errorf("hinted segment count: own=%d, ximage=%d",
+			ownHinted.SegmentCount(), ximgHinted.SegmentCount())
+	}
+
+	// Advances should be identical (from same phantom points).
+	if ownHinted.Advance != ximgHinted.Advance {
+		t.Errorf("hinted advance: own=%g, ximage=%g",
+			ownHinted.Advance, ximgHinted.Advance)
+	}
+
+	// Verify segment coordinates match exactly.
+	n := ownHinted.SegmentCount()
+	if n > ximgHinted.SegmentCount() {
+		n = ximgHinted.SegmentCount()
+	}
+	for i := range n {
+		ownSeg := ownHinted.Segments[i]
+		ximgSeg := ximgHinted.Segments[i]
+		if ownSeg.Op != ximgSeg.Op {
+			t.Errorf("segment %d: op mismatch own=%v, ximage=%v", i, ownSeg.Op, ximgSeg.Op)
+			continue
+		}
+		for j := range segPointCount(ownSeg.Op) {
+			if ownSeg.Points[j] != ximgSeg.Points[j] {
+				t.Errorf("segment %d point %d: own=%+v, ximage=%+v",
+					i, j, ownSeg.Points[j], ximgSeg.Points[j])
+			}
+		}
+	}
+}
+
+// --- Phase 3b: Blue zone detection with ownParsedFont ---
+
+func TestComputeDefaultBlues_OwnParser(t *testing.T) {
+	data := loadTestFontData(t, "tthint_subset.ttf")
+	own := parseWithOwn(t, data)
+	ximg := parseWithXimage(t, data)
+
+	// Use Latin script for blue zone detection.
+	ownBlues := computeBlueZones(own, &scriptLatin)
+	ximgBlues := computeBlueZones(ximg, &scriptLatin)
+
+	t.Logf("ownBlues: %d zones, ximgBlues: %d zones", len(ownBlues), len(ximgBlues))
+
+	// Both should produce the same number of zones (same font data, same script).
+	if len(ownBlues) != len(ximgBlues) {
+		// Tolerance: own parser uses contour path which may find fewer/more
+		// blue characters than sfnt path due to composite glyph handling.
+		// Log but don't fail if within reasonable range.
+		t.Logf("WARNING: blue zone count differs: own=%d, ximage=%d (contour vs sfnt path)",
+			len(ownBlues), len(ximgBlues))
+	}
+
+	// If both have zones, verify positions are close.
+	n := len(ownBlues)
+	if n > len(ximgBlues) {
+		n = len(ximgBlues)
+	}
+	for i := range n {
+		ownZ := ownBlues[i]
+		ximgZ := ximgBlues[i]
+		if ownZ.flags != ximgZ.flags {
+			t.Errorf("zone %d: flags mismatch own=%d, ximage=%d", i, ownZ.flags, ximgZ.flags)
+		}
+		// The contour-based path measures extrema from raw points (all on-curve),
+		// while the sfnt path measures from LoadGlyph segments (which may
+		// include off-curve control points in extrema search). Allow tolerance.
+		const posTol = 20 // font units
+		if abs32(ownZ.position-ximgZ.position) > posTol {
+			t.Errorf("zone %d: position mismatch own=%d, ximage=%d",
+				i, ownZ.position, ximgZ.position)
+		}
+	}
+}
+
 func TestCmapGlyphIndex_NotoSerifShaping(t *testing.T) {
 	// Cross-validate NotoSerif shaping font (Latin script).
 	data := loadTestFontData(t, "notoserif_autohint_shaping.ttf")

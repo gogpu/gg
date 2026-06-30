@@ -196,12 +196,15 @@ func (f *ownParsedFont) GlyphBounds(glyphIndex uint16, ppem float64) Rect {
 	xMax := int16(binary.BigEndian.Uint16(data[6:8]))
 	yMax := int16(binary.BigEndian.Uint16(data[8:10]))
 
+	// The glyf header stores coordinates in Y-UP (font units).
+	// sfnt.GlyphBounds returns Y-DOWN (Go image convention) by negating Y.
+	// To match: negate Y and swap MinY/MaxY.
 	scale := ppem / float64(f.upem)
 	return Rect{
 		MinX: float64(xMin) * scale,
-		MinY: float64(yMin) * scale,
+		MinY: float64(-yMax) * scale, // Y-UP → Y-DOWN: negate and swap
 		MaxX: float64(xMax) * scale,
-		MaxY: float64(yMax) * scale,
+		MaxY: float64(-yMin) * scale, // Y-UP → Y-DOWN: negate and swap
 	}
 }
 
