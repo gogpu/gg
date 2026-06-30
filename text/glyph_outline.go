@@ -378,7 +378,42 @@ func tryTTBytecodeHinting(xiFont *ximageParsedFont, gid GlyphID, size float64) *
 		return nil
 	}
 
-	return ttHintedOutlineToGlyphOutline(hinted, gid)
+	outline := ttHintedOutlineToGlyphOutline(hinted, gid)
+	if outline == nil {
+		return nil
+	}
+
+	// Validate hinted outline bounds. The TT interpreter may produce corrupt
+	// coordinates for some fonts (e.g., DejaVuSans) when the bytecode moves
+	// points to degenerate positions. Two checks:
+	//
+	// 1. Coordinate range: a well-formed glyph at ppem N should have
+	//    coordinates within a few multiples of ppem. We use 4x ppem as a
+	//    generous upper bound — this catches values like 642043 px at 24 ppem
+	//    while allowing large glyphs (CJK, decorative) to pass.
+	//
+	// 2. Non-degenerate width: if the original glyph has non-zero width (it
+	//    has visible outline segments), the hinted outline should also have
+	//    non-zero width. A width of exactly 0.0 means all X coordinates
+	//    collapsed — this happens when the interpreter zeroes X coordinates
+	//    without proper IUP interpolation.
+	//
+	// When validation fails, we return nil so the caller falls back to the
+	// auto-hinter, which produces correct outlines from sfnt data.
+	maxCoord := size * 4
+	b := outline.Bounds
+	if b.MaxX-b.MinX > maxCoord || b.MaxY-b.MinY > maxCoord ||
+		b.MinX < -maxCoord || b.MinY < -maxCoord ||
+		b.MaxX > maxCoord || b.MaxY > maxCoord {
+		return nil
+	}
+	// Check for zero-width collapse: if the outline has segments (not a
+	// space/empty glyph), it must have non-zero X extent.
+	if len(outline.Segments) > 0 && b.MaxX-b.MinX < 0.01 {
+		return nil
+	}
+
+	return outline
 }
 
 // extractFromSFNT extracts outline from an sfnt.Font.

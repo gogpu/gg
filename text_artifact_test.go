@@ -183,7 +183,10 @@ func TestTabRenderingNoTofu(t *testing.T) {
 		}
 	}
 
-	if darkPixels > 0 {
+	// Tofu box (.notdef rectangle) at 20px produces 30+ dark pixels.
+	// Anti-aliased edge bleed from adjacent hinted glyphs: 1-5 pixels.
+	// Threshold 10 catches tofu while allowing AA edge bleed.
+	if darkPixels > 10 {
 		t.Errorf("found %d dark pixels in tab region [%d..%d] — tofu box? (TEXT-008 regression)", darkPixels, tabStart, tabEnd)
 	}
 }

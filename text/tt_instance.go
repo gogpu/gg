@@ -180,8 +180,6 @@ func (h *ttHintInstance) backwardCompatibility() bool {
 //   - phantom points initialized and appended to the end of points
 //
 // Reference: skrifa hint/instance.rs:104-177
-//
-//nolint:unparam // error return kept: pedantic mode will propagate errors (future)
 func (h *ttHintInstance) hintGlyph(outline *ttGlyphOutline) error {
 	numPhysicalPoints := len(outline.points) // includes phantom points
 
@@ -203,11 +201,19 @@ func (h *ttHintInstance) hintGlyph(outline *ttGlyphOutline) error {
 		contours: twilightContours,
 	}
 
-	// Build glyph zone with outline data.
+	// Build glyph zone with a COPY of outline points. The engine modifies
+	// zone points in-place (MDAP, MIRP, SHP, etc.), so we must work on a
+	// copy to preserve the original if the glyph program fails. On success,
+	// hinted points are copied back to outline.points.
+	//
+	// Reference: skrifa hint/instance.rs creates a fresh points buffer per glyph.
+	glyphPoints := make([][2]int32, len(outline.points))
+	copy(glyphPoints, outline.points)
+
 	glyph := ttZone{
 		unscaled: outline.unscaled,
 		original: outline.original,
-		points:   outline.points,
+		points:   glyphPoints,
 		flags:    outline.flags,
 		contours: outline.contours,
 	}
@@ -238,11 +244,12 @@ func (h *ttHintInstance) hintGlyph(outline *ttGlyphOutline) error {
 
 	if err := engine.runProgram(ttProgramGlyph, false); err != nil {
 		// Non-pedantic: glyph program errors are common in production fonts.
-		// Return nil to let the caller use unhinted outlines.
-		return nil //nolint:nilerr // intentional: non-pedantic mode silently ignores glyph errors
+		// Original outline.points are untouched (engine worked on glyphPoints copy).
+		// Return the error so the caller can fall back to auto-hinter.
+		return err
 	}
 
-	// Copy hinted points back to outline.
+	// Copy hinted points from zone copy back to outline.
 	copy(outline.points, engine.graphics.zones[1].points)
 
 	// Extract phantom points.
