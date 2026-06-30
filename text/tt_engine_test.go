@@ -335,20 +335,87 @@ func TestZone_PointAccess(t *testing.T) {
 }
 
 func TestZone_MovePoint(t *testing.T) {
-	z := ttZone{
-		points: [][2]int32{{100, 200}},
-		flags:  []ttPointFlags{0},
-	}
-	gs := defaultGraphicsState()
-	// Freedom vector = X axis
-	gs.freedomVector = [2]int32{0x4000, 0}
-	gs.updateProjectionState()
-	if err := z.movePoint(&gs, 0, 64); err != nil {
-		t.Fatalf("movePoint: %v", err)
-	}
-	if z.points[0][0] != 164 {
-		t.Errorf("x = %d, want 164", z.points[0][0])
-	}
+	t.Run("X axis no backward compat", func(t *testing.T) {
+		z := ttZone{
+			points: [][2]int32{{100, 200}},
+			flags:  []ttPointFlags{0},
+		}
+		gs := defaultGraphicsState()
+		gs.backwardCompatibility = false
+		gs.freedomVector = [2]int32{0x4000, 0}
+		gs.updateProjectionState()
+		if err := z.movePoint(&gs, 0, 64); err != nil {
+			t.Fatalf("movePoint: %v", err)
+		}
+		if z.points[0][0] != 164 {
+			t.Errorf("x = %d, want 164", z.points[0][0])
+		}
+		if !z.isTouchedX(0) {
+			t.Error("expected X-touched after movePoint")
+		}
+	})
+	t.Run("X axis backward compat suppresses move", func(t *testing.T) {
+		z := ttZone{
+			points: [][2]int32{{100, 200}},
+			flags:  []ttPointFlags{0},
+		}
+		gs := defaultGraphicsState()
+		gs.backwardCompatibility = true
+		gs.freedomVector = [2]int32{0x4000, 0}
+		gs.updateProjectionState()
+		if err := z.movePoint(&gs, 0, 64); err != nil {
+			t.Fatalf("movePoint: %v", err)
+		}
+		// In backward compat mode, X movement is suppressed but point is touched.
+		if z.points[0][0] != 100 {
+			t.Errorf("x = %d, want 100 (suppressed)", z.points[0][0])
+		}
+		if !z.isTouchedX(0) {
+			t.Error("expected X-touched even when movement suppressed")
+		}
+	})
+	t.Run("Y axis backward compat allows move", func(t *testing.T) {
+		z := ttZone{
+			points: [][2]int32{{100, 200}},
+			flags:  []ttPointFlags{0},
+		}
+		gs := defaultGraphicsState()
+		gs.backwardCompatibility = true
+		gs.freedomVector = [2]int32{0, 0x4000}
+		gs.updateProjectionState()
+		if err := z.movePoint(&gs, 0, 64); err != nil {
+			t.Fatalf("movePoint: %v", err)
+		}
+		// Y movement proceeds normally in backward compat (until IUP done).
+		if z.points[0][1] != 264 {
+			t.Errorf("y = %d, want 264", z.points[0][1])
+		}
+		if !z.isTouchedY(0) {
+			t.Error("expected Y-touched after movePoint")
+		}
+	})
+	t.Run("Y axis backward compat after IUP suppresses", func(t *testing.T) {
+		z := ttZone{
+			points: [][2]int32{{100, 200}},
+			flags:  []ttPointFlags{0},
+		}
+		gs := defaultGraphicsState()
+		gs.backwardCompatibility = true
+		gs.didIUPx = true
+		gs.didIUPy = true
+		gs.freedomVector = [2]int32{0, 0x4000}
+		gs.updateProjectionState()
+		if err := z.movePoint(&gs, 0, 64); err != nil {
+			t.Fatalf("movePoint: %v", err)
+		}
+		// After IUP done on both axes, Y movement also suppressed.
+		if z.points[0][1] != 200 {
+			t.Errorf("y = %d, want 200 (suppressed after IUP)", z.points[0][1])
+		}
+		if !z.isTouchedY(0) {
+			t.Error("expected Y-touched even when movement suppressed")
+		}
+	})
 }
 
 func TestGraphicsState_Project(t *testing.T) {

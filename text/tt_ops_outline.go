@@ -41,7 +41,7 @@ func (e *ttEngine) opMdap(opcode byte) error {
 			return err
 		}
 	}
-	e.touchPoint(z, pointIdx)
+	// NOTE: movePoint now handles touching (skrifa pattern).
 	e.graphics.rp0 = pointIdx
 	e.graphics.rp1 = pointIdx
 	return nil
@@ -99,7 +99,7 @@ func (e *ttEngine) opMiap(opcode byte) error {
 			return err
 		}
 	}
-	e.touchPoint(z, pointIdx)
+	// NOTE: movePoint now handles touching (skrifa pattern).
 	e.graphics.rp0 = pointIdx
 	e.graphics.rp1 = pointIdx
 	return nil
@@ -178,12 +178,8 @@ func (e *ttEngine) opMdrp(opcode byte) error {
 		}
 	}
 
-	// Backward compatibility: suppress X movement
-	if e.graphics.backwardCompatibility {
-		if e.graphics.projAxis == ttCoordX {
-			distance = 0
-		}
-	}
+	// NOTE: backward compatibility is handled inside movePoint (skrifa pattern).
+	// skrifa's op_mdrp does NOT check backward_compatibility.
 
 	// Get current position and compute movement
 	curPt, err := z.point(pointIdx)
@@ -212,7 +208,6 @@ func (e *ttEngine) opMdrp(opcode byte) error {
 	if setRP0 {
 		e.graphics.rp0 = pointIdx
 	}
-	e.touchPoint(z, pointIdx)
 	return nil
 }
 
@@ -309,12 +304,8 @@ func (e *ttEngine) opMirp(opcode byte) error {
 		}
 	}
 
-	// Backward compatibility: suppress X movement
-	if e.graphics.backwardCompatibility {
-		if e.graphics.projAxis == ttCoordX {
-			distance = 0
-		}
-	}
+	// NOTE: backward compatibility is handled inside movePoint (skrifa pattern).
+	// skrifa's op_mirp does NOT check backward_compatibility.
 
 	// Apply movement
 	z := e.zone(e.graphics.zp1)
@@ -342,7 +333,6 @@ func (e *ttEngine) opMirp(opcode byte) error {
 	if setRP0 {
 		e.graphics.rp0 = pointIdx
 	}
-	e.touchPoint(z, pointIdx)
 	return nil
 }
 
@@ -361,9 +351,8 @@ func (e *ttEngine) opMsirp(opcode byte) error {
 	if err != nil {
 		return err
 	}
-	if e.graphics.backwardCompatibility && e.graphics.projAxis == ttCoordX {
-		distance = 0
-	}
+	// NOTE: backward compatibility is handled inside movePoint (skrifa pattern).
+	// skrifa's op_msirp does NOT check backward_compatibility.
 	z := e.zone(e.graphics.zp1)
 	rp0z := e.zone(e.graphics.zp0)
 	curPt, e1 := z.point(pointIdx)
@@ -388,7 +377,6 @@ func (e *ttEngine) opMsirp(opcode byte) error {
 	if opcode&1 != 0 {
 		e.graphics.rp0 = pointIdx
 	}
-	e.touchPoint(z, pointIdx)
 	return nil
 }
 
@@ -631,7 +619,7 @@ func (e *ttEngine) opIP() error {
 		if err := z.movePoint(gs, pointIdx, newDist-curDist); err != nil {
 			return err
 		}
-		e.touchPoint(z, pointIdx)
+		// NOTE: movePoint now handles touching (skrifa pattern).
 	}
 	return nil
 }
@@ -650,9 +638,8 @@ func (e *ttEngine) opAlignrp() error {
 		if err != nil {
 			return err
 		}
-		if e.graphics.backwardCompatibility && e.graphics.projAxis == ttCoordX {
-			continue
-		}
+		// NOTE: backward compatibility handled inside movePoint (skrifa pattern).
+		// skrifa's op_alignrp does NOT check backward_compatibility.
 		z := e.zone(e.graphics.zp1)
 		rp0z := e.zone(e.graphics.zp0)
 		curPt, e1 := z.point(pointIdx)
@@ -670,7 +657,6 @@ func (e *ttEngine) opAlignrp() error {
 		if err := z.movePoint(&e.graphics, pointIdx, -dist); err != nil {
 			return err
 		}
-		e.touchPoint(z, pointIdx)
 	}
 	return nil
 }
@@ -710,8 +696,7 @@ func (e *ttEngine) opAlignpts() error {
 	if err := z1.movePoint(&e.graphics, p2Idx, dist/2); err != nil {
 		return err
 	}
-	e.touchPoint(z0, p1Idx)
-	e.touchPoint(z1, p2Idx)
+	// NOTE: movePoint now handles touching (skrifa pattern).
 	return nil
 }
 
@@ -847,13 +832,11 @@ func (e *ttEngine) opShp(opcode byte) error {
 		if err != nil {
 			return err
 		}
-		if e.graphics.backwardCompatibility && e.graphics.projAxis == ttCoordX {
-			continue
-		}
+		// NOTE: backward compatibility handled inside movePoint (skrifa pattern).
+		// skrifa's op_shp uses move_zp2_point which embeds backward compat.
 		if err := z.movePoint(&e.graphics, pointIdx, displacement); err != nil {
 			return err
 		}
-		e.touchPoint(z, pointIdx)
 	}
 	return nil
 }
@@ -866,9 +849,7 @@ func (e *ttEngine) opShc(opcode byte) error {
 	if err != nil {
 		return err
 	}
-	if e.graphics.backwardCompatibility && e.graphics.projAxis == ttCoordX {
-		return nil
-	}
+	// NOTE: backward compatibility handled inside movePoint (skrifa pattern).
 	var rpIdx int
 	var rpZone *ttZone
 	if opcode&1 != 0 {
@@ -921,9 +902,7 @@ func (e *ttEngine) opShz(opcode byte) error {
 	if err != nil {
 		return err
 	}
-	if e.graphics.backwardCompatibility && e.graphics.projAxis == ttCoordX {
-		return nil
-	}
+	// NOTE: backward compatibility handled inside movePoint (skrifa pattern).
 	zp, err := ttZonePointerFromInt32(zoneIdx)
 	if err != nil {
 		if e.graphics.isPedantic {
@@ -966,32 +945,41 @@ func (e *ttEngine) opShz(opcode byte) error {
 // ============================================================
 
 // opShpix implements SHPIX[] (0x38).
-// Reference: skrifa hint/engine/outline.rs
+// Reference: skrifa hint/engine/outline.rs:221-244
 func (e *ttEngine) opShpix() error {
+	gs := &e.graphics
+	inTwilight := gs.zp0 == ttZoneTwilight || gs.zp1 == ttZoneTwilight || gs.zp2 == ttZoneTwilight
 	distance, err := e.valueStack.pop()
 	if err != nil {
 		return err
 	}
-	loop := e.graphics.loopCounter
-	e.graphics.loopCounter = 1
-	z := e.zone(e.graphics.zp2)
+	loop := gs.loopCounter
+	gs.loopCounter = 1
+	didIUP := gs.didIUPx && gs.didIUPy
+	z := e.zone(gs.zp2)
 	for i := int32(0); i < loop; i++ {
 		pointIdx, err := e.valueStack.popUsize()
 		if err != nil {
 			return err
 		}
-		if e.graphics.backwardCompatibility {
-			if e.graphics.projAxis == ttCoordX {
-				continue
+		if gs.backwardCompatibility {
+			// In backward compat mode, SHPIX has its own gating logic:
+			// only move if in twilight zone, or if IUP hasn't been done
+			// and either (composite with Y freedom) or (point is Y-touched).
+			// Reference: skrifa hint/engine/outline.rs:232-239
+			if inTwilight ||
+				(!didIUP &&
+					((gs.isComposite && gs.freedomVector[1] != 0) ||
+						z.isTouchedY(pointIdx))) {
+				if err := z.movePoint(gs, pointIdx, distance); err != nil {
+					return err
+				}
 			}
-			if e.graphics.didIUPx && e.graphics.didIUPy {
-				continue
+		} else {
+			if err := z.movePoint(gs, pointIdx, distance); err != nil {
+				return err
 			}
 		}
-		if err := z.movePoint(&e.graphics, pointIdx, distance); err != nil {
-			return err
-		}
-		e.touchPoint(z, pointIdx)
 	}
 	return nil
 }
@@ -1072,25 +1060,8 @@ func (e *ttEngine) opFliprgoff() error {
 }
 
 // ============================================================
-// Helper: touch point based on current projection vector
+// Helper: check if point is touched along an axis
 // ============================================================
-
-// touchPoint marks a point as touched along the current projection axis.
-func (e *ttEngine) touchPoint(z *ttZone, index int) {
-	switch e.graphics.freedomAxis {
-	case ttCoordX:
-		z.touchX(index)
-	case ttCoordY:
-		z.touchY(index)
-	default:
-		if e.graphics.freedomVector[0] != 0 {
-			z.touchX(index)
-		}
-		if e.graphics.freedomVector[1] != 0 {
-			z.touchY(index)
-		}
-	}
-}
 
 // isPointTouched checks if a point has been touched along the specified axis.
 func (e *ttEngine) isPointTouched(z *ttZone, index int, isX bool) bool {
