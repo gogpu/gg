@@ -224,6 +224,18 @@ linters:
         linters:
           - revive        # var-naming: package name shadows stdlib path
 
+      # TrueType bytecode interpreter - skrifa port (1:1 translation from Rust)
+      # Algorithmic complexity is inherent to virtual machine instruction dispatch
+      - path: text/tt_.*\.go
+        linters:
+          - gocognit     # Outline ops (MDRP/MIRP) are algorithmically complex
+          - gocyclo      # Error enum switch and dispatch are large
+          - cyclop        # Same — faithful port of skrifa round/error functions
+          - nestif        # Deep nesting inherent to point movement with fallbacks
+          - funlen        # Skrifa port functions are inherently long (1:1 translation)
+          - errname       # tt-prefixed error names match subsystem convention
+          - maintidx      # Opcode dispatch has inherently low maintainability index
+
       # CPU rasterization CORE - Skia AAA port (1:1 translation from C++)
       # Algorithmic complexity is inherent to edge-walk rasterization algorithms
       - path: internal/raster/.*\.go
