@@ -251,12 +251,23 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 	advance, lsb := l.glyphMetrics(glyphID)
 
 	// Compute phantom points (in font units).
-	// Reference: skrifa glyf/mod.rs:529-549, FreeType ttgload.c:1365
+	// Matches FreeType / skrifa phantom point layout:
+	//   [0] = (xMin - lsb, 0)             — horizontal origin
+	//   [1] = (phantom[0].x + advance, 0)  — horizontal advance
+	//   [2] = (0, yMax + tsb)              — vertical origin (= ascent)
+	//   [3] = (0, phantom[2].y - vadvance) — vertical advance (= descent)
+	// where tsb = ascent - yMax, vadvance = ascent - descent.
+	// Reference: skrifa glyf/mod.rs:529-549 (setup_phantom_points)
+	// Reference: FreeType ttgload.c:1365
 	var phantomFU [ttPhantomPointCount][2]int32
+	ascent := int32(l.font.os2Ascender)
+	descent := int32(l.font.os2Descender)
+	tsb := ascent - int32(yMax)
+	vadvance := ascent - descent
 	phantomFU[0] = [2]int32{int32(xMin) - int32(lsb), 0}
 	phantomFU[1] = [2]int32{phantomFU[0][0] + int32(advance), 0}
-	phantomFU[2] = [2]int32{0, int32(yMax)} // tsb simplified (no vmtx)
-	phantomFU[3] = [2]int32{0, int32(yMax) - int32(l.font.unitsPerEm)}
+	phantomFU[2] = [2]int32{0, int32(yMax) + tsb}          // = ascent
+	phantomFU[3] = [2]int32{0, phantomFU[2][1] - vadvance} // = descent
 
 	totalPoints := numPoints + ttPhantomPointCount
 
@@ -279,9 +290,12 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 		outline.unscaled[i*2] = x
 		outline.unscaled[i*2+1] = y
 
-		// Scale to 26.6: (fontUnits * scale) >> 16, where scale is 16.16.
-		sx := int32((int64(x) * int64(scale)) >> 16)
-		sy := int32((int64(y) * int64(scale)) >> 16)
+		// Scale font units to 26.6 via rounded 16.16 multiply.
+		// Matches skrifa Scale26Dot6::apply() which uses Fixed::mul (rounded).
+		// Reference: skrifa glyf/mod.rs:399-401 (apply)
+		// Reference: font-types/src/fixed.rs:189-192 (Fixed::mul)
+		sx := ttMul16Dot16(x, scale)
+		sy := ttMul16Dot16(y, scale)
 		outline.original[i] = [2]int32{sx, sy}
 		outline.points[i] = [2]int32{sx, sy}
 
@@ -297,8 +311,9 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 		outline.unscaled[idx*2] = phantomFU[j][0]
 		outline.unscaled[idx*2+1] = phantomFU[j][1]
 
-		sx := int32((int64(phantomFU[j][0]) * int64(scale)) >> 16)
-		sy := int32((int64(phantomFU[j][1]) * int64(scale)) >> 16)
+		// Scale phantom points with rounded multiply (same as contour points).
+		sx := ttMul16Dot16(phantomFU[j][0], scale)
+		sy := ttMul16Dot16(phantomFU[j][1], scale)
 		outline.original[idx] = [2]int32{sx, sy}
 		outline.points[idx] = [2]int32{sx, sy}
 

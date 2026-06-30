@@ -65,10 +65,18 @@ type ttHintInstance struct {
 func newTTHintInstance(font *ttFontProgram, ppem int32, target ttTarget) (*ttHintInstance, error) {
 	// Compute scale: ppem * 64 / upem in 16.16 fixed-point.
 	// This is 26.6 pixels per font unit, stored as 16.16.
-	// Reference: skrifa glyf/mod.rs Scale26Dot6 computation.
+	//
+	// Uses rounded division to match skrifa exactly:
+	//   Fixed::from_bits(ppem * 64) / Fixed::from_bits(upem)
+	// which computes: ((a << 16) + (b >> 1)) / b
+	//
+	// Reference: skrifa glyf/mod.rs Scale26Dot6::new (line 387)
+	// Reference: font-types/src/fixed.rs impl Div for Fixed (line 205)
 	scale := int32(0)
 	if font.unitsPerEm > 0 {
-		scale = int32((int64(ppem) * 64 * (1 << 16)) / int64(font.unitsPerEm))
+		a := uint64(ppem*64) << 16
+		b := uint64(font.unitsPerEm)
+		scale = int32((a + b/2) / b)
 	}
 
 	h := &ttHintInstance{
@@ -279,22 +287,16 @@ func (h *ttHintInstance) setup(font *ttFontProgram, scale int32) {
 	// Scale CVT values.
 	// CVT values are font units (int16 from table) → convert to 26.6, then scale.
 	//
-	// Reference: skrifa hint/instance.rs:194-219
-	// FreeType reference: ttobjs.c:996
+	// Uses rounded 16.16 multiply (Fixed::mul) matching skrifa exactly.
+	// CVT values are in 26.6 (font_units * 64), scale is adjusted: scale >> 6.
 	//
-	// Step 1: Convert font units to 26.6 (multiply by 64).
-	// Step 2: Apply scale (which is 16.16 but the CVT is already 26.6, so
-	//         we use scale >> 6 as the multiplier in 16.16 format).
+	// Reference: skrifa hint/instance.rs:236-242
+	// Reference: FreeType ttobjs.c:996
 	h.cvt = make([]int32, len(font.cvt))
-	// The scale factor has the form: ppem * 64 / upem * 65536
-	// CVT values need: cvt_font_units * ppem * 64 / upem
-	// Since CVT is already * 64 (to 26.6), we use scale >> 6 as Fixed.
-	scaleFrac := scale >> 6 // Convert 16.16 scale to account for 26.6 CVT
+	scaleFrac := scale >> 6 // scale >> 6 = Fixed scale for 26.6 CVT values
 	for i, v := range font.cvt {
-		// v is in font units, convert to 26.6 first.
 		v26dot6 := v * 64
-		// Then scale: (v * 64) * (scale >> 6) / 65536
-		h.cvt[i] = int32((int64(v26dot6) * int64(scaleFrac)) >> 16)
+		h.cvt[i] = ttMul16Dot16(v26dot6, scaleFrac)
 	}
 
 	// Allocate storage area.
