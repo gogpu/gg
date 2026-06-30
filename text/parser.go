@@ -42,6 +42,21 @@ type ParsedFont interface {
 	Metrics(ppem float64) FontMetrics
 }
 
+// VariableAdvanceProvider is an optional interface that ParsedFont
+// implementations may implement to provide variation-aware advance widths.
+// When a face has font variations set, the advance width may differ from
+// the static (default) advance stored in the hmtx table.
+//
+// Implementations use the HVAR table to compute advance deltas efficiently,
+// without reprocessing gvar outlines.
+//
+// See: [RawFontDataProvider] for a similar optional-interface pattern.
+type VariableAdvanceProvider interface {
+	// GlyphAdvanceVar returns the advance width for a glyph in pixels,
+	// adjusted for the given font variations. The ppem is the pixel size.
+	GlyphAdvanceVar(glyphIndex uint16, ppem float64, variations []FontVariation) float64
+}
+
 // FontMetrics holds font-level metrics at a specific size.
 type FontMetrics struct {
 	// Ascent is the distance from the baseline to the top of the font (positive).

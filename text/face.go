@@ -89,6 +89,12 @@ func (f *sourceFace) Advance(text string) float64 {
 	parsed := f.source.Parsed()
 	totalAdvance := 0.0
 
+	// Check for variable advance provider (HVAR) when variations are set.
+	var varProvider VariableAdvanceProvider
+	if len(f.config.variations) > 0 {
+		varProvider, _ = parsed.(VariableAdvanceProvider)
+	}
+
 	for _, r := range text {
 		if r < 0x20 && r != '\t' {
 			continue
@@ -98,7 +104,11 @@ func (f *sourceFace) Advance(text string) float64 {
 			_, advance = tabAdvance(parsed, f.size)
 		} else {
 			gid := parsed.GlyphIndex(r)
-			advance = parsed.GlyphAdvance(gid, f.size)
+			if varProvider != nil {
+				advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
+			} else {
+				advance = parsed.GlyphAdvance(gid, f.size)
+			}
 		}
 		totalAdvance += advance
 	}
@@ -120,6 +130,12 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 		x := 0.0
 		byteIndex := 0
 
+		// Check for variable advance provider (HVAR) when variations are set.
+		var varProvider VariableAdvanceProvider
+		if len(f.config.variations) > 0 {
+			varProvider, _ = parsed.(VariableAdvanceProvider)
+		}
+
 		for i, r := range text {
 			// Skip non-tab control characters.
 			if r < 0x20 && r != '\t' {
@@ -137,7 +153,11 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 				// Space bounds are empty — no visual rendering.
 			} else {
 				gid = parsed.GlyphIndex(r)
-				advance = parsed.GlyphAdvance(gid, f.size)
+				if varProvider != nil {
+					advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
+				} else {
+					advance = parsed.GlyphAdvance(gid, f.size)
+				}
 				bounds = parsed.GlyphBounds(gid, f.size)
 			}
 
@@ -170,6 +190,12 @@ func (f *sourceFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
 	x := 0.0
 	byteIndex := 0
 
+	// Check for variable advance provider (HVAR) when variations are set.
+	var varProvider VariableAdvanceProvider
+	if len(f.config.variations) > 0 {
+		varProvider, _ = parsed.(VariableAdvanceProvider)
+	}
+
 	for i, r := range text {
 		// Skip non-tab control characters.
 		if r < 0x20 && r != '\t' {
@@ -185,7 +211,11 @@ func (f *sourceFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
 			gid, advance = tabAdvance(parsed, f.size)
 		} else {
 			gid = parsed.GlyphIndex(r)
-			advance = parsed.GlyphAdvance(gid, f.size)
+			if varProvider != nil {
+				advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
+			} else {
+				advance = parsed.GlyphAdvance(gid, f.size)
+			}
 			bounds = parsed.GlyphBounds(gid, f.size)
 		}
 
