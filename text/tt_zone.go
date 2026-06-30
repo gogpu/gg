@@ -181,7 +181,15 @@ func (z *ttZone) contourEnd(contourIndex int) (int, error) {
 // by 1/fdotp to account for the angle between projection and freedom
 // vectors.
 //
-// Reference: skrifa hint/zone.rs (Zone move methods)
+// In backward compatibility mode (ClearType):
+//   - X adjustments are suppressed (point.x NOT moved, but still touched)
+//   - Y adjustments are suppressed ONLY after IUP has been done on both axes
+//
+// This matches skrifa zone.rs:417-468 where backward compat is enforced at the
+// move level, NOT at the instruction level. Individual instructions (MDRP, MIRP,
+// etc.) must NOT check backward compat themselves.
+//
+// Reference: skrifa hint/zone.rs:417-468
 func (z *ttZone) movePoint(gs *ttGraphicsState, index int, distance int32) error {
 	if index < 0 || index >= len(z.points) {
 		if gs.isPedantic {
@@ -190,21 +198,38 @@ func (z *ttZone) movePoint(gs *ttGraphicsState, index int, distance int32) error
 		return nil
 	}
 
+	backCompat := gs.backwardCompatibility
+	backCompatAndDidIUP := backCompat && gs.didIUPx && gs.didIUPy
+
 	switch gs.freedomAxis {
 	case ttCoordX:
-		z.points[index][0] += distance
+		if !backCompat {
+			z.points[index][0] += distance
+		}
+		z.touchX(index)
 	case ttCoordY:
-		z.points[index][1] += distance
+		if !backCompatAndDidIUP {
+			z.points[index][1] += distance
+		}
+		z.touchY(index)
 	default:
 		fv := gs.freedomVector
 		fdotp := gs.fdotp
 		if fdotp != 0x4000 {
-			// Scale distance by fdotp to account for angle between
-			// projection and freedom vectors.
 			distance = ttMul14(distance, fdotp)
 		}
-		z.points[index][0] += ttMul14(distance, fv[0])
-		z.points[index][1] += ttMul14(distance, fv[1])
+		if fv[0] != 0 {
+			if !backCompat {
+				z.points[index][0] += ttMul14(distance, fv[0])
+			}
+			z.touchX(index)
+		}
+		if fv[1] != 0 {
+			if !backCompatAndDidIUP {
+				z.points[index][1] += ttMul14(distance, fv[1])
+			}
+			z.touchY(index)
+		}
 	}
 	return nil
 }

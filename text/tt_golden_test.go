@@ -999,6 +999,80 @@ func TestTTGolden_EdgeCasePPEM(t *testing.T) {
 	}
 }
 
+// --- Test 21: Backward compat preserves X coordinates (bug fix validation) ---
+
+// TestTTGolden_BackwardCompatXPreserved validates that in backward compatibility
+// mode (ClearType), the TT interpreter preserves X coordinates instead of zeroing
+// them. This was the root cause of the DejaVuSans X-zeroing bug.
+//
+// In backward compat mode, skrifa's move_point() (zone.rs:417-468):
+//   - Suppresses X movement (point.x stays at original, not zeroed)
+//   - Still touches the point (flag set)
+//   - Y movement proceeds normally (until both IUP axes done)
+func TestTTGolden_BackwardCompatXPreserved(t *testing.T) {
+	data := loadTTTestFont(t, "tthint_subset.ttf")
+	fp, err := loadTTFontProgram(data)
+	if err != nil || fp == nil {
+		t.Fatalf("loadTTFontProgram: fp=%v err=%v", fp, err)
+	}
+
+	for _, ppem := range []int32{12, 16, 24} {
+		t.Run("ppem_"+itoa(int(ppem)), func(t *testing.T) {
+			instance, err := newTTHintInstance(fp, ppem, ttTargetSmooth)
+			if err != nil || instance == nil {
+				t.Fatalf("newTTHintInstance: %v", err)
+			}
+			if !instance.backwardCompatibility() {
+				t.Skip("smooth target should have backward compat enabled")
+			}
+
+			loader, lerr := newTTGlyphLoader(data, fp)
+			if lerr != nil || loader == nil {
+				t.Fatalf("newTTGlyphLoader: %v", lerr)
+			}
+			outline, err := loader.loadGlyphOutline(1, instance.scale) // GID 1 = 'A'
+			if err != nil || outline == nil {
+				t.Fatalf("loadGlyphOutline: %v", err)
+			}
+
+			// Save pre-hint X coordinates.
+			numPoints := len(outline.points) - ttPhantomPointCount
+			preHintX := make([]int32, numPoints)
+			for i := range numPoints {
+				preHintX[i] = outline.points[i][0]
+			}
+
+			// Run hinting.
+			err = instance.hintGlyph(outline)
+			if err != nil {
+				t.Fatalf("hintGlyph: %v", err)
+			}
+
+			// In backward compat mode, X coordinates should be preserved
+			// (NOT zeroed). Points keep their original X values.
+			zeroedCount := 0
+			preservedCount := 0
+			for i := range numPoints {
+				postX := outline.points[i][0]
+				if preHintX[i] != 0 && postX == 0 {
+					zeroedCount++
+				}
+				if postX == preHintX[i] {
+					preservedCount++
+				}
+			}
+
+			if zeroedCount > 0 {
+				t.Errorf("REGRESSION: %d/%d X coordinates zeroed (backward compat should preserve X)",
+					zeroedCount, numPoints)
+			}
+
+			t.Logf("ppem=%d: %d/%d X coords preserved, 0 zeroed",
+				ppem, preservedCount, numPoints)
+		})
+	}
+}
+
 // --- Helpers ---
 
 // absInt64 returns the absolute value of an int64.

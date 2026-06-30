@@ -539,56 +539,73 @@ func (e *ttEngine) opGetdata() error {
 // ============================================================
 
 // opDeltap implements DELTAP1/2/3 (0x5D, 0x71, 0x72).
-// Reference: skrifa hint/engine/delta.rs
+// Reference: skrifa hint/engine/delta.rs:30-79
 func (e *ttEngine) opDeltap(opcode byte) error {
+	gs := &e.graphics
 	count, err := e.valueStack.popCountChecked()
 	if err != nil {
 		return err
 	}
+	z := e.zone(gs.zp0)
+	pointCount := z.pointCount()
+	// Each pair needs 2 stack values; limit to prevent looping in non-pedantic mode.
+	if count > e.valueStack.len()/2 {
+		count = e.valueStack.len() / 2
+	}
+	bias := int32(gs.retained.deltaBase)
+	switch opcode {
+	case opDELTAP2:
+		bias += 16
+	case opDELTAP3:
+		bias += 32
+	}
+	backCompat := gs.backwardCompatibility
+	didIUP := gs.didIUPx && gs.didIUPy
 	for i := 0; i < count; i++ {
-		arg, err := e.valueStack.pop()
-		if err != nil {
-			return err
-		}
+		// skrifa pops point_ix first, then b (arg).
+		// Reference: skrifa hint/engine/delta.rs:47-48
 		pointIdx, err := e.valueStack.popUsize()
 		if err != nil {
 			return err
 		}
-		// Compute the ppem range for this delta opcode
-		var deltaBase int32
-		switch opcode {
-		case opDELTAP1:
-			deltaBase = int32(e.graphics.retained.deltaBase)
-		case opDELTAP2:
-			deltaBase = int32(e.graphics.retained.deltaBase) + 16
-		case opDELTAP3:
-			deltaBase = int32(e.graphics.retained.deltaBase) + 32
-		default:
+		b, err := e.valueStack.pop()
+		if err != nil {
+			return err
+		}
+		// FreeType notes that some popular fonts contain invalid DELTAP
+		// instructions so out of bounds points are ignored.
+		if pointIdx >= pointCount {
 			continue
 		}
-		ppemIdx := (arg >> 4) & 0xF
-		targetPpem := deltaBase + ppemIdx
-		if targetPpem != e.graphics.retained.ppem {
+		c := int32((uint32(b) & 0xF0) >> 4)
+		c += bias
+		if c != gs.retained.ppem {
 			continue
 		}
-		// Check backward compatibility suppression
-		if e.graphics.backwardCompatibility {
-			if e.graphics.didIUPx && e.graphics.didIUPy {
-				continue
+		// Compute distance (skrifa pattern).
+		b = (b & 0xF) - 8
+		if b >= 0 {
+			b++
+		}
+		b *= 1 << (6 - int32(gs.retained.deltaShift))
+		if backCompat {
+			// In backward compat mode, DELTAP only moves if:
+			// - IUP not done AND (composite with Y freedom OR point Y-touched)
+			// Reference: skrifa hint/engine/delta.rs:66-72
+			if !didIUP &&
+				((gs.isComposite && gs.freedomVector[1] != 0) ||
+					z.isTouchedY(pointIdx)) {
+				if err := z.movePoint(gs, pointIdx, b); err != nil {
+					if gs.isPedantic {
+						return err
+					}
+				}
 			}
-		}
-		// Compute the movement
-		mag := arg & 0xF
-		if mag >= 8 {
-			mag -= 7
 		} else {
-			mag = -(8 - mag)
-		}
-		mag <<= 6 - int32(e.graphics.retained.deltaShift)
-		z := e.zone(e.graphics.zp0)
-		if err := z.movePoint(&e.graphics, pointIdx, mag); err != nil {
-			if e.graphics.isPedantic {
-				return err
+			if err := z.movePoint(gs, pointIdx, b); err != nil {
+				if gs.isPedantic {
+					return err
+				}
 			}
 		}
 	}
