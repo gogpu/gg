@@ -59,6 +59,11 @@ type ximageParsedFont struct {
 	hvarOnce sync.Once
 	hvar     *hvarTable // nil if HVAR not present or failed to parse
 	fvarAxes []fvarAxis // parsed fvar axes for coordinate normalization
+
+	// TT bytecode hint cache — lazy loading (thread-safe).
+	// Provides cached fpgm/prep execution results per ppem.
+	ttHintOnce  sync.Once
+	ttHintCache *ttHintCache // nil if font has no TT instructions
 }
 
 // RawFontData implements RawFontDataProvider, returning the raw font file
@@ -150,6 +155,18 @@ func (f *ximageParsedFont) Metrics(ppem float64) FontMetrics {
 		XHeight:   fixedToFloat64(metrics.XHeight),
 		CapHeight: fixedToFloat64(metrics.CapHeight),
 	}
+}
+
+// loadTTHintCache lazily initializes the TT bytecode hint cache.
+// Thread-safe via sync.Once. Returns nil if the font has no TT instructions.
+func (f *ximageParsedFont) loadTTHintCache() *ttHintCache {
+	f.ttHintOnce.Do(func() {
+		if f.rawData == nil {
+			return
+		}
+		f.ttHintCache = newTTHintCache(f.rawData)
+	})
+	return f.ttHintCache
 }
 
 // loadHVAR lazily parses the HVAR table and fvar axes from the raw font data.

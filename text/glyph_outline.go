@@ -336,7 +336,15 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 		return outline, nil
 	}
 
-	// Try full auto-hinter (contour-based, Y-UP convention).
+	// Priority 1: TT bytecode hinting (for fonts with fpgm/prep instructions).
+	// This produces professionally hinted outlines matching the font designer's
+	// intent. Fonts like Arial, Times New Roman, Segoe UI rely on TT instructions
+	// for quality rendering at screen sizes.
+	if ttOutline := tryTTBytecodeHinting(xiFont, gid, size); ttOutline != nil && len(ttOutline.Segments) > 0 {
+		return ttOutline, nil
+	}
+
+	// Priority 2: Auto-hinter (contour-based, Y-UP convention).
 	// Falls back to simple grid-fitting if contour data is unavailable
 	// (TTC fonts, composite glyphs, CFF fonts). The legacy outline-based
 	// auto-hinter is not used because sfnt outlines are Y-DOWN while the
@@ -346,6 +354,31 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 		gridFitOutline(outline, hinting)
 	}
 	return outline, nil
+}
+
+// tryTTBytecodeHinting attempts to use TrueType bytecode hinting for the
+// given glyph. Returns the hinted GlyphOutline if successful, nil otherwise.
+//
+// This path runs the font's fpgm + prep programs (cached per ppem) and the
+// glyph-specific bytecode to produce professionally hinted outlines with
+// correct phantom-point advances.
+func tryTTBytecodeHinting(xiFont *ximageParsedFont, gid GlyphID, size float64) *GlyphOutline {
+	cache := xiFont.loadTTHintCache()
+	if cache == nil {
+		return nil
+	}
+
+	ppem := int32(size)
+	if ppem <= 0 {
+		return nil
+	}
+
+	hinted, err := cache.hintGlyphOutline(uint16(gid), ppem)
+	if err != nil || hinted == nil {
+		return nil
+	}
+
+	return ttHintedOutlineToGlyphOutline(hinted, gid)
 }
 
 // extractFromSFNT extracts outline from an sfnt.Font.
