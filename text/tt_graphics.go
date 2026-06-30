@@ -308,3 +308,21 @@ func (gs *ttGraphicsState) dualProject(v1x, v1y, v2x, v2y int32) int32 {
 		return ttDot14(dx, dy, gs.dualProjVector[0], gs.dualProjVector[1])
 	}
 }
+
+// dualProjectUnscaled computes the projection of (v1 - v2) along the
+// current dual projection vector for unscaled (font-unit) points.
+// This is the same operation as dualProject but takes raw int32 coordinates
+// instead of 26.6 fixed-point coordinates.
+// Reference: skrifa hint/projection.rs:99-115
+func (gs *ttGraphicsState) dualProjectUnscaled(v1x, v1y, v2x, v2y int32) int32 {
+	switch gs.dualProjAxis {
+	case ttCoordX:
+		return v1x - v2x
+	case ttCoordY:
+		return v1y - v2y
+	default:
+		dx := v1x - v2x
+		dy := v1y - v2y
+		return ttDot14(dx, dy, gs.dualProjVector[0], gs.dualProjVector[1])
+	}
+}

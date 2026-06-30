@@ -214,8 +214,10 @@ func TestNewTTHintInstance_WithRealFont(t *testing.T) {
 				t.Fatal("expected non-nil instance")
 			}
 
-			// Verify scale.
-			expectedScale := int32((int64(tt.ppem) * 64 * (1 << 16)) / int64(fp.unitsPerEm))
+			// Verify scale (rounded division matching skrifa Fixed::div).
+			a := uint64(tt.ppem*64) << 16
+			b := uint64(fp.unitsPerEm)
+			expectedScale := int32((a + b/2) / b)
 			if instance.scale != expectedScale {
 				t.Errorf("scale = %d, want %d", instance.scale, expectedScale)
 			}

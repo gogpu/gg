@@ -38,9 +38,22 @@ func ttRoundPad(x, n int32) int32 {
 }
 
 // ttMul16Dot16 multiplies two 16.16 fixed-point values.
-// Reference: skrifa hint/math.rs:30 (Fixed::from_bits(a) * Fixed::from_bits(b))
+// Uses the same rounding as skrifa's Fixed::mul:
+//
+//	ab + 0x8000 - sign_correction  (sign_correction = 1 if product is negative)
+//
+// This produces a correctly-rounded result for both positive and negative products.
+// Without the sign correction, negative products round away from zero instead of
+// toward the nearest integer.
+//
+// Reference: font-types/src/fixed.rs:189-192 (impl Mul for Fixed)
 func ttMul16Dot16(a, b int32) int32 {
-	return int32((int64(a)*int64(b) + 0x8000) >> 16)
+	ab := int64(a) * int64(b)
+	sign := int64(0)
+	if ab < 0 {
+		sign = 1
+	}
+	return int32((ab + 0x8000 - sign) >> 16)
 }
 
 // ttDiv16Dot16 divides two 16.16 fixed-point values.

@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parser for variable font advance width deltas. No go-text dependency for advance
   computation. ItemVariationStore is reusable across HVAR, VVAR, MVAR, GDEF, COLR.
   Golden tests: 6/6 diff=0 against skrifa (VAZIRMATN_VAR).
+- **TT interpreter skrifa golden tests** (#405) — 1872 coordinate pairs (624 points
+  × 3 sizes) extracted from Google skrifa via instrumented `hint/instance.rs`.
+  Coordinate-exact diff=0 comparison at 12, 16, 24 ppem.
+
+### Fixed
+
+- **TT interpreter fixed-point math** (#405) — 3 rounding bugs found via skrifa golden
+  comparison: `ttMul16Dot16` sign correction for negative products (skrifa `Fixed::mul`),
+  scale computation rounded division (skrifa `Fixed::div`), phantom points from OS/2
+  `sTypoAscender`/`sTypoDescender` (skrifa `setup_phantom_points`).
+- **TT interpreter twilight zone** (#405) — 5 instruction bugs causing 561/624 Y
+  coordinate mismatches: MIAP/MIRP/MSIRP missing original-point updates for twilight
+  zone reference points, SCFS missing current→original copy, `movePoint` CoordBoth
+  wrong multiply chain (fixed to `ttMulDiv(distance, fv, fdotp)` matching skrifa
+  `zone.rs`). Result: 624/624 diff=0 at all sizes.
 
 ## [0.49.6] - 2026-06-29
 

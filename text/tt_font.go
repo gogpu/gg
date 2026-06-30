@@ -52,6 +52,15 @@ type ttFontProgram struct {
 
 	// numGlyphs is the total number of glyphs (from maxp.numGlyphs).
 	numGlyphs int
+
+	// os2Ascender is sTypoAscender from the OS/2 table (font units).
+	// Used for vertical phantom point computation.
+	// Reference: skrifa glyf/mod.rs:55 (os2_vmetrics)
+	os2Ascender int16
+
+	// os2Descender is sTypoDescender from the OS/2 table (font units).
+	// Typically negative.
+	os2Descender int16
 }
 
 // loadTTFontProgram loads font-level TrueType bytecode data from raw font bytes.
@@ -101,6 +110,14 @@ func loadTTFontProgram(fontData []byte) (*ttFontProgram, error) {
 		maxInstructionDefs: maxp.maxInstructionDefs,
 		unitsPerEm:         upem,
 		numGlyphs:          maxp.numGlyphs,
+	}
+
+	// Parse OS/2 table for vertical metrics (sTypoAscender, sTypoDescender).
+	// These are used for vertical phantom point computation.
+	// Reference: skrifa glyf/mod.rs:101-103 (os2_vmetrics)
+	if os2Data, ok := tables["OS/2"]; ok && len(os2Data) >= 72 {
+		fp.os2Ascender = int16(binary.BigEndian.Uint16(os2Data[68:70]))
+		fp.os2Descender = int16(binary.BigEndian.Uint16(os2Data[70:72]))
 	}
 
 	// Load optional tables (fpgm, prep, cvt may be absent).

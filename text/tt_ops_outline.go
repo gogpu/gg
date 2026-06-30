@@ -53,7 +53,13 @@ func (e *ttEngine) opMdap(opcode byte) error {
 
 // opMiap implements MIAP[a] (0x3E-0x3F).
 // Moves a point to a CVT value, optionally rounding.
-// Reference: skrifa hint/engine/outline.rs
+//
+// For twilight zone points, MIAP first sets both the original and current
+// point positions to the CVT distance decomposed along the freedom vector.
+// This is critical because later instructions (MDRP, MIRP) use the twilight
+// zone's original points to compute reference distances.
+//
+// Reference: skrifa hint/engine/outline.rs:345-372
 func (e *ttEngine) opMiap(opcode byte) error {
 	cvtIdx, err := e.valueStack.popUsize()
 	if err != nil {
@@ -65,13 +71,31 @@ func (e *ttEngine) opMiap(opcode byte) error {
 	}
 	doRound := opcode&1 != 0
 	// Read CVT value
-	var cvtDist int32
+	cvtDist := int32(0)
 	if cvtIdx >= 0 && cvtIdx < len(e.cvt) {
 		cvtDist = e.cvt[cvtIdx]
 	} else if e.graphics.isPedantic {
 		return ttErrInvalidCvtIndex
 	}
 	z := e.zone(e.graphics.zp0)
+
+	// Special twilight zone handling: set original and current point to
+	// CVT distance projected along the freedom vector BEFORE doing the
+	// normal MIAP logic. This ensures that original points reflect the
+	// intended reference positions for subsequent MDRP/MIRP instructions.
+	//
+	// Reference: skrifa hint/engine/outline.rs:350-359
+	// Reference: FreeType ttinterp.c:5548
+	if e.graphics.zp0 == ttZoneTwilight {
+		if pointIdx >= 0 && pointIdx < len(z.original) && pointIdx < len(z.points) {
+			fv := e.graphics.freedomVector
+			ox := ttMul14(cvtDist, fv[0])
+			oy := ttMul14(cvtDist, fv[1])
+			z.original[pointIdx] = [2]int32{ox, oy}
+			z.points[pointIdx] = [2]int32{ox, oy}
+		}
+	}
+
 	pt, err := z.point(pointIdx)
 	if err != nil {
 		if e.graphics.isPedantic {
@@ -126,22 +150,33 @@ func (e *ttEngine) opMdrp(opcode byte) error {
 	z := e.zone(e.graphics.zp1)
 	rp0z := e.zone(e.graphics.zp0)
 
-	// Get original distance
-	pt, err := z.originalPoint(pointIdx)
-	if err != nil {
-		if e.graphics.isPedantic {
-			return err
+	// Get original distance.
+	// In twilight zone, use scaled original points.
+	// In glyph zone, use UNSCALED font-unit points then multiply by scale.
+	// This matches skrifa hint/engine/outline.rs:409-416 exactly.
+	var origDist int32
+	if e.graphics.zp0 == ttZoneTwilight || e.graphics.zp1 == ttZoneTwilight {
+		pt, err := z.originalPoint(pointIdx)
+		if err != nil {
+			if e.graphics.isPedantic {
+				return err
+			}
+			return nil
 		}
-		return nil
-	}
-	rp0Pt, err := rp0z.originalPoint(e.graphics.rp0)
-	if err != nil {
-		if e.graphics.isPedantic {
-			return err
+		rp0Pt, err := rp0z.originalPoint(e.graphics.rp0)
+		if err != nil {
+			if e.graphics.isPedantic {
+				return err
+			}
+			return nil
 		}
-		return nil
+		origDist = e.graphics.dualProject(pt[0], pt[1], rp0Pt[0], rp0Pt[1])
+	} else {
+		v1x, v1y := z.unscaledPoint(pointIdx)
+		v2x, v2y := rp0z.unscaledPoint(e.graphics.rp0)
+		dist := e.graphics.dualProjectUnscaled(v1x, v1y, v2x, v2y)
+		origDist = ttMul16Dot16(dist, e.graphics.unscaledToPixels())
 	}
-	origDist := e.graphics.dualProject(pt[0], pt[1], rp0Pt[0], rp0Pt[1])
 
 	// Single width substitution
 	distance := origDist
@@ -217,7 +252,12 @@ func (e *ttEngine) opMdrp(opcode byte) error {
 
 // opMirp implements MIRP[abcde] (0xE0-0xFF).
 // Like MDRP but uses CVT for the target distance.
-// Reference: skrifa hint/engine/outline.rs
+//
+// For twilight zone points, MIRP sets the point's original position to
+// rp0's original + cvtDist * freedomVector, then copies to current,
+// before computing the distance-based movement.
+//
+// Reference: skrifa hint/engine/outline.rs:489-567
 func (e *ttEngine) opMirp(opcode byte) error {
 	cvtIdx, err := e.valueStack.popUsize()
 	if err != nil {
@@ -233,52 +273,72 @@ func (e *ttEngine) opMirp(opcode byte) error {
 	doRound := flags&4 != 0
 
 	// Read CVT distance
-	var cvtDist int32
+	cvtDist := int32(0)
 	if cvtIdx >= 0 && cvtIdx < len(e.cvt) {
 		cvtDist = e.cvt[cvtIdx]
 	} else if e.graphics.isPedantic {
 		return ttErrInvalidCvtIndex
 	}
 
-	// Auto flip
-	if e.graphics.retained.autoFlip {
-		z := e.zone(e.graphics.zp1)
-		rp0z := e.zone(e.graphics.zp0)
-		pt, e1 := z.originalPoint(pointIdx)
-		rp0Pt, e2 := rp0z.originalPoint(e.graphics.rp0)
-		if e1 == nil && e2 == nil {
-			origDist := e.graphics.dualProject(pt[0], pt[1], rp0Pt[0], rp0Pt[1])
-			if (origDist ^ cvtDist) < 0 {
-				cvtDist = -cvtDist
-			}
-		}
-	}
-
-	// Single width substitution
-	distance := cvtDist
+	// Single width substitution (before twilight handling, matching skrifa order).
+	// Reference: skrifa hint/engine/outline.rs:509-518
 	if sw := e.graphics.retained.singleWidth; sw != 0 {
-		diff := distance - sw
+		diff := cvtDist - sw
 		if diff < 0 {
 			diff = -diff
 		}
 		if diff < e.graphics.retained.singleWidthCutin {
-			if distance >= 0 {
-				distance = sw
+			if cvtDist >= 0 {
+				cvtDist = sw
 			} else {
-				distance = -sw
+				cvtDist = -sw
 			}
 		}
 	}
 
-	// Rounding
-	if doRound {
-		// CVT cutin check
-		z := e.zone(e.graphics.zp1)
-		rp0z := e.zone(e.graphics.zp0)
+	// Twilight zone handling: set point's original to rp0's original + cvtDist * fv,
+	// then copy to current. This ensures correct original distance computation
+	// for auto-flip, cutin, and the final movement.
+	// Reference: skrifa hint/engine/outline.rs:519-530
+	z := e.zone(e.graphics.zp1)
+	rp0z := e.zone(e.graphics.zp0)
+	if e.graphics.zp1 == ttZoneTwilight {
+		rp0Orig, rErr := rp0z.originalPoint(e.graphics.rp0)
+		if rErr == nil && pointIdx >= 0 && pointIdx < len(z.original) && pointIdx < len(z.points) {
+			fv := e.graphics.freedomVector
+			d := cvtDist
+			// skrifa uses math::mul (= ttMul16Dot16 with 2.14 vector component).
+			// math::mul(d, fv.x) = d * fv.x using 16.16 multiply.
+			// But fv is 2.14, so we need ttMul14 here.
+			ox := rp0Orig[0] + ttMul14(d, fv[0])
+			oy := rp0Orig[1] + ttMul14(d, fv[1])
+			z.original[pointIdx] = [2]int32{ox, oy}
+			z.points[pointIdx] = [2]int32{ox, oy}
+		}
+	}
+
+	// Compute original distance (uses the now-correctly-set twilight originals).
+	origDist := int32(0)
+	{
 		pt, e1 := z.originalPoint(pointIdx)
 		rp0Pt, e2 := rp0z.originalPoint(e.graphics.rp0)
 		if e1 == nil && e2 == nil {
-			origDist := e.graphics.dualProject(pt[0], pt[1], rp0Pt[0], rp0Pt[1])
+			origDist = e.graphics.dualProject(pt[0], pt[1], rp0Pt[0], rp0Pt[1])
+		}
+	}
+
+	// Auto flip: flip CVT sign to match original distance sign.
+	// Reference: skrifa hint/engine/outline.rs:534-536
+	if e.graphics.retained.autoFlip && (origDist^cvtDist) < 0 {
+		cvtDist = -cvtDist
+	}
+
+	// Rounding with CVT cutin check.
+	// Reference: skrifa hint/engine/outline.rs:538-548
+	distance := cvtDist
+	if doRound {
+		// CVT cutin: only check when both zones are the same.
+		if e.graphics.zp0 == e.graphics.zp1 {
 			diff := distance - origDist
 			if diff < 0 {
 				diff = -diff
@@ -290,10 +350,11 @@ func (e *ttEngine) opMirp(opcode byte) error {
 		distance = e.graphics.roundState.round(distance)
 	}
 
-	// Minimum distance
+	// Minimum distance.
+	// Reference: skrifa hint/engine/outline.rs:550-558
 	if useMinDist {
 		minDist := e.graphics.retained.minDistance
-		if cvtDist >= 0 {
+		if origDist >= 0 {
 			if distance < minDist {
 				distance = minDist
 			}
@@ -304,12 +365,8 @@ func (e *ttEngine) opMirp(opcode byte) error {
 		}
 	}
 
+	// Apply movement.
 	// NOTE: backward compatibility is handled inside movePoint (skrifa pattern).
-	// skrifa's op_mirp does NOT check backward_compatibility.
-
-	// Apply movement
-	z := e.zone(e.graphics.zp1)
-	rp0z := e.zone(e.graphics.zp0)
 	curPt, e1 := z.point(pointIdx)
 	rp0CurPt, e2 := rp0z.point(e.graphics.rp0)
 	if e1 != nil || e2 != nil {
@@ -341,7 +398,12 @@ func (e *ttEngine) opMirp(opcode byte) error {
 // ============================================================
 
 // opMsirp implements MSIRP[a] (0x3A-0x3B).
-// Reference: skrifa hint/engine/outline.rs
+//
+// For twilight zone points, MSIRP first sets the point's original and current
+// position to rp0's original position + distance along the freedom vector,
+// before computing the movement delta.
+//
+// Reference: skrifa hint/engine/outline.rs:266-286
 func (e *ttEngine) opMsirp(opcode byte) error {
 	distance, err := e.valueStack.pop()
 	if err != nil {
@@ -353,8 +415,40 @@ func (e *ttEngine) opMsirp(opcode byte) error {
 	}
 	// NOTE: backward compatibility is handled inside movePoint (skrifa pattern).
 	// skrifa's op_msirp does NOT check backward_compatibility.
+
+	// Twilight zone handling: set point's original to rp0's original,
+	// then move_original by distance, then set point to new original.
+	// Reference: skrifa hint/engine/outline.rs:273-277
 	z := e.zone(e.graphics.zp1)
 	rp0z := e.zone(e.graphics.zp0)
+	if e.graphics.zp1 == ttZoneTwilight {
+		rp0Orig, rErr := rp0z.originalPoint(e.graphics.rp0)
+		if rErr == nil && pointIdx >= 0 && pointIdx < len(z.points) && pointIdx < len(z.original) {
+			// Set point to rp0's original
+			z.points[pointIdx] = rp0Orig
+			// Move original by distance along freedom vector
+			fv := e.graphics.freedomVector
+			fdotp := e.graphics.fdotp
+			ox := rp0Orig[0]
+			oy := rp0Orig[1]
+			switch e.graphics.freedomAxis {
+			case ttCoordX:
+				ox += distance
+			case ttCoordY:
+				oy += distance
+			default:
+				if fv[0] != 0 {
+					ox += ttMulDiv(distance, fv[0], fdotp)
+				}
+				if fv[1] != 0 {
+					oy += ttMulDiv(distance, fv[1], fdotp)
+				}
+			}
+			z.original[pointIdx] = [2]int32{ox, oy}
+			z.points[pointIdx] = z.original[pointIdx]
+		}
+	}
+
 	curPt, e1 := z.point(pointIdx)
 	rp0CurPt, e2 := rp0z.point(e.graphics.rp0)
 	if e1 != nil || e2 != nil {
@@ -386,126 +480,169 @@ func (e *ttEngine) opMsirp(opcode byte) error {
 
 // opIup implements IUP[a] (0x30-0x31).
 // Interpolates all untouched points in a contour between touched ones.
-// Reference: skrifa hint/engine/outline.rs
+//
+// In backward compatibility mode, IUP is skipped if it has already been
+// done on BOTH axes (skrifa hint/engine/outline.rs:775-799).
+//
+// Reference: skrifa hint/engine/outline.rs:775-799
+// Reference: skrifa hint/zone.rs:162-207 (Zone::iup)
 func (e *ttEngine) opIup(opcode byte) error {
 	isX := opcode&1 != 0
+	gs := &e.graphics
+
+	// In backward compat mode, allow IUP until done on both axes.
+	run := !gs.backwardCompatibility || !gs.didIUPx || !gs.didIUPy
 	if isX {
-		e.graphics.didIUPx = true
+		gs.didIUPx = true
 	} else {
-		e.graphics.didIUPy = true
+		gs.didIUPy = true
 	}
+	if !run {
+		return nil
+	}
+
 	z := e.zone(ttZoneGlyph)
 	if len(z.contours) == 0 || len(z.points) == 0 {
 		return nil
 	}
-	contourStart := 0
-	for _, contourEnd := range z.contours {
-		end := int(contourEnd)
-		if end >= len(z.points) {
-			break
+
+	// Linear contour walk matching skrifa zone.rs:162-207 exactly.
+	point := 0
+	for ci := range z.contours {
+		endPoint := int(z.contours[ci])
+		firstPoint := point
+		if endPoint >= len(z.points) {
+			endPoint = len(z.points) - 1
 		}
-		e.iupContour(z, contourStart, end, isX)
-		contourStart = end + 1
+		// Find first touched point in this contour.
+		for point <= endPoint && !e.isPointTouched(z, point, isX) {
+			point++
+		}
+		if point <= endPoint {
+			firstTouched := point
+			curTouched := point
+			point++
+			// Walk forward, interpolating between consecutive touched points.
+			for point <= endPoint {
+				if e.isPointTouched(z, point, isX) {
+					iupInterpolateRange(z, isX, curTouched+1, point-1, curTouched, point)
+					curTouched = point
+				}
+				point++
+			}
+			if curTouched == firstTouched {
+				// Only one touched point — shift entire contour.
+				iupShift(z, isX, firstPoint, endPoint, curTouched)
+			} else {
+				// Wrap: interpolate from last touched to first touched.
+				iupInterpolateRange(z, isX, curTouched+1, endPoint, curTouched, firstTouched)
+				if firstTouched > firstPoint {
+					iupInterpolateRange(z, isX, firstPoint, firstTouched-1, curTouched, firstTouched)
+				}
+			}
+		}
 	}
 	return nil
 }
 
-// iupContour interpolates untouched points within one contour.
-func (e *ttEngine) iupContour(z *ttZone, start, end int, isX bool) {
-	if start > end {
+// iupShift shifts all points in [p1..p2] by the delta of the touched point p.
+// Reference: skrifa hint/zone.rs:213-247
+func iupShift(z *ttZone, isX bool, p1, p2, p int) {
+	if p1 > p2 || p1 > p || p > p2 {
 		return
 	}
-	// Find the first touched point
-	firstTouched := -1
-	for i := start; i <= end; i++ {
-		if e.isPointTouched(z, i, isX) {
-			firstTouched = i
-			break
-		}
-	}
-	if firstTouched < 0 {
-		return // No touched points in this contour
-	}
-	// Walk around the contour interpolating between touched points
-	cur := firstTouched
-	for {
-		// Find next touched point (wrapping around)
-		next := cur + 1
-		if next > end {
-			next = start
-		}
-		for next != cur && !e.isPointTouched(z, next, isX) {
-			next++
-			if next > end {
-				next = start
-			}
-		}
-		if next == cur {
-			break // Only one touched point
-		}
-		// Interpolate points between cur and next
-		e.iupInterpolateRange(z, start, end, cur, next, isX)
-		cur = next
-		if cur == firstTouched {
-			break
-		}
-	}
-}
-
-// iupInterpolateRange interpolates untouched points between two
-// touched reference points.
-func (e *ttEngine) iupInterpolateRange(z *ttZone, contourStart, contourEnd, ref1, ref2 int, isX bool) {
 	axis := 0
 	if !isX {
 		axis = 1
 	}
-	ref1Orig := z.original[ref1][axis]
-	ref1Cur := z.points[ref1][axis]
-	ref2Orig := z.original[ref2][axis]
-	ref2Cur := z.points[ref2][axis]
-
-	// Walk from ref1 to ref2 (wrapping)
-	i := ref1 + 1
-	if i > contourEnd {
-		i = contourStart
+	if p >= len(z.points) || p >= len(z.original) {
+		return
 	}
-	for i != ref2 {
-		if !e.isPointTouched(z, i, isX) {
-			origCoord := z.original[i][axis]
-			// Determine which reference is "before" and "after"
-			var newCoord int32
-			if ref1Orig <= ref2Orig {
-				newCoord = iupInterpolate(origCoord, ref1Orig, ref1Cur, ref2Orig, ref2Cur)
-			} else {
-				newCoord = iupInterpolate(origCoord, ref2Orig, ref2Cur, ref1Orig, ref1Cur)
-			}
-			z.points[i][axis] = newCoord
-		}
-		i++
-		if i > contourEnd {
-			i = contourStart
+	delta := z.points[p][axis] - z.original[p][axis]
+	if delta == 0 {
+		return
+	}
+	for i := p1; i <= p2 && i < len(z.points); i++ {
+		if i != p {
+			z.points[i][axis] += delta
 		}
 	}
 }
 
-// iupInterpolate computes the interpolated coordinate.
-// origBefore/origAfter must be in ascending order.
-func iupInterpolate(origCoord, origBefore, curBefore, origAfter, curAfter int32) int32 {
-	if origCoord <= origBefore {
-		// Before the range — shift by same delta
-		return curBefore + (origCoord - origBefore)
+// iupInterpolateRange interpolates untouched points in [p1..p2] between
+// two touched reference points ref1 and ref2.
+//
+// Uses UNSCALED font-unit coordinates for reference ordering and the
+// inner interpolation formula, matching skrifa zone.rs:253-330 exactly.
+// This produces different (correct) results than using scaled coordinates
+// because the unscaled integer arithmetic avoids fixed-point precision loss.
+//
+// Reference: skrifa hint/zone.rs:253-330
+func iupInterpolateRange(z *ttZone, isX bool, p1, p2, ref1, ref2 int) {
+	if p1 > p2 {
+		return
 	}
-	if origCoord >= origAfter {
-		// After the range — shift by same delta
-		return curAfter + (origCoord - origAfter)
+	maxPoints := len(z.points)
+	if ref1 >= maxPoints || ref2 >= maxPoints {
+		return
 	}
-	// Within range — linear interpolation
-	origRange := origAfter - origBefore
-	if origRange == 0 {
-		return curBefore
+
+	axis := 0
+	if !isX {
+		axis = 1
 	}
-	curRange := curAfter - curBefore
-	return curBefore + ttMulDiv(origCoord-origBefore, curRange, origRange)
+	// Unscaled axis index for interleaved (x, y) array.
+	unscaledAxis := 0
+	if !isX {
+		unscaledAxis = 1
+	}
+
+	// Sort references by unscaled coordinate (skrifa uses unscaled for ordering).
+	orus1 := z.unscaledCoord(ref1, unscaledAxis)
+	orus2 := z.unscaledCoord(ref2, unscaledAxis)
+	if orus1 > orus2 {
+		orus1, orus2 = orus2, orus1
+		ref1, ref2 = ref2, ref1
+	}
+
+	org1 := z.original[ref1][axis]
+	org2 := z.original[ref2][axis]
+	cur1 := z.points[ref1][axis]
+	cur2 := z.points[ref2][axis]
+	delta1 := cur1 - org1
+	delta2 := cur2 - org2
+
+	if cur1 == cur2 || orus1 == orus2 {
+		// Degenerate case: same current or same unscaled coordinate.
+		for i := p1; i <= p2 && i < maxPoints; i++ {
+			a := z.original[i][axis]
+			switch {
+			case a <= org1:
+				z.points[i][axis] = a + delta1
+			case a >= org2:
+				z.points[i][axis] = a + delta2
+			default:
+				z.points[i][axis] = cur1
+			}
+		}
+	} else {
+		// Normal interpolation using unscaled coordinates.
+		// scale = (cur2 - cur1) / (orus2 - orus1) in 16.16 fixed point.
+		scale := ttDiv16Dot16((cur2 - cur1), orus2-orus1)
+		for i := p1; i <= p2 && i < maxPoints; i++ {
+			a := z.original[i][axis]
+			switch {
+			case a <= org1:
+				z.points[i][axis] = a + delta1
+			case a >= org2:
+				z.points[i][axis] = a + delta2
+			default:
+				// unscaled interpolation: cur1 + (unscaled[i] - orus1) * scale
+				uCoord := z.unscaledCoord(i, unscaledAxis)
+				z.points[i][axis] = cur1 + ttMul16Dot16(uCoord-orus1, scale)
+			}
+		}
+	}
 }
 
 // ============================================================
@@ -531,8 +668,9 @@ func (e *ttEngine) opIP() error {
 		return e.valueStack.popN(int(loop))
 	}
 
-	// In twilight zone, use original points; otherwise use unscaled points
-	// treated as 26.6 fixed-point (skrifa: unscaled().map(F26Dot6::from_bits)).
+	// In twilight zone, use original (scaled) points; otherwise use unscaled
+	// points treated as 26.6 fixed-point (skrifa: unscaled().map(F26Dot6::from_bits)).
+	// Reference: skrifa hint/engine/outline.rs:710-757
 	inTwilight := gs.zp0 == ttZoneTwilight || gs.zp1 == ttZoneTwilight || gs.zp2 == ttZoneTwilight
 
 	// Compute original base (rp1 position in original/unscaled space).
@@ -564,6 +702,8 @@ func (e *ttEngine) opIP() error {
 		oldRange = gs.dualProject(pt[0], pt[1], orusBase[0], orusBase[1])
 	} else {
 		x, y := rp2z.unscaledPoint(gs.rp2)
+		// Use dualProject with unscaled values treated as F26Dot6 bits
+		// (skrifa: gs.dual_project(unscaled.map(F26Dot6::from_bits), orus_base))
 		oldRange = gs.dualProject(x, y, orusBase[0], orusBase[1])
 	}
 
@@ -599,6 +739,7 @@ func (e *ttEngine) opIP() error {
 			origDist = gs.dualProject(pt[0], pt[1], orusBase[0], orusBase[1])
 		} else {
 			x, y := z.unscaledPoint(pointIdx)
+			// Use dualProject with unscaled values treated as F26Dot6 bits
 			origDist = gs.dualProject(x, y, orusBase[0], orusBase[1])
 		}
 

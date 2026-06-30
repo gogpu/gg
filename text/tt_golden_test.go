@@ -1073,6 +1073,203 @@ func TestTTGolden_BackwardCompatXPreserved(t *testing.T) {
 	}
 }
 
+// ============================================================
+// COORDINATE-EXACT GOLDEN TESTS (skrifa parity)
+// ============================================================
+//
+// These tests compare our TT interpreter output coordinate-by-coordinate
+// against golden data extracted from Google's skrifa (Rust fontations).
+// The golden arrays are in tt_golden_data_test.go, extracted via
+// SKRIFA_DUMP_GOLDEN=1 instrumentation in skrifa hint/instance.rs.
+//
+// All coordinates are 26.6 fixed-point integers.
+// Comparison is EXACT (diff=0) — no tolerance.
+//
+// Reference: skrifa/src/outline/glyf/hint/instance.rs:hint()
+// ============================================================
+
+// --- Test 22: Coordinate-exact golden comparison at 16ppem ---
+
+func TestTTGolden_SkrifaParity_16ppem(t *testing.T) {
+	ttGoldenCompareCoords(t, "tthint_subset.ttf", 1, 16,
+		skrifa26Dot6GID1at16ppem, skrifaPhantomsGID1at16ppem)
+}
+
+// --- Test 23: Coordinate-exact golden comparison at 12ppem ---
+
+func TestTTGolden_SkrifaParity_12ppem(t *testing.T) {
+	ttGoldenCompareCoords(t, "tthint_subset.ttf", 1, 12,
+		skrifa26Dot6GID1at12ppem, skrifaPhantomsGID1at12ppem)
+}
+
+// --- Test 24: Coordinate-exact golden comparison at 24ppem ---
+
+func TestTTGolden_SkrifaParity_24ppem(t *testing.T) {
+	ttGoldenCompareCoords(t, "tthint_subset.ttf", 1, 24,
+		skrifa26Dot6GID1at24ppem, skrifaPhantomsGID1at24ppem)
+}
+
+// ttGoldenCompareCoords compares hinted glyph coordinates from our TT
+// interpreter against golden data from skrifa.
+//
+// Both X and Y coordinates must match diff=0 (hard fail on regression).
+// This is the TT interpreter equivalent of the auto-hinter's
+// TestAutoHintGolden_HintedCoords_* tests.
+func ttGoldenCompareCoords(
+	t *testing.T,
+	fontFile string,
+	glyphID uint16,
+	ppem int32,
+	expectedCoords [][2]int32,
+	expectedPhantoms [4][2]int32,
+) {
+	t.Helper()
+
+	data := loadTTTestFont(t, fontFile)
+	cache := newTTHintCache(data)
+	if cache == nil {
+		t.Fatal("expected non-nil TT hint cache")
+	}
+
+	outline, err := cache.hintGlyphOutline(glyphID, ppem)
+	if err != nil {
+		t.Fatalf("hintGlyphOutline(gid=%d, ppem=%d): %v", glyphID, ppem, err)
+	}
+	if outline == nil {
+		t.Fatalf("hintGlyphOutline(gid=%d, ppem=%d): returned nil", glyphID, ppem)
+	}
+
+	numPoints := len(outline.points) - ttPhantomPointCount
+
+	if numPoints != len(expectedCoords) {
+		t.Fatalf("point count mismatch: got %d, want %d (skrifa)",
+			numPoints, len(expectedCoords))
+	}
+
+	xMismatches := 0
+	yMismatches := 0
+	for i, want := range expectedCoords {
+		got := outline.points[i]
+		dx := got[0] - want[0]
+		dy := got[1] - want[1]
+		if dx != 0 {
+			t.Errorf("pt[%d] X: got %d, want %d [dx=%d]", i, got[0], want[0], dx)
+			xMismatches++
+		}
+		if dy != 0 {
+			t.Errorf("pt[%d] Y: got %d, want %d [dy=%d]", i, got[1], want[1], dy)
+			yMismatches++
+		}
+	}
+
+	if xMismatches > 0 {
+		t.Errorf("X REGRESSION: %d/%d X coordinates differ from skrifa", xMismatches, numPoints)
+	}
+	if yMismatches > 0 {
+		t.Errorf("Y REGRESSION: %d/%d Y coordinates differ from skrifa", yMismatches, numPoints)
+	}
+
+	// Phantom points must match (advance width and vertical metrics).
+	for i := range 4 {
+		got := outline.points[numPoints+i]
+		want := expectedPhantoms[i]
+		if got[0] != want[0] {
+			t.Errorf("phantom[%d] X: got %d, want %d", i, got[0], want[0])
+		}
+		if got[1] != want[1] {
+			t.Errorf("phantom[%d] Y: got %d, want %d", i, got[1], want[1])
+		}
+	}
+
+	t.Logf("skrifa parity ppem=%d: X=%d/%d diff=0, Y=%d/%d diff=0",
+		ppem, numPoints-xMismatches, numPoints, numPoints-yMismatches, numPoints)
+}
+
+// --- Test 25: Pre-hinting coordinate scaling parity ---
+// Verifies that our initial scaling (font units → 26.6) matches skrifa
+// exactly, isolating scaling from interpreter differences.
+
+func TestTTGolden_SkrifaParity_PreHinting_16ppem(t *testing.T) {
+	data := loadTTTestFont(t, "tthint_subset.ttf")
+	fp, err := loadTTFontProgram(data)
+	if err != nil || fp == nil {
+		t.Fatalf("loadTTFontProgram: fp=%v err=%v", fp, err)
+	}
+
+	loader, err := newTTGlyphLoader(data, fp)
+	if err != nil || loader == nil {
+		t.Fatalf("newTTGlyphLoader: %v", err)
+	}
+
+	ppem := int32(16)
+	// Compute scale using skrifa-matching rounded division.
+	a := uint64(ppem*64) << 16
+	b := uint64(fp.unitsPerEm)
+	scale := int32((a + b/2) / b)
+
+	outline, err := loader.loadGlyphOutline(1, scale)
+	if err != nil || outline == nil {
+		t.Fatalf("loadGlyphOutline: outline=%v err=%v", outline, err)
+	}
+
+	// Pre-hinting coordinates from skrifa (extracted with SKRIFA_DUMP_PREHINT=1).
+	// These are the scaled coordinates BEFORE the interpreter runs.
+	// Only checking first 20 + last 4 to keep the test readable.
+	// If these match, the initial scaling is correct and any post-hinting
+	// differences are purely in the interpreter.
+	wantFirst20 := [][2]int32{
+		{0, -315}, {0, 1029}, {866, 1029}, {866, 1024}, {793, 1024},
+		{793, 950}, {866, 950}, {866, 945}, {793, 945}, {793, 871},
+		{866, 871}, {866, 866}, {793, 866}, {793, 793}, {866, 793},
+		{866, 788}, {793, 788}, {793, 714}, {866, 714}, {866, 630},
+	}
+
+	numPoints := len(outline.points) - ttPhantomPointCount
+	mismatches := 0
+	for i, want := range wantFirst20 {
+		if i >= numPoints {
+			break
+		}
+		got := outline.points[i]
+		if got != want {
+			t.Errorf("pre-hint pt[%d]: got (%d, %d), want (%d, %d) [dx=%d dy=%d]",
+				i, got[0], got[1], want[0], want[1],
+				got[0]-want[0], got[1]-want[1])
+			mismatches++
+		}
+	}
+
+	// Check phantom points (before rounding — these are the raw scaled values).
+	wantPhantomPre := [4][2]int32{
+		{0, 0}, {866, 0}, {0, 1029}, {0, -315},
+	}
+	for i, want := range wantPhantomPre {
+		got := outline.original[numPoints+i]
+		if got != want {
+			t.Errorf("pre-hint phantom_original[%d]: got (%d, %d), want (%d, %d)",
+				i, got[0], got[1], want[0], want[1])
+			mismatches++
+		}
+	}
+
+	// Check rounded phantom points (these go into outline.points for the interpreter).
+	wantPhantomRounded := [4][2]int32{
+		{0, 0}, {896, 0}, {0, 1024}, {0, -320},
+	}
+	for i, want := range wantPhantomRounded {
+		got := outline.points[numPoints+i]
+		if got != want {
+			t.Errorf("pre-hint phantom_rounded[%d]: got (%d, %d), want (%d, %d)",
+				i, got[0], got[1], want[0], want[1])
+			mismatches++
+		}
+	}
+
+	if mismatches == 0 {
+		t.Logf("PASS: pre-hinting coordinates match skrifa (first %d + phantoms)", len(wantFirst20))
+	}
+}
+
 // --- Helpers ---
 
 // absInt64 returns the absolute value of an int64.
