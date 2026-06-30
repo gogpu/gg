@@ -1,8 +1,12 @@
 package text
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"sync"
 
+	ot "github.com/go-text/typesetting/font/opentype"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/font/sfnt"
@@ -50,6 +54,11 @@ func (p *ximageParser) ParseIndex(data []byte, index int) (ParsedFont, error) {
 type ximageParsedFont struct {
 	font    *opentype.Font
 	rawData []byte // raw font file bytes (for contour-based auto-hinter)
+
+	// HVAR lazy loading (thread-safe).
+	hvarOnce sync.Once
+	hvar     *hvarTable // nil if HVAR not present or failed to parse
+	fvarAxes []fvarAxis // parsed fvar axes for coordinate normalization
 }
 
 // RawFontData implements RawFontDataProvider, returning the raw font file
@@ -141,6 +150,141 @@ func (f *ximageParsedFont) Metrics(ppem float64) FontMetrics {
 		XHeight:   fixedToFloat64(metrics.XHeight),
 		CapHeight: fixedToFloat64(metrics.CapHeight),
 	}
+}
+
+// loadHVAR lazily parses the HVAR table and fvar axes from the raw font data.
+// Thread-safe via sync.Once. Silently ignores errors (HVAR is optional).
+func (f *ximageParsedFont) loadHVAR() {
+	f.hvarOnce.Do(func() {
+		if f.rawData == nil {
+			return
+		}
+		loader, err := ot.NewLoader(bytes.NewReader(f.rawData))
+		if err != nil {
+			return
+		}
+
+		// Parse HVAR table.
+		hvarRaw, err := loader.RawTable(ot.MustNewTag("HVAR"))
+		if err != nil {
+			return
+		}
+		hvar, err := parseHVAR(hvarRaw)
+		if err != nil {
+			return
+		}
+		f.hvar = hvar
+
+		// Parse fvar axes for coordinate normalization.
+		fvarRaw, err := loader.RawTable(ot.MustNewTag("fvar"))
+		if err != nil {
+			return
+		}
+		f.fvarAxes = parseFvarAxes(fvarRaw)
+	})
+}
+
+// GlyphAdvanceVar implements VariableAdvanceProvider.
+// Returns the advance width in pixels for a glyph, adjusted by HVAR deltas
+// for the given font variations.
+//
+// Matches skrifa GlyphMetrics::advance_width (metrics.rs:291-311):
+//
+//	advance = hmtx_advance + hvar_delta(gid, normalizedCoords)
+//	result = advance * ppem / unitsPerEm
+func (f *ximageParsedFont) GlyphAdvanceVar(glyphIndex uint16, ppem float64, variations []FontVariation) float64 {
+	f.loadHVAR()
+
+	// Get base advance (same as GlyphAdvance).
+	baseAdvance := f.GlyphAdvance(glyphIndex, ppem)
+
+	if f.hvar == nil || len(f.fvarAxes) == 0 || len(variations) == 0 {
+		return baseAdvance
+	}
+
+	// Normalize variation coordinates.
+	coords := normalizeCoords(f.fvarAxes, variations)
+
+	// Get HVAR delta (in font units).
+	delta := f.hvar.advanceDelta(glyphIndex, coords)
+	if delta == 0 {
+		return baseAdvance
+	}
+
+	// Scale delta from font units to pixels: delta * ppem / unitsPerEm.
+	upm := float64(f.font.UnitsPerEm())
+	if upm == 0 {
+		return baseAdvance
+	}
+	// The delta from advanceDelta is in font units (integer).
+	// skrifa truncates to i32, then scales: Fixed::from_i32(delta).to_f64() → float.
+	// Then: self.fixed_scale.apply(advance) where fixed_scale = ppem / upem.
+	// But since baseAdvance already has the scale applied (ppem/upem factor via sfnt),
+	// we need to add the scaled delta separately.
+	scaledDelta := float64(delta) * ppem / upm
+
+	return baseAdvance + scaledDelta
+}
+
+// parseFvarAxes extracts axis definitions from raw fvar table data.
+// Uses direct binary parsing to avoid go-text dependency for this simple task.
+//
+// fvar table layout:
+//
+//	uint16  majorVersion (must be 1)
+//	uint16  minorVersion (must be 0)
+//	Offset16 axisArrayOffset
+//	uint16  reserved
+//	uint16  axisCount
+//	uint16  axisSize (must be 20)
+//	... (instance data follows)
+//
+// Each axis record (20 bytes):
+//
+//	Tag     axisTag (4 bytes)
+//	Fixed   minValue (4 bytes, 16.16)
+//	Fixed   defaultValue (4 bytes, 16.16)
+//	Fixed   maxValue (4 bytes, 16.16)
+//	uint16  flags
+//	uint16  axisNameID
+func parseFvarAxes(data []byte) []fvarAxis {
+	if len(data) < 16 {
+		return nil
+	}
+
+	// major := binary.BigEndian.Uint16(data[0:2])
+	// minor := binary.BigEndian.Uint16(data[2:4])
+	axisArrayOffset := binary.BigEndian.Uint16(data[4:6])
+	// reserved := binary.BigEndian.Uint16(data[6:8])
+	axisCount := binary.BigEndian.Uint16(data[8:10])
+	axisSize := binary.BigEndian.Uint16(data[10:12])
+
+	if axisSize < 20 || axisCount == 0 {
+		return nil
+	}
+
+	start := int(axisArrayOffset)
+	if start+int(axisCount)*int(axisSize) > len(data) {
+		return nil
+	}
+
+	axes := make([]fvarAxis, axisCount)
+	for i := range axisCount {
+		off := start + int(i)*int(axisSize)
+		axes[i] = fvarAxis{
+			Tag:          [4]byte{data[off], data[off+1], data[off+2], data[off+3]},
+			MinValue:     fixed1616ToFloat32(data[off+4:]),
+			DefaultValue: fixed1616ToFloat32(data[off+8:]),
+			MaxValue:     fixed1616ToFloat32(data[off+12:]),
+		}
+	}
+	return axes
+}
+
+// fixed1616ToFloat32 reads a big-endian Fixed 16.16 value and converts to float32.
+func fixed1616ToFloat32(data []byte) float32 {
+	raw := int32(binary.BigEndian.Uint32(data[:4]))
+	return float32(raw) / 65536.0
 }
 
 // fixedToFloat64 converts fixed.Int26_6 to float64.
