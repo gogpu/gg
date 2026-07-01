@@ -386,6 +386,67 @@ func TestOutline_Trimmed_VarDefaultVsStatic(t *testing.T) {
 	}
 }
 
+// TestOutline_VarAutoHint_GvarDeltasPreserved verifies that gvar deltas
+// survive through the auto-hinter fallback path. This is the critical test
+// for the bug where autoHintViaContours re-read unvaried glyf data, causing
+// gvar deltas to be lost for fonts where TT bytecode hinting is unavailable.
+//
+// Uses Vazirmatn (no TT instructions) to ensure the auto-hinter path runs.
+func TestOutline_VarAutoHint_GvarDeltasPreserved(t *testing.T) {
+	data, err := os.ReadFile("testdata/vazirmatn_var_trimmed.ttf")
+	if err != nil {
+		t.Skipf("font not available: %v", err)
+	}
+
+	parser := &ownParser{}
+	parsed, err := parser.Parse(data)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Confirm no TT instructions — auto-hinter will be used.
+	cache := newTTHintCache(data)
+	if cache != nil {
+		t.Log("note: font has TT instructions, TT hinting path may override auto-hinter")
+	}
+
+	extractor := NewOutlineExtractor()
+	ppem := 24.0
+
+	// Test glyph A (GID 1) which has known non-zero gvar deltas.
+	gid := GlyphID(1)
+
+	defaultOutline, err := extractor.ExtractOutlineHintedVar(
+		parsed, gid, ppem, HintingFull,
+		[]FontVariation{NewFontVariation("wght", 400)},
+	)
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+
+	maxOutline, err := extractor.ExtractOutlineHintedVar(
+		parsed, gid, ppem, HintingFull,
+		[]FontVariation{NewFontVariation("wght", 900)},
+	)
+	if err != nil {
+		t.Fatalf("max weight: %v", err)
+	}
+
+	if defaultOutline == nil || maxOutline == nil {
+		t.Fatal("outline is nil")
+	}
+
+	// Outlines must differ — gvar deltas should produce different auto-hinted results.
+	if outlineSegmentsEqual(defaultOutline, maxOutline) {
+		t.Error("BUG: wght=400 and wght=900 produced identical auto-hinted outlines — " +
+			"gvar deltas lost in auto-hinter fallback path")
+	} else {
+		t.Logf("OK: wght=400 (%d segs, adv=%.4f) vs wght=900 (%d segs, adv=%.4f) — outlines differ",
+			len(defaultOutline.Segments), defaultOutline.Advance,
+			len(maxOutline.Segments), maxOutline.Advance)
+	}
+}
+
 // ppemName formats a ppem value for use as a test sub-name.
 func ppemName(ppem float64) string {
 	return "ppem" + varfontFmtFloat(ppem)

@@ -386,8 +386,11 @@ func (e *OutlineExtractor) ExtractOutlineHintedVar(
 		return nil, ErrUnsupportedFontType
 	}
 
-	// Extract the gvar-varied outline (unscaled + gvar deltas + scale).
-	outline, err := e.extractFromOwnVariable(ownFont, gid, size, variations)
+	// Extract the gvar-varied outline AND the varied contour points.
+	// Both are needed: the outline for the final result, and the contours
+	// for the auto-hinter fallback (which must operate on gvar-varied points,
+	// not re-read the original unvaried glyf data).
+	outline, variedContours, err := e.extractFromOwnVariableWithContours(ownFont, gid, size, variations)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +407,11 @@ func (e *OutlineExtractor) ExtractOutlineHintedVar(
 	}
 
 	// Priority 2: Auto-hinter on the gvar-varied outline.
-	if !autoHintOutline(outline, parsedFont, size, hinting) {
+	// Pass the pre-varied contour points so the auto-hinter operates on
+	// gvar-modified coordinates, not the original unvaried glyf data.
+	// This fixes the bug where gvar deltas were computed correctly but
+	// lost when the auto-hinter re-read contours from the raw font.
+	if !autoHintOutlineVar(outline, variedContours, parsedFont, size, hinting) {
 		gridFitOutline(outline, hinting)
 	}
 	return outline, nil
@@ -680,6 +687,23 @@ func (e *OutlineExtractor) extractFromOwn(f *ownParsedFont, gid GlyphID, size fl
 	return outline, nil
 }
 
+// extractFromOwnVariableWithContours extracts a glyph outline with font
+// variations applied and also returns the gvar-varied GlyfContours.
+// The contours are needed by the auto-hinter fallback, which must operate
+// on gvar-modified coordinates rather than re-reading unvaried glyf data.
+//
+// Returns (outline, variedContours, err). variedContours is nil for empty
+// glyphs or on error.
+func (e *OutlineExtractor) extractFromOwnVariableWithContours(
+	f *ownParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) (*GlyphOutline, *GlyfContours, error) {
+	outline, contours, err := e.extractFromOwnVariableImpl(f, gid, size, variations)
+	return outline, contours, err
+}
+
 // extractFromOwnVariable extracts a glyph outline with font variations
 // applied (gvar/HVAR). This replaces the deleted ExtractOutlineGoText
 // which used an external library for outline extraction.
@@ -695,9 +719,22 @@ func (e *OutlineExtractor) extractFromOwnVariable(
 	size float64,
 	variations []FontVariation,
 ) (*GlyphOutline, error) {
+	outline, _, err := e.extractFromOwnVariableImpl(f, gid, size, variations)
+	return outline, err
+}
+
+// extractFromOwnVariableImpl is the shared implementation for
+// extractFromOwnVariable and extractFromOwnVariableWithContours.
+// Returns (outline, variedContours, err).
+func (e *OutlineExtractor) extractFromOwnVariableImpl(
+	f *ownParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) (*GlyphOutline, *GlyfContours, error) {
 	upem := f.UnitsPerEm()
 	if upem == 0 {
-		return nil, &FontError{Reason: "own parser: zero unitsPerEm"}
+		return nil, nil, &FontError{Reason: "own parser: zero unitsPerEm"}
 	}
 
 	// Get variation-aware advance.
@@ -711,28 +748,28 @@ func (e *OutlineExtractor) extractFromOwnVariable(
 	// Parse raw contour points with phantom points for gvar.
 	glyfData, ok := f.tables["glyf"]
 	if !ok {
-		return nil, &FontError{Reason: "own parser: missing glyf table"}
+		return nil, nil, &FontError{Reason: "own parser: missing glyf table"}
 	}
 	locaData, ok := f.tables["loca"]
 	if !ok {
-		return nil, &FontError{Reason: "own parser: missing loca table"}
+		return nil, nil, &FontError{Reason: "own parser: missing loca table"}
 	}
 	headData, ok := f.tables["head"]
 	if !ok || len(headData) < 54 {
-		return nil, &FontError{Reason: "own parser: missing head table"}
+		return nil, nil, &FontError{Reason: "own parser: missing head table"}
 	}
 	isLongLoca := binary.BigEndian.Uint16(headData[50:52]) != 0
 
 	contours, err := extractGlyfContourOwn(glyfData, locaData, int(gid), isLongLoca)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if contours == nil || len(contours.Points) == 0 {
 		return &GlyphOutline{
 			GID:     gid,
 			Type:    GlyphTypeOutline,
 			Advance: float32(advance),
-		}, nil
+		}, nil, nil
 	}
 
 	// Build points array for applyVariations: [x, y] pairs + 4 phantom points.
@@ -772,7 +809,7 @@ func (e *OutlineExtractor) extractFromOwnVariable(
 			GID:     gid,
 			Type:    GlyphTypeOutline,
 			Advance: float32(advance),
-		}, nil
+		}, contours, nil
 	}
 
 	outline := &GlyphOutline{
@@ -791,7 +828,7 @@ func (e *OutlineExtractor) extractFromOwnVariable(
 	}
 	outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
 
-	return outline, nil
+	return outline, contours, nil
 }
 
 // contourPointsToSegments converts raw TrueType glyf contour points to
