@@ -276,7 +276,7 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 		return Region{}, fmt.Errorf("failed to generate MSDF: %w", err)
 	}
 
-	MedianFilter(msdf)
+	msdf = MedianFilter(msdf)
 	ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
 
 	// Now take write lock only for atlas insertion (fast).
