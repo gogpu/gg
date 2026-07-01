@@ -188,9 +188,10 @@ func TestCurveAwareAET_RemoveExpiredSubpixel(t *testing.T) {
 	// Insert line edge: y 0..10
 	v := NewLineEdgeVariant(CurvePoint{X: 5, Y: 0}, CurvePoint{X: 5, Y: 10}, 0)
 	if v == nil {
-		t.Skip("NewLineEdgeVariant returned nil")
+		t.Fatal("NewLineEdgeVariant returned nil")
 	}
-	aet.Insert(*v)
+	edge := *v
+	aet.Insert(edge)
 
 	// BottomY for a line is LastY + 1; after RemoveExpiredSubpixel
 	// with large Y, the edge should be removed
