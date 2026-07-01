@@ -172,14 +172,17 @@ func TestLoadGlyphOutline(t *testing.T) {
 		if len(outline.unscaled) != totalPoints*2 {
 			t.Errorf("gid=%d: unscaled len=%d, want %d", gid, len(outline.unscaled), totalPoints*2)
 		}
-		if len(outline.contours) == 0 {
-			t.Errorf("gid=%d: no contours", gid)
-		}
-
 		// Verify phantom points are present.
 		advance := outline.hintedAdvance()
 		if advance <= 0 {
 			t.Logf("gid=%d: advance=%d (may be zero-width glyph)", gid, advance)
+		}
+
+		if len(outline.contours) == 0 {
+			// Phantom-only outline (empty glyph like space/.notdef).
+			t.Logf("gid=%d: %d points, 0 contours (phantom-only), advance=%d (26.6)",
+				gid, totalPoints, advance)
+			continue
 		}
 
 		t.Logf("gid=%d: %d points, %d contours, advance=%d (26.6), %d instruction bytes",
@@ -390,7 +393,10 @@ func TestTTHintedOutlineToGlyphOutline(t *testing.T) {
 		}
 
 		if len(outline.Segments) == 0 {
-			t.Errorf("gid=%d: no segments in converted outline", gid)
+			// Phantom-only outlines (empty glyphs like space, .notdef) have
+			// no segments but a valid advance. This is expected.
+			t.Logf("gid=%d: phantom-only outline, advance=%.2f", gid, outline.Advance)
+			convertedCount++
 			continue
 		}
 		if outline.Advance <= 0 {

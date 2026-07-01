@@ -90,7 +90,11 @@ func (c *ttHintCache) getInstance(ppem int32) (*ttHintInstance, error) {
 // points and phantom-point advance. This is the main entry point for TT
 // bytecode hinting of a single glyph.
 //
-// Returns nil, nil for glyphs that cannot be hinted (composites, empty, etc.).
+// For empty glyphs (space, etc.), returns a phantom-only outline with rounded
+// phantom points but no contour points. The advance from such an outline is
+// integer-pixel, matching FreeType/skrifa behavior.
+//
+// Returns nil, nil for glyphs that cannot be hinted (composites, etc.).
 //
 //nolint:nilnil // nil result = "no hintable outline"
 func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutline, error) {
@@ -117,6 +121,14 @@ func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutl
 	}
 	if outline == nil {
 		return nil, nil
+	}
+
+	// Empty glyphs (space, etc.) have phantom-only outlines with pre-rounded
+	// phantom points. No bytecode to run — just return the outline.
+	// Reference: FreeType ttgload.c:1555-1608 — does NOT call TT_Hint_Glyph
+	// for empty glyphs. skrifa load_empty does NOT call hinter.hint().
+	if len(outline.contours) == 0 && len(outline.bytecode) == 0 {
+		return outline, nil
 	}
 
 	// Run the bytecode interpreter.
@@ -182,6 +194,12 @@ func (c *ttHintCache) hintGlyphOutlineVar(
 		return nil, nil
 	}
 
+	// Empty glyphs (space, etc.) have phantom-only outlines with pre-rounded
+	// phantom points. No bytecode to run — just return the outline.
+	if len(outline.contours) == 0 && len(outline.bytecode) == 0 {
+		return outline, nil
+	}
+
 	// Run the bytecode interpreter on the varied+scaled points.
 	if err := instance.hintGlyph(outline); err != nil {
 		// Non-pedantic: return unhinted outline on error.
@@ -230,6 +248,10 @@ func tryTTBytecodeHintingVar(
 // GlyphOutline format used by the rendering pipeline. The hinted points
 // replace the sfnt-loaded outline for professional quality rendering.
 //
+// For phantom-only outlines (empty glyphs like space), returns a GlyphOutline
+// with the hinted advance but no segments. This is intentional — space has no
+// visible outline but needs an accurate advance for text layout.
+//
 // All coordinates are converted from 26.6 fixed-point to float32 pixels.
 func ttHintedOutlineToGlyphOutline(hinted *ttGlyphOutline, gid GlyphID) *GlyphOutline {
 	if hinted == nil {
@@ -239,6 +261,15 @@ func ttHintedOutlineToGlyphOutline(hinted *ttGlyphOutline, gid GlyphID) *GlyphOu
 	// Count actual outline points (excluding phantom points).
 	numPoints := len(hinted.points) - ttPhantomPointCount
 	if numPoints <= 0 || len(hinted.contours) == 0 {
+		// Phantom-only outline (empty glyph like space): return advance-only
+		// GlyphOutline. The advance is hinted (integer-pixel) from phantom points.
+		if len(hinted.points) >= ttPhantomPointCount {
+			return &GlyphOutline{
+				GID:     gid,
+				Type:    GlyphTypeOutline,
+				Advance: float32(hinted.hintedAdvance()) / 64.0,
+			}
+		}
 		return nil
 	}
 

@@ -158,11 +158,18 @@ func newTTGlyphLoader(fontData []byte, font *ttFontProgram) (*ttGlyphLoader, err
 // loadGlyphOutline reads a simple glyph's contour points and instructions,
 // appends phantom points, and scales everything to 26.6 fixed-point.
 //
-// Returns nil, nil for composite glyphs or empty glyphs (space, etc.).
+// For empty glyphs (space, etc. with no glyf entry), returns a phantom-only
+// outline with 0 contour points and 4 phantom points. The phantom points
+// are scaled and rounded to the pixel grid, matching FreeType/skrifa behavior
+// where hinted empty glyphs produce integer-pixel advances.
+//
+// Returns nil, nil for composite glyphs.
 //
 // The scale parameter is in 16.16 fixed-point (ppem * 64 * 65536 / upem).
 //
 // Reference: skrifa glyf/mod.rs:584-782 (load_simple)
+// Reference: skrifa glyf/mod.rs:556-582 (load_empty — phantom-only scaling)
+// Reference: FreeType ttgload.c:1555-1608 (empty glyph shortcut)
 //
 //nolint:nilnil // nil result = "no simple outline", not an error
 func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphOutline, error) {
@@ -172,7 +179,7 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 
 	off := l.glyfOff[glyphID]
 	if off.length == 0 {
-		return nil, nil // empty glyph (e.g., space)
+		return l.loadEmptyGlyphOutline(glyphID, scale), nil
 	}
 
 	glyfData, ok := l.tables["glyf"]
@@ -196,7 +203,9 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 		return nil, nil // composite glyph — skip for now
 	}
 	if numContours == 0 {
-		return nil, nil // no contours
+		// Glyph exists in glyf but has no contours (rare — most empty glyphs
+		// use off.length == 0 instead). Treat the same as empty glyph.
+		return l.loadEmptyGlyphOutline(glyphID, scale), nil
 	}
 
 	xMin := int16(binary.BigEndian.Uint16(data[2:4]))
@@ -367,7 +376,9 @@ func (l *ttGlyphLoader) loadGlyphOutlineVar(
 
 	off := l.glyfOff[glyphID]
 	if off.length == 0 {
-		return nil, nil // empty glyph (e.g., space)
+		// Empty glyph with variations: apply gvar phantom deltas, then
+		// scale and round. Matches skrifa load_empty (glyf/mod.rs:556-582).
+		return l.loadEmptyGlyphOutlineVar(glyphID, scale, font, variations), nil
 	}
 
 	glyfData, ok := l.tables["glyf"]
@@ -391,7 +402,8 @@ func (l *ttGlyphLoader) loadGlyphOutlineVar(
 		return nil, nil // composite glyph — skip for now
 	}
 	if numContours == 0 {
-		return nil, nil // no contours
+		// Glyph exists with header but no contours — same as empty.
+		return l.loadEmptyGlyphOutlineVar(glyphID, scale, font, variations), nil
 	}
 
 	xMin := int16(binary.BigEndian.Uint16(data[2:4]))
@@ -525,6 +537,143 @@ func (l *ttGlyphLoader) loadGlyphOutlineVar(
 	}
 
 	return outline, nil
+}
+
+// loadEmptyGlyphOutline creates a phantom-only outline for empty glyphs
+// (space, etc.). Empty glyphs have no contour points but still need hinted
+// advances — the phantom points encode the advance width.
+//
+// When TT hinting is active, phantom points are rounded to the pixel grid,
+// producing integer-pixel advances. This matches FreeType and skrifa behavior:
+//   - FreeType ttgload.c:1555-1608: scales phantom points for empty glyphs
+//   - skrifa glyf/mod.rs:556-582 (load_empty): scales phantom points
+//   - skrifa glyf/mod.rs:762-773: rounds phantoms when hinting active
+//
+// For empty glyphs, bounds are [0,0,0,0], so phantom[0] = (0-lsb, 0) and
+// phantom[1] = (phantom[0]+advance, 0). After scaling+rounding, the advance
+// = phantom[1].x - phantom[0].x is an integer pixel count.
+func (l *ttGlyphLoader) loadEmptyGlyphOutline(glyphID uint16, scale int32) *ttGlyphOutline {
+	// Get horizontal metrics.
+	advance, lsb := l.glyphMetrics(glyphID)
+
+	// Compute phantom points in font units.
+	// For empty glyphs, bounds = [0,0,0,0] (no outline data).
+	// Reference: skrifa glyf/mod.rs:289-291 (None => bounds = [0;4])
+	// Reference: FreeType ttgload.c:1261-1262
+	var phantomFU [ttPhantomPointCount][2]int32
+	ascent := int32(l.font.os2Ascender)
+	descent := int32(l.font.os2Descender)
+	tsb := ascent // tsb = ascent - yMax, yMax=0 for empty glyph
+	vadvance := ascent - descent
+	phantomFU[0] = [2]int32{-int32(lsb), 0}              // xMin(0) - lsb
+	phantomFU[1] = [2]int32{-int32(lsb) + int32(advance), 0} // phantom[0].x + advance
+	phantomFU[2] = [2]int32{0, tsb}                       // yMax(0) + tsb = ascent
+	phantomFU[3] = [2]int32{0, tsb - vadvance}            // phantom[2].y - vadvance = descent
+
+	totalPoints := ttPhantomPointCount // 0 contour points + 4 phantoms
+
+	outline := &ttGlyphOutline{
+		unscaled:    make([]int32, totalPoints*2),
+		original:    make([][2]int32, totalPoints),
+		points:      make([][2]int32, totalPoints),
+		flags:       make([]ttPointFlags, totalPoints),
+		contours:    nil, // no contours
+		bytecode:    nil, // no instructions
+		isComposite: false,
+		glyphID:     glyphID,
+	}
+
+	// Scale phantom points and round to pixel grid.
+	// Rounding matches skrifa load_simple lines 736-738 and lines 762-773:
+	// when hinting is active, phantom points are rounded regardless of
+	// whether instructions exist.
+	for j := range ttPhantomPointCount {
+		outline.unscaled[j*2] = phantomFU[j][0]
+		outline.unscaled[j*2+1] = phantomFU[j][1]
+
+		sx := ttMul16Dot16(phantomFU[j][0], scale)
+		sy := ttMul16Dot16(phantomFU[j][1], scale)
+		outline.original[j] = [2]int32{sx, sy}
+
+		// Round to pixel grid (same as non-empty glyph phantom rounding).
+		outline.points[j] = [2]int32{ttRound26Dot6(sx), ttRound26Dot6(sy)}
+	}
+
+	// Initialize phantom outputs.
+	for j := range ttPhantomPointCount {
+		outline.phantoms[j] = outline.points[j]
+	}
+
+	return outline
+}
+
+// loadEmptyGlyphOutlineVar creates a phantom-only outline for empty glyphs
+// in variable fonts. This applies gvar phantom point deltas before scaling.
+//
+// Reference: skrifa glyf/mod.rs:556-582 (FreeTypeScaler::load_empty with gvar)
+// Reference: FreeType ttgload.c:1563-1589 (empty glyph with GX_VAR_SUPPORT)
+func (l *ttGlyphLoader) loadEmptyGlyphOutlineVar(
+	glyphID uint16,
+	scale int32,
+	font *ownParsedFont,
+	variations []FontVariation,
+) *ttGlyphOutline {
+	// Get horizontal metrics.
+	advance, lsb := l.glyphMetrics(glyphID)
+
+	// Compute phantom points in font units (bounds = [0,0,0,0]).
+	var phantomFU [ttPhantomPointCount][2]int32
+	ascent := int32(l.font.os2Ascender)
+	descent := int32(l.font.os2Descender)
+	tsb := ascent
+	vadvance := ascent - descent
+	phantomFU[0] = [2]int32{-int32(lsb), 0}
+	phantomFU[1] = [2]int32{-int32(lsb) + int32(advance), 0}
+	phantomFU[2] = [2]int32{0, tsb}
+	phantomFU[3] = [2]int32{0, tsb - vadvance}
+
+	// Build gvar point array: 0 contour points + 4 phantom points.
+	gvarPoints := make([][2]int32, ttPhantomPointCount)
+	for j := range ttPhantomPointCount {
+		gvarPoints[j] = phantomFU[j]
+	}
+
+	// Apply gvar deltas to phantom points.
+	// FreeType ttgload.c:1584: TT_Vary_Apply_Glyph_Deltas with outline.n_points=0
+	// skrifa glyf/mod.rs:561-570: phantom_point_deltas for empty glyph
+	if font != nil {
+		font.applyVariations(glyphID, gvarPoints, nil, variations)
+	}
+
+	totalPoints := ttPhantomPointCount
+
+	outline := &ttGlyphOutline{
+		unscaled:    make([]int32, totalPoints*2),
+		original:    make([][2]int32, totalPoints),
+		points:      make([][2]int32, totalPoints),
+		flags:       make([]ttPointFlags, totalPoints),
+		contours:    nil,
+		bytecode:    nil,
+		isComposite: false,
+		glyphID:     glyphID,
+	}
+
+	// Scale varied phantom points and round to pixel grid.
+	for j := range ttPhantomPointCount {
+		outline.unscaled[j*2] = gvarPoints[j][0]
+		outline.unscaled[j*2+1] = gvarPoints[j][1]
+
+		sx := ttMul16Dot16(gvarPoints[j][0], scale)
+		sy := ttMul16Dot16(gvarPoints[j][1], scale)
+		outline.original[j] = [2]int32{sx, sy}
+		outline.points[j] = [2]int32{ttRound26Dot6(sx), ttRound26Dot6(sy)}
+	}
+
+	for j := range ttPhantomPointCount {
+		outline.phantoms[j] = outline.points[j]
+	}
+
+	return outline
 }
 
 // glyphMetrics returns the advance width and left side bearing for a glyph.

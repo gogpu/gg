@@ -1270,6 +1270,137 @@ func TestTTGolden_SkrifaParity_PreHinting_16ppem(t *testing.T) {
 	}
 }
 
+// --- Test: Space (empty glyph) hinted advance ---
+
+// TestTTHint_SpaceAdvance verifies that empty glyphs (space character) produce
+// integer-pixel hinted advances. Space has no contours/outline, but the phantom
+// points should be scaled and rounded to the pixel grid.
+//
+// Without this fix, space advances are fractional (e.g., 6.5742 at 24ppem)
+// causing uneven word spacing when mixed with hinted letter advances.
+//
+// Golden values from skrifa (Rust) test with Segoe UI:
+//
+//	12ppem: space hinted = 3.0000
+//	16ppem: space hinted = 4.0000
+//	24ppem: space hinted = 7.0000
+func TestTTHint_SpaceAdvance(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("system font test only on Windows (Segoe UI)")
+	}
+
+	data, err := os.ReadFile(filepath.Join("C:", "Windows", "Fonts", "segoeui.ttf"))
+	if err != nil {
+		t.Skipf("Segoe UI not available: %v", err)
+	}
+
+	cache := newTTHintCache(data)
+	if cache == nil {
+		t.Fatal("expected non-nil TT hint cache for Segoe UI")
+	}
+
+	// Find the space glyph ID via cmap.
+	parser := &ownParser{}
+	parsed, parseErr := parser.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("ownParser.Parse: %v", parseErr)
+	}
+	spaceGID := parsed.GlyphIndex(' ')
+	if spaceGID == 0 {
+		t.Fatal("space character not found in Segoe UI cmap")
+	}
+	t.Logf("space GID = %d", spaceGID)
+
+	tests := []struct {
+		ppem    int32
+		wantAdv float64 // expected integer-pixel advance from skrifa
+	}{
+		{12, 3.0},
+		{16, 4.0},
+		{24, 7.0},
+	}
+
+	for _, tt := range tests {
+		t.Run("ppem_"+itoa(int(tt.ppem)), func(t *testing.T) {
+			adv, ok := cache.hintedAdvanceWidth(spaceGID, tt.ppem)
+			if !ok {
+				t.Fatalf("hintedAdvanceWidth returned false for space at ppem=%d", tt.ppem)
+			}
+
+			// Advance must be integer (no fractional part).
+			if adv != math.Trunc(adv) {
+				t.Errorf("ppem=%d: space advance %f is not integer-pixel", tt.ppem, adv)
+			}
+
+			// Must match skrifa golden value.
+			if math.Abs(adv-tt.wantAdv) > 0.001 {
+				t.Errorf("ppem=%d: space advance = %f, want %f (skrifa golden)",
+					tt.ppem, adv, tt.wantAdv)
+			}
+
+			t.Logf("ppem=%d: space hinted advance = %.4f px (OK)", tt.ppem, adv)
+		})
+	}
+}
+
+// TestTTHint_SpaceAdvanceIntegerPixel verifies that ALL empty glyphs in TT-hinted
+// fonts produce integer-pixel advances. Tests with multiple system fonts.
+func TestTTHint_SpaceAdvanceIntegerPixel(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("system font test only on Windows")
+	}
+
+	fonts := []struct {
+		name string
+		path string
+	}{
+		{"Segoe UI", filepath.Join("C:", "Windows", "Fonts", "segoeui.ttf")},
+		{"Arial", filepath.Join("C:", "Windows", "Fonts", "arial.ttf")},
+		{"Consolas", filepath.Join("C:", "Windows", "Fonts", "consola.ttf")},
+		{"Times New Roman", filepath.Join("C:", "Windows", "Fonts", "times.ttf")},
+	}
+
+	ppems := []int32{8, 10, 12, 14, 16, 18, 20, 24, 32, 48}
+
+	for _, f := range fonts {
+		t.Run(f.name, func(t *testing.T) {
+			data, err := os.ReadFile(f.path)
+			if err != nil {
+				t.Skipf("font not available: %v", err)
+			}
+
+			cache := newTTHintCache(data)
+			if cache == nil {
+				t.Skipf("%s: no TT instructions", f.name)
+			}
+
+			parser := &ownParser{}
+			parsed, parseErr := parser.Parse(data)
+			if parseErr != nil {
+				t.Skipf("ownParser.Parse: %v", parseErr)
+			}
+			spaceGID := parsed.GlyphIndex(' ')
+			if spaceGID == 0 {
+				t.Skipf("%s: space not found in cmap", f.name)
+			}
+
+			for _, ppem := range ppems {
+				adv, ok := cache.hintedAdvanceWidth(spaceGID, ppem)
+				if !ok {
+					// Some fonts disable hinting at certain ppem values via the
+					// prep program. This is expected behavior, not a bug.
+					t.Logf("ppem=%2d: hinting not available (prep disabled or no instance)", ppem)
+					continue
+				}
+				if adv != math.Trunc(adv) {
+					t.Errorf("ppem=%d: space advance %f is not integer-pixel", ppem, adv)
+				}
+				t.Logf("ppem=%2d: space hinted = %.4f px", ppem, adv)
+			}
+		})
+	}
+}
+
 // --- Helpers ---
 
 // absInt64 returns the absolute value of an int64.
