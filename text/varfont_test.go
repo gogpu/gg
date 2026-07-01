@@ -6,7 +6,6 @@ import (
 	"image/draw"
 	"os"
 	"testing"
-
 )
 
 // variableFontPath returns the path to a variable font for testing.

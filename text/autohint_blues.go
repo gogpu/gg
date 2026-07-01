@@ -107,7 +107,6 @@ func computeBlueZones(font ParsedFont, script *scriptClass) []blueZone {
 //
 // See FreeType aflatin.c:314-800 af_latin_metrics_init_blues.
 // See skrifa metrics/blues.rs compute_default_blues.
-//
 func computeDefaultBlues(font ParsedFont, script *scriptClass) []blueZone {
 	upm := font.UnitsPerEm()
 	if upm == 0 {

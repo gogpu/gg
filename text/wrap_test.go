@@ -3,7 +3,6 @@ package text
 import (
 	"strings"
 	"testing"
-
 )
 
 // TestWrapModeString tests WrapMode.String method.

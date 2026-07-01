@@ -2,7 +2,6 @@ package text
 
 import (
 	"testing"
-
 )
 
 // loadTestFont loads a test font for testing.

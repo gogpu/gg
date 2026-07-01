@@ -3,7 +3,6 @@ package text
 import (
 	"sync"
 	"testing"
-
 )
 
 // ownTestFace creates a test Face using the own parser at size 16.

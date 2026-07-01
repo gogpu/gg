@@ -5,7 +5,6 @@ import (
 	"math"
 	"os"
 	"testing"
-
 )
 
 // loadGoRegularFont loads the Go Regular font for testing.

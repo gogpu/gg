@@ -2,7 +2,6 @@ package text
 
 import (
 	"testing"
-
 )
 
 // TestWithFeatures verifies that WithFeatures correctly stores features on a face.

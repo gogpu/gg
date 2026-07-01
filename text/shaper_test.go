@@ -3,7 +3,6 @@ package text
 import (
 	"sync"
 	"testing"
-
 )
 
 // builtinTestFace creates a test Face at size 16 for builtin shaper tests.

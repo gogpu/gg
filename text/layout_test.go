@@ -3,7 +3,6 @@ package text
 import (
 	"strings"
 	"testing"
-
 )
 
 // layoutTestFace creates a test Face at size 16 for layout tests.
