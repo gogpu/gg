@@ -208,7 +208,7 @@ func TestCurveAwareAET_AdvanceX(t *testing.T) {
 	// Create a diagonal line with non-zero slope
 	v := NewLineEdgeVariant(CurvePoint{X: 0, Y: 0}, CurvePoint{X: 20, Y: 20}, 0)
 	if v == nil {
-		t.Skip("NewLineEdgeVariant returned nil")
+		t.Fatal("NewLineEdgeVariant returned nil")
 	}
 	aet.Insert(*v)
 
@@ -342,10 +342,10 @@ func TestCurveAwareAET_StepCurves(t *testing.T) {
 	p2 := CurvePoint{X: 90, Y: 0}
 	variant := NewQuadraticEdgeVariant(p0, p1, p2, 0)
 	if variant == nil {
-		t.Skip("NewQuadraticEdgeVariant returned nil for test curve")
+		t.Fatal("NewQuadraticEdgeVariant returned nil for test curve")
 	}
-
-	aet.Insert(*variant)
+	qEdge := *variant
+	aet.Insert(qEdge)
 
 	// StepCurves should not panic
 	aet.StepCurves()
