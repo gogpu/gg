@@ -157,6 +157,9 @@ func TestNewFontFeature_EquivalentToConstant(t *testing.T) {
 	if NewFontFeature("onum", 1) != OldstyleNums {
 		t.Error("NewFontFeature(\"onum\", 1) != OldstyleNums")
 	}
+	if NewFontFeature("dlig", 0) != NoDLigatures {
+		t.Error("NewFontFeature(\"dlig\", 0) != NoDLigatures")
+	}
 }
 
 // TestNewFontFeature_PanicShortTag verifies panic on too-short tag.
@@ -208,6 +211,7 @@ func TestPredefinedConstants_Tags(t *testing.T) {
 		{"NoKerning", NoKerning, [4]byte{'k', 'e', 'r', 'n'}, 0},
 		{"SmallCaps", SmallCaps, [4]byte{'s', 'm', 'c', 'p'}, 1},
 		{"OldstyleNums", OldstyleNums, [4]byte{'o', 'n', 'u', 'm'}, 1},
+		{"NoDLigatures", NoDLigatures, [4]byte{'d', 'l', 'i', 'g'}, 0},
 	}
 
 	for _, tt := range tests {
