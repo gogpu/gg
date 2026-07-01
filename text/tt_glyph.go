@@ -565,10 +565,10 @@ func (l *ttGlyphLoader) loadEmptyGlyphOutline(glyphID uint16, scale int32) *ttGl
 	descent := int32(l.font.os2Descender)
 	tsb := ascent // tsb = ascent - yMax, yMax=0 for empty glyph
 	vadvance := ascent - descent
-	phantomFU[0] = [2]int32{-int32(lsb), 0}              // xMin(0) - lsb
+	phantomFU[0] = [2]int32{-int32(lsb), 0}                  // xMin(0) - lsb
 	phantomFU[1] = [2]int32{-int32(lsb) + int32(advance), 0} // phantom[0].x + advance
-	phantomFU[2] = [2]int32{0, tsb}                       // yMax(0) + tsb = ascent
-	phantomFU[3] = [2]int32{0, tsb - vadvance}            // phantom[2].y - vadvance = descent
+	phantomFU[2] = [2]int32{0, tsb}                          // yMax(0) + tsb = ascent
+	phantomFU[3] = [2]int32{0, tsb - vadvance}               // phantom[2].y - vadvance = descent
 
 	totalPoints := ttPhantomPointCount // 0 contour points + 4 phantoms
 
