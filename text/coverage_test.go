@@ -2,26 +2,25 @@ package text
 
 import (
 	"testing"
-
-	"golang.org/x/image/font"
 )
 
-func TestMapHinting(t *testing.T) {
+func TestToFontHintingXimage(t *testing.T) {
+	// Verify that the ximage hinting conversion maps correctly.
 	tests := []struct {
 		name string
 		h    Hinting
-		want font.Hinting
+		want int // font.Hinting underlying int value
 	}{
-		{"none", HintingNone, font.HintingNone},
-		{"vertical", HintingVertical, font.HintingVertical},
-		{"full", HintingFull, font.HintingFull},
-		{"unknown defaults to full", Hinting(99), font.HintingFull},
+		{"none", HintingNone, 0},         // font.HintingNone
+		{"vertical", HintingVertical, 1}, // font.HintingVertical
+		{"full", HintingFull, 2},         // font.HintingFull
+		{"unknown defaults to none", Hinting(99), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mapHinting(tt.h)
+			got := int(toFontHintingXimage(tt.h))
 			if got != tt.want {
-				t.Errorf("mapHinting(%d) = %d, want %d", tt.h, got, tt.want)
+				t.Errorf("toFontHintingXimage(%d) = %d, want %d", tt.h, got, tt.want)
 			}
 		})
 	}

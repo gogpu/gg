@@ -1,14 +1,10 @@
 package text
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"sync"
-
-	gotextFont "github.com/go-text/typesetting/font"
-	ot "github.com/go-text/typesetting/font/opentype"
-	"github.com/go-text/typesetting/font/opentype/tables"
 )
 
 // FontSource represents a loaded font file.
@@ -186,8 +182,8 @@ func (s *FontSource) IsVariable() bool {
 		return false
 	}
 
-	fvarTable, _ := s.parseFvar()
-	return len(fvarTable.Axis) > 0
+	axes, _ := s.parseFvarOwn()
+	return len(axes) > 0
 }
 
 // VariationAxes returns the variation axes defined in the font.
@@ -204,24 +200,23 @@ func (s *FontSource) VariationAxes() []VariationAxis {
 		return nil
 	}
 
-	fvarTable, nameTable := s.parseFvar()
-	if len(fvarTable.Axis) == 0 {
+	axes, _ := s.parseFvarOwn()
+	if len(axes) == 0 {
 		return nil
 	}
 
-	axes := make([]VariationAxis, len(fvarTable.Axis))
-	for i, axis := range fvarTable.Axis {
-		tag := axis.Tag
-		axes[i] = VariationAxis{
-			Tag:     tagToBytes(tag),
-			Name:    axisName(tag, axis, nameTable),
-			Minimum: axis.Minimum,
-			Default: axis.Default,
-			Maximum: axis.Maximum,
+	result := make([]VariationAxis, len(axes))
+	for i, axis := range axes {
+		result[i] = VariationAxis{
+			Tag:     axis.Tag,
+			Name:    axisNameFromTag(axis.Tag),
+			Minimum: axis.MinValue,
+			Default: axis.DefaultValue,
+			Maximum: axis.MaxValue,
 		}
 	}
 
-	return axes
+	return result
 }
 
 // NamedInstances returns the predefined named instances in the font.
@@ -238,107 +233,214 @@ func (s *FontSource) NamedInstances() []NamedInstance {
 		return nil
 	}
 
-	fvarTable, nameTable := s.parseFvar()
-	if len(fvarTable.Instances) == 0 {
+	axes, instances := s.parseFvarOwn()
+	if len(instances) == 0 {
 		return nil
 	}
 
-	var instances []NamedInstance
-	for _, inst := range fvarTable.Instances {
+	// Parse name table for instance names.
+	tables, err := parseFontTables(s.data)
+	if err != nil {
+		return nil
+	}
+	nameData := tables["name"]
+
+	var result []NamedInstance
+	for _, inst := range instances {
 		name := ""
-		if nameTable != nil && inst.SubfamilyNameID != 0 {
-			name = nameTable.Name(tables.NameID(inst.SubfamilyNameID))
+		if nameData != nil && inst.subfamilyNameID != 0 {
+			name = lookupNameTableEntry(nameData, inst.subfamilyNameID)
 		}
 		if name == "" {
 			continue
 		}
 
 		var vars []FontVariation
-		for j, coord := range inst.Coordinates {
-			if j < len(fvarTable.Axis) {
+		for j, coord := range inst.coordinates {
+			if j < len(axes) {
 				vars = append(vars, FontVariation{
-					Tag:   tagToBytes(fvarTable.Axis[j].Tag),
+					Tag:   axes[j].Tag,
 					Value: coord,
 				})
 			}
 		}
 
-		instances = append(instances, NamedInstance{
+		result = append(result, NamedInstance{
 			Name:       name,
 			Variations: vars,
 		})
 	}
 
-	return instances
+	return result
 }
 
-// parseFvar parses the fvar and name tables from the raw font data.
-// Returns zero values on error (non-variable font or parse failure).
+// ownFvarInstance holds a named instance parsed from the fvar table.
+type ownFvarInstance struct {
+	subfamilyNameID uint16
+	coordinates     []float32
+}
+
+// parseFvarOwn parses the fvar table from raw font data using own binary parsing.
+// Returns the axes and named instances, or nil on error.
 // Caller must hold s.mu (at least RLock).
-func (s *FontSource) parseFvar() (tables.FvarRecords, *tables.Name) {
-	reader := bytes.NewReader(s.data)
-	ld, err := ot.NewLoader(reader)
+func (s *FontSource) parseFvarOwn() ([]fvarAxis, []ownFvarInstance) {
+	tables, err := parseFontTables(s.data)
 	if err != nil {
-		return tables.FvarRecords{}, nil
+		return nil, nil
 	}
 
-	// Parse fvar table.
-	raw, err := ld.RawTable(ot.MustNewTag("fvar"))
-	if err != nil {
-		return tables.FvarRecords{}, nil
+	fvarData, ok := tables["fvar"]
+	if !ok {
+		return nil, nil
 	}
 
-	fvar, _, err := tables.ParseFvar(raw)
-	if err != nil {
-		return tables.FvarRecords{}, nil
+	axes := parseFvarAxes(fvarData)
+	if len(axes) == 0 {
+		return nil, nil
 	}
 
-	// Parse name table for axis/instance names.
-	var nameTable *tables.Name
-	nameRaw, err := ld.RawTable(ot.MustNewTag("name"))
-	if err == nil {
-		nt, _, ntErr := tables.ParseName(nameRaw)
-		if ntErr == nil {
-			nameTable = &nt
+	instances := parseFvarInstances(fvarData, len(axes))
+	return axes, instances
+}
+
+// parseFvarInstances parses named instances from raw fvar table data.
+// Each instance record is 4 + axisCount*4 bytes (+ optional 2 bytes for postScriptNameID).
+//
+// fvar table layout after axes:
+//
+//	uint16 instanceCount
+//	uint16 instanceSize
+//	InstanceRecord[instanceCount]
+//
+// InstanceRecord:
+//
+//	uint16 subfamilyNameID
+//	uint16 flags
+//	Fixed  coordinates[axisCount] (4 bytes each, 16.16)
+//	[uint16 postScriptNameID] (optional, present if instanceSize > minSize)
+func parseFvarInstances(data []byte, axisCount int) []ownFvarInstance {
+	if len(data) < 14 {
+		return nil
+	}
+
+	axisArrayOffset := binary.BigEndian.Uint16(data[4:6])
+	numAxes := binary.BigEndian.Uint16(data[8:10])
+	axisSize := binary.BigEndian.Uint16(data[10:12])
+	instanceCount := binary.BigEndian.Uint16(data[12:14])
+
+	if instanceCount == 0 || axisSize < 20 {
+		return nil
+	}
+
+	// Instance size: if the table has an instanceSize field at offset 14.
+	instanceSize := 4 + axisCount*4 // minimum: subfamilyNameID + flags + coordinates
+	if len(data) >= 16 {
+		// Some fonts store instanceSize at offset 14 (after instanceCount).
+		// But per spec, it's part of the fvar header at a fixed position.
+		// The field at offset [4] is axesArrayOffset, [8] axisCount, [10] axisSize,
+		// [12] instanceCount, [14] instanceSize.
+		is := int(binary.BigEndian.Uint16(data[14:16]))
+		if is >= instanceSize {
+			instanceSize = is
 		}
 	}
 
-	return fvar.FvarRecords, nameTable
-}
-
-// tagToBytes converts an OpenType tag (uint32) to [4]byte.
-func tagToBytes(tag gotextFont.Tag) [4]byte {
-	return [4]byte{
-		byte(tag >> 24),
-		byte(tag >> 16),
-		byte(tag >> 8),
-		byte(tag),
+	// Instances start after axes.
+	instanceStart := int(axisArrayOffset) + int(numAxes)*int(axisSize)
+	if instanceStart+int(instanceCount)*instanceSize > len(data) {
+		return nil
 	}
+
+	instances := make([]ownFvarInstance, 0, instanceCount)
+	for i := range int(instanceCount) {
+		off := instanceStart + i*instanceSize
+		if off+4+axisCount*4 > len(data) {
+			break
+		}
+
+		inst := ownFvarInstance{
+			subfamilyNameID: binary.BigEndian.Uint16(data[off : off+2]),
+			coordinates:     make([]float32, axisCount),
+		}
+
+		for j := range axisCount {
+			coordOff := off + 4 + j*4
+			inst.coordinates[j] = fixed1616ToFloat32(data[coordOff:])
+		}
+
+		instances = append(instances, inst)
+	}
+
+	return instances
 }
 
-// axisName returns a human-readable name for a variation axis.
-// It first tries the font's name table, then falls back to well-known axis names.
-func axisName(tag gotextFont.Tag, _ tables.VariationAxisRecord, nameTable *tables.Name) string {
-	// The strid field on VariationAxisRecord is unexported in go-text,
-	// so we cannot look up per-axis names from the name table.
-	// Use well-known registered axis names as the primary source.
-	_ = nameTable // Future: if strid becomes exported, look up from name table.
+// lookupNameTableEntry finds a name entry by nameID in a raw name table.
+// Returns the first match found (preferring platform 3 = Windows, encoding 1 = Unicode BMP).
+func lookupNameTableEntry(nameData []byte, nameID uint16) string {
+	if len(nameData) < 6 {
+		return ""
+	}
 
+	count := binary.BigEndian.Uint16(nameData[2:4])
+	storageOff := binary.BigEndian.Uint16(nameData[4:6])
+
+	for i := range int(count) {
+		recOff := 6 + i*12
+		if recOff+12 > len(nameData) {
+			break
+		}
+
+		recNameID := binary.BigEndian.Uint16(nameData[recOff+6 : recOff+8])
+		if recNameID != nameID {
+			continue
+		}
+
+		platformID := binary.BigEndian.Uint16(nameData[recOff : recOff+2])
+		encodingID := binary.BigEndian.Uint16(nameData[recOff+2 : recOff+4])
+		length := binary.BigEndian.Uint16(nameData[recOff+8 : recOff+10])
+		offset := binary.BigEndian.Uint16(nameData[recOff+10 : recOff+12])
+
+		strStart := int(storageOff) + int(offset)
+		strEnd := strStart + int(length)
+		if strEnd > len(nameData) {
+			continue
+		}
+
+		raw := nameData[strStart:strEnd]
+
+		// Platform 3 (Windows), Encoding 1 (Unicode BMP): UTF-16BE.
+		if platformID == 3 && encodingID == 1 {
+			return decodeUTF16BE(raw)
+		}
+		// Platform 1 (Macintosh), Encoding 0 (Roman): ASCII/Latin-1.
+		if platformID == 1 && encodingID == 0 {
+			return string(raw)
+		}
+		// Platform 0 (Unicode): UTF-16BE.
+		if platformID == 0 {
+			return decodeUTF16BE(raw)
+		}
+	}
+
+	return ""
+}
+
+// axisNameFromTag returns a human-readable name for a variation axis tag.
+// Uses well-known registered axis names, falling back to the tag string.
+func axisNameFromTag(tag [4]byte) string {
 	switch tag {
-	case ot.MustNewTag("wght"):
+	case [4]byte{'w', 'g', 'h', 't'}:
 		return "Weight"
-	case ot.MustNewTag("wdth"):
+	case [4]byte{'w', 'd', 't', 'h'}:
 		return "Width"
-	case ot.MustNewTag("ital"):
+	case [4]byte{'i', 't', 'a', 'l'}:
 		return "Italic"
-	case ot.MustNewTag("slnt"):
+	case [4]byte{'s', 'l', 'n', 't'}:
 		return "Slant"
-	case ot.MustNewTag("opsz"):
+	case [4]byte{'o', 'p', 's', 'z'}:
 		return "Optical Size"
 	default:
-		// Return the tag as a readable 4-char string.
-		b := tagToBytes(tag)
-		return string(b[:])
+		return string(tag[:])
 	}
 }
 

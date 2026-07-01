@@ -146,12 +146,12 @@ func TestSetShaperNil(t *testing.T) {
 		SetShaper(original)
 	})
 
-	// Set to nil should reset to BuiltinShaper
+	// Set to nil should reset to OwnShaper (default, ADR-048 Phase 6).
 	SetShaper(nil)
 
 	current := GetShaper()
-	if _, ok := current.(*BuiltinShaper); !ok {
-		t.Errorf("GetShaper() after SetShaper(nil) should be *BuiltinShaper, got %T", current)
+	if _, ok := current.(*OwnShaper); !ok {
+		t.Errorf("GetShaper() after SetShaper(nil) should be *OwnShaper, got %T", current)
 	}
 }
 
@@ -162,9 +162,9 @@ func TestGetShaper(t *testing.T) {
 		t.Error("GetShaper() returned nil")
 	}
 
-	// Default should be BuiltinShaper
-	if _, ok := shaper.(*BuiltinShaper); !ok {
-		t.Errorf("default shaper should be *BuiltinShaper, got %T", shaper)
+	// Default should be OwnShaper (ADR-048 Phase 6).
+	if _, ok := shaper.(*OwnShaper); !ok {
+		t.Errorf("default shaper should be *OwnShaper, got %T", shaper)
 	}
 }
 

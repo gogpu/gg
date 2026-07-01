@@ -1,10 +1,11 @@
 package text
 
 // FontParser is an interface for font parsing backends.
-// This abstraction allows swapping the font parsing library
-// (e.g., golang.org/x/image/font/opentype vs a pure Go implementation).
+// This abstraction allows swapping the font parsing library.
 //
-// The default implementation uses golang.org/x/image/font/opentype.
+// The default implementation is ownParser (Pure Go, zero external deps).
+// The legacy "ximage" parser (golang.org/x/image) is available via
+// build tag "ximage" for backward compatibility.
 type FontParser interface {
 	// Parse parses font data (TTF or OTF) and returns a ParsedFont.
 	Parse(data []byte) (ParsedFont, error)
@@ -81,13 +82,14 @@ func (m FontMetrics) Height() float64 {
 }
 
 // parserRegistry holds registered font parsers.
-// The default parser is "ximage" (golang.org/x/image).
+// The default parser is "own" (Pure Go, zero external deps).
 var parserRegistry = map[string]FontParser{
-	"ximage": &ximageParser{},
+	"own": &ownParser{},
 }
 
 // defaultParserName is the name of the default parser.
-const defaultParserName = "ximage"
+// Changed from "ximage" to "own" as part of ADR-048 Phase 6.
+const defaultParserName = "own"
 
 // RegisterParser registers a custom font parser.
 // This allows users to provide their own parsing implementation.

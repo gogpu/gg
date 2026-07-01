@@ -153,7 +153,7 @@ func WithCollectionIndex(index int) SourceOption {
 }
 
 // WithParser specifies the font parser backend.
-// The default is "ximage" which uses golang.org/x/image/font/opentype.
+// The default is "own" which uses Pure Go binary parsing (ADR-048).
 //
 // Custom parsers can be registered with RegisterParser.
 // This allows using alternative font parsing libraries or

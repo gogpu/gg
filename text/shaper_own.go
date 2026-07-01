@@ -522,8 +522,5 @@ func parseLangTag(lang string) [4]byte {
 	}
 }
 
-func init() {
-	// OwnShaper is not set as the default — it must be explicitly selected
-	// via text.SetShaper(text.NewOwnShaper()). The default remains BuiltinShaper
-	// for backward compatibility. Phase 6 will make it the default.
-}
+// init is intentionally empty — OwnShaper is now the default shaper,
+// initialized via defaultOwnShaper in shaper.go (ADR-048 Phase 6).

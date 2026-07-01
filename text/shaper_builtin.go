@@ -1,12 +1,11 @@
 package text
 
-// BuiltinShaper provides text shaping using golang.org/x/image/font.
+// BuiltinShaper provides simple left-to-right text shaping.
 // It supports Latin, Cyrillic, Greek, CJK, and other scripts that don't
 // require complex text shaping (ligatures, contextual forms, etc.).
 //
-// For complex scripts like Arabic, Hebrew, or Indic languages that require
-// advanced shaping features (GSUB/GPOS tables), use SetShaper() with a
-// HarfBuzz-compatible implementation such as go-text/typesetting.
+// BuiltinShaper was the default shaper before ADR-048 Phase 6.
+// The default is now OwnShaper which provides GSUB/GPOS support.
 //
 // BuiltinShaper is stateless and safe for concurrent use.
 type BuiltinShaper struct{}
