@@ -188,9 +188,10 @@ func TestCurveAwareAET_RemoveExpiredSubpixel(t *testing.T) {
 	// Insert line edge: y 0..10
 	v := NewLineEdgeVariant(CurvePoint{X: 5, Y: 0}, CurvePoint{X: 5, Y: 10}, 0)
 	if v == nil {
-		t.Skip("NewLineEdgeVariant returned nil")
+		t.Fatal("NewLineEdgeVariant returned nil")
 	}
-	aet.Insert(*v)
+	edge := *v
+	aet.Insert(edge)
 
 	// BottomY for a line is LastY + 1; after RemoveExpiredSubpixel
 	// with large Y, the edge should be removed
@@ -207,7 +208,7 @@ func TestCurveAwareAET_AdvanceX(t *testing.T) {
 	// Create a diagonal line with non-zero slope
 	v := NewLineEdgeVariant(CurvePoint{X: 0, Y: 0}, CurvePoint{X: 20, Y: 20}, 0)
 	if v == nil {
-		t.Skip("NewLineEdgeVariant returned nil")
+		t.Fatal("NewLineEdgeVariant returned nil")
 	}
 	aet.Insert(*v)
 
@@ -341,9 +342,8 @@ func TestCurveAwareAET_StepCurves(t *testing.T) {
 	p2 := CurvePoint{X: 90, Y: 0}
 	variant := NewQuadraticEdgeVariant(p0, p1, p2, 0)
 	if variant == nil {
-		t.Skip("NewQuadraticEdgeVariant returned nil for test curve")
+		t.Skip("NewQuadraticEdgeVariant returned nil (degenerate input)")
 	}
-
 	aet.Insert(*variant)
 
 	// StepCurves should not panic

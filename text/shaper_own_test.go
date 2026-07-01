@@ -3,15 +3,13 @@ package text
 import (
 	"sync"
 	"testing"
-
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // ownTestFace creates a test Face using the own parser at size 16.
 func ownTestFace(t *testing.T) (Face, *FontSource) {
 	t.Helper()
 
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(t), WithParser("own"))
 	if err != nil {
 		t.Fatalf("failed to create font source with own parser: %v", err)
 	}
@@ -171,7 +169,7 @@ func TestOwnShaper_ClusterIndices(t *testing.T) {
 
 // TestOwnShaper_DifferentSizes tests shaping at various font sizes.
 func TestOwnShaper_DifferentSizes(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(t), WithParser("own"))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -204,7 +202,7 @@ func TestOwnShaper_DifferentSizes(t *testing.T) {
 // Both should produce similar results for simple Latin text without GSUB/GPOS.
 func TestOwnShaper_VsBuiltinShaper(t *testing.T) {
 	// Use own parser for both to ensure same font parsing.
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(t), WithParser("own"))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -807,7 +805,7 @@ func TestKern_ParseAndLookup(t *testing.T) {
 // TestOwnShaper_WithGoRegularFont tests shaping with Go Regular using own parser.
 // Go Regular has a GPOS table with kerning data.
 func TestOwnShaper_WithGoRegularFont(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(t), WithParser("own"))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -989,7 +987,7 @@ func TestSliceReplace(t *testing.T) {
 
 // TestOwnShaper_NoLigatures tests that disabling ligatures works.
 func TestOwnShaper_NoLigatures(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(t), WithParser("own"))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -1017,7 +1015,7 @@ func TestOwnShaper_NoLigatures(t *testing.T) {
 
 // BenchmarkOwnShape benchmarks OwnShaper with a standard sentence.
 func BenchmarkOwnShape(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(b), WithParser("own"))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -1041,7 +1039,7 @@ func BenchmarkOwnShape(b *testing.B) {
 
 // BenchmarkOwnShapeShort benchmarks shaping a short string.
 func BenchmarkOwnShapeShort(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(b), WithParser("own"))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}

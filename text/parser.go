@@ -4,8 +4,7 @@ package text
 // This abstraction allows swapping the font parsing library.
 //
 // The default implementation is ownParser (Pure Go, zero external deps).
-// The legacy "ximage" parser (golang.org/x/image) is available via
-// build tag "ximage" for backward compatibility.
+// Custom parsers can be registered via [RegisterParser].
 type FontParser interface {
 	// Parse parses font data (TTF or OTF) and returns a ParsedFont.
 	Parse(data []byte) (ParsedFont, error)

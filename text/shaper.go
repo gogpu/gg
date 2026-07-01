@@ -6,7 +6,7 @@ import "sync"
 // Implementations provide different levels of text shaping support:
 //   - OwnShaper: Pure Go shaper with GSUB/GPOS support (default, ADR-048)
 //   - BuiltinShaper: Simple LTR shaper for Latin, Cyrillic, Greek, CJK (no GSUB/GPOS)
-//   - GoTextShaper: HarfBuzz-level shaping via go-text/typesetting (opt-in)
+//   - BuiltinShaper: Simple LTR shaper for scripts without GSUB/GPOS (legacy)
 type Shaper interface {
 	// Shape converts text into positioned glyphs using the given face.
 	// The font size is obtained from face.Size().

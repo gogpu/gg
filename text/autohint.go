@@ -176,6 +176,32 @@ func autoHintOutline(outline *GlyphOutline, font ParsedFont, ppem float64, hinti
 	return false
 }
 
+// autoHintOutlineVar applies auto-hinting to a variable font outline using
+// pre-computed gvar-varied contour points. This is the variable-font
+// counterpart of autoHintOutline.
+//
+// The critical difference: autoHintOutline re-reads contour points from
+// the raw glyf table (which contains UNVARIED data). For variable fonts,
+// the contour points must have gvar deltas already applied. This function
+// uses the pre-varied contours directly, preserving the gvar modifications.
+//
+// variedContours may be nil (e.g., for empty glyphs or composite glyphs),
+// in which case this falls back to the static autoHintOutline path.
+func autoHintOutlineVar(outline *GlyphOutline, variedContours *GlyfContours, font ParsedFont, ppem float64, hinting Hinting) bool {
+	if outline == nil || len(outline.Segments) == 0 {
+		return false
+	}
+
+	// If we have pre-varied contour points, use them directly.
+	if variedContours != nil && len(variedContours.Points) > 0 {
+		return autoHintViaContoursPreloaded(outline, variedContours, font, ppem, hinting)
+	}
+
+	// Fallback: no pre-varied contours available (composite glyph, etc.)
+	// Use the static path which re-reads from glyf.
+	return autoHintOutline(outline, font, ppem, hinting)
+}
+
 // hintedEdgeMetrics captures the leftmost and rightmost horizontal edge
 // positions (original and hinted) from the auto-hinting pipeline. These
 // are used to compute adjusted advance widths per skrifa instance.rs:127-183.
@@ -292,6 +318,50 @@ func autoHintViaContours(outline *GlyphOutline, fontData []byte, font ParsedFont
 
 	// Set adjusted advance (convert from 26.6 to pixels, then round).
 	// Matches skrifa instance.rs:183: F26Dot6::from_bits(pix_round(advance)).to_f32()
+	outline.Advance = f26dot6ToFloat(f26dot6Round(adjustedAdvance))
+
+	return true
+}
+
+// autoHintViaContoursPreloaded applies auto-hinting using pre-loaded contour
+// points (typically gvar-varied for variable fonts). This avoids re-reading
+// contour data from the raw glyf table, which would lose gvar deltas.
+//
+// The logic is identical to autoHintViaContours except the contour source:
+// instead of ParseGlyfContours(fontData, gid), we use the provided contours.
+func autoHintViaContoursPreloaded(outline *GlyphOutline, contours *GlyfContours, font ParsedFont, ppem float64, hinting Hinting) bool {
+	if contours == nil || len(contours.Points) == 0 {
+		return false
+	}
+
+	// Apply auto-hinting on the (possibly gvar-varied) contour points.
+	hinted, edgeMetrics := autoHintContourPoints(contours, font, ppem, hinting)
+	if hinted == nil {
+		return false
+	}
+
+	// Compute adjusted advance width (skrifa instance.rs:127-183).
+	upm := font.UnitsPerEm()
+	fontUnitAdvance := int32(math.Round(font.GlyphAdvance(uint16(outline.GID), float64(upm))))
+	xScale := computeScale16dot16(ppem / float64(upm))
+
+	adjustedAdvance, pp1x := computeAdjustedAdvance(fontUnitAdvance, xScale, edgeMetrics)
+
+	// Translate outline points by -pp1x if the left phantom shifted.
+	if pp1x != 0 {
+		for i := range hinted.Points {
+			hinted.Points[i].X -= int16(pp1x)
+		}
+	}
+
+	// Convert hinted contour points to outline segments for rendering.
+	hintedOutline := contoursToOutline(hinted)
+
+	// Transfer results: replace the outline's segments and bounds.
+	outline.Segments = hintedOutline.Segments
+	refreshOutlineBounds(outline)
+
+	// Set adjusted advance.
 	outline.Advance = f26dot6ToFloat(f26dot6Round(adjustedAdvance))
 
 	return true

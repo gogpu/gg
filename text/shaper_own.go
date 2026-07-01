@@ -1,7 +1,7 @@
 // OwnShaper — Pure Go text shaper with GSUB/GPOS support.
 //
 // OwnShaper implements the Shaper interface with direct binary parsing of
-// OpenType GSUB and GPOS tables. It replaces GoTextShaper (go-text/typesetting)
+// OpenType GSUB and GPOS tables, replacing the legacy GoTextShaper
 // as part of the Pure Go Font Stack (ADR-048, Phase 5).
 //
 // Shaping pipeline:
@@ -270,20 +270,34 @@ func runeToGlyphs(runes []rune, sc *ownShaperCache) []shapingGlyph {
 }
 
 // collectDesiredFeatures determines which GSUB and GPOS feature tags to apply.
-// Default: 'liga' (ligatures) for GSUB, 'kern' (kerning) for GPOS.
 // User features can enable/disable individual features.
+//
+// Default GSUB features: ccmp, liga, clig, rlig, dlig.
+//
+// Why 'dlig': Some major fonts (e.g. Times New Roman) place standard Latin
+// ligatures (fi, fl, ffi) under 'dlig' rather than 'liga'. Without 'dlig',
+// these common ligatures would not be applied. Microsoft DirectWrite and
+// most desktop applications enable these ligatures by default.
+// Users who want strictly HarfBuzz-compatible behavior can disable 'dlig'
+// explicitly with text.NoDLigatures.
+//
+// Default GPOS features: kern.
 func collectDesiredFeatures(userFeatures []FontFeature) (gsubTags, gposTags [][4]byte) {
 	// Default features.
+	ccmp := [4]byte{'c', 'c', 'm', 'p'}
 	liga := [4]byte{'l', 'i', 'g', 'a'}
 	kern := [4]byte{'k', 'e', 'r', 'n'}
 	clig := [4]byte{'c', 'l', 'i', 'g'}
 	rlig := [4]byte{'r', 'l', 'i', 'g'}
+	dlig := [4]byte{'d', 'l', 'i', 'g'}
 
 	// GSUB defaults.
 	gsubEnabled := map[[4]byte]bool{
+		ccmp: true,
 		liga: true,
 		clig: true,
 		rlig: true,
+		dlig: true,
 	}
 
 	// GPOS defaults.
@@ -322,6 +336,7 @@ func collectDesiredFeatures(userFeatures []FontFeature) (gsubTags, gposTags [][4
 // isGSUBFeature returns true if the feature tag is typically a GSUB feature.
 func isGSUBFeature(tag [4]byte) bool {
 	gsubFeatures := map[[4]byte]bool{
+		{'c', 'c', 'm', 'p'}: true, // Glyph composition/decomposition
 		{'l', 'i', 'g', 'a'}: true, // Standard ligatures
 		{'c', 'l', 'i', 'g'}: true, // Contextual ligatures
 		{'r', 'l', 'i', 'g'}: true, // Required ligatures

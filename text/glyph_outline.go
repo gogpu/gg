@@ -2,6 +2,7 @@
 package text
 
 import (
+	"encoding/binary"
 	"math"
 	"sort"
 )
@@ -320,12 +321,7 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 	case *ownParsedFont:
 		outline, err = e.extractFromOwn(f, gid, size)
 	default:
-		// Try registered sfnt extractor for ximage or other font types.
-		if registeredSfntExtractor != nil {
-			outline, err = registeredSfntExtractor.extract(parsedFont, gid, size, hinting)
-		} else {
-			return nil, ErrUnsupportedFontType
-		}
+		return nil, ErrUnsupportedFontType
 	}
 	if err != nil {
 		return nil, err
@@ -355,22 +351,70 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 	return outline, nil
 }
 
-// sfntOutlineExtractor is an interface for extracting outlines from sfnt-based
-// fonts (ximageParsedFont). This decouples glyph_outline.go from x/image/font/sfnt.
-// The implementation is registered in parser_ximage.go init().
-type sfntOutlineExtractor interface {
-	extract(parsedFont ParsedFont, gid GlyphID, size float64, hinting Hinting) (*GlyphOutline, error)
-}
+// ExtractOutlineHintedVar extracts a glyph outline with font variations AND
+// hinting applied in a single unified path. This matches skrifa's load_simple
+// architecture where gvar deltas are applied to unscaled points BEFORE
+// scaling and TT bytecode hinting.
+//
+// This fixes the variable font rendering bug where variable fonts skipped
+// TT bytecode hinting and auto-hinting, causing them to render bolder
+// than static fonts at the same weight.
+//
+// The hinting priority chain (same as static fonts):
+//  1. TT bytecode hinting with gvar-varied unscaled points
+//  2. Auto-hinter on the gvar-varied outline
+//  3. Grid-fit fallback
+//
+// When variations is nil or empty, this produces identical output to
+// ExtractOutlineHinted (delegates to the static path).
+//
+// Reference: skrifa glyf/mod.rs:584-782 (load_simple — one path for both)
+func (e *OutlineExtractor) ExtractOutlineHintedVar(
+	parsedFont ParsedFont,
+	gid GlyphID,
+	size float64,
+	hinting Hinting,
+	variations []FontVariation,
+) (*GlyphOutline, error) {
+	// If no variations, delegate to the static path.
+	if len(variations) == 0 {
+		return e.ExtractOutlineHinted(parsedFont, gid, size, hinting)
+	}
 
-// registeredSfntExtractor is set by parser_ximage.go init() when compiled in.
-// This allows the outline extractor to handle ximageParsedFont without
-// a hard dependency on x/image/font/sfnt.
-var registeredSfntExtractor sfntOutlineExtractor
+	ownFont, ok := parsedFont.(*ownParsedFont)
+	if !ok {
+		return nil, ErrUnsupportedFontType
+	}
 
-// RegisterSfntExtractor registers the sfnt outline extractor.
-// Called by parser_ximage.go init().
-func RegisterSfntExtractor(e sfntOutlineExtractor) {
-	registeredSfntExtractor = e
+	// Extract the gvar-varied outline AND the varied contour points.
+	// Both are needed: the outline for the final result, and the contours
+	// for the auto-hinter fallback (which must operate on gvar-varied points,
+	// not re-read the original unvaried glyf data).
+	outline, variedContours, err := e.extractFromOwnVariableWithContours(ownFont, gid, size, variations)
+	if err != nil {
+		return nil, err
+	}
+
+	if outline == nil || hinting == HintingNone {
+		return outline, nil
+	}
+
+	// Priority 1: TT bytecode hinting with gvar-varied unscaled points.
+	// This runs gvar deltas on unscaled points, then scales to 26.6,
+	// then runs the TT interpreter — exactly matching skrifa load_simple.
+	if ttOutline := tryTTBytecodeHintingVar(parsedFont, gid, size, variations); ttOutline != nil && len(ttOutline.Segments) > 0 {
+		return ttOutline, nil
+	}
+
+	// Priority 2: Auto-hinter on the gvar-varied outline.
+	// Pass the pre-varied contour points so the auto-hinter operates on
+	// gvar-modified coordinates, not the original unvaried glyf data.
+	// This fixes the bug where gvar deltas were computed correctly but
+	// lost when the auto-hinter re-read contours from the raw font.
+	if !autoHintOutlineVar(outline, variedContours, parsedFont, size, hinting) {
+		gridFitOutline(outline, hinting)
+	}
+	return outline, nil
 }
 
 // updateBounds updates the min/max bounds.
@@ -643,6 +687,150 @@ func (e *OutlineExtractor) extractFromOwn(f *ownParsedFont, gid GlyphID, size fl
 	return outline, nil
 }
 
+// extractFromOwnVariableWithContours extracts a glyph outline with font
+// variations applied and also returns the gvar-varied GlyfContours.
+// The contours are needed by the auto-hinter fallback, which must operate
+// on gvar-modified coordinates rather than re-reading unvaried glyf data.
+//
+// Returns (outline, variedContours, err). variedContours is nil for empty
+// glyphs or on error.
+func (e *OutlineExtractor) extractFromOwnVariableWithContours(
+	f *ownParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) (*GlyphOutline, *GlyfContours, error) {
+	outline, contours, err := e.extractFromOwnVariableImpl(f, gid, size, variations)
+	return outline, contours, err
+}
+
+// extractFromOwnVariable extracts a glyph outline with font variations
+// applied (gvar/HVAR). This replaces the deleted ExtractOutlineGoText
+// which used an external library for outline extraction.
+//
+// The approach:
+//  1. Parse raw glyf contour points (Y-UP font units, with phantom points)
+//  2. Apply gvar deltas via ownParsedFont.applyVariations
+//  3. Convert modified points to OutlineSegments (Y-UP → Y-DOWN)
+//  4. Compute variation-aware advance from HVAR
+func (e *OutlineExtractor) extractFromOwnVariable(
+	f *ownParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) (*GlyphOutline, error) {
+	outline, _, err := e.extractFromOwnVariableImpl(f, gid, size, variations)
+	return outline, err
+}
+
+// extractFromOwnVariableImpl is the shared implementation for
+// extractFromOwnVariable and extractFromOwnVariableWithContours.
+// Returns (outline, variedContours, err).
+func (e *OutlineExtractor) extractFromOwnVariableImpl(
+	f *ownParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) (*GlyphOutline, *GlyfContours, error) {
+	upem := f.UnitsPerEm()
+	if upem == 0 {
+		return nil, nil, &FontError{Reason: "own parser: zero unitsPerEm"}
+	}
+
+	// Get variation-aware advance.
+	var advance float64
+	if vap, ok := ParsedFont(f).(VariableAdvanceProvider); ok {
+		advance = vap.GlyphAdvanceVar(uint16(gid), size, variations)
+	} else {
+		advance = f.GlyphAdvance(uint16(gid), size)
+	}
+
+	// Parse raw contour points with phantom points for gvar.
+	glyfData, ok := f.tables["glyf"]
+	if !ok {
+		return nil, nil, &FontError{Reason: "own parser: missing glyf table"}
+	}
+	locaData, ok := f.tables["loca"]
+	if !ok {
+		return nil, nil, &FontError{Reason: "own parser: missing loca table"}
+	}
+	headData, ok := f.tables["head"]
+	if !ok || len(headData) < 54 {
+		return nil, nil, &FontError{Reason: "own parser: missing head table"}
+	}
+	isLongLoca := binary.BigEndian.Uint16(headData[50:52]) != 0
+
+	contours, err := extractGlyfContourOwn(glyfData, locaData, int(gid), isLongLoca)
+	if err != nil {
+		return nil, nil, err
+	}
+	if contours == nil || len(contours.Points) == 0 {
+		return &GlyphOutline{
+			GID:     gid,
+			Type:    GlyphTypeOutline,
+			Advance: float32(advance),
+		}, nil, nil
+	}
+
+	// Build points array for applyVariations: [x, y] pairs + 4 phantom points.
+	nPts := len(contours.Points)
+	points := make([][2]int32, nPts+4)
+	for i, pt := range contours.Points {
+		points[i] = [2]int32{int32(pt.X), int32(pt.Y)}
+	}
+
+	// Compute hmtx advance for phantom points.
+	var hmtxAdv int32
+	f.ensureHmtx()
+	if f.hmtxParsed && f.hmtxAdv != nil {
+		hmtxAdv = int32(hmtxAdvance(f.hmtxAdv, f.numHMetrics, uint16(gid)))
+	}
+
+	// Phantom points: [nPts+0]=origin, [nPts+1]=advance, [nPts+2/3]=vertical.
+	points[nPts] = [2]int32{0, 0}
+	points[nPts+1] = [2]int32{hmtxAdv, 0}
+	points[nPts+2] = [2]int32{0, 0}
+	points[nPts+3] = [2]int32{0, 0}
+
+	// Apply gvar deltas.
+	f.applyVariations(uint16(gid), points, contours.EndPts, variations)
+
+	// Write modified points back to contours.
+	for i := range contours.Points {
+		contours.Points[i].X = int16(points[i][0])
+		contours.Points[i].Y = int16(points[i][1])
+	}
+
+	// Scale and convert to segments.
+	scale := size / float64(upem)
+	segments := contourPointsToSegments(contours, scale)
+	if len(segments) == 0 {
+		return &GlyphOutline{
+			GID:     gid,
+			Type:    GlyphTypeOutline,
+			Advance: float32(advance),
+		}, contours, nil
+	}
+
+	outline := &GlyphOutline{
+		Segments: segments,
+		GID:      gid,
+		Type:     GlyphTypeOutline,
+		Advance:  float32(advance),
+	}
+
+	minX, minY := float64(1e10), float64(1e10)
+	maxX, maxY := float64(-1e10), float64(-1e10)
+	for _, seg := range segments {
+		for j := range segPointCount(seg.Op) {
+			updateBounds(seg.Points[j], &minX, &minY, &maxX, &maxY)
+		}
+	}
+	outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
+
+	return outline, contours, nil
+}
+
 // contourPointsToSegments converts raw TrueType glyf contour points to
 // OutlineSegment slices. Coordinates are scaled from font units to ppem
 // and Y is negated (Y-UP → Y-DOWN) to match sfnt.LoadGlyph output.
@@ -732,24 +920,17 @@ func contourPointsToSegments(contours *GlyfContours, scale float64) []OutlineSeg
 	return segments
 }
 
-// tryTTBytecodeHintingGeneric attempts TT bytecode hinting for any font type
-// that implements RawFontDataProvider. This is a generic version of
-// tryTTBytecodeHinting that works with both ximageParsedFont and ownParsedFont.
+// tryTTBytecodeHintingGeneric attempts TT bytecode hinting for an ownParsedFont.
 //
 // The TT bytecode hinting path requires:
 //  1. Raw font data (for loading fpgm/prep programs and glyph bytecode)
 //  2. A ttHintCache (lazily initialized from the raw data)
-//
-// Both ximageParsedFont and ownParsedFont implement loadTTHintCache().
 func tryTTBytecodeHintingGeneric(parsedFont ParsedFont, gid GlyphID, size float64) *GlyphOutline {
 	// Get the TT hint cache based on font type.
 	var cache *ttHintCache
-	switch f := parsedFont.(type) {
-	case *ximageParsedFont:
+	if f, ok := parsedFont.(*ownParsedFont); ok {
 		cache = f.loadTTHintCache()
-	case *ownParsedFont:
-		cache = f.loadTTHintCache()
-	default:
+	} else {
 		return nil
 	}
 	if cache == nil {

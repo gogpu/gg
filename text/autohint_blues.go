@@ -4,9 +4,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-
-	"golang.org/x/image/font/sfnt"
-	"golang.org/x/image/math/fixed"
 )
 
 // Blue zone detection and scaling for auto-hinting.
@@ -110,55 +107,27 @@ func computeBlueZones(font ParsedFont, script *scriptClass) []blueZone {
 //
 // See FreeType aflatin.c:314-800 af_latin_metrics_init_blues.
 // See skrifa metrics/blues.rs compute_default_blues.
-//
-//nolint:gocognit,gocyclo,cyclop // FreeType aflatin.c port — algorithmic complexity is inherent
 func computeDefaultBlues(font ParsedFont, script *scriptClass) []blueZone {
-	// Determine UPM and whether we have sfnt (ximage) access.
-	xiFont, isXimage := font.(*ximageParsedFont)
-
-	var upm int
-	if isXimage {
-		upm = int(xiFont.font.UnitsPerEm())
-	} else {
-		upm = font.UnitsPerEm()
-	}
+	upm := font.UnitsPerEm()
 	if upm == 0 {
 		return nil
 	}
 	flatThreshold := int32(upm / 14)
 
-	// Get raw font data for contour-based analysis (needed for LONG zones
-	// and as the sole path for ownParsedFont).
+	// Get raw font data for contour-based analysis.
 	var rawFontData []byte
 	if provider, ok := font.(RawFontDataProvider); ok {
 		rawFontData = provider.RawFontData()
 	}
-
-	// ownParsedFont requires raw data for outline extraction.
-	if !isXimage && rawFontData == nil {
+	if rawFontData == nil {
 		return nil
 	}
-
-	// Determine if any zone needs LONG processing.
-	needsContours := false
-	for _, spec := range script.blues {
-		if spec.flags&blueZoneLong != 0 {
-			needsContours = true
-			break
-		}
-	}
-	// If we need contours but don't have raw data, fall back to sfnt path.
-	useContours := needsContours && rawFontData != nil
-
-	ppem := fixed.Int26_6(upm * 64) // Load at design size (for sfnt path).
-	var buf sfnt.Buffer
 
 	var zones []blueZone
 
 	for _, spec := range script.blues {
 		var flats, rounds []int32
 		isTop := spec.flags.isTopLike()
-		isLong := spec.flags&blueZoneLong != 0
 
 		// Split the blue character string into individual characters.
 		chars := strings.Fields(spec.chars)
@@ -174,17 +143,8 @@ func computeDefaultBlues(font ParsedFont, script *scriptClass) []blueZone {
 				continue
 			}
 
-			// Measure blue character — use contour path for LONG zones, sfnt for others.
-			var bestY int32
-			var isRound, measured bool
-			if isXimage && (!useContours || !isLong) {
-				// sfnt path: use LoadGlyph for fast Y-extremum extraction.
-				bestY, isRound, measured = measureBlueCharSfnt(xiFont, &buf, sfnt.GlyphIndex(gid), ppem, isTop, flatThreshold)
-			} else if rawFontData != nil {
-				// Contour path: used for LONG zones (both parsers) and
-				// all zones for ownParsedFont.
-				bestY, isRound, measured = measureBlueCharContour(rawFontData, GlyphID(gid), isTop, flatThreshold, int32(upm))
-			}
+			// Measure blue character using raw contour points.
+			bestY, isRound, measured := measureBlueCharContour(rawFontData, GlyphID(gid), isTop, flatThreshold, int32(upm))
 			if !measured {
 				continue
 			}
@@ -250,24 +210,6 @@ func computeBlueMedians(flats, rounds []int32) (blueRef, blueShoot int32) {
 	default:
 		return flats[len(flats)/2], rounds[len(rounds)/2]
 	}
-}
-
-// measureBlueCharSfnt measures a blue reference character via sfnt.LoadGlyph.
-// Returns (bestY, isRound, ok).
-func measureBlueCharSfnt(xiFont *ximageParsedFont, buf *sfnt.Buffer, gid sfnt.GlyphIndex,
-	ppem fixed.Int26_6, isTop bool, flatThreshold int32) (int32, bool, bool) {
-	segments, err := xiFont.font.LoadGlyph(buf, gid, ppem, nil)
-	if err != nil || len(segments) == 0 {
-		return 0, false, false
-	}
-
-	bestY, hasPoints := findBestY(segments, isTop)
-	if !hasPoints {
-		return 0, false, false
-	}
-
-	isRound := classifyRoundFlat(segments, isTop, flatThreshold)
-	return bestY, isRound, true
 }
 
 // measureBlueCharContour measures a blue reference character using raw
@@ -672,31 +614,21 @@ func classifyRoundFlatContour(contour []ContourPoint,
 // See skrifa metrics/blues.rs compute_cjk_blues.
 // See FreeType afcjk.c:277.
 //
-//nolint:gocognit,gocyclo,cyclop // FreeType afcjk.c port — CJK blue zone detection
+//nolint:gocognit // FreeType afcjk.c port — CJK blue zone detection
 func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
-	xiFont, isXimage := font.(*ximageParsedFont)
-
-	var upm int
-	if isXimage {
-		upm = int(xiFont.font.UnitsPerEm())
-	} else {
-		upm = font.UnitsPerEm()
-	}
+	upm := font.UnitsPerEm()
 	if upm == 0 {
 		return nil
 	}
 
-	// Get raw font data for contour-based measurement (ownParsedFont path).
+	// Get raw font data for contour-based measurement.
 	var rawFontData []byte
 	if provider, ok := font.(RawFontDataProvider); ok {
 		rawFontData = provider.RawFontData()
 	}
-	if !isXimage && rawFontData == nil {
+	if rawFontData == nil {
 		return nil
 	}
-
-	ppem := fixed.Int26_6(upm * 64)
-	var buf sfnt.Buffer
 
 	var zones []blueZone
 
@@ -723,7 +655,7 @@ func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
 			if gid == 0 {
 				continue
 			}
-			if bestY, ok := measureCJKCharY(isXimage, xiFont, &buf, rawFontData, gid, ppem, isTop); ok {
+			if bestY, ok := findBestYContour(rawFontData, GlyphID(gid), isTop); ok {
 				fills = append(fills, bestY)
 			}
 		}
@@ -737,7 +669,7 @@ func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
 			if gid == 0 {
 				continue
 			}
-			if bestY, ok := measureCJKCharY(isXimage, xiFont, &buf, rawFontData, gid, ppem, isTop); ok {
+			if bestY, ok := findBestYContour(rawFontData, GlyphID(gid), isTop); ok {
 				flatsSlice = append(flatsSlice, bestY)
 			}
 		}
@@ -775,73 +707,6 @@ func computeCJKBlues(font ParsedFont, script *scriptClass) []blueZone {
 	return zones
 }
 
-// findBestY finds the Y-extremum from on-curve points of a glyph.
-// For top zones, returns the maximum Y; for bottom zones, the minimum Y.
-// Returns the value in font units (Y-up convention).
-func findBestY(segments []sfnt.Segment, isTop bool) (int32, bool) {
-	bestY := int32(0)
-	hasPoints := false
-
-	for _, seg := range segments {
-		pointCount := 0
-		switch seg.Op {
-		case sfnt.SegmentOpMoveTo, sfnt.SegmentOpLineTo:
-			pointCount = 1
-		case sfnt.SegmentOpQuadTo:
-			pointCount = 2
-		case sfnt.SegmentOpCubeTo:
-			pointCount = 3
-		}
-		for j := range pointCount {
-			// Only check on-curve points.
-			isOnCurve := true
-			switch seg.Op {
-			case sfnt.SegmentOpQuadTo:
-				isOnCurve = j == 1
-			case sfnt.SegmentOpCubeTo:
-				isOnCurve = j == 2
-			}
-			if !isOnCurve {
-				continue
-			}
-
-			// sfnt.LoadGlyph returns Y-down coordinates in 26.6 fixed-point.
-			// Negate and convert to font units (Y-up, integer).
-			y := -int32(seg.Args[j].Y) / 64
-
-			switch {
-			case !hasPoints:
-				bestY = y
-				hasPoints = true
-			case isTop && y > bestY:
-				bestY = y
-			case !isTop && y < bestY:
-				bestY = y
-			}
-		}
-	}
-
-	return bestY, hasPoints
-}
-
-// measureCJKCharY measures the Y-extremum for a CJK blue zone character.
-// Uses sfnt.LoadGlyph when available (ximage), otherwise falls back to
-// raw contour points (own parser). Returns (bestY, ok).
-func measureCJKCharY(isXimage bool, xiFont *ximageParsedFont, buf *sfnt.Buffer,
-	rawFontData []byte, gid uint16, ppem fixed.Int26_6, isTop bool) (int32, bool) {
-	if isXimage {
-		segments, err := xiFont.font.LoadGlyph(buf, sfnt.GlyphIndex(gid), ppem, nil)
-		if err != nil || len(segments) == 0 {
-			return 0, false
-		}
-		return findBestY(segments, isTop)
-	}
-	if rawFontData != nil {
-		return findBestYContour(rawFontData, GlyphID(gid), isTop)
-	}
-	return 0, false
-}
-
 // findBestYContour finds the Y-extremum from raw glyf contour points.
 // This is the contour-based equivalent of findBestY (which uses sfnt segments).
 // Coordinates are in Y-UP font units (raw glyf data, no conversion needed).
@@ -871,123 +736,6 @@ func findBestYContour(fontData []byte, gid GlyphID, isTop bool) (int32, bool) {
 	}
 
 	return bestY, hasPoints
-}
-
-// classifyRoundFlat determines whether the extremum of a glyph is
-// a round feature (curve) or a flat feature (straight segment).
-// Simplified version of skrifa's on-curve segment analysis.
-//
-//nolint:gocognit,gocyclo,cyclop,nestif // FreeType port — extremum search with near-point collection
-func classifyRoundFlat(segments []sfnt.Segment, isTop bool, flatThreshold int32) bool {
-	// Find the extremum Y value.
-	extremumY := int32(0)
-	hasPoints := false
-
-	for _, seg := range segments {
-		for j := range segPointCountForOp(seg.Op) {
-			if !isOnCurveForOp(seg.Op, j) {
-				continue
-			}
-			y := -int32(seg.Args[j].Y) / 64
-			switch {
-			case !hasPoints:
-				extremumY = y
-				hasPoints = true
-			case isTop && y > extremumY:
-				extremumY = y
-			case !isTop && y < extremumY:
-				extremumY = y
-			}
-		}
-	}
-
-	if !hasPoints {
-		return false
-	}
-
-	// Collect on-curve points near the extremum (within 5 font units).
-	var nearXMin, nearXMax int32
-	nearCount := 0
-	const nearThreshold = 5
-
-	for _, seg := range segments {
-		for j := range segPointCountForOp(seg.Op) {
-			if !isOnCurveForOp(seg.Op, j) {
-				continue
-			}
-			y := -int32(seg.Args[j].Y) / 64
-			x := int32(seg.Args[j].X) / 64
-
-			dy := y - extremumY
-			if dy < 0 {
-				dy = -dy
-			}
-			if dy <= nearThreshold {
-				if nearCount == 0 {
-					nearXMin = x
-					nearXMax = x
-				} else {
-					if x < nearXMin {
-						nearXMin = x
-					}
-					if x > nearXMax {
-						nearXMax = x
-					}
-				}
-				nearCount++
-			}
-		}
-	}
-
-	// If the horizontal span of on-curve points at the extremum is large
-	// enough, it's flat. Otherwise, check for curves.
-	if nearCount >= 2 {
-		span := nearXMax - nearXMin
-		if span < 0 {
-			span = -span
-		}
-		if span > flatThreshold {
-			return false // flat
-		}
-	}
-
-	// Check for curves at the extremum.
-	return hasRoundFeature(segments)
-}
-
-// segPointCountForOp returns the number of points for a segment operation.
-func segPointCountForOp(op sfnt.SegmentOp) int {
-	switch op {
-	case sfnt.SegmentOpMoveTo, sfnt.SegmentOpLineTo:
-		return 1
-	case sfnt.SegmentOpQuadTo:
-		return 2
-	case sfnt.SegmentOpCubeTo:
-		return 3
-	}
-	return 0
-}
-
-// isOnCurveForOp returns whether point index j is on-curve for the given op.
-func isOnCurveForOp(op sfnt.SegmentOp, j int) bool {
-	switch op {
-	case sfnt.SegmentOpQuadTo:
-		return j == 1
-	case sfnt.SegmentOpCubeTo:
-		return j == 2
-	}
-	return true
-}
-
-// hasRoundFeature checks if a glyph has a round feature at the top/bottom.
-// A round feature means the extremum is reached by a curve, not a flat line.
-func hasRoundFeature(segments []sfnt.Segment) bool {
-	for _, seg := range segments {
-		if seg.Op == sfnt.SegmentOpQuadTo || seg.Op == sfnt.SegmentOpCubeTo {
-			return true
-		}
-	}
-	return false
 }
 
 // adjustBlueZonesByIndex adjusts overlapping blue zones using an index-based

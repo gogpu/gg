@@ -144,6 +144,88 @@ func (c *ttHintCache) hintedAdvanceWidth(glyphID uint16, ppem int32) (float64, b
 	return float64(advance26dot6) / 64.0, true
 }
 
+// hintGlyphOutlineVar loads, applies gvar deltas, hints, and returns the
+// glyph outline for variable fonts. This is the variable-font counterpart
+// of hintGlyphOutline — it applies gvar deltas to unscaled points BEFORE
+// scaling and hinting, matching skrifa load_simple (lines 647-773).
+//
+// Returns nil, nil for glyphs that cannot be hinted.
+//
+//nolint:nilnil // nil result = "no hintable outline"
+func (c *ttHintCache) hintGlyphOutlineVar(
+	glyphID uint16,
+	ppem int32,
+	font *ownParsedFont,
+	variations []FontVariation,
+) (*ttGlyphOutline, error) {
+	instance, err := c.getInstance(ppem)
+	if err != nil {
+		return nil, err
+	}
+	if instance == nil {
+		return nil, nil
+	}
+
+	// Check if hinting was disabled by the prep program.
+	if !instance.isEnabled() {
+		return nil, nil
+	}
+
+	scale := instance.scale
+
+	// Load glyph outline with gvar deltas applied to unscaled points.
+	outline, err := c.loader.loadGlyphOutlineVar(glyphID, scale, font, variations)
+	if err != nil {
+		return nil, err
+	}
+	if outline == nil {
+		return nil, nil
+	}
+
+	// Run the bytecode interpreter on the varied+scaled points.
+	if err := instance.hintGlyph(outline); err != nil {
+		// Non-pedantic: return unhinted outline on error.
+		return outline, nil //nolint:nilerr // intentional: use unhinted outline on hinting failure
+	}
+
+	return outline, nil
+}
+
+// tryTTBytecodeHintingVar attempts TT bytecode hinting for a variable font
+// glyph. This applies gvar deltas to unscaled points before scaling and
+// hinting — matching skrifa's unified load_simple path.
+//
+// This is used by ExtractOutlineHintedVar to provide the same hinting
+// quality for variable fonts as for static fonts.
+func tryTTBytecodeHintingVar(
+	parsedFont ParsedFont,
+	gid GlyphID,
+	size float64,
+	variations []FontVariation,
+) *GlyphOutline {
+	ownFont, ok := parsedFont.(*ownParsedFont)
+	if !ok {
+		return nil
+	}
+
+	cache := ownFont.loadTTHintCache()
+	if cache == nil {
+		return nil
+	}
+
+	ppem := int32(size)
+	if ppem <= 0 {
+		return nil
+	}
+
+	hinted, err := cache.hintGlyphOutlineVar(uint16(gid), ppem, ownFont, variations)
+	if err != nil || hinted == nil {
+		return nil
+	}
+
+	return ttHintedOutlineToGlyphOutline(hinted, gid)
+}
+
 // ttHintedOutlineToGlyphOutline converts a TT-hinted outline to the public
 // GlyphOutline format used by the rendering pipeline. The hinted points
 // replace the sfnt-loaded outline for professional quality rendering.

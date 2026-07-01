@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, **pixel-perfect mode** (`SetAntiAlias(false)` — dedicated NoAAFiller, Skia/Cairo/tiny-skia pattern), CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | TrueType fonts, **variable font support** (`WithVariations` — weight/width/slant axes, gvar/HVAR interpolation via go-text), MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks — GPU + CPU), **per-glyph rendering** (fractional advances, Skia linearMetrics pattern), **OpenType font features** (`WithFeatures(TabularNums, NoLigatures)` — tnum, kern, smcp, onum via HarfBuzz), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (auto-hinter + CJK vertical-only), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, HarfBuzz shaping, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
+| **Text** | **Pure Go font stack** (own cmap/hmtx/GSUB/GPOS/gvar/avar parsers, TrueType bytecode interpreter — skrifa golden parity 624/624 diff=0), **variable font support** (`WithVariations` — weight/width/slant axes, own gvar/HVAR interpolation), MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks — GPU + CPU), **per-glyph rendering** (fractional advances, Skia linearMetrics pattern), **OpenType font features** (`WithFeatures(TabularNums, NoLigatures)` — own GSUB/GPOS shaper, 5-10x faster than HarfBuzz), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (enterprise auto-hinter + TrueType bytecode interpreter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, **HiDPI-aware damage tracking** (logical→physical scaling for OS compositor), damage-aware multi-rect sub-region updates, per-draw dynamic scissor ADR-028) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
@@ -343,7 +343,7 @@ gpuR.RenderScene(s)
 
 ### Text Rendering
 
-Full Unicode support with font fallback and optional HarfBuzz-level shaping:
+Full Unicode support with font fallback and built-in GSUB/GPOS shaping:
 
 ```go
 // Font composition
@@ -360,10 +360,8 @@ multiFace, _ := text.NewMultiFace(
 dc.SetFont(multiFace)
 dc.DrawString("Hello World! Nice day!", 50, 100)
 
-// Optional: enable HarfBuzz shaping for ligatures, kerning, complex scripts
-shaper := text.NewGoTextShaper()
-text.SetShaper(shaper)
-defer text.SetShaper(nil)
+// Built-in GSUB/GPOS shaping (ligatures, kerning) is enabled by default.
+// No additional setup needed — OwnShaper handles liga, kern features automatically.
 
 // Text layout with wrapping
 opts := text.LayoutOptions{

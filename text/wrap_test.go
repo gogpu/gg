@@ -3,8 +3,6 @@ package text
 import (
 	"strings"
 	"testing"
-
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // TestWrapModeString tests WrapMode.String method.
@@ -287,7 +285,7 @@ func TestWrapTextInfo_Substring(t *testing.T) {
 func wrapTestFace(t *testing.T) Face {
 	t.Helper()
 
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -522,7 +520,7 @@ func BenchmarkFindBreakOpportunities_Long(b *testing.B) {
 
 // BenchmarkWrapText benchmarks text wrapping.
 func BenchmarkWrapText(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -541,7 +539,7 @@ func BenchmarkWrapText(b *testing.B) {
 
 // BenchmarkMeasureText benchmarks text measurement.
 func BenchmarkMeasureText(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}

@@ -192,27 +192,15 @@ func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face tex
 		return
 	}
 
-	vars := face.Variations()
-	var outlineFunc func(gid text.GlyphID) *text.GlyphOutline
+	parsed := source.Parsed()
+	extractor := text.NewOutlineExtractor()
 
-	if len(vars) > 0 {
-		gtFont, err := text.GetGoTextFont(source)
+	outlineFunc := func(gid text.GlyphID) *text.GlyphOutline {
+		outline, err := extractor.ExtractOutline(parsed, gid, face.Size())
 		if err != nil {
-			return
+			return nil
 		}
-		outlineFunc = func(gid text.GlyphID) *text.GlyphOutline {
-			return text.ExtractOutlineGoText(gtFont, gid, face.Size(), vars)
-		}
-	} else {
-		parsed := source.Parsed()
-		extractor := text.NewOutlineExtractor()
-		outlineFunc = func(gid text.GlyphID) *text.GlyphOutline {
-			outline, err := extractor.ExtractOutline(parsed, gid, face.Size())
-			if err != nil {
-				return nil
-			}
-			return outline
-		}
+		return outline
 	}
 
 	for _, glyph := range glyphs {

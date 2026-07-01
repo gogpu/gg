@@ -3,15 +3,13 @@ package text
 import (
 	"sync"
 	"testing"
-
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // builtinTestFace creates a test Face at size 16 for builtin shaper tests.
 func builtinTestFace(t *testing.T) Face {
 	t.Helper()
 
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -220,7 +218,7 @@ func TestShapedGlyphFields(t *testing.T) {
 
 // TestShapeDifferentSizes tests shaping at different font sizes.
 func TestShapeDifferentSizes(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -323,7 +321,7 @@ func TestCustomShaperIntegration(t *testing.T) {
 
 // BenchmarkBuiltinShape benchmarks the Shape function with BuiltinShaper.
 func BenchmarkBuiltinShape(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -342,7 +340,7 @@ func BenchmarkBuiltinShape(b *testing.B) {
 
 // BenchmarkBuiltinShapeShort benchmarks shaping short text.
 func BenchmarkBuiltinShapeShort(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -361,7 +359,7 @@ func BenchmarkBuiltinShapeShort(b *testing.B) {
 
 // BenchmarkBuiltinShapeLong benchmarks shaping long text.
 func BenchmarkBuiltinShapeLong(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}

@@ -2,8 +2,6 @@ package text
 
 import (
 	"testing"
-
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // loadTestFont loads a test font for testing.
@@ -11,7 +9,7 @@ func loadTestFont(t *testing.T) *FontSource {
 	t.Helper()
 
 	// Use embedded Go font
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}

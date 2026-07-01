@@ -1,6 +1,9 @@
 package text
 
-import "image"
+import (
+	"image"
+	"math"
+)
 
 // GlyphImage represents a rasterized glyph.
 // This contains the alpha mask and positioning information.
@@ -18,20 +21,39 @@ type GlyphImage struct {
 	Advance float64
 }
 
-// RasterizeGlyph renders a glyph to an alpha mask.
-// Uses the ximage parser (golang.org/x/image/font) for rasterization.
+// RasterizeGlyph renders a glyph to an alpha mask using [GlyphMaskRasterizer].
 //
 // This function is primarily intended for future caching implementations
 // and advanced use cases. For normal text drawing, use the Draw function instead.
 //
 // Parameters:
-//   - parsed: The parsed font (must be *ximageParsedFont from the "ximage" parser)
+//   - parsed: The parsed font
 //   - glyphID: The glyph index to rasterize
 //   - ppem: Pixels per em (font size)
 //
 // Returns:
 //   - *GlyphImage with the rasterized glyph, or nil if rasterization fails
-//     or the font type is not ximageParsedFont
 func RasterizeGlyph(parsed ParsedFont, glyphID GlyphID, ppem float64) *GlyphImage {
-	return rasterizeGlyphXimage(parsed, glyphID, ppem)
+	rast := NewGlyphMaskRasterizer()
+	result, err := rast.RasterizeHinted(parsed, glyphID, ppem, 0, 0, HintingFull)
+	if err != nil || result == nil {
+		return nil
+	}
+
+	maskImg := &image.Alpha{
+		Pix:    result.Mask,
+		Stride: result.Width,
+		Rect:   image.Rect(0, 0, result.Width, result.Height),
+	}
+
+	return &GlyphImage{
+		Mask: maskImg,
+		Bounds: image.Rect(
+			int(math.Round(float64(result.BearingX))),
+			-int(math.Round(float64(result.BearingY))),
+			int(math.Round(float64(result.BearingX)))+result.Width,
+			-int(math.Round(float64(result.BearingY)))+result.Height,
+		),
+		Advance: float64(result.Width), // simplified, true advance from font
+	}
 }

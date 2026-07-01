@@ -97,10 +97,13 @@ type ownParsedFont struct {
 	hheaOK      bool        // true if hhea was parsed successfully
 	os2OK       bool        // true if OS/2 was parsed successfully
 
+	// fvar axes — parsed independently, needed by both HVAR and gvar.
+	fvarOnce sync.Once
+	fvarAxes []fvarAxis // parsed fvar axes for coordinate normalization
+
 	// HVAR (reuse existing parser from hvar.go).
 	hvarOnce sync.Once
 	hvar     *hvarTable // nil if HVAR not present or failed to parse
-	fvarAxes []fvarAxis // parsed fvar axes for coordinate normalization
 
 	// TT hint cache — lazy loading (thread-safe).
 	// Provides cached fpgm/prep execution results per ppem.
@@ -342,9 +345,26 @@ func (f *ownParsedFont) loadTTHintCache() *ttHintCache {
 	return f.ttHintCache
 }
 
-// loadHVAR lazily parses the HVAR table and fvar axes.
-// Reuses the existing parseHVAR() and parseFvarAxes() functions.
+// loadFvar lazily parses the fvar table to extract axis definitions.
+// fvar axes are needed by both HVAR (advance deltas) and gvar (outline deltas),
+// so they are parsed independently from either table.
+//
+// A font with gvar but no HVAR (e.g., Apple SFNS.ttf) still needs fvarAxes
+// for normalizeCoords to produce the correct-length coordinate array.
+func (f *ownParsedFont) loadFvar() {
+	f.fvarOnce.Do(func() {
+		fvarRaw, ok := f.tables["fvar"]
+		if !ok {
+			return
+		}
+		f.fvarAxes = parseFvarAxes(fvarRaw)
+	})
+}
+
+// loadHVAR lazily parses the HVAR table.
+// Ensures fvar axes are also parsed (needed for coordinate normalization).
 func (f *ownParsedFont) loadHVAR() {
+	f.loadFvar()
 	f.hvarOnce.Do(func() {
 		hvarRaw, ok := f.tables["HVAR"]
 		if !ok {
@@ -355,12 +375,6 @@ func (f *ownParsedFont) loadHVAR() {
 			return
 		}
 		f.hvar = hvar
-
-		fvarRaw, ok := f.tables["fvar"]
-		if !ok {
-			return
-		}
-		f.fvarAxes = parseFvarAxes(fvarRaw)
 	})
 }
 
@@ -411,7 +425,7 @@ func (f *ownParsedFont) applyVariations(
 		return
 	}
 
-	f.loadHVAR() // ensures fvarAxes are parsed
+	f.loadFvar()
 	if len(f.fvarAxes) == 0 {
 		return
 	}
@@ -427,6 +441,21 @@ func (f *ownParsedFont) applyVariations(
 	// Apply avar remapping.
 	f.loadAvar()
 	f.avar.apply(coords)
+
+	// Optimization: skip gvar delta computation when all normalized coords
+	// are zero (default instance). This is the common case when the user
+	// specifies e.g. wght=400 on a font where 400 is the default weight.
+	// Avoids allocation + IUP computation for a zero-delta result.
+	allZero := true
+	for _, c := range coords {
+		if c != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return
+	}
 
 	// Total outline points (without phantom points).
 	numPoints := len(points) - 4

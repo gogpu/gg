@@ -42,7 +42,7 @@ func loadGoldenTestFont(t *testing.T, filename string) ParsedFont {
 	if err != nil {
 		t.Fatalf("failed to read font file testdata/%s: %v", filename, err)
 	}
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(data)
 	if err != nil {
 		t.Fatalf("failed to parse font testdata/%s: %v", filename, err)
@@ -57,7 +57,7 @@ func loadGoldenFontAndData(t *testing.T, filename string) (ParsedFont, []byte) {
 	if err != nil {
 		t.Fatalf("failed to read font file testdata/%s: %v", filename, err)
 	}
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(data)
 	if err != nil {
 		t.Fatalf("failed to parse font testdata/%s: %v", filename, err)
@@ -372,10 +372,10 @@ func TestGolden_Widths_CantarellVF_Fallback(t *testing.T) {
 		t.Skip("testdata/cantarell_vf_trimmed.ttf not available")
 		return
 	}
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(data)
 	if err != nil {
-		t.Skipf("cantarell_vf_trimmed.ttf parse error (CFF not supported by x/image/font): %v", err)
+		t.Skipf("cantarell_vf_trimmed.ttf parse error (CFF not supported): %v", err)
 		return
 	}
 

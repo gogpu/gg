@@ -2,7 +2,7 @@
 
 **Status:** v0.14.0 (Released as part of gg v0.31.0)
 
-This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2, go-text/typesetting, and vello.
+This package implements a modern GPU-ready text pipeline for gogpu/gg, inspired by Ebitengine text/v2, skrifa/fontations, and vello.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ Bidi/Script  Cache    Lines    ┌────┴────┐
 ### Pluggable Shaper (v0.10.0)
 - **Shaper interface** — Converts text to positioned glyphs
 - **BuiltinShaper** — Default using golang.org/x/image
-- **GoTextShaper** — HarfBuzz-level shaping via go-text/typesetting (opt-in)
+- **OwnShaper** — Pure Go GSUB/GPOS shaping (default, ADR-048)
 - **Custom shapers** — Plug in any implementation via SetShaper()
 
 ### Bidi/Script Segmentation (v0.10.0)
@@ -149,19 +149,10 @@ for _, r := range results {
 width := text.MeasureText("Hello World", face)
 ```
 
-### GoTextShaper (HarfBuzz-level shaping)
+### OwnShaper (default, GSUB/GPOS)
 
-```go
-// Enable HarfBuzz-level shaping for ligatures, kerning, and complex scripts
-shaper := text.NewGoTextShaper()
-text.SetShaper(shaper)
-defer text.SetShaper(nil) // Reset to BuiltinShaper
-
-// Shape text — now uses go-text/typesetting HarfBuzz engine
-glyphs := text.Shape("Hello", face)
-```
-
-GoTextShaper is safe for concurrent use and caches parsed font data internally.
+The default shaper provides Pure Go GSUB/GPOS support including ligatures,
+kerning, and contextual alternates without any external dependencies.
 
 ### Custom Shaper
 
@@ -225,9 +216,9 @@ type Line struct {
 
 ## Dependencies
 
-- `golang.org/x/image/font/opentype` — TTF/OTF parsing
+- Pure Go binary font parsing (no external deps)
 - `golang.org/x/text/unicode/bidi` — Unicode Bidirectional Algorithm
-- `github.com/go-text/typesetting` — HarfBuzz shaping engine (used by GoTextShaper)
+- Pure Go GSUB/GPOS shaping (no external deps)
 
 ## Subpackages
 

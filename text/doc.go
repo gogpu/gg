@@ -28,16 +28,10 @@
 // # Font Parsing
 //
 // The default parser is "own" — a Pure Go font parser with zero external
-// dependencies (ADR-048). The legacy "ximage" parser (golang.org/x/image)
-// is still available for backward compatibility:
-//
-//	source, err := text.NewFontSource(data, text.WithParser("ximage"))
+// dependencies (ADR-048). Custom parsers can be registered via [RegisterParser].
 //
 // # Text Shaping
 //
-// The default shaper is OwnShaper with GSUB/GPOS support (ligatures,
-// kerning, contextual alternates). For HarfBuzz-level shaping:
-//
-//	text.SetShaper(text.NewGoTextShaper())
-//	defer text.SetShaper(nil) // Reset to default OwnShaper
+// The default shaper is [OwnShaper] with GSUB/GPOS support (ligatures,
+// kerning, contextual alternates). Custom shapers can be set via [SetShaper].
 package text

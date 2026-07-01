@@ -282,7 +282,12 @@ func (g *gvarTable) readPeakTuple(st *gvarTupleState, tupleIndexRaw uint16) ([]i
 
 	sharedTupleIdx := int(tupleIndexRaw & 0x0FFF)
 	if sharedTupleIdx < len(g.sharedTuples) {
-		return g.sharedTuples[sharedTupleIdx], true
+		tuple := g.sharedTuples[sharedTupleIdx]
+		// Matches skrifa check (variations.rs:1298): peak.len() must equal axisCount.
+		if len(tuple) != g.axisCount {
+			return nil, false
+		}
+		return tuple, true
 	}
 	return nil, false
 }
@@ -423,19 +428,29 @@ func computeAxisScalar(scalar, coord, peak int32, axisIdx int, hasInter bool, in
 }
 
 // computeAxisScalarIntermediate handles the intermediate region case.
+//
+// Matches skrifa compute_scalar (variations.rs:1316-1330):
+//
+//	if coord <= start || coord >= end { return None }
+//	if coord < peak { scalar *= (coord - start) / (peak - start) }
+//	else            { scalar *= (end - coord)   / (end - peak)   }
 func computeAxisScalarIntermediate(scalar, coord, peak, start, end int32) int32 {
-	if start > peak || peak > end || (start < 0 && end > 0 && peak != 0) {
-		return scalar // degenerate region axis — skip
-	}
 	if coord <= start || coord >= end {
 		return 0
 	}
-	if coord < peak && peak != start {
+	if coord < peak {
+		if peak == start {
+			return scalar // avoid division by zero
+		}
 		return mulDiv(scalar, coord-start, peak-start)
 	}
-	if coord > peak && end != peak {
+	if coord > peak {
+		if end == peak {
+			return scalar // avoid division by zero
+		}
 		return mulDiv(scalar, end-coord, end-peak)
 	}
+	// coord == peak
 	return scalar
 }
 

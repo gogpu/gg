@@ -268,31 +268,26 @@ func (m *AtlasManager) Get(key GlyphKey, outline *text.GlyphOutline) (Region, er
 
 	m.misses.Add(1)
 
-	// Slow path: need to generate and add (write lock)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if region, ok := m.lookup[key]; ok {
-		return region, nil
-	}
-
-	// Generate MSDF
+	// Generate MSDF OUTSIDE the lock — Generate spawns worker goroutines
+	// and is the most expensive operation. Holding the write lock during
+	// generation causes goroutine starvation under concurrent access.
 	msdf, err := m.generator.Generate(outline)
 	if err != nil {
 		return Region{}, fmt.Errorf("failed to generate MSDF: %w", err)
 	}
 
-	// Apply median filter to clean MSDF noise before error correction.
-	// MedianFilter smooths outlier texels that arise from edge-case
-	// distance evaluations, reducing color fringing at glyph boundaries.
 	msdf = MedianFilter(msdf)
-
-	// Apply error correction to prevent bilinear interpolation artifacts.
-	// Without this, GPU bilinear filtering between adjacent MSDF texels can
-	// cause channel ordering to change, producing incorrect median values
-	// that manifest as color fringing on small or gray text.
 	ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
+
+	// Now take write lock only for atlas insertion (fast).
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine may have
+	// generated the same glyph while we were generating ours).
+	if region, ok := m.lookup[key]; ok {
+		return region, nil
+	}
 
 	// Find or create atlas with space
 	atlas, err := m.findOrCreateAtlas()

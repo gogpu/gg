@@ -3,15 +3,13 @@ package text
 import (
 	"strings"
 	"testing"
-
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // layoutTestFace creates a test Face at size 16 for layout tests.
 func layoutTestFace(t *testing.T) Face {
 	t.Helper()
 
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -645,7 +643,7 @@ func TestIsCJK(t *testing.T) {
 
 // TestLayoutText_DifferentSizes tests layout at different font sizes.
 func TestLayoutText_DifferentSizes(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to create font source: %v", err)
 	}
@@ -710,7 +708,7 @@ func TestSplitParagraphs(t *testing.T) {
 
 // BenchmarkLayoutText benchmarks the LayoutText function.
 func BenchmarkLayoutText(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -730,7 +728,7 @@ func BenchmarkLayoutText(b *testing.B) {
 
 // BenchmarkLayoutText_MultiLine benchmarks multi-line layout.
 func BenchmarkLayoutText_MultiLine(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
@@ -750,7 +748,7 @@ func BenchmarkLayoutText_MultiLine(b *testing.B) {
 
 // BenchmarkLayoutText_Wrapped benchmarks line wrapping.
 func BenchmarkLayoutText_Wrapped(b *testing.B) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("failed to create font source: %v", err)
 	}
