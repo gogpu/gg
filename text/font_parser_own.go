@@ -106,6 +106,13 @@ type ownParsedFont struct {
 	// Provides cached fpgm/prep execution results per ppem.
 	ttHintOnce  sync.Once
 	ttHintCache *ttHintCache // nil if font has no TT instructions
+
+	// gvar/avar — lazy loading (thread-safe).
+	// Provides variable font outline interpolation.
+	gvarOnce sync.Once
+	gvar     *gvarTable // nil if gvar not present or failed to parse
+	avarOnce sync.Once
+	avar     *avarTable // nil if avar not present
 }
 
 // --- ParsedFont interface ---
@@ -355,6 +362,93 @@ func (f *ownParsedFont) loadHVAR() {
 		}
 		f.fvarAxes = parseFvarAxes(fvarRaw)
 	})
+}
+
+// loadGvar lazily parses the gvar table.
+func (f *ownParsedFont) loadGvar() {
+	f.gvarOnce.Do(func() {
+		gvarRaw, ok := f.tables["gvar"]
+		if !ok {
+			return
+		}
+		gvar, err := parseGvar(gvarRaw)
+		if err != nil {
+			return
+		}
+		f.gvar = gvar
+	})
+}
+
+// loadAvar lazily parses the avar table.
+func (f *ownParsedFont) loadAvar() {
+	f.avarOnce.Do(func() {
+		avarRaw, ok := f.tables["avar"]
+		if !ok {
+			return
+		}
+		f.avar = parseAvar(avarRaw)
+	})
+}
+
+// applyVariations computes gvar deltas and applies them to the given
+// outline points. Points are modified in-place.
+//
+// Parameters:
+//   - glyphID: the glyph to look up in gvar
+//   - points: outline points as [x, y] pairs (modified in-place)
+//   - contourEnds: end-of-contour point indices
+//   - variations: user-space variation settings (e.g., wght=700)
+//
+// The function normalizes coordinates, applies avar remapping, then
+// computes gvar deltas and adds them to the points.
+func (f *ownParsedFont) applyVariations(
+	glyphID uint16,
+	points [][2]int32,
+	contourEnds []uint16,
+	variations []FontVariation,
+) {
+	if len(variations) == 0 {
+		return
+	}
+
+	f.loadHVAR() // ensures fvarAxes are parsed
+	if len(f.fvarAxes) == 0 {
+		return
+	}
+
+	f.loadGvar()
+	if f.gvar == nil {
+		return
+	}
+
+	// Normalize variation coordinates.
+	coords := normalizeCoords(f.fvarAxes, variations)
+
+	// Apply avar remapping.
+	f.loadAvar()
+	f.avar.apply(coords)
+
+	// Total outline points (without phantom points).
+	numPoints := len(points) - 4
+	if numPoints < 0 {
+		return
+	}
+
+	// Compute gvar deltas.
+	dx, dy := f.gvar.glyphVariationDeltas(glyphID, coords, numPoints, contourEnds, points)
+	if dx == nil || dy == nil {
+		return
+	}
+
+	// Apply deltas to points.
+	for i := range points {
+		if i < len(dx) {
+			points[i][0] += dx[i]
+		}
+		if i < len(dy) {
+			points[i][1] += dy[i]
+		}
+	}
 }
 
 // locateGlyph returns the byte offset and length of a glyph within the glyf
