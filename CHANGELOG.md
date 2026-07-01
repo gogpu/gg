@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extension. Legacy kern table fallback. OpenType layout engine (ScriptList,
   FeatureList, Coverage, ClassDef). 5.8-10x faster than GoTextShaper. 27 tests.
 
+### Changed
+
+- **Default font parser** switched from `ximageParsedFont` (x/image/font/sfnt) to
+  `ownParsedFont` (Pure Go). Zero external font dependency on default code path.
+- **Default text shaper** switched from `BuiltinShaper` (LTR-only) to `OwnShaper`
+  (GSUB/GPOS with ligatures and kerning). 5.8-10x faster than go-text HarfBuzz.
+- **glyf parser** rewritten: own binary parser replaces go-text `tables.ParseGlyf`.
+- **fvar/name parsers** in source.go: own binary parsing replaces go-text loaders.
+- Legacy paths (ximageParsedFont, GoTextShaper) kept as opt-in for backward compat.
+
 ### Fixed
 
 - **TT interpreter fixed-point math** (#405) — 3 rounding bugs found via skrifa golden
