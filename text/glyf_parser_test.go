@@ -4,7 +4,6 @@ import (
 	"os"
 	"testing"
 
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // ============================================================
@@ -12,8 +11,8 @@ import (
 // ============================================================
 
 func TestParseGlyfContours_GoRegular_H(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -23,7 +22,7 @@ func TestParseGlyfContours_GoRegular_H(t *testing.T) {
 		t.Fatal("'H' glyph not found in Go Regular")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -84,8 +83,8 @@ func TestParseGlyfContours_GoRegular_H(t *testing.T) {
 }
 
 func TestParseGlyfContours_GoRegular_o(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -95,7 +94,7 @@ func TestParseGlyfContours_GoRegular_o(t *testing.T) {
 		t.Fatal("'o' glyph not found")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -128,8 +127,8 @@ func TestParseGlyfContours_GoRegular_o(t *testing.T) {
 // ============================================================
 
 func TestParseGlyfContours_SpaceGlyph(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -139,7 +138,7 @@ func TestParseGlyfContours_SpaceGlyph(t *testing.T) {
 		t.Skip("space glyph not found (gid=0)")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -153,7 +152,7 @@ func TestParseGlyfContours_SpaceGlyph(t *testing.T) {
 func TestParseGlyfContours_GlyphZero(t *testing.T) {
 	// Glyph ID 0 is the .notdef glyph. It typically has a simple rectangle
 	// outline, but may be empty in some fonts. Either way, it should not error.
-	contours, err := ParseGlyfContours(goregular.TTF, 0)
+	contours, err := ParseGlyfContours(requireTestFont(t), 0)
 	if err != nil {
 		t.Fatalf("ParseGlyfContours for glyph 0 failed: %v", err)
 	}
@@ -167,7 +166,7 @@ func TestParseGlyfContours_GlyphZero(t *testing.T) {
 func TestParseGlyfContours_OutOfRange(t *testing.T) {
 	// GlyphID is uint16, so use a value within uint16 range but
 	// beyond Go Regular's actual glyph count (~1000 glyphs).
-	_, err := ParseGlyfContours(goregular.TTF, 60000)
+	_, err := ParseGlyfContours(requireTestFont(t), 60000)
 	if err == nil {
 		t.Error("expected error for out-of-range glyph ID")
 	}
@@ -197,8 +196,8 @@ func TestParseGlyfContours_InvalidData(t *testing.T) {
 // ============================================================
 
 func TestGlyfContours_ContourPoints(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -208,7 +207,7 @@ func TestGlyfContours_ContourPoints(t *testing.T) {
 		t.Fatal("'o' glyph not found")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil || contours == nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -237,7 +236,7 @@ func TestGlyfContours_ContourPoints(t *testing.T) {
 // ============================================================
 
 func TestCachedGlyfParser(t *testing.T) {
-	p, err := newCachedGlyfParser(goregular.TTF)
+	p, err := newCachedGlyfParser(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("newCachedGlyfParser failed: %v", err)
 	}
@@ -248,8 +247,8 @@ func TestCachedGlyfParser(t *testing.T) {
 	t.Logf("Go Regular: %d glyphs", p.NumGlyphs())
 
 	// Parse 'H' via cached parser.
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -264,7 +263,7 @@ func TestCachedGlyfParser(t *testing.T) {
 	}
 
 	// Should match single-shot parse.
-	singleContours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	singleContours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -287,13 +286,13 @@ func TestCachedGlyfParser(t *testing.T) {
 }
 
 func TestCachedGlyfParser_MultipleGlyphs(t *testing.T) {
-	p, err := newCachedGlyfParser(goregular.TTF)
+	p, err := newCachedGlyfParser(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("newCachedGlyfParser failed: %v", err)
 	}
 
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -347,8 +346,8 @@ func TestCachedGlyfParser_InvalidData(t *testing.T) {
 // motivation for the glyf parser: the auto-hinter needs raw contour points
 // (fewer, matching FreeType), not pen-expanded outline segments (more).
 func TestParseGlyfContours_VsOutlineExtractor(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -361,7 +360,7 @@ func TestParseGlyfContours_VsOutlineExtractor(t *testing.T) {
 		}
 
 		// Raw contour points from glyf table.
-		rawContours, rawErr := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+		rawContours, rawErr := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 		if rawErr != nil || rawContours == nil {
 			continue
 		}
@@ -394,8 +393,8 @@ func TestParseGlyfContours_VsOutlineExtractor(t *testing.T) {
 // ============================================================
 
 func TestParseGlyfContours_CoordinatesInBBox(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -408,7 +407,7 @@ func TestParseGlyfContours_CoordinatesInBBox(t *testing.T) {
 			continue
 		}
 
-		contours, contourErr := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+		contours, contourErr := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 		if contourErr != nil || contours == nil {
 			continue
 		}
@@ -435,7 +434,7 @@ func TestParseGlyfContours_CoordinatesInBBox(t *testing.T) {
 // ============================================================
 
 func TestParseGlyfContoursFromSource(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("NewFontSource failed: %v", err)
 	}
@@ -460,7 +459,7 @@ func TestParseGlyfContoursFromSource(t *testing.T) {
 	}
 
 	// Should match direct parse.
-	directContours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	directContours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -479,7 +478,7 @@ func TestParseGlyfContoursFromSource_NilSource(t *testing.T) {
 }
 
 func TestParseGlyfContoursFromSource_ClosedSource(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("NewFontSource failed: %v", err)
 	}
@@ -500,8 +499,8 @@ func TestParseGlyfContoursFromSource_ClosedSource(t *testing.T) {
 
 func TestParseGlyfContours_OnCurveFlags_Rectangle(t *testing.T) {
 	// 'H' in Go Regular is rectilinear — all points should be on-curve.
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -511,7 +510,7 @@ func TestParseGlyfContours_OnCurveFlags_Rectangle(t *testing.T) {
 		t.Fatal("'H' glyph not found")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil || contours == nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -526,8 +525,8 @@ func TestParseGlyfContours_OnCurveFlags_Rectangle(t *testing.T) {
 
 func TestParseGlyfContours_OnCurveFlags_Curved(t *testing.T) {
 	// 'o' has quadratic curves — should have a mix of on-curve and off-curve.
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -537,7 +536,7 @@ func TestParseGlyfContours_OnCurveFlags_Curved(t *testing.T) {
 		t.Fatal("'o' glyph not found")
 	}
 
-	contours, err := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+	contours, err := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 	if err != nil || contours == nil {
 		t.Fatalf("ParseGlyfContours failed: %v", err)
 	}
@@ -567,13 +566,13 @@ func TestParseGlyfContours_OnCurveFlags_Curved(t *testing.T) {
 // ============================================================
 
 func TestParseGlyfContours_AllLatinLetters(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
 
-	cachedParser, err := newCachedGlyfParser(goregular.TTF)
+	cachedParser, err := newCachedGlyfParser(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("newCachedGlyfParser failed: %v", err)
 	}
@@ -721,7 +720,7 @@ func TestParseGlyfContours_NotoSerifHebrew_VsOutlineExtractor(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -768,8 +767,8 @@ func TestParseGlyfContours_NotoSerifHebrew_VsOutlineExtractor(t *testing.T) {
 // ============================================================
 
 func TestParseGlyfContours_CompositeGlyph(t *testing.T) {
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
 	}
@@ -783,7 +782,7 @@ func TestParseGlyfContours_CompositeGlyph(t *testing.T) {
 			continue
 		}
 
-		contours, contourErr := ParseGlyfContours(goregular.TTF, GlyphID(gid))
+		contours, contourErr := ParseGlyfContours(requireTestFont(t), GlyphID(gid))
 		if contourErr != nil {
 			t.Errorf("'%c' (gid=%d): unexpected error: %v", ch, gid, contourErr)
 			continue

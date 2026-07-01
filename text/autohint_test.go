@@ -6,15 +6,14 @@ import (
 	"os"
 	"testing"
 
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // loadGoRegularFont loads the Go Regular font for testing.
 // This font is available cross-platform via the goregular package.
 func loadGoRegularFont(t *testing.T) ParsedFont {
 	t.Helper()
-	parser := &ximageParser{}
-	font, err := parser.Parse(goregular.TTF)
+	parser := &ownParser{}
+	font, err := parser.Parse(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to parse Go Regular font: %v", err)
 	}
@@ -926,7 +925,7 @@ func TestAutoHint_RawContourPoints_ScaleVsSkrifaGolden(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -1013,7 +1012,7 @@ func TestAutoHint_ContourPath_PointCount(t *testing.T) {
 		t.Fatal("expected non-nil contours for glyph 9")
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -1055,7 +1054,7 @@ func TestAutoHint_ContourPath_DirectionClassification(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -1733,7 +1732,7 @@ func TestAutoHint_Segments_VsSkrifaGolden_Horizontal(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -1847,7 +1846,7 @@ func TestAutoHint_Segments_VsSkrifaGolden_Vertical(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -1970,7 +1969,7 @@ func TestAutoHint_Edges_VsSkrifaGolden_Horizontal(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2091,7 +2090,7 @@ func TestAutoHint_Edges_VsSkrifaGolden_Vertical(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2232,7 +2231,7 @@ func TestAutoHint_Edges_VsSkrifaRust_FullParity(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2400,7 +2399,7 @@ func TestAutoHint_HintEdges_VsSkrifaGolden_Horizontal(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2498,7 +2497,7 @@ func TestAutoHint_HintEdges_VsSkrifaGolden_Vertical(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2615,7 +2614,7 @@ func TestAutoHint_FullPipeline_VsSkrifaGolden(t *testing.T) {
 		t.Fatalf("failed to read NotoSerifHebrew font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)
@@ -2723,7 +2722,7 @@ func TestAutoHint_AlignEdgePoints_VsSkrifaGolden(t *testing.T) {
 		t.Fatalf("failed to read font: %v", err)
 	}
 
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	font, err := parser.Parse(fontData)
 	if err != nil {
 		t.Fatalf("failed to parse font: %v", err)

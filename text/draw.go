@@ -31,7 +31,7 @@ func Draw(dst draw.Image, text string, face Face, x, y float64, col color.Color)
 }
 
 // glyphRasterMode selects the rasterization coverage mode.
-// Outline extraction (sfnt or go-text) and rasterization mode are orthogonal
+// Outline extraction and rasterization mode are orthogonal
 // concerns (Skia pattern: SkFont::Edging is independent of font variations).
 type glyphRasterMode int
 
@@ -113,9 +113,9 @@ func drawGlyphs(
 	}
 }
 
-// drawGlyphsVariable renders text using go-text/typesetting for outline extraction,
-// which supports variable font tables (gvar/HVAR). This path is used when
-// the face has font variations configured via WithVariations.
+// drawGlyphsVariable renders text using the own parser's gvar path for outline
+// extraction, which supports variable font tables (gvar/HVAR). This path is
+// used when the face has font variations configured via WithVariations.
 //
 // The mode parameter selects coverage computation (Skia pattern: outline source
 // and rasterization mode are orthogonal — variable fonts don't affect AA choice).
@@ -129,15 +129,16 @@ func drawGlyphsVariable(
 	mode glyphRasterMode,
 ) {
 	source := sf.source
-	gtFont, err := GetGoTextFont(source)
-	if err != nil {
+	parsed := source.Parsed()
+	ownFont, ok := parsed.(*ownParsedFont)
+	if !ok {
 		return
 	}
 
-	parsed := source.Parsed()
 	ppem := sf.size
 	rast := NewGlyphMaskRasterizer()
 	src := image.NewUniform(col)
+	extractor := &OutlineExtractor{}
 
 	// Hinting only for aliased mode (Skia pattern: FT_LOAD_TARGET_MONO for kAlias,
 	// FT_LOAD_TARGET_NORMAL for kAntiAlias). AA rendering benefits from smooth
@@ -152,7 +153,12 @@ func drawGlyphsVariable(
 
 		gid := GlyphID(parsed.GlyphIndex(r))
 		if gid == 0 {
-			advanceX += goTextGlyphAdvance(gtFont, gid, ppem, variations)
+			// Use variable-aware advance for skipped glyphs.
+			if vap, vapOK := parsed.(VariableAdvanceProvider); vapOK {
+				advanceX += vap.GlyphAdvanceVar(uint16(gid), ppem, variations)
+			} else {
+				advanceX += parsed.GlyphAdvance(uint16(gid), ppem)
+			}
 			continue
 		}
 
@@ -164,7 +170,7 @@ func drawGlyphsVariable(
 		subpixelX := glyphX - intX
 		subpixelY := glyphY - intY
 
-		outline := ExtractOutlineGoText(gtFont, gid, ppem, variations)
+		outline, _ := extractor.extractFromOwnVariable(ownFont, gid, ppem, variations)
 		if applyHinting && outline != nil && !outline.IsEmpty() {
 			gridFitOutline(outline, sf.config.hinting)
 		}

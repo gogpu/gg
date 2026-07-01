@@ -174,7 +174,7 @@ func (r *GlyphMaskRasterizer) RasterizeAliased(
 // RasterizeOutlineAliased renders a pre-extracted glyph outline into an R8 alpha
 // mask with binary (0 or 255) coverage. Same as RasterizeOutline but with no
 // anti-aliasing — matches Skia's SkFont::Edging::kAlias applied to any outline
-// source (sfnt or go-text variable font).
+// source (own parser, with optional gvar variations).
 func (r *GlyphMaskRasterizer) RasterizeOutlineAliased(
 	outline *GlyphOutline,
 	subpixelX, subpixelY float64,

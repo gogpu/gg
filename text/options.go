@@ -207,11 +207,11 @@ func WithLanguage(lang string) FaceOption {
 }
 
 // WithFeatures sets OpenType font features for the face.
-// Features are applied during shaping when using [GoTextShaper].
+// Features are applied during shaping when using [OwnShaper] (the default).
 // The [BuiltinShaper] ignores features since it does not perform
 // OpenType shaping.
 //
-// Note: Features affect shaped output via [GoTextShaper] only. Methods like
+// Note: Features affect shaped output via [OwnShaper] only. Methods like
 // [Face.Advance] and [Face.Glyphs] use raw glyph metrics without shaping.
 //
 // Example — enable tabular figures for aligned numeric columns:
@@ -224,7 +224,7 @@ func WithFeatures(features ...FontFeature) FaceOption {
 }
 
 // WithVariations sets font variation axis values for the face.
-// Variations are applied to both shaping and rendering via go-text/typesetting,
+// Variations are applied to both shaping and rendering via the own parser,
 // which handles gvar/HVAR/avar interpolation for TrueType variable fonts.
 // Static fonts ignore variations.
 //

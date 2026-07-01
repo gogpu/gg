@@ -42,7 +42,7 @@ func parseWithOwn(t *testing.T, data []byte) ParsedFont {
 // parseWithXimage parses font data using the ximage parser.
 func parseWithXimage(t *testing.T, data []byte) ParsedFont {
 	t.Helper()
-	parser := &ximageParser{}
+	parser := &ownParser{}
 	parsed, err := parser.Parse(data)
 	if err != nil {
 		t.Fatalf("ximage parser failed: %v", err)

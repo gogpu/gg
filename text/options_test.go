@@ -3,13 +3,11 @@ package text
 import (
 	"testing"
 
-	ot "github.com/go-text/typesetting/font/opentype"
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // TestWithFeatures verifies that WithFeatures correctly stores features on a face.
 func TestWithFeatures(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -32,7 +30,7 @@ func TestWithFeatures(t *testing.T) {
 
 // TestWithFeatures_Single verifies a single feature.
 func TestWithFeatures_Single(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -51,7 +49,7 @@ func TestWithFeatures_Single(t *testing.T) {
 
 // TestWithFeatures_None verifies that no features is the default.
 func TestWithFeatures_None(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -67,7 +65,7 @@ func TestWithFeatures_None(t *testing.T) {
 
 // TestWithFeatures_Empty verifies that WithFeatures() with no args clears features.
 func TestWithFeatures_Empty(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -81,91 +79,10 @@ func TestWithFeatures_Empty(t *testing.T) {
 	}
 }
 
-// TestConvertFeatures_Nil verifies nil input → nil output.
-func TestConvertFeatures_Nil(t *testing.T) {
-	got := convertFeatures(nil)
-	if got != nil {
-		t.Errorf("convertFeatures(nil) = %v, want nil", got)
-	}
-}
-
-// TestConvertFeatures_Empty verifies empty input → nil output.
-func TestConvertFeatures_Empty(t *testing.T) {
-	got := convertFeatures([]FontFeature{})
-	if got != nil {
-		t.Errorf("convertFeatures([]) = %v, want nil", got)
-	}
-}
-
-// TestConvertFeatures_Single verifies correct tag and value mapping.
-func TestConvertFeatures_Single(t *testing.T) {
-	out := convertFeatures([]FontFeature{TabularNums})
-	if len(out) != 1 {
-		t.Fatalf("convertFeatures(TabularNums) returned %d features, want 1", len(out))
-	}
-
-	// Verify tag bytes match: "tnum" → ot.NewTag('t','n','u','m').
-	wantTag := ot.NewTag('t', 'n', 'u', 'm')
-	if out[0].Tag != wantTag {
-		t.Errorf("tag = 0x%08X, want 0x%08X (tnum)", out[0].Tag, wantTag)
-	}
-	if out[0].Value != 1 {
-		t.Errorf("value = %d, want 1", out[0].Value)
-	}
-}
-
-// TestConvertFeatures_Multiple verifies multiple features are mapped correctly.
-func TestConvertFeatures_Multiple(t *testing.T) {
-	out := convertFeatures([]FontFeature{TabularNums, NoLigatures, ProportionalNums})
-	if len(out) != 3 {
-		t.Fatalf("convertFeatures returned %d features, want 3", len(out))
-	}
-
-	// Verify each feature's tag.
-	tests := []struct {
-		name    string
-		feature FontFeature
-		wantTag ot.Tag
-		wantVal uint32
-	}{
-		{"tnum", TabularNums, ot.NewTag('t', 'n', 'u', 'm'), 1},
-		{"liga off", NoLigatures, ot.NewTag('l', 'i', 'g', 'a'), 0},
-		{"pnum", ProportionalNums, ot.NewTag('p', 'n', 'u', 'm'), 1},
-	}
-
-	for i, tt := range tests {
-		if out[i].Tag != tt.wantTag {
-			t.Errorf("feature[%d] (%s): tag = 0x%08X, want 0x%08X",
-				i, tt.name, out[i].Tag, tt.wantTag)
-		}
-		if out[i].Value != tt.wantVal {
-			t.Errorf("feature[%d] (%s): value = %d, want %d",
-				i, tt.name, out[i].Value, tt.wantVal)
-		}
-	}
-}
-
-// TestConvertFeatures_CustomTag verifies conversion of an arbitrary custom tag.
-func TestConvertFeatures_CustomTag(t *testing.T) {
-	custom := FontFeature{Tag: [4]byte{'s', 'm', 'c', 'p'}, Value: 1}
-	out := convertFeatures([]FontFeature{custom})
-	if len(out) != 1 {
-		t.Fatalf("convertFeatures returned %d features, want 1", len(out))
-	}
-
-	wantTag := ot.NewTag('s', 'm', 'c', 'p')
-	if out[0].Tag != wantTag {
-		t.Errorf("custom tag = 0x%08X, want 0x%08X (smcp)", out[0].Tag, wantTag)
-	}
-	if out[0].Value != 1 {
-		t.Errorf("custom value = %d, want 1", out[0].Value)
-	}
-}
-
 // TestWithFeatures_PreservedBySource verifies features survive face creation
 // and are independent per face from the same source.
 func TestWithFeatures_PreservedBySource(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -312,7 +229,7 @@ func TestPredefinedConstants_Tags(t *testing.T) {
 
 // TestFaceLanguage_Default verifies the default language is "en".
 func TestFaceLanguage_Default(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -326,7 +243,7 @@ func TestFaceLanguage_Default(t *testing.T) {
 
 // TestFaceLanguage_WithLanguage verifies WithLanguage sets the language tag.
 func TestFaceLanguage_WithLanguage(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -353,7 +270,7 @@ func TestFaceLanguage_WithLanguage(t *testing.T) {
 
 // TestFaceLanguage_IndependentPerFace verifies language is independent per face.
 func TestFaceLanguage_IndependentPerFace(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}

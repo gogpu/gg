@@ -1,7 +1,7 @@
 // OwnShaper — Pure Go text shaper with GSUB/GPOS support.
 //
 // OwnShaper implements the Shaper interface with direct binary parsing of
-// OpenType GSUB and GPOS tables. It replaces GoTextShaper (go-text/typesetting)
+// OpenType GSUB and GPOS tables, replacing the legacy GoTextShaper
 // as part of the Pure Go Font Stack (ADR-048, Phase 5).
 //
 // Shaping pipeline:

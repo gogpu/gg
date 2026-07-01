@@ -1,23 +1,20 @@
 package text
 
 import (
-	"bytes"
 	"os"
 	"testing"
-
-	ot "github.com/go-text/typesetting/font/opentype"
 )
 
 // loadHVARFromFont loads and parses the HVAR table from raw font data.
 // Returns nil if the font has no HVAR table.
 func loadHVARFromFont(t *testing.T, fontData []byte) *hvarTable {
 	t.Helper()
-	loader, err := ot.NewLoader(bytes.NewReader(fontData))
+	tables, err := parseFontTables(fontData)
 	if err != nil {
-		t.Fatalf("failed to create loader: %v", err)
+		t.Fatalf("failed to parse font tables: %v", err)
 	}
-	hvarRaw, err := loader.RawTable(ot.MustNewTag("HVAR"))
-	if err != nil {
+	hvarRaw, ok := tables["HVAR"]
+	if !ok {
 		return nil
 	}
 	hvar, err := parseHVAR(hvarRaw)
@@ -30,13 +27,13 @@ func loadHVARFromFont(t *testing.T, fontData []byte) *hvarTable {
 // loadFvarAxesFromFont loads fvar axes from raw font data.
 func loadFvarAxesFromFont(t *testing.T, fontData []byte) []fvarAxis {
 	t.Helper()
-	loader, err := ot.NewLoader(bytes.NewReader(fontData))
+	tables, err := parseFontTables(fontData)
 	if err != nil {
-		t.Fatalf("failed to create loader: %v", err)
+		t.Fatalf("failed to parse font tables: %v", err)
 	}
-	fvarRaw, err := loader.RawTable(ot.MustNewTag("fvar"))
-	if err != nil {
-		t.Fatalf("failed to load fvar table: %v", err)
+	fvarRaw, ok := tables["fvar"]
+	if !ok {
+		t.Fatal("no fvar table found")
 	}
 	return parseFvarAxes(fvarRaw)
 }

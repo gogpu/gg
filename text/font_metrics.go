@@ -109,7 +109,7 @@ func parseOS2Table(data []byte) (os2Metrics, bool) {
 //
 // Scaling: font units * ppem / unitsPerEm = pixels.
 //
-// Matches golang.org/x/image/font/sfnt behavior:
+// Matches sfnt behavior:
 //   - Uses OS/2 sTypoAscender/Descender when available.
 //   - Falls back to hhea ascent/descent if OS/2 values are zero.
 //   - xHeight and capHeight from OS/2 version 2+.

@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestXimageParser_ParseIndex_SingleFont(t *testing.T) {
-	p := &ximageParser{}
+func TestOwnParser_ParseIndex_SingleFont(t *testing.T) {
+	p := &ownParser{}
 
 	data := loadSingleFontData(t)
 	parsed, err := p.ParseIndex(data, 0)
@@ -19,7 +19,7 @@ func TestXimageParser_ParseIndex_SingleFont(t *testing.T) {
 	}
 }
 
-func TestXimageParser_ParseIndex_Collection(t *testing.T) {
+func TestOwnParser_ParseIndex_Collection(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("TTC test requires Windows system fonts")
 	}
@@ -29,7 +29,7 @@ func TestXimageParser_ParseIndex_Collection(t *testing.T) {
 		t.Skipf("msyh.ttc not found: %v", err)
 	}
 
-	p := &ximageParser{}
+	p := &ownParser{}
 
 	// Index 0 — first font in collection.
 	parsed, err := p.ParseIndex(data, 0)
@@ -51,7 +51,7 @@ func TestXimageParser_ParseIndex_Collection(t *testing.T) {
 	}
 }
 
-func TestXimageParser_ParseIndex_OutOfRange(t *testing.T) {
+func TestOwnParser_ParseIndex_OutOfRange(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("TTC test requires Windows system fonts")
 	}
@@ -61,7 +61,7 @@ func TestXimageParser_ParseIndex_OutOfRange(t *testing.T) {
 		t.Skipf("msyh.ttc not found: %v", err)
 	}
 
-	p := &ximageParser{}
+	p := &ownParser{}
 	_, err = p.ParseIndex(data, 999)
 	if err == nil {
 		t.Error("expected error for out-of-range index")

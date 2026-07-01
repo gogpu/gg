@@ -92,3 +92,60 @@ func parseHVAR(data []byte) (*hvarTable, error) {
 		advWidthMap: advWidthMap,
 	}, nil
 }
+
+// parseFvarAxes extracts axis definitions from raw fvar table data.
+// Uses direct binary parsing.
+//
+// fvar table layout:
+//
+//	uint16  majorVersion (must be 1)
+//	uint16  minorVersion (must be 0)
+//	Offset16 axisArrayOffset
+//	uint16  reserved
+//	uint16  axisCount
+//	uint16  axisSize (must be 20)
+//
+// Each axis record (20 bytes):
+//
+//	Tag     axisTag (4 bytes)
+//	Fixed   minValue (4 bytes, 16.16)
+//	Fixed   defaultValue (4 bytes, 16.16)
+//	Fixed   maxValue (4 bytes, 16.16)
+//	uint16  flags
+//	uint16  axisNameID
+func parseFvarAxes(data []byte) []fvarAxis {
+	if len(data) < 16 {
+		return nil
+	}
+
+	axisArrayOffset := binary.BigEndian.Uint16(data[4:6])
+	axisCount := binary.BigEndian.Uint16(data[8:10])
+	axisSize := binary.BigEndian.Uint16(data[10:12])
+
+	if axisSize < 20 || axisCount == 0 {
+		return nil
+	}
+
+	start := int(axisArrayOffset)
+	if start+int(axisCount)*int(axisSize) > len(data) {
+		return nil
+	}
+
+	axes := make([]fvarAxis, axisCount)
+	for i := range axisCount {
+		off := start + int(i)*int(axisSize)
+		axes[i] = fvarAxis{
+			Tag:          [4]byte{data[off], data[off+1], data[off+2], data[off+3]},
+			MinValue:     fixed1616ToFloat32(data[off+4:]),
+			DefaultValue: fixed1616ToFloat32(data[off+8:]),
+			MaxValue:     fixed1616ToFloat32(data[off+12:]),
+		}
+	}
+	return axes
+}
+
+// fixed1616ToFloat32 reads a big-endian Fixed 16.16 value and converts to float32.
+func fixed1616ToFloat32(data []byte) float32 {
+	raw := int32(binary.BigEndian.Uint32(data[:4]))
+	return float32(raw) / 65536.0
+}

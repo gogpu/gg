@@ -20,7 +20,7 @@ type BuiltinShaper struct{}
 //   - Contextual alternates
 //   - Right-to-left reordering
 //
-// For these features, use a full shaper like go-text/typesetting.
+// For these features, use OwnShaper (the default) which provides GSUB/GPOS.
 func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 	if text == "" || face == nil {
 		return nil

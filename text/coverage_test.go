@@ -4,31 +4,9 @@ import (
 	"testing"
 )
 
-func TestToFontHintingXimage(t *testing.T) {
-	// Verify that the ximage hinting conversion maps correctly.
-	tests := []struct {
-		name string
-		h    Hinting
-		want int // font.Hinting underlying int value
-	}{
-		{"none", HintingNone, 0},         // font.HintingNone
-		{"vertical", HintingVertical, 1}, // font.HintingVertical
-		{"full", HintingFull, 2},         // font.HintingFull
-		{"unknown defaults to none", Hinting(99), 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := int(toFontHintingXimage(tt.h))
-			if got != tt.want {
-				t.Errorf("toFontHintingXimage(%d) = %d, want %d", tt.h, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRegisterParser(t *testing.T) {
 	// Register a custom parser
-	RegisterParser("test_parser", &ximageParser{})
+	RegisterParser("test_parser", &ownParser{})
 	// Should be retrievable
 	p := getParser("test_parser")
 	if p == nil {

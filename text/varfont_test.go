@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // variableFontPath returns the path to a variable font for testing.
@@ -150,7 +149,7 @@ func TestAxisConstants(t *testing.T) {
 
 // TestWithVariations verifies that WithVariations stores variations on a face.
 func TestWithVariations(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestWithVariations(t *testing.T) {
 
 // TestWithVariations_None verifies that no variations is the default.
 func TestWithVariations_None(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestWithVariations_None(t *testing.T) {
 
 // TestWithVariations_Empty verifies that WithVariations() with no args clears.
 func TestWithVariations_Empty(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -208,7 +207,7 @@ func TestWithVariations_Empty(t *testing.T) {
 
 // TestWithVariations_IndependentPerFace verifies variations are independent per face.
 func TestWithVariations_IndependentPerFace(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -234,7 +233,7 @@ func TestWithVariations_IndependentPerFace(t *testing.T) {
 
 // TestWithVariations_CombinedWithFeatures verifies features and variations coexist.
 func TestWithVariations_CombinedWithFeatures(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -259,7 +258,7 @@ func TestWithVariations_CombinedWithFeatures(t *testing.T) {
 
 // TestIsVariable_StaticFont verifies that goregular (static) returns false.
 func TestIsVariable_StaticFont(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -286,7 +285,7 @@ func TestIsVariable_VariableFont(t *testing.T) {
 
 // TestVariationAxes_StaticFont verifies nil for static font.
 func TestVariationAxes_StaticFont(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -348,7 +347,7 @@ func TestVariationAxes_VariableFont(t *testing.T) {
 
 // TestNamedInstances_StaticFont verifies nil for static font.
 func TestNamedInstances_StaticFont(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatalf("failed to load test font: %v", err)
 	}
@@ -505,21 +504,14 @@ func TestVariationCacheKey_DifferentVariations(t *testing.T) {
 // --------------------------------------------------------------------------
 
 // TestVariations_AffectShaping verifies that variation axis values actually
-// change glyph metrics via the GoTextShaper path. Shape the same string at
+// change glyph metrics via OwnShaper. Shape the same string at
 // wght=300 and wght=700 — advance widths must differ because heavier weight
 // produces wider glyphs in most variable fonts.
-//
-// Note: Face.Glyphs() and Face.Advance() still use sfnt (no gvar support).
-// Rendering (Draw/drawGlyphs) detects variations and routes through go-text
-// for both outline extraction and advance calculation.
 func TestVariations_AffectShaping(t *testing.T) {
 	source := requireVariableFont(t)
 	defer func() { _ = source.Close() }()
 
-	shaper := NewGoTextShaper()
-	if shaper == nil {
-		t.Skip("GoTextShaper not available")
-	}
+	shaper := NewOwnShaper()
 
 	light := source.Face(24, WithVariations(NewFontVariation("wght", 300)))
 	bold := source.Face(24, WithVariations(NewFontVariation("wght", 700)))
@@ -543,7 +535,7 @@ func TestVariations_AffectShaping(t *testing.T) {
 	// Note: some variable fonts (e.g. Bahnschrift) may not change advance widths
 	// with wght axis — they adjust stem thickness but keep metrics constant.
 	// This is font-specific behavior, not a bug in our implementation.
-	// go-text/typesetting confirms variations work via Commissioner-VF.ttf
+	// Variations work via Commissioner-VF.ttf (font-test-data)
 	// (shaping/shaping_test.go:670-687).
 	if lightWidth != boldWidth {
 		t.Logf("Variations affect advance: wght=300 width=%.2f, wght=700 width=%.2f (delta=%.2f)",
@@ -591,44 +583,6 @@ func TestVariations_DefaultMatchesNoVariation(t *testing.T) {
 // --------------------------------------------------------------------------
 // convertVariations tests
 // --------------------------------------------------------------------------
-
-// TestConvertVariations_Nil verifies nil input produces nil output.
-func TestConvertVariations_Nil(t *testing.T) {
-	got := convertVariations(nil)
-	if got != nil {
-		t.Errorf("convertVariations(nil) = %v, want nil", got)
-	}
-}
-
-// TestConvertVariations_Empty verifies empty input produces nil output.
-func TestConvertVariations_Empty(t *testing.T) {
-	got := convertVariations([]FontVariation{})
-	if got != nil {
-		t.Errorf("convertVariations([]) = %v, want nil", got)
-	}
-}
-
-// TestConvertVariations_Values verifies correct tag and value mapping.
-func TestConvertVariations_Values(t *testing.T) {
-	vars := []FontVariation{
-		NewFontVariation("wght", 700),
-		NewFontVariation("wdth", 125),
-	}
-
-	out := convertVariations(vars)
-	if len(out) != 2 {
-		t.Fatalf("convertVariations returned %d items, want 2", len(out))
-	}
-
-	// Verify tag bytes: "wght" → big-endian uint32.
-	// 'w'=0x77, 'g'=0x67, 'h'=0x68, 't'=0x74 → 0x77676874
-	if out[0].Value != 700 {
-		t.Errorf("out[0].Value = %v, want 700", out[0].Value)
-	}
-	if out[1].Value != 125 {
-		t.Errorf("out[1].Value = %v, want 125", out[1].Value)
-	}
-}
 
 // --------------------------------------------------------------------------
 // Variable font RENDERING tests
@@ -684,7 +638,7 @@ func TestVariations_AffectRendering(t *testing.T) {
 // TestVariations_NoVariation_UsesDefaultPath verifies that faces without
 // variations still render correctly through the standard sfnt path.
 func TestVariations_NoVariation_UsesDefaultPath(t *testing.T) {
-	source, err := NewFontSource(goregular.TTF)
+	source, err := NewFontSource(requireTestFont(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,22 +664,23 @@ func TestVariations_OutlineExtraction(t *testing.T) {
 	source := requireVariableFont(t)
 	defer func() { _ = source.Close() }()
 
-	gtFont, err := GetGoTextFont(source)
-	if err != nil {
-		t.Fatalf("GetGoTextFont: %v", err)
+	parsed := source.Parsed()
+	ownFont, ok := parsed.(*ownParsedFont)
+	if !ok {
+		t.Skip("test requires ownParsedFont")
 	}
 
 	lightVars := []FontVariation{NewFontVariation("wght", 300)}
 	boldVars := []FontVariation{NewFontVariation("wght", 700)}
 
-	parsed := source.Parsed()
 	gid := GlyphID(parsed.GlyphIndex('H'))
 	if gid == 0 {
 		t.Skip("font doesn't have 'H' glyph")
 	}
 
-	lightOutline := ExtractOutlineGoText(gtFont, gid, 28, lightVars)
-	boldOutline := ExtractOutlineGoText(gtFont, gid, 28, boldVars)
+	ext := NewOutlineExtractor()
+	lightOutline, _ := ext.extractFromOwnVariable(ownFont, gid, 28, lightVars)
+	boldOutline, _ := ext.extractFromOwnVariable(ownFont, gid, 28, boldVars)
 
 	if lightOutline == nil || lightOutline.IsEmpty() {
 		t.Fatal("light outline is empty")

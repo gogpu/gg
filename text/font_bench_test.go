@@ -21,7 +21,6 @@ import (
 	"os"
 	"testing"
 
-	"golang.org/x/image/font/gofont/goregular"
 )
 
 // ---------------------------------------------------------------------------
@@ -33,29 +32,17 @@ import (
 func benchOwnParsed(b *testing.B) *ownParsedFont {
 	b.Helper()
 	p := &ownParser{}
-	pf, err := p.Parse(goregular.TTF)
+	pf, err := p.Parse(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("own parser: %v", err)
 	}
 	return pf.(*ownParsedFont)
 }
 
-// benchXimageParsed parses Go Regular with the x/image parser and returns
-// the ParsedFont. Fails the benchmark on error.
-func benchXimageParsed(b *testing.B) *ximageParsedFont {
-	b.Helper()
-	p := &ximageParser{}
-	pf, err := p.Parse(goregular.TTF)
-	if err != nil {
-		b.Fatalf("ximage parser: %v", err)
-	}
-	return pf.(*ximageParsedFont)
-}
-
 // benchOwnFace returns a Face at the given size using the own parser.
 func benchOwnFace(b *testing.B, size float64) (Face, *FontSource) {
 	b.Helper()
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(b), WithParser("own"))
 	if err != nil {
 		b.Fatalf("own FontSource: %v", err)
 	}
@@ -64,16 +51,6 @@ func benchOwnFace(b *testing.B, size float64) (Face, *FontSource) {
 }
 
 // benchXimageFace returns a Face at the given size using the ximage parser.
-func benchXimageFace(b *testing.B, size float64) (Face, *FontSource) {
-	b.Helper()
-	source, err := NewFontSource(goregular.TTF)
-	if err != nil {
-		b.Fatalf("ximage FontSource: %v", err)
-	}
-	face := source.Face(size)
-	return face, source
-}
-
 // longParagraph is a ~120 character string for paragraph-level shaping.
 const longParagraph = "The quick brown fox jumps over the lazy dog. " +
 	"Pack my box with five dozen liquor jugs. " +
@@ -88,20 +65,7 @@ func BenchmarkFontParse_Own(b *testing.B) {
 	p := &ownParser{}
 	b.ResetTimer()
 	for range b.N {
-		pf, err := p.Parse(goregular.TTF)
-		if err != nil {
-			b.Fatal(err)
-		}
-		_ = pf
-	}
-}
-
-func BenchmarkFontParse_Ximage(b *testing.B) {
-	b.ReportAllocs()
-	p := &ximageParser{}
-	b.ResetTimer()
-	for range b.N {
-		pf, err := p.Parse(goregular.TTF)
+		pf, err := p.Parse(requireTestFont(b))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -125,32 +89,10 @@ func BenchmarkFontCmap_GlyphIndex_Own(b *testing.B) {
 	}
 }
 
-func BenchmarkFontCmap_GlyphIndex_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		_ = pf.GlyphIndex('A')
-	}
-}
-
 func BenchmarkFontCmap_ASCII_Own(b *testing.B) {
 	pf := benchOwnParsed(b)
 	// Warm up lazy cmap.
 	_ = pf.GlyphIndex(' ')
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		for r := rune(0x20); r <= 0x7E; r++ {
-			_ = pf.GlyphIndex(r)
-		}
-	}
-}
-
-func BenchmarkFontCmap_ASCII_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -176,17 +118,6 @@ func BenchmarkFontHmtx_GlyphAdvance_Own(b *testing.B) {
 	}
 }
 
-func BenchmarkFontHmtx_GlyphAdvance_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
-	gid := pf.GlyphIndex('A')
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		_ = pf.GlyphAdvance(gid, 16.0)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 4. Font Metrics
 // ---------------------------------------------------------------------------
@@ -203,18 +134,8 @@ func BenchmarkFontMetrics_Own(b *testing.B) {
 	}
 }
 
-func BenchmarkFontMetrics_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		_ = pf.Metrics(16.0)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// 5. Shaping: OwnShaper vs GoTextShaper
+// 5. Shaping: OwnShaper
 // ---------------------------------------------------------------------------
 
 func BenchmarkFontShape_Own(b *testing.B) {
@@ -223,34 +144,6 @@ func BenchmarkFontShape_Own(b *testing.B) {
 
 	shaper := NewOwnShaper()
 	// Warm up cache.
-	_ = shaper.Shape("A", face)
-
-	texts := []struct {
-		name string
-		text string
-	}{
-		{"Short_5", "Hello"},
-		{"Sentence_19", "The quick brown fox"},
-		{"Paragraph_120", longParagraph},
-	}
-
-	for _, tc := range texts {
-		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				_ = shaper.Shape(tc.text, face)
-			}
-		})
-	}
-}
-
-func BenchmarkFontShape_GoText(b *testing.B) {
-	face, source := benchXimageFace(b, 16.0)
-	defer func() { _ = source.Close() }()
-
-	shaper := NewGoTextShaper()
-	// Warm up.
 	_ = shaper.Shape("A", face)
 
 	texts := []struct {
@@ -395,7 +288,7 @@ func BenchmarkFontTTHint_CacheHitPath(b *testing.B) {
 
 func BenchmarkFontAutoHint_Glyph(b *testing.B) {
 	p := &ownParser{}
-	pf, err := p.Parse(goregular.TTF)
+	pf, err := p.Parse(requireTestFont(b))
 	if err != nil {
 		b.Fatalf("parse: %v", err)
 	}
@@ -565,7 +458,7 @@ func BenchmarkFontFullPipeline_ParseAndShape(b *testing.B) {
 
 	for range b.N {
 		// Parse.
-		source, err := NewFontSource(goregular.TTF, WithParser("own"))
+		source, err := NewFontSource(requireTestFont(b), WithParser("own"))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -582,7 +475,7 @@ func BenchmarkFontFullPipeline_ParseAndShape(b *testing.B) {
 
 func BenchmarkFontFullPipeline_ShapeOnly(b *testing.B) {
 	// Parse once, shape many times.
-	source, err := NewFontSource(goregular.TTF, WithParser("own"))
+	source, err := NewFontSource(requireTestFont(b), WithParser("own"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -615,17 +508,6 @@ func BenchmarkFontGlyphBounds_Own(b *testing.B) {
 	}
 }
 
-func BenchmarkFontGlyphBounds_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
-	gid := pf.GlyphIndex('A')
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		_ = pf.GlyphBounds(gid, 16.0)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 11. Name Table
 // ---------------------------------------------------------------------------
@@ -634,16 +516,6 @@ func BenchmarkFontName_Own(b *testing.B) {
 	pf := benchOwnParsed(b)
 	// Warm up lazy name parsing.
 	_ = pf.Name()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		_ = pf.Name()
-	}
-}
-
-func BenchmarkFontName_Ximage(b *testing.B) {
-	pf := benchXimageParsed(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -682,7 +554,7 @@ func BenchmarkFontParseGlyfContours(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		_, err := ParseGlyfContours(goregular.TTF, gid)
+		_, err := ParseGlyfContours(requireTestFont(b), gid)
 		if err != nil {
 			b.Fatal(err)
 		}
