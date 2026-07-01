@@ -8,8 +8,8 @@ require (
 	github.com/gogpu/gputypes v0.5.1
 	github.com/gogpu/naga v0.17.15
 	github.com/gogpu/wgpu v0.30.7
-	golang.org/x/image v0.40.0
-	golang.org/x/text v0.37.0
+	golang.org/x/image v0.43.0
+	golang.org/x/text v0.38.0
 )
 
 require (
