@@ -56,16 +56,39 @@ func ttMul16Dot16(a, b int32) int32 {
 	return int32((ab + 0x8000 - sign) >> 16)
 }
 
-// ttDiv16Dot16 divides two 16.16 fixed-point values.
-// Reference: skrifa hint/math.rs:34
+// ttDiv16Dot16 divides two 16.16 fixed-point values with rounding.
+//
+// Uses the same rounded division as skrifa's Fixed::div:
+//
+//	sign = (a < 0) ^ (b < 0)
+//	q = (abs(a) << 16 + abs(b)/2) / abs(b)
+//	result = sign ? -q : q
+//
+// The rounding (adding half-divisor) is critical for IUP interpolation
+// where even 1 LSB difference in the scale factor produces visible
+// coordinate differences on untouched points.
+//
+// Reference: skrifa hint/math.rs:34 → font-types/src/fixed.rs:195-207
 func ttDiv16Dot16(a, b int32) int32 {
-	if b == 0 {
-		if a >= 0 {
-			return 0x7FFFFFFF
-		}
-		return -0x7FFFFFFF
+	sign := (a < 0) != (b < 0)
+	au := int64(a)
+	if au < 0 {
+		au = -au
 	}
-	return int32((int64(a) << 16) / int64(b))
+	bu := int64(b)
+	if bu < 0 {
+		bu = -bu
+	}
+	var q int32
+	if bu == 0 {
+		q = 0x7FFFFFFF
+	} else {
+		q = int32(((au << 16) + (bu >> 1)) / bu)
+	}
+	if sign {
+		return -q
+	}
+	return q
 }
 
 // ttMulDiv computes a * b / c with 64-bit intermediate precision and rounding.

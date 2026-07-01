@@ -38,6 +38,20 @@ func (t ttTarget) preserveLinearMetrics() bool {
 	return t == ttTargetLCD || t == ttTargetLCDV
 }
 
+// isVerticalLCD returns true if the target uses vertical LCD subpixels.
+// Reference: skrifa hint.rs Target::is_vertical_lcd
+func (t ttTarget) isVerticalLCD() bool {
+	return t == ttTargetLCDV
+}
+
+// isGrayscaleClearType returns true for smooth targets that use grayscale
+// rendering (not LCD subpixel). This corresponds to SmoothMode::Normal
+// in skrifa — the default smooth mode without LCD optimization.
+// Reference: skrifa hint.rs:496-501
+func (t ttTarget) isGrayscaleClearType() bool {
+	return t == ttTargetSmooth
+}
+
 // ttRetainedGraphicsState holds the persistent portion of the graphics state
 // that survives between interpreter runs (set by CV program, persists for
 // all glyph programs).

@@ -492,44 +492,63 @@ func (e *ttEngine) opMd(opcode byte) error {
 }
 
 // opGetinfo implements GETINFO[] (0x88).
-// Reference: skrifa hint/engine/misc.rs
+//
+// Returns information about the interpreter environment. Each selector bit
+// enables a corresponding result bit. The bit mapping matches skrifa exactly.
+//
+// Reference: skrifa hint/engine/misc.rs:28-77
+// Reference: skrifa hint/engine/misc.rs:135-176 (getinfo constants)
 func (e *ttEngine) opGetinfo() error {
 	selector, err := e.valueStack.pop()
 	if err != nil {
 		return err
 	}
 	result := int32(0)
-	// Bit 0: version (we report version 40 = ClearType compatible)
-	if selector&1 != 0 {
+	// Selector bit 0: version → result bits 0-7 (version 40 = ClearType compatible)
+	if selector&(1<<0) != 0 {
 		result = 40
 	}
-	// Bit 1: glyph rotated
-	if selector&2 != 0 && e.graphics.retained.isRotated {
+	// Selector bit 1: glyph rotated → result bit 8
+	if selector&(1<<1) != 0 && e.graphics.retained.isRotated {
 		result |= 1 << 8
 	}
-	// Bit 2: glyph stretched
-	if selector&4 != 0 && e.graphics.retained.isStretched {
+	// Selector bit 2: glyph stretched → result bit 9
+	if selector&(1<<2) != 0 && e.graphics.retained.isStretched {
 		result |= 1 << 9
 	}
-	// Bit 5: ClearType enabled
-	if selector&32 != 0 && e.graphics.retained.target.isSmooth() {
-		result |= 1 << 12
+	// Selector bit 3: font has variations → result bit 10
+	if selector&(1<<3) != 0 && e.axisCount != 0 {
+		result |= 1 << 10
 	}
-	// Bit 6: compatible width ClearType enabled
-	if selector&64 != 0 && e.graphics.retained.target.preserveLinearMetrics() {
-		result |= 1 << 13
-	}
-	// Bit 8: subpixel positioned (smooth targets)
-	if selector&256 != 0 && e.graphics.retained.target.isSmooth() {
-		result |= 1 << 15
-	}
-	// Bit 9: symmetric smoothing (smooth targets)
-	if selector&512 != 0 && e.graphics.retained.target.isSmooth() {
-		result |= 1 << 16
-	}
-	// Bit 10: gray ClearType (smooth targets)
-	if selector&1024 != 0 && e.graphics.retained.target == ttTargetSmooth {
-		result |= 1 << 17
+	// The following only apply for smooth hinting targets.
+	// Reference: skrifa hint/engine/misc.rs:44-76
+	if e.graphics.retained.target.isSmooth() {
+		// Selector bit 6: subpixel hinting / ClearType enabled (always) → result bit 13
+		if selector&(1<<6) != 0 {
+			result |= 1 << 13
+		}
+		// Selector bit 8: vertical LCD subpixels → result bit 15
+		if selector&(1<<8) != 0 && e.graphics.retained.target.isVerticalLCD() {
+			result |= 1 << 15
+		}
+		// Selector bit 10: subpixel positioned (always for smooth) → result bit 17
+		if selector&(1<<10) != 0 {
+			result |= 1 << 17
+		}
+		// Selector bit 11: symmetrical smoothing → result bit 18
+		// In skrifa, this checks Target.symmetric_rendering which is true by
+		// default for all HintingMode::Smooth targets. We always use symmetric
+		// rendering for smooth targets, matching the skrifa default.
+		// Reference: skrifa hint/engine/misc.rs:64-68 + hint.rs:533-541
+		if selector&(1<<11) != 0 {
+			result |= 1 << 18
+		}
+		// Selector bit 12: ClearType hinting + grayscale rendering → result bit 19
+		// True for Normal and Light smooth modes (not LCD).
+		// Reference: skrifa hint.rs:496-501
+		if selector&(1<<12) != 0 && e.graphics.retained.target.isGrayscaleClearType() {
+			result |= 1 << 19
+		}
 	}
 	return e.valueStack.push(result)
 }
