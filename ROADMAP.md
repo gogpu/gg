@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.48.13
+## Current State: v0.50.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
@@ -46,20 +46,32 @@
 
 ## Roadmap to v1.0.0 (November 2027 — Go's 18th anniversary)
 
-### v0.49.0 — Gradients & Clipping (Q3 2026)
+### v0.49.x — Font Stack Foundation (Q2-Q3 2026) ✅ COMPLETE
+- [x] **Enterprise auto-hinter** — skrifa golden parity, 17/19 diff=0, 6 scripts
+- [x] **TrueType bytecode interpreter** — 200+ opcodes, 624/624 skrifa diff=0
+- [x] **HVAR variable font advance** — own parser, ItemVariationStore
+
+### v0.50.0 — Pure Go Font Stack (Q3 2026) ✅ COMPLETE
+- [x] **Own font table parsers** — cmap (format 4/6/12), hmtx/hhea, name, head/OS/2
+- [x] **gvar/avar variable font outlines** — IUP interpolation, skrifa phantom diff=0
+- [x] **GSUB/GPOS shaper** — ligatures, kerning, 5-10x faster than HarfBuzz
+- [x] **Integration** — ownParsedFont + OwnShaper as defaults, sfnt/go-text decoupled
+- [x] **Performance benchmarks** — 27 benchmarks, own parser 7-46x faster than sfnt
+
+### v0.51.0 — Gradients & Clipping (Q3-Q4 2026)
 - [ ] **Linear & radial gradients** — BrushLinearGradient/BrushRadialGradient, GPU SDF gradient shader
 - [ ] **GPU-CLIP-003d** — stencil-based arbitrary path clip for text + complex shapes
 - [ ] **Thread safety** (#365) — atomic global caches, Context.closed CAS, sync.Once for gpuCtx
 - [ ] **Performance** (#365) — scissor groups ownership transfer (~5-10% CPU), path conversion scratch buffers
 
-### v0.50.0 — API Quality (Q3–Q4 2026)
+### v0.52.0 — API Quality (Q4 2026)
 - [ ] **Type alias cleanup** (#365) — replace 7 public aliases with real types (breaking)
 - [ ] **Error hierarchy** — GPUError, FontError, RenderError with sentinel values
 - [ ] **wgpu#218 migration** — gputypes direct imports (13 files, 86 lines)
 - [ ] **Deprecated Paint fields** — removal or v2.0 commitment (Pattern, LineWidth, LineCap, LineJoin)
 - [ ] **Test coverage for GPU core** — gpu_render_context.go (0 tests → 50+), render_session.go expansion
 
-### v0.51.0+ — Advanced Features (Q4 2026 – Q1 2027)
+### v0.53.0+ — Advanced Features (Q4 2026 – Q1 2027)
 - [ ] **Conic gradients** — sweep/angular gradient (CSS conic-gradient parity)
 - [ ] **Mesh gradients** — Coons patch (Inkscape/SVG2 pattern)
 - [ ] **Path boolean operations** — union, intersect, difference, XOR (Skia PathOps)
@@ -67,7 +79,7 @@
 - [ ] **Backdrop filters** — blur, color matrix behind layers (CSS backdrop-filter, Flutter BackdropFilter)
 - [ ] **Color filter layers** — hue/saturation/brightness per-layer (Skia SkColorFilter)
 
-### v0.52.0 — Platform Expansion (Q1–Q2 2027)
+### v0.54.0 — Platform Expansion (Q1–Q2 2027)
 - [ ] **WebAssembly** — browser rendering via wgpu Browser backend (js,wasm build tag)
 - [ ] **Android/iOS** — mobile GPU rendering via wgpu Metal/Vulkan
 - [ ] **SVG 2.0 compliance** — full SVG rendering (JSVG-level feature parity)
