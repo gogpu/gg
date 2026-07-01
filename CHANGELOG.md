@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deltas (int8/int16/zero runs), IUP interpolation (skrifa Jiggler pattern). avar:
   piecewise linear axis remapping (HarfBuzz-compatible edge cases). Skrifa golden
   parity: phantom point deltas diff=0 (`gvar.rs` test data). 21 tests.
+- **Pure Go GSUB/GPOS shaper** (ADR-048, #405) — own text shaper replacing
+  go-text/typesetting HarfBuzz. GSUB: single, multiple, alternate, ligature
+  substitution + extension. GPOS: single adjustment, pair kerning (format 1+2) +
+  extension. Legacy kern table fallback. OpenType layout engine (ScriptList,
+  FeatureList, Coverage, ClassDef). 5.8-10x faster than GoTextShaper. 27 tests.
 
 ### Fixed
 
