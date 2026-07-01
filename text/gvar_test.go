@@ -1104,6 +1104,237 @@ func TestGvar_DiagnosticDump(t *testing.T) {
 	}
 }
 
+// TestGolden_NormalizeCoords_MultiAxis validates that normalizeCoords always
+// returns a coords array whose length equals the number of fvar axes, even
+// when only a subset of axes is specified in the variations.
+//
+// Golden values derived from skrifa variation.rs:location_to_slice pattern:
+//
+//	let mut location = vec![NormalizedCoord::default(); axes.len()];
+//	axes.location_to_slice([("wght", 250.0)], &mut location);
+//	// location has axes.len() elements, unspecified axes = 0
+func TestGolden_NormalizeCoords_MultiAxis(t *testing.T) {
+	// Simulate a 4-axis font (like Apple SFNS: wght, wdth, opsz, GRAD).
+	axes := []fvarAxis{
+		{Tag: [4]byte{'w', 'g', 'h', 't'}, MinValue: 100, DefaultValue: 400, MaxValue: 900},
+		{Tag: [4]byte{'w', 'd', 't', 'h'}, MinValue: 75, DefaultValue: 100, MaxValue: 125},
+		{Tag: [4]byte{'o', 'p', 's', 'z'}, MinValue: 8, DefaultValue: 14, MaxValue: 144},
+		{Tag: [4]byte{'G', 'R', 'A', 'D'}, MinValue: -200, DefaultValue: 0, MaxValue: 150},
+	}
+
+	tests := []struct {
+		name       string
+		variations []FontVariation
+		wantLen    int
+		wantCoords []int16 // expected normalized coords (F2.14)
+	}{
+		{
+			name:       "single axis specified (wght=700)",
+			variations: []FontVariation{NewFontVariation("wght", 700)},
+			wantLen:    4,
+			// wght: (700-400)/(900-400) = 0.6 → 0.6 * 16384 = 9830
+			// wdth, opsz, GRAD: all at default → 0
+			wantCoords: []int16{9830, 0, 0, 0},
+		},
+		{
+			name:       "two axes specified (wght=700, GRAD=150)",
+			variations: []FontVariation{NewFontVariation("wght", 700), NewFontVariation("GRAD", 150)},
+			wantLen:    4,
+			// wght: 9830, wdth: 0, opsz: 0, GRAD: (150-0)/(150-0) = 1.0 → 16384
+			wantCoords: []int16{9830, 0, 0, 16384},
+		},
+		{
+			name:       "no variations specified",
+			variations: nil,
+			wantLen:    4,
+			wantCoords: []int16{0, 0, 0, 0},
+		},
+		{
+			name:       "all axes at default",
+			variations: []FontVariation{NewFontVariation("wght", 400), NewFontVariation("wdth", 100)},
+			wantLen:    4,
+			wantCoords: []int16{0, 0, 0, 0},
+		},
+		{
+			name:       "unknown axis tag ignored",
+			variations: []FontVariation{NewFontVariation("slnt", 12)},
+			wantLen:    4,
+			wantCoords: []int16{0, 0, 0, 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var coords []int16
+			if tt.variations == nil {
+				coords = normalizeCoords(axes, nil)
+			} else {
+				coords = normalizeCoords(axes, tt.variations)
+			}
+			if len(coords) != tt.wantLen {
+				t.Errorf("coords length = %d, want %d (must equal axisCount)", len(coords), tt.wantLen)
+			}
+			for i := range tt.wantCoords {
+				if i >= len(coords) {
+					break
+				}
+				if coords[i] != tt.wantCoords[i] {
+					t.Errorf("coords[%d] = %d, want %d", i, coords[i], tt.wantCoords[i])
+				}
+			}
+		})
+	}
+}
+
+// TestLoadFvar_IndependentOfHVAR verifies that fvar axes are loaded even
+// when the HVAR table is absent. This is the root cause of the SFNS bug:
+// fonts with gvar but no HVAR must still have fvarAxes for gvar delta
+// computation.
+//
+// Regression test for: gvar returns zero deltas on multi-axis fonts
+// without HVAR (e.g., Apple SFNS.ttf 4-axis).
+func TestLoadFvar_IndependentOfHVAR(t *testing.T) {
+	data, err := os.ReadFile("testdata/vazirmatn_var_trimmed.ttf")
+	if err != nil {
+		t.Fatalf("failed to read font: %v", err)
+	}
+
+	parser := &ownParser{}
+	pf, err := parser.Parse(data)
+	if err != nil {
+		t.Fatalf("failed to parse font: %v", err)
+	}
+	opf := pf.(*ownParsedFont)
+
+	// Simulate HVAR absence by removing it from the tables BEFORE any lazy loading.
+	// Create a fresh font with no HVAR.
+	tables, err := parseFontTablesIndex(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(tables, "HVAR")
+
+	noHvarFont := &ownParsedFont{
+		rawData:   data,
+		tables:    tables,
+		upem:      opf.upem,
+		numGlyphs: opf.numGlyphs,
+	}
+
+	// loadFvar must work independently.
+	noHvarFont.loadFvar()
+
+	if len(noHvarFont.fvarAxes) == 0 {
+		t.Fatal("fvarAxes not loaded when HVAR is absent — loadFvar must not depend on HVAR")
+	}
+
+	// Verify axes match what we expect from Vazirmatn (1 axis: wght).
+	if len(noHvarFont.fvarAxes) != 1 {
+		t.Errorf("expected 1 axis, got %d", len(noHvarFont.fvarAxes))
+	}
+	if noHvarFont.fvarAxes[0].Tag != [4]byte{'w', 'g', 'h', 't'} {
+		t.Errorf("expected wght axis, got %s", string(noHvarFont.fvarAxes[0].Tag[:]))
+	}
+
+	// HVAR must still be nil.
+	noHvarFont.loadHVAR()
+	if noHvarFont.hvar != nil {
+		t.Error("hvar should be nil when HVAR table is absent")
+	}
+
+	// fvarAxes must still be present after loadHVAR.
+	if len(noHvarFont.fvarAxes) == 0 {
+		t.Fatal("fvarAxes lost after loadHVAR — sync.Once interaction bug")
+	}
+}
+
+// TestApplyVariations_NoHVAR verifies that gvar deltas are correctly
+// computed on a font that has gvar + fvar but no HVAR table.
+// This is the core regression test for the SFNS multi-axis bug.
+func TestApplyVariations_NoHVAR(t *testing.T) {
+	data, err := os.ReadFile("testdata/vazirmatn_var_trimmed.ttf")
+	if err != nil {
+		t.Fatalf("failed to read font: %v", err)
+	}
+
+	// Parse the font normally first to get reference deltas.
+	parser := &ownParser{}
+	pf, err := parser.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opfRef := pf.(*ownParsedFont)
+
+	tables := opfRef.tables
+	glyphInfo := loadGlyphInfo(t, tables, 1)
+
+	// Compute reference deltas with HVAR present (normal path).
+	refPoints := make([][2]int32, glyphInfo.numPoints+4)
+	copy(refPoints, glyphInfo.points)
+	variations := []FontVariation{{Tag: [4]byte{'w', 'g', 'h', 't'}, Value: 900}}
+	opfRef.applyVariations(1, refPoints, glyphInfo.contourEnds, variations)
+
+	refChanged := false
+	for i := range glyphInfo.numPoints {
+		if refPoints[i] != glyphInfo.points[i] {
+			refChanged = true
+			break
+		}
+	}
+	if !refChanged {
+		t.Fatal("reference applyVariations did not modify points — test setup broken")
+	}
+
+	// Now create a font WITHOUT HVAR and verify same deltas.
+	tablesNoHvar, err := parseFontTablesIndex(data, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(tablesNoHvar, "HVAR")
+
+	headData := tablesNoHvar["head"]
+	upem, _ := parseHeadUnitsPerEm(headData)
+	maxpData := tablesNoHvar["maxp"]
+	numGlyphs := int(binary.BigEndian.Uint16(maxpData[4:6]))
+
+	noHvarFont := &ownParsedFont{
+		rawData:   data,
+		tables:    tablesNoHvar,
+		upem:      upem,
+		numGlyphs: numGlyphs,
+	}
+
+	testPoints := make([][2]int32, glyphInfo.numPoints+4)
+	copy(testPoints, glyphInfo.points)
+	noHvarFont.applyVariations(1, testPoints, glyphInfo.contourEnds, variations)
+
+	// Verify deltas match the reference (with HVAR present).
+	testChanged := false
+	for i := range glyphInfo.numPoints {
+		if testPoints[i] != glyphInfo.points[i] {
+			testChanged = true
+			break
+		}
+	}
+	if !testChanged {
+		t.Error("applyVariations WITHOUT HVAR did not modify points — fvar not loaded independently of HVAR")
+	}
+
+	// Compare point-by-point with reference.
+	mismatches := 0
+	for i := range glyphInfo.numPoints + 4 {
+		if testPoints[i] != refPoints[i] {
+			mismatches++
+			if mismatches <= 5 {
+				t.Errorf("point[%d] mismatch: noHVAR=%v, ref=%v", i, testPoints[i], refPoints[i])
+			}
+		}
+	}
+	if mismatches > 0 {
+		t.Errorf("total point mismatches: %d (expected 0 — gvar deltas must be identical with/without HVAR)", mismatches)
+	}
+}
+
 // makeGvarHeader constructs a minimal gvar header for testing.
 func makeGvarHeader(major, minor, axisCount, glyphCount uint16, flags uint16) []byte {
 	buf := make([]byte, 20+int(glyphCount+1)*2)
