@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.1] - 2026-07-01
+
+### Fixed
+
+- **TT GETINFO instruction** — ClearType selector bits were off by one vs skrifa/FreeType.
+  Segoe UI prep program received wrong ClearType feature answers, causing incorrect CVT
+  values and wrong Y coordinates for complex glyphs ('w' at 12ppem). Golden test: 20/20
+  points match skrifa.
+- **ttDiv16Dot16 rounding** — truncated → rounded division matching skrifa `Fixed::div`.
+  Improves IUP interpolation precision for all TT-hinted fonts.
+- **Space glyph TT hinting** — empty glyphs (space, .notdef) now produce integer-pixel
+  hinted advances via phantom-only outlines. Before: space 24ppem=6.5742 (fractional,
+  uneven word spacing). After: 7.0000 (integer, skrifa parity diff=0).
+
+### Changed
+
+- **Dependencies:** wgpu v0.30.7 → v0.30.8 (MSAA rejection, BGRA swizzle, buffer offsets),
+  gogpu v0.43.2 → v0.43.3 (WM_PAINT fix), x/image v0.43.0, x/text v0.38.0.
+
 ## [0.50.0] - 2026-07-01
 
 ### Added
