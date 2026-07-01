@@ -322,12 +322,17 @@ func (e *OutlineExtractor) ExtractOutline(parsedFont ParsedFont, gid GlyphID, si
 // Hinting should be disabled for rotated/scaled text where grid-fitting
 // doesn't apply (the pixel grid is no longer axis-aligned).
 func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid GlyphID, size float64, hinting Hinting) (*GlyphOutline, error) {
-	xiFont, ok := parsedFont.(*ximageParsedFont)
-	if !ok {
+	var outline *GlyphOutline
+	var err error
+
+	switch f := parsedFont.(type) {
+	case *ximageParsedFont:
+		outline, err = e.extractFromSFNT(f.font, gid, size, hinting)
+	case *ownParsedFont:
+		outline, err = e.extractFromOwn(f, gid, size)
+	default:
 		return nil, ErrUnsupportedFontType
 	}
-
-	outline, err := e.extractFromSFNT(xiFont.font, gid, size, hinting)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +345,7 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 	// This produces professionally hinted outlines matching the font designer's
 	// intent. Fonts like Arial, Times New Roman, Segoe UI rely on TT instructions
 	// for quality rendering at screen sizes.
-	if ttOutline := tryTTBytecodeHinting(xiFont, gid, size); ttOutline != nil && len(ttOutline.Segments) > 0 {
+	if ttOutline := tryTTBytecodeHintingGeneric(parsedFont, gid, size); ttOutline != nil && len(ttOutline.Segments) > 0 {
 		return ttOutline, nil
 	}
 
@@ -354,36 +359,6 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 		gridFitOutline(outline, hinting)
 	}
 	return outline, nil
-}
-
-// tryTTBytecodeHinting attempts to use TrueType bytecode hinting for the
-// given glyph. Returns the hinted GlyphOutline if successful, nil otherwise.
-//
-// This path runs the font's fpgm + prep programs (cached per ppem) and the
-// glyph-specific bytecode to produce professionally hinted outlines with
-// correct phantom-point advances.
-func tryTTBytecodeHinting(xiFont *ximageParsedFont, gid GlyphID, size float64) *GlyphOutline {
-	cache := xiFont.loadTTHintCache()
-	if cache == nil {
-		return nil
-	}
-
-	ppem := int32(size)
-	if ppem <= 0 {
-		return nil
-	}
-
-	hinted, err := cache.hintGlyphOutline(uint16(gid), ppem)
-	if err != nil || hinted == nil {
-		return nil
-	}
-
-	outline := ttHintedOutlineToGlyphOutline(hinted, gid)
-	if outline == nil {
-		return nil
-	}
-
-	return outline
 }
 
 // extractFromSFNT extracts outline from an sfnt.Font.
@@ -697,6 +672,208 @@ func abs32f(x float32) float32 {
 		return -x
 	}
 	return x
+}
+
+// extractFromOwn extracts outline from an ownParsedFont using raw glyf
+// contour points. This is the Pure Go path that does not depend on
+// sfnt.Font.LoadGlyph.
+//
+// The approach:
+//  1. Parse raw contour points via ParseGlyfContours (Y-UP font units)
+//  2. Scale to ppem and convert Y-UP → Y-DOWN (Go rendering convention)
+//  3. Convert TrueType on/off-curve points to MoveTo/LineTo/QuadTo segments
+//
+// This matches the sfnt.LoadGlyph output format so the rest of the
+// pipeline (hinting, rendering) works identically.
+func (e *OutlineExtractor) extractFromOwn(f *ownParsedFont, gid GlyphID, size float64) (*GlyphOutline, error) {
+	rawData := f.RawFontData()
+	if rawData == nil {
+		return nil, &FontError{Reason: "own parser: no raw font data"}
+	}
+
+	upem := f.UnitsPerEm()
+	if upem == 0 {
+		return nil, &FontError{Reason: "own parser: zero unitsPerEm"}
+	}
+
+	// Get advance width.
+	advance := f.GlyphAdvance(uint16(gid), size)
+
+	// Parse raw contour points from glyf table.
+	contours, err := ParseGlyfContours(rawData, gid)
+	if err != nil {
+		return nil, err
+	}
+	if contours == nil || len(contours.Points) == 0 {
+		// Empty glyph (space, etc.) — return outline with advance only.
+		return &GlyphOutline{
+			GID:     gid,
+			Type:    GlyphTypeOutline,
+			Advance: float32(advance),
+		}, nil
+	}
+
+	// Scale factor: ppem / unitsPerEm.
+	scale := size / float64(upem)
+
+	// Convert raw contour points to outline segments.
+	// sfnt.LoadGlyph returns coordinates in Y-DOWN at ppem scale.
+	// Our raw contours are in Y-UP font units.
+	// To match sfnt: scaleX = scale, scaleY = -scale (Y-UP → Y-DOWN).
+	segments := contourPointsToSegments(contours, scale)
+
+	if len(segments) == 0 {
+		return &GlyphOutline{
+			GID:     gid,
+			Type:    GlyphTypeOutline,
+			Advance: float32(advance),
+		}, nil
+	}
+
+	// Compute bounds from segments.
+	outline := &GlyphOutline{
+		Segments: segments,
+		GID:      gid,
+		Type:     GlyphTypeOutline,
+		Advance:  float32(advance),
+	}
+
+	minX, minY := float64(1e10), float64(1e10)
+	maxX, maxY := float64(-1e10), float64(-1e10)
+	for _, seg := range segments {
+		for j := range segPointCount(seg.Op) {
+			updateBounds(seg.Points[j], &minX, &minY, &maxX, &maxY)
+		}
+	}
+	outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
+
+	return outline, nil
+}
+
+// contourPointsToSegments converts raw TrueType glyf contour points to
+// OutlineSegment slices. Coordinates are scaled from font units to ppem
+// and Y is negated (Y-UP → Y-DOWN) to match sfnt.LoadGlyph output.
+//
+// TrueType contour point representation:
+//   - On-curve points are line/curve endpoints
+//   - Off-curve points are quadratic Bezier control points
+//   - Two consecutive off-curve points imply an on-curve midpoint
+func contourPointsToSegments(contours *GlyfContours, scale float64) []OutlineSegment {
+	var segments []OutlineSegment
+
+	for ci := range contours.NumContours() {
+		pts := contours.ContourPoints(ci)
+		if len(pts) < 2 {
+			continue
+		}
+		n := len(pts)
+
+		// Find the first on-curve point.
+		firstOnCurve := -1
+		for i := range n {
+			if pts[i].OnCurve {
+				firstOnCurve = i
+				break
+			}
+		}
+
+		// Compute start point.
+		var startX, startY float32
+		startIdx := 0
+		if firstOnCurve >= 0 {
+			startX = float32(float64(pts[firstOnCurve].X) * scale)
+			startY = float32(-float64(pts[firstOnCurve].Y) * scale) // Y-UP → Y-DOWN
+			startIdx = firstOnCurve
+		} else {
+			// All off-curve: start from midpoint of first and last.
+			x0 := float64(pts[0].X) * scale
+			y0 := -float64(pts[0].Y) * scale
+			x1 := float64(pts[n-1].X) * scale
+			y1 := -float64(pts[n-1].Y) * scale
+			startX = float32((x0 + x1) / 2)
+			startY = float32((y0 + y1) / 2)
+		}
+
+		segments = append(segments, OutlineSegment{
+			Op:     OutlineOpMoveTo,
+			Points: [3]OutlinePoint{{X: startX, Y: startY}},
+		})
+
+		// Walk points starting from after the first on-curve point.
+		for count := 0; count < n; count++ {
+			i := (startIdx + 1 + count) % n
+			px := float32(float64(pts[i].X) * scale)
+			py := float32(-float64(pts[i].Y) * scale) // Y-UP → Y-DOWN
+
+			if pts[i].OnCurve {
+				segments = append(segments, OutlineSegment{
+					Op:     OutlineOpLineTo,
+					Points: [3]OutlinePoint{{X: px, Y: py}},
+				})
+			} else {
+				// Off-curve: quadratic Bezier control point.
+				next := (i + 1) % n
+				var endX, endY float32
+				if pts[next].OnCurve {
+					endX = float32(float64(pts[next].X) * scale)
+					endY = float32(-float64(pts[next].Y) * scale)
+					count++ // Skip the next point since we consumed it.
+				} else {
+					// Two consecutive off-curve: implicit on-curve at midpoint.
+					nx := float64(pts[next].X) * scale
+					ny := -float64(pts[next].Y) * scale
+					endX = float32((float64(px) + nx) / 2)
+					endY = float32((float64(py) + ny) / 2)
+				}
+				segments = append(segments, OutlineSegment{
+					Op: OutlineOpQuadTo,
+					Points: [3]OutlinePoint{
+						{X: px, Y: py},     // control
+						{X: endX, Y: endY}, // endpoint
+					},
+				})
+			}
+		}
+	}
+
+	return segments
+}
+
+// tryTTBytecodeHintingGeneric attempts TT bytecode hinting for any font type
+// that implements RawFontDataProvider. This is a generic version of
+// tryTTBytecodeHinting that works with both ximageParsedFont and ownParsedFont.
+//
+// The TT bytecode hinting path requires:
+//  1. Raw font data (for loading fpgm/prep programs and glyph bytecode)
+//  2. A ttHintCache (lazily initialized from the raw data)
+//
+// Both ximageParsedFont and ownParsedFont implement loadTTHintCache().
+func tryTTBytecodeHintingGeneric(parsedFont ParsedFont, gid GlyphID, size float64) *GlyphOutline {
+	// Get the TT hint cache based on font type.
+	var cache *ttHintCache
+	switch f := parsedFont.(type) {
+	case *ximageParsedFont:
+		cache = f.loadTTHintCache()
+	case *ownParsedFont:
+		cache = f.loadTTHintCache()
+	default:
+		return nil
+	}
+	if cache == nil {
+		return nil
+	}
+
+	ppem := int32(size)
+	if ppem <= 0 {
+		return nil
+	}
+
+	hinted, err := cache.hintGlyphOutline(uint16(gid), ppem)
+	if err != nil || hinted == nil {
+		return nil
+	}
+
+	return ttHintedOutlineToGlyphOutline(hinted, gid)
 }
 
 // sfntFont is a type alias for easier access.

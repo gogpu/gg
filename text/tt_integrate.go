@@ -133,8 +133,6 @@ func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutl
 // computes the advance from phantom[1].x - phantom[0].x.
 //
 // Returns 0, false if TT hinting is unavailable or the glyph cannot be hinted.
-//
-//nolint:unparam // ppem varies at runtime; tests happen to use 16 mostly
 func (c *ttHintCache) hintedAdvanceWidth(glyphID uint16, ppem int32) (float64, bool) {
 	outline, err := c.hintGlyphOutline(glyphID, ppem)
 	if err != nil || outline == nil {

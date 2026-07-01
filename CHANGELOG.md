@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TT interpreter skrifa golden tests** (#405) — 1872 coordinate pairs (624 points
   × 3 sizes) extracted from Google skrifa via instrumented `hint/instance.rs`.
   Coordinate-exact diff=0 comparison at 12, 16, 24 ppem.
+- **Pure Go font table parsers** (ADR-048, #405) — own cmap (format 4/6/12), hmtx/hhea,
+  name, head/OS/2 parsers. New `ownParsedFont` implementing full `ParsedFont` interface
+  with zero sfnt dependency. Cross-validated against ximageParsedFont: exact parity.
+  Glyph outline extraction, GlyphBounds, auto-hinter blue zones generalized for both
+  parser types. 37 tests.
+- **Pure Go gvar/avar parsers** (ADR-048, #405) — gvar: tuple variation data, packed
+  deltas (int8/int16/zero runs), IUP interpolation (skrifa Jiggler pattern). avar:
+  piecewise linear axis remapping (HarfBuzz-compatible edge cases). Skrifa golden
+  parity: phantom point deltas diff=0 (`gvar.rs` test data). 21 tests.
 
 ### Fixed
 
