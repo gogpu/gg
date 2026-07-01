@@ -351,6 +351,64 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 	return outline, nil
 }
 
+// ExtractOutlineHintedVar extracts a glyph outline with font variations AND
+// hinting applied in a single unified path. This matches skrifa's load_simple
+// architecture where gvar deltas are applied to unscaled points BEFORE
+// scaling and TT bytecode hinting.
+//
+// This fixes the variable font rendering bug where variable fonts skipped
+// TT bytecode hinting and auto-hinting, causing them to render bolder
+// than static fonts at the same weight.
+//
+// The hinting priority chain (same as static fonts):
+//  1. TT bytecode hinting with gvar-varied unscaled points
+//  2. Auto-hinter on the gvar-varied outline
+//  3. Grid-fit fallback
+//
+// When variations is nil or empty, this produces identical output to
+// ExtractOutlineHinted (delegates to the static path).
+//
+// Reference: skrifa glyf/mod.rs:584-782 (load_simple — one path for both)
+func (e *OutlineExtractor) ExtractOutlineHintedVar(
+	parsedFont ParsedFont,
+	gid GlyphID,
+	size float64,
+	hinting Hinting,
+	variations []FontVariation,
+) (*GlyphOutline, error) {
+	// If no variations, delegate to the static path.
+	if len(variations) == 0 {
+		return e.ExtractOutlineHinted(parsedFont, gid, size, hinting)
+	}
+
+	ownFont, ok := parsedFont.(*ownParsedFont)
+	if !ok {
+		return nil, ErrUnsupportedFontType
+	}
+
+	// Extract the gvar-varied outline (unscaled + gvar deltas + scale).
+	outline, err := e.extractFromOwnVariable(ownFont, gid, size, variations)
+	if err != nil {
+		return nil, err
+	}
+
+	if outline == nil || hinting == HintingNone {
+		return outline, nil
+	}
+
+	// Priority 1: TT bytecode hinting with gvar-varied unscaled points.
+	// This runs gvar deltas on unscaled points, then scales to 26.6,
+	// then runs the TT interpreter — exactly matching skrifa load_simple.
+	if ttOutline := tryTTBytecodeHintingVar(parsedFont, gid, size, variations); ttOutline != nil && len(ttOutline.Segments) > 0 {
+		return ttOutline, nil
+	}
+
+	// Priority 2: Auto-hinter on the gvar-varied outline.
+	if !autoHintOutline(outline, parsedFont, size, hinting) {
+		gridFitOutline(outline, hinting)
+	}
+	return outline, nil
+}
 
 // updateBounds updates the min/max bounds.
 func updateBounds(p OutlinePoint, minX, minY, maxX, maxY *float64) {

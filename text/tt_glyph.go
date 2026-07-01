@@ -334,6 +334,199 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 	return outline, nil
 }
 
+// loadGlyphOutlineVar loads a simple glyph's contour points with variation
+// deltas applied, then scales to 26.6 fixed-point — exactly matching skrifa
+// load_simple with gvar delta application (lines 647-706).
+//
+// This is the unified path for variable font TT hinting. The flow:
+//  1. Parse raw contour points (font units) + phantom points
+//  2. Apply gvar deltas to unscaled points (including phantoms)
+//  3. Scale varied points to 26.6 (same formula as static path)
+//  4. The returned outline is ready for TT bytecode hinting
+//
+// When variations is nil or empty, this produces identical output to
+// loadGlyphOutline (no deltas applied).
+//
+// Reference: skrifa glyf/mod.rs:584-782 (load_simple with gvar)
+//
+//nolint:nilnil // nil result = "no simple outline", not an error
+func (l *ttGlyphLoader) loadGlyphOutlineVar(
+	glyphID uint16,
+	scale int32,
+	font *ownParsedFont,
+	variations []FontVariation,
+) (*ttGlyphOutline, error) {
+	// If no variations, delegate to the static path.
+	if len(variations) == 0 || font == nil {
+		return l.loadGlyphOutline(glyphID, scale)
+	}
+
+	if int(glyphID) >= len(l.glyfOff) {
+		return nil, fmt.Errorf("tt: glyph %d out of range (%d glyphs)", glyphID, len(l.glyfOff))
+	}
+
+	off := l.glyfOff[glyphID]
+	if off.length == 0 {
+		return nil, nil // empty glyph (e.g., space)
+	}
+
+	glyfData, ok := l.tables["glyf"]
+	if !ok {
+		return nil, errors.New("tt: missing glyf table")
+	}
+
+	end := off.offset + off.length
+	if end > uint32(len(glyfData)) {
+		return nil, fmt.Errorf("tt: glyph %d data out of bounds", glyphID)
+	}
+
+	data := glyfData[off.offset:end]
+	if len(data) < 10 {
+		return nil, nil // too short for glyph header
+	}
+
+	// Parse glyph header.
+	numContours := int16(binary.BigEndian.Uint16(data[0:2]))
+	if numContours < 0 {
+		return nil, nil // composite glyph — skip for now
+	}
+	if numContours == 0 {
+		return nil, nil // no contours
+	}
+
+	xMin := int16(binary.BigEndian.Uint16(data[2:4]))
+	yMax := int16(binary.BigEndian.Uint16(data[8:10]))
+
+	// Parse contour endpoints.
+	nContours := int(numContours)
+	if len(data) < 10+nContours*2 {
+		return nil, fmt.Errorf("tt: glyph %d: truncated contour endpoints", glyphID)
+	}
+	contourEnds := make([]uint16, nContours)
+	for i := range nContours {
+		contourEnds[i] = binary.BigEndian.Uint16(data[10+i*2 : 12+i*2])
+	}
+	numPoints := int(contourEnds[nContours-1]) + 1
+
+	// Skip instruction length and instructions.
+	instrOff := 10 + nContours*2
+	if instrOff+2 > len(data) {
+		return nil, fmt.Errorf("tt: glyph %d: truncated instruction length", glyphID)
+	}
+	instrLen := int(binary.BigEndian.Uint16(data[instrOff : instrOff+2]))
+	instrStart := instrOff + 2
+	var instructions []byte
+	if instrLen > 0 && instrStart+instrLen <= len(data) {
+		instructions = data[instrStart : instrStart+instrLen]
+	}
+
+	// Parse point flags.
+	flagStart := instrStart + instrLen
+	flags, flagsEnd, err := parseGlyfFlags(data, flagStart, numPoints)
+	if err != nil {
+		return nil, fmt.Errorf("tt: glyph %d: %w", glyphID, err)
+	}
+
+	// Parse X coordinates.
+	xCoords, xEnd, err := parseGlyfCoords(data, flagsEnd, flags, numPoints, 0x02, 0x10)
+	if err != nil {
+		return nil, fmt.Errorf("tt: glyph %d: x coords: %w", glyphID, err)
+	}
+
+	// Parse Y coordinates.
+	yCoords, _, err := parseGlyfCoords(data, xEnd, flags, numPoints, 0x04, 0x20)
+	if err != nil {
+		return nil, fmt.Errorf("tt: glyph %d: y coords: %w", glyphID, err)
+	}
+
+	// Get horizontal metrics.
+	advance, lsb := l.glyphMetrics(glyphID)
+
+	// Compute phantom points (in font units).
+	var phantomFU [ttPhantomPointCount][2]int32
+	ascent := int32(l.font.os2Ascender)
+	descent := int32(l.font.os2Descender)
+	tsb := ascent - int32(yMax)
+	vadvance := ascent - descent
+	phantomFU[0] = [2]int32{int32(xMin) - int32(lsb), 0}
+	phantomFU[1] = [2]int32{phantomFU[0][0] + int32(advance), 0}
+	phantomFU[2] = [2]int32{0, int32(yMax) + tsb}
+	phantomFU[3] = [2]int32{0, phantomFU[2][1] - vadvance}
+
+	totalPoints := numPoints + ttPhantomPointCount
+
+	// Build points array for gvar: [x, y] pairs including phantom points.
+	// This matches the structure used by ownParsedFont.applyVariations.
+	gvarPoints := make([][2]int32, totalPoints)
+	for i := range numPoints {
+		gvarPoints[i] = [2]int32{int32(xCoords[i]), int32(yCoords[i])}
+	}
+	for j := range ttPhantomPointCount {
+		gvarPoints[numPoints+j] = phantomFU[j]
+	}
+
+	// Apply gvar deltas to unscaled points (including phantom points).
+	// This is the critical step that skrifa does at lines 647-668:
+	//   if gvar present && coords non-empty → compute and apply deltas.
+	font.applyVariations(glyphID, gvarPoints, contourEnds, variations)
+
+	// Build the outline from varied unscaled points.
+	outline := &ttGlyphOutline{
+		unscaled:    make([]int32, totalPoints*2),
+		original:    make([][2]int32, totalPoints),
+		points:      make([][2]int32, totalPoints),
+		flags:       make([]ttPointFlags, totalPoints),
+		contours:    contourEnds,
+		bytecode:    instructions,
+		isComposite: false,
+		glyphID:     glyphID,
+	}
+
+	// Fill unscaled, original, points, and flags for contour points.
+	// The unscaled array now contains gvar-varied font unit values.
+	for i := range numPoints {
+		x := gvarPoints[i][0]
+		y := gvarPoints[i][1]
+		outline.unscaled[i*2] = x
+		outline.unscaled[i*2+1] = y
+
+		// Scale varied font units to 26.6 (same formula as static path).
+		sx := ttMul16Dot16(x, scale)
+		sy := ttMul16Dot16(y, scale)
+		outline.original[i] = [2]int32{sx, sy}
+		outline.points[i] = [2]int32{sx, sy}
+
+		// Set on-curve flag from TrueType flags.
+		if flags[i]&0x01 != 0 {
+			outline.flags[i] = ttPointFlagOnCurve
+		}
+	}
+
+	// Append phantom points (now with gvar deltas applied).
+	for j := range ttPhantomPointCount {
+		idx := numPoints + j
+		outline.unscaled[idx*2] = gvarPoints[idx][0]
+		outline.unscaled[idx*2+1] = gvarPoints[idx][1]
+
+		sx := ttMul16Dot16(gvarPoints[idx][0], scale)
+		sy := ttMul16Dot16(gvarPoints[idx][1], scale)
+		outline.original[idx] = [2]int32{sx, sy}
+		outline.points[idx] = [2]int32{sx, sy}
+
+		// Round phantom points for hinting (FreeType pattern).
+		outline.points[idx][0] = ttRound26Dot6(sx)
+		outline.points[idx][1] = ttRound26Dot6(sy)
+	}
+
+	// Initialize phantom outputs from scaled (rounded) phantom points.
+	for j := range ttPhantomPointCount {
+		idx := numPoints + j
+		outline.phantoms[j] = outline.points[idx]
+	}
+
+	return outline, nil
+}
+
 // glyphMetrics returns the advance width and left side bearing for a glyph.
 // Matches hmtx table semantics: glyphs beyond numHMtx use the last advance.
 func (l *ttGlyphLoader) glyphMetrics(glyphID uint16) (advance uint16, lsb int16) {

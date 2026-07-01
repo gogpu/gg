@@ -428,6 +428,21 @@ func (f *ownParsedFont) applyVariations(
 	f.loadAvar()
 	f.avar.apply(coords)
 
+	// Optimization: skip gvar delta computation when all normalized coords
+	// are zero (default instance). This is the common case when the user
+	// specifies e.g. wght=400 on a font where 400 is the default weight.
+	// Avoids allocation + IUP computation for a zero-delta result.
+	allZero := true
+	for _, c := range coords {
+		if c != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		return
+	}
+
 	// Total outline points (without phantom points).
 	numPoints := len(points) - 4
 	if numPoints < 0 {

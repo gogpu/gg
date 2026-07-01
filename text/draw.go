@@ -114,8 +114,14 @@ func drawGlyphs(
 }
 
 // drawGlyphsVariable renders text using the own parser's gvar path for outline
-// extraction, which supports variable font tables (gvar/HVAR). This path is
-// used when the face has font variations configured via WithVariations.
+// extraction with full hinting support. This path matches skrifa's unified
+// load_simple architecture: gvar deltas are applied to unscaled points BEFORE
+// scaling and TT bytecode hinting.
+//
+// Hinting priority (same as static fonts):
+//  1. TT bytecode hinting with gvar-varied unscaled points
+//  2. Auto-hinter on the gvar-varied outline
+//  3. Grid-fit fallback
 //
 // The mode parameter selects coverage computation (Skia pattern: outline source
 // and rasterization mode are orthogonal — variable fonts don't affect AA choice).
@@ -130,20 +136,15 @@ func drawGlyphsVariable(
 ) {
 	source := sf.source
 	parsed := source.Parsed()
-	ownFont, ok := parsed.(*ownParsedFont)
-	if !ok {
+	if _, ok := parsed.(*ownParsedFont); !ok {
 		return
 	}
 
 	ppem := sf.size
+	hinting := sf.config.hinting
 	rast := NewGlyphMaskRasterizer()
 	src := image.NewUniform(col)
 	extractor := &OutlineExtractor{}
-
-	// Hinting only for aliased mode (Skia pattern: FT_LOAD_TARGET_MONO for kAlias,
-	// FT_LOAD_TARGET_NORMAL for kAntiAlias). AA rendering benefits from smooth
-	// unhinted outlines; aliased needs grid-fitting for crisp stems.
-	applyHinting := mode == rasterModeAliased && sf.config.hinting != HintingNone
 
 	advanceX := 0.0
 	for _, r := range text {
@@ -170,10 +171,9 @@ func drawGlyphsVariable(
 		subpixelX := glyphX - intX
 		subpixelY := glyphY - intY
 
-		outline, _ := extractor.extractFromOwnVariable(ownFont, gid, ppem, variations)
-		if applyHinting && outline != nil && !outline.IsEmpty() {
-			gridFitOutline(outline, sf.config.hinting)
-		}
+		// Unified gvar + hinting path (skrifa load_simple parity).
+		// ExtractOutlineHintedVar applies gvar deltas THEN hinting in one pass.
+		outline, _ := extractor.ExtractOutlineHintedVar(parsed, gid, ppem, hinting, variations)
 		if outline == nil || outline.IsEmpty() {
 			if outline != nil {
 				advanceX += float64(outline.Advance)
