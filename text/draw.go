@@ -57,9 +57,14 @@ type glyphRasterizeFunc func(
 // DrawAliased. Each glyph is individually rasterized via the provided callback,
 // then composited at its precise subpixel position using draw.DrawMask.
 //
-// The Glyphs() iterator returns fractional X positions from HintingNone
-// advances (ADR-039), while the rasterize callback controls outline
-// rasterization (AA vs aliased).
+// When TT bytecode hinting is active, glyph positions are computed from
+// hinted advances (phantom[1].x - phantom[0].x after TT interpreter runs)
+// rather than unhinted hmtx advances. This prevents outline/advance mismatch
+// where hinted outlines are wider or narrower than the raw advance, causing
+// letters to merge or have gaps at certain ppem values (e.g., 16px Segoe UI).
+//
+// This matches skrifa/FreeType/Skia: when TT hinting runs on a glyph, the
+// hinted advance replaces the raw hmtx advance for positioning.
 func drawGlyphs(
 	dst draw.Image,
 	sf *sourceFace,
@@ -77,16 +82,32 @@ func drawGlyphs(
 	ppem := sf.size
 	hinting := sf.config.hinting
 
+	// Check if TT bytecode hinting is available for this font.
+	// When it is, we need to use hinted advances for glyph positioning
+	// to match the hinted outlines. Without this, the outline shape
+	// (grid-fitted by TT interpreter) disagrees with the cursor advance
+	// (raw hmtx), causing letters to merge or gap at certain sizes.
+	var ttCache *ttHintCache
+	if hinting != HintingNone {
+		if ownFont, ok := parsed.(*ownParsedFont); ok {
+			ttCache = ownFont.loadTTHintCache()
+		}
+	}
+
 	rast := NewGlyphMaskRasterizer()
 	src := image.NewUniform(col)
 
+	advanceX := 0.0
 	for glyph := range sf.Glyphs(text) {
 		if glyph.GID == 0 {
+			// Space and other no-outline glyphs: use unhinted advance.
+			// These have no TT bytecode and phantom points would be trivial.
+			advanceX += glyph.Advance
 			continue
 		}
 
-		// glyph.X is the accumulated horizontal position (includes all prior advances).
-		glyphX := x + glyph.X
+		// Position glyph using our tracked advance (which may be hinted).
+		glyphX := x + advanceX
 		glyphY := y + glyph.Y
 
 		intX := math.Floor(glyphX)
@@ -96,6 +117,7 @@ func drawGlyphs(
 
 		result, err := rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
 		if err != nil || result == nil {
+			advanceX += hintedOrRawAdvance(ttCache, glyph, ppem)
 			continue
 		}
 
@@ -110,7 +132,29 @@ func drawGlyphs(
 
 		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
 		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
+
+		// Advance cursor using hinted advance when TT hinting is active.
+		advanceX += hintedOrRawAdvance(ttCache, glyph, ppem)
 	}
+}
+
+// hintedOrRawAdvance returns the TT hinted advance for a glyph if available,
+// otherwise falls back to the unhinted advance from the Glyphs() iterator.
+//
+// When TT bytecode hinting is active, the hinted advance (from phantom
+// points after TT interpreter execution) matches the hinted outline shape.
+// Using unhinted advances with hinted outlines causes positioning errors
+// because the outline is grid-fitted but the advance is not.
+//
+// Reference: skrifa ScaledOutline::advance_width — returns hinted advance
+// when hinting is active, raw advance otherwise.
+func hintedOrRawAdvance(ttCache *ttHintCache, glyph Glyph, ppem float64) float64 {
+	if ttCache != nil {
+		if adv, ok := ttCache.hintedAdvanceWidth(uint16(glyph.GID), int32(ppem)); ok {
+			return adv
+		}
+	}
+	return glyph.Advance
 }
 
 // drawGlyphsVariable renders text using the own parser's gvar path for outline
@@ -270,12 +314,8 @@ func drawMultiFace(dst draw.Image, text string, mf *MultiFace, x, y float64, col
 			faceToUse = mf.faces[0]
 		}
 
-		// Get advance for this rune
-		advance := 0.0
-		for glyph := range faceToUse.Glyphs(runeStr) {
-			advance = glyph.Advance
-			break
-		}
+		// Get advance for this rune (prefer hinted advance if available).
+		advance := faceGlyphAdvance(faceToUse, runeStr)
 
 		// Render based on face type
 		switch f := faceToUse.(type) {
@@ -306,12 +346,8 @@ func drawFilteredFace(dst draw.Image, text string, ff *FilteredFace, x, y float6
 
 		runeStr := string(r)
 
-		// Get advance for this rune
-		advance := 0.0
-		for glyph := range ff.face.Glyphs(runeStr) {
-			advance = glyph.Advance
-			break
-		}
+		// Get advance for this rune (prefer hinted advance if available).
+		advance := faceGlyphAdvance(ff.face, runeStr)
 
 		// Render using the underlying face
 		switch f := ff.face.(type) {
@@ -325,6 +361,52 @@ func drawFilteredFace(dst draw.Image, text string, ff *FilteredFace, x, y float6
 
 		currentX += advance
 	}
+}
+
+// faceGlyphAdvance returns the advance width for a single-rune string,
+// using TT hinted advances when available. This is used by drawMultiFace
+// and drawFilteredFace which render one rune at a time and need consistent
+// cursor advancement matching the hinted glyph outlines.
+func faceGlyphAdvance(face Face, runeStr string) float64 {
+	sf, ok := face.(*sourceFace)
+	if !ok {
+		return unhintedGlyphAdvance(face, runeStr)
+	}
+
+	cache := loadFaceTTCache(sf)
+	if cache == nil {
+		return unhintedGlyphAdvance(face, runeStr)
+	}
+
+	ppem := sf.size
+	for glyph := range sf.Glyphs(runeStr) {
+		if adv, hintOK := cache.hintedAdvanceWidth(uint16(glyph.GID), int32(ppem)); hintOK {
+			return adv
+		}
+		return glyph.Advance
+	}
+	return 0
+}
+
+// loadFaceTTCache returns the TT hint cache for a sourceFace, or nil if
+// TT bytecode hinting is unavailable or disabled.
+func loadFaceTTCache(sf *sourceFace) *ttHintCache {
+	if sf.config.hinting == HintingNone {
+		return nil
+	}
+	ownFont, ok := sf.source.Parsed().(*ownParsedFont)
+	if !ok {
+		return nil
+	}
+	return ownFont.loadTTHintCache()
+}
+
+// unhintedGlyphAdvance returns the advance from the Glyphs iterator (unhinted).
+func unhintedGlyphAdvance(face Face, runeStr string) float64 {
+	for glyph := range face.Glyphs(runeStr) {
+		return glyph.Advance
+	}
+	return 0
 }
 
 // Measure returns the dimensions of text.
