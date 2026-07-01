@@ -205,10 +205,10 @@ func TestGoTextShaper_SetShaper(t *testing.T) {
 		t.Errorf("Shape(\"Hello\") via global: got %d glyphs, want 5", len(result))
 	}
 
-	// Reset to nil should restore BuiltinShaper.
+	// Reset to nil should restore OwnShaper (default, ADR-048 Phase 6).
 	SetShaper(nil)
-	if _, ok := GetShaper().(*BuiltinShaper); !ok {
-		t.Errorf("SetShaper(nil) should restore BuiltinShaper, got %T", GetShaper())
+	if _, ok := GetShaper().(*OwnShaper); !ok {
+		t.Errorf("SetShaper(nil) should restore OwnShaper, got %T", GetShaper())
 	}
 }
 

@@ -5,7 +5,8 @@
 //
 //   - FontSource: Heavyweight, shared font resource (parses TTF/OTF files)
 //   - Face: Lightweight font instance at a specific size
-//   - FontParser: Pluggable font parsing backend (default: golang.org/x/image)
+//   - FontParser: Pluggable font parsing backend (default: own Pure Go parser)
+//   - Shaper: Pluggable text shaper (default: OwnShaper with GSUB/GPOS)
 //
 // # Example usage
 //
@@ -24,20 +25,19 @@
 //	ctx.SetFont(face)
 //	ctx.DrawString("Hello, GoGPU!", 100, 100)
 //
-// # Pluggable Parser Backend
+// # Font Parsing
 //
-// The font parsing is abstracted through the FontParser interface.
-// By default, golang.org/x/image/font/opentype is used.
-// Custom parsers can be registered for alternative implementations:
+// The default parser is "own" — a Pure Go font parser with zero external
+// dependencies (ADR-048). The legacy "ximage" parser (golang.org/x/image)
+// is still available for backward compatibility:
 //
-//	// Register a custom parser
-//	text.RegisterParser("myparser", myCustomParser)
+//	source, err := text.NewFontSource(data, text.WithParser("ximage"))
 //
-//	// Use the custom parser
-//	source, err := text.NewFontSource(data, text.WithParser("myparser"))
+// # Text Shaping
 //
-// This design allows:
-//   - Easy migration to different font libraries
-//   - Pure Go implementations without external dependencies
-//   - Custom font formats or optimized parsers
+// The default shaper is OwnShaper with GSUB/GPOS support (ligatures,
+// kerning, contextual alternates). For HarfBuzz-level shaping:
+//
+//	text.SetShaper(text.NewGoTextShaper())
+//	defer text.SetShaper(nil) // Reset to default OwnShaper
 package text

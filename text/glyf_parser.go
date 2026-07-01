@@ -20,11 +20,8 @@
 package text
 
 import (
-	"bytes"
+	"encoding/binary"
 	"fmt"
-
-	ot "github.com/go-text/typesetting/font/opentype"
-	"github.com/go-text/typesetting/font/opentype/tables"
 )
 
 // ContourPoint represents a raw TrueType glyph contour point.
@@ -74,8 +71,8 @@ const glyfOnCurveFlag = 0x01
 
 // ParseGlyfContours reads raw contour points from the TrueType glyf table
 // for the specified glyph. This parses the binary font data directly using
-// the go-text/typesetting table parsers, producing the same point representation
-// that FreeType and skrifa use internally.
+// pure Go binary parsing, producing the same point representation that
+// FreeType and skrifa use internally.
 //
 // Returns nil, nil for:
 //   - composite glyphs (numberOfContours < 0)
@@ -85,111 +82,196 @@ const glyfOnCurveFlag = 0x01
 // The font data must be valid TrueType (.ttf) or OpenType (.otf) with a glyf table.
 // CFF-based OpenType fonts do not have a glyf table and will return an error.
 func ParseGlyfContours(fontData []byte, gid GlyphID) (*GlyfContours, error) {
-	loader, err := ot.NewLoader(bytes.NewReader(fontData))
+	tables, err := parseFontTables(fontData)
 	if err != nil {
 		return nil, fmt.Errorf("text: glyf parser: failed to load font: %w", err)
 	}
 
-	// Parse head table to get indexToLocFormat (short vs long loca offsets).
-	headRaw, err := loader.RawTable(ot.MustNewTag("head"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing head table: %w", err)
-	}
-	head, _, err := tables.ParseHead(headRaw)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid head table: %w", err)
+	headData, ok := tables["head"]
+	if !ok || len(headData) < 54 {
+		return nil, fmt.Errorf("text: glyf parser: missing or invalid head table")
 	}
 
-	// Parse maxp table to get numGlyphs.
-	maxpRaw, err := loader.RawTable(ot.MustNewTag("maxp"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing maxp table: %w", err)
+	maxpData, ok := tables["maxp"]
+	if !ok || len(maxpData) < 6 {
+		return nil, fmt.Errorf("text: glyf parser: missing or invalid maxp table")
 	}
-	maxp, _, err := tables.ParseMaxp(maxpRaw)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid maxp table: %w", err)
-	}
-
-	numGlyphs := int(maxp.NumGlyphs)
+	numGlyphs := int(binary.BigEndian.Uint16(maxpData[4:6]))
 	if int(gid) >= numGlyphs {
 		return nil, fmt.Errorf("text: glyf parser: glyph ID %d out of range (font has %d glyphs)", gid, numGlyphs)
 	}
 
-	// Parse loca table to get glyph offsets within glyf.
-	locaRaw, err := loader.RawTable(ot.MustNewTag("loca"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing loca table: %w", err)
+	locaData, ok := tables["loca"]
+	if !ok {
+		return nil, fmt.Errorf("text: glyf parser: missing loca table")
 	}
-	// head.IndexToLocFormat: 0 = short (uint16 offsets / 2), 1 = long (uint32 offsets).
-	isLong := head.IndexToLocFormat != 0
-	locaOffsets, err := tables.ParseLoca(locaRaw, numGlyphs, isLong)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid loca table: %w", err)
+	isLong := binary.BigEndian.Uint16(headData[50:52]) != 0
+
+	glyfData, ok := tables["glyf"]
+	if !ok {
+		return nil, fmt.Errorf("text: glyf parser: missing glyf table")
 	}
 
-	// Parse glyf table.
-	glyfRaw, err := loader.RawTable(ot.MustNewTag("glyf"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing glyf table: %w", err)
-	}
-	glyf, err := tables.ParseGlyf(glyfRaw, locaOffsets)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid glyf table: %w", err)
-	}
-
-	return extractSimpleGlyph(glyf, gid)
+	return extractGlyfContourOwn(glyfData, locaData, int(gid), isLong)
 }
 
-// extractSimpleGlyph extracts raw contour points from a parsed Glyf table
-// for the given glyph ID. Returns nil, nil for composite or empty glyphs.
-// The nil-nil return is intentional API design: nil result = "no simple outline"
-// (empty glyph like space, or composite glyph) without an error condition.
+// extractGlyfContourOwn extracts raw contour points from the glyf table
+// for the given glyph ID using pure Go binary parsing.
+// Returns nil, nil for composite or empty glyphs.
 //
-//nolint:nilnil // Intentional: nil result means "no simple outline data", not an error.
-func extractSimpleGlyph(glyf tables.Glyf, gid GlyphID) (*GlyfContours, error) {
-	if int(gid) >= len(glyf) {
-		return nil, fmt.Errorf("text: glyf parser: glyph ID %d out of range", gid)
+//nolint:nilnil,gocognit,cyclop,gocyclo,nestif,funlen // Intentional nil-nil; TrueType glyf binary parsing is inherently complex.
+func extractGlyfContourOwn(glyfData, locaData []byte, glyphIndex int, isLong bool) (*GlyfContours, error) {
+	off, length := locateGlyph(locaData, glyphIndex, isLong)
+	if length == 0 {
+		return nil, nil // empty glyph (space, etc.)
+	}
+	end := off + length
+	if end > len(glyfData) {
+		return nil, fmt.Errorf("text: glyf parser: glyph %d offset out of range", glyphIndex)
 	}
 
-	g := glyf[gid]
-
-	// Empty glyph (no outline data, e.g., space).
-	if g.Data == nil {
+	data := glyfData[off:end]
+	if len(data) < 10 {
 		return nil, nil
 	}
 
-	// Check if this is a simple glyph (not composite).
-	simple, ok := g.Data.(tables.SimpleGlyph)
-	if !ok {
-		// Composite glyph — return nil without error.
+	numContours := int16(binary.BigEndian.Uint16(data[0:2]))
+	xMin := int16(binary.BigEndian.Uint16(data[2:4]))
+	yMin := int16(binary.BigEndian.Uint16(data[4:6]))
+	xMax := int16(binary.BigEndian.Uint16(data[6:8]))
+	yMax := int16(binary.BigEndian.Uint16(data[8:10]))
+
+	if numContours < 0 {
+		return nil, nil // composite glyph
+	}
+	if numContours == 0 {
 		return nil, nil
 	}
 
-	if len(simple.EndPtsOfContours) == 0 || len(simple.Points) == 0 {
-		return nil, nil
+	nc := int(numContours)
+	pos := 10
+
+	// Read endPtsOfContours.
+	if pos+nc*2 > len(data) {
+		return nil, fmt.Errorf("text: glyf parser: glyph %d: endPts overflow", glyphIndex)
+	}
+	endPts := make([]uint16, nc)
+	for i := range nc {
+		endPts[i] = binary.BigEndian.Uint16(data[pos : pos+2])
+		pos += 2
 	}
 
-	// Build the result.
-	result := &GlyfContours{
-		Points: make([]ContourPoint, len(simple.Points)),
-		EndPts: make([]uint16, len(simple.EndPtsOfContours)),
-		XMin:   g.XMin,
-		YMin:   g.YMin,
-		XMax:   g.XMax,
-		YMax:   g.YMax,
+	numPoints := int(endPts[nc-1]) + 1
+
+	// Skip instructions.
+	if pos+2 > len(data) {
+		return nil, fmt.Errorf("text: glyf parser: glyph %d: instruction length overflow", glyphIndex)
+	}
+	instructionLength := int(binary.BigEndian.Uint16(data[pos : pos+2]))
+	pos += 2 + instructionLength
+
+	if pos > len(data) {
+		return nil, fmt.Errorf("text: glyf parser: glyph %d: instructions overflow", glyphIndex)
 	}
 
-	copy(result.EndPts, simple.EndPtsOfContours)
+	// Parse flags.
+	flags := make([]byte, numPoints)
+	for i := 0; i < numPoints; {
+		if pos >= len(data) {
+			return nil, fmt.Errorf("text: glyf parser: glyph %d: flags overflow", glyphIndex)
+		}
+		flag := data[pos]
+		pos++
+		flags[i] = flag
+		i++
 
-	for i, pt := range simple.Points {
-		result.Points[i] = ContourPoint{
-			X:       pt.X,
-			Y:       pt.Y,
-			OnCurve: (pt.Flag & glyfOnCurveFlag) != 0,
+		// Repeat flag?
+		if flag&0x08 != 0 {
+			if pos >= len(data) {
+				return nil, fmt.Errorf("text: glyf parser: glyph %d: repeat count overflow", glyphIndex)
+			}
+			repeat := int(data[pos])
+			pos++
+			for j := 0; j < repeat && i < numPoints; j++ {
+				flags[i] = flag
+				i++
+			}
 		}
 	}
 
-	return result, nil
+	// Parse X coordinates.
+	xs := make([]int16, numPoints)
+	var prevX int16
+	for i := range numPoints {
+		f := flags[i]
+		xShort := f&0x02 != 0
+		xSame := f&0x10 != 0
+		if xShort {
+			if pos >= len(data) {
+				return nil, fmt.Errorf("text: glyf parser: glyph %d: X coord overflow", glyphIndex)
+			}
+			val := int16(data[pos])
+			pos++
+			if !xSame {
+				val = -val
+			}
+			prevX += val
+		} else if !xSame {
+			if pos+2 > len(data) {
+				return nil, fmt.Errorf("text: glyf parser: glyph %d: X coord overflow", glyphIndex)
+			}
+			prevX += int16(binary.BigEndian.Uint16(data[pos : pos+2]))
+			pos += 2
+		}
+		// else: xSame && !xShort → same as previous
+		xs[i] = prevX
+	}
+
+	// Parse Y coordinates.
+	ys := make([]int16, numPoints)
+	var prevY int16
+	for i := range numPoints {
+		f := flags[i]
+		yShort := f&0x04 != 0
+		ySame := f&0x20 != 0
+		if yShort {
+			if pos >= len(data) {
+				return nil, fmt.Errorf("text: glyf parser: glyph %d: Y coord overflow", glyphIndex)
+			}
+			val := int16(data[pos])
+			pos++
+			if !ySame {
+				val = -val
+			}
+			prevY += val
+		} else if !ySame {
+			if pos+2 > len(data) {
+				return nil, fmt.Errorf("text: glyf parser: glyph %d: Y coord overflow", glyphIndex)
+			}
+			prevY += int16(binary.BigEndian.Uint16(data[pos : pos+2]))
+			pos += 2
+		}
+		ys[i] = prevY
+	}
+
+	// Build result.
+	points := make([]ContourPoint, numPoints)
+	for i := range numPoints {
+		points[i] = ContourPoint{
+			X:       xs[i],
+			Y:       ys[i],
+			OnCurve: flags[i]&glyfOnCurveFlag != 0,
+		}
+	}
+
+	return &GlyfContours{
+		Points: points,
+		EndPts: endPts,
+		XMin:   xMin,
+		YMin:   yMin,
+		XMax:   xMax,
+		YMax:   yMax,
+	}, nil
 }
 
 // ParseGlyfContoursFromSource reads raw contour points for a glyph from a
@@ -217,64 +299,58 @@ func ParseGlyfContoursFromSource(source *FontSource, gid GlyphID) (*GlyfContours
 // from the same font. This avoids re-parsing the head, maxp, loca, and
 // glyf tables on every call when iterating over multiple glyphs.
 type cachedGlyfParser struct {
-	glyf tables.Glyf
+	glyfData  []byte
+	locaData  []byte
+	isLong    bool
+	numGlyphs int
 }
 
-// newCachedGlyfParser creates a parser that caches the parsed glyf table
+// newCachedGlyfParser creates a parser that caches the parsed table data
 // for efficient repeated glyph lookups.
 func newCachedGlyfParser(fontData []byte) (*cachedGlyfParser, error) {
-	loader, err := ot.NewLoader(bytes.NewReader(fontData))
+	tables, err := parseFontTables(fontData)
 	if err != nil {
 		return nil, fmt.Errorf("text: glyf parser: failed to load font: %w", err)
 	}
 
-	headRaw, err := loader.RawTable(ot.MustNewTag("head"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing head table: %w", err)
-	}
-	head, _, err := tables.ParseHead(headRaw)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid head table: %w", err)
+	headData, ok := tables["head"]
+	if !ok || len(headData) < 54 {
+		return nil, fmt.Errorf("text: glyf parser: missing or invalid head table")
 	}
 
-	maxpRaw, err := loader.RawTable(ot.MustNewTag("maxp"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing maxp table: %w", err)
-	}
-	maxp, _, err := tables.ParseMaxp(maxpRaw)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid maxp table: %w", err)
+	maxpData, ok := tables["maxp"]
+	if !ok || len(maxpData) < 6 {
+		return nil, fmt.Errorf("text: glyf parser: missing or invalid maxp table")
 	}
 
-	locaRaw, err := loader.RawTable(ot.MustNewTag("loca"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing loca table: %w", err)
-	}
-	isLong := head.IndexToLocFormat != 0
-	locaOffsets, err := tables.ParseLoca(locaRaw, int(maxp.NumGlyphs), isLong)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid loca table: %w", err)
+	locaData, ok := tables["loca"]
+	if !ok {
+		return nil, fmt.Errorf("text: glyf parser: missing loca table")
 	}
 
-	glyfRaw, err := loader.RawTable(ot.MustNewTag("glyf"))
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: missing glyf table: %w", err)
-	}
-	glyf, err := tables.ParseGlyf(glyfRaw, locaOffsets)
-	if err != nil {
-		return nil, fmt.Errorf("text: glyf parser: invalid glyf table: %w", err)
+	glyfData, ok := tables["glyf"]
+	if !ok {
+		return nil, fmt.Errorf("text: glyf parser: missing glyf table")
 	}
 
-	return &cachedGlyfParser{glyf: glyf}, nil
+	isLong := binary.BigEndian.Uint16(headData[50:52]) != 0
+	numGlyphs := int(binary.BigEndian.Uint16(maxpData[4:6]))
+
+	return &cachedGlyfParser{
+		glyfData:  glyfData,
+		locaData:  locaData,
+		isLong:    isLong,
+		numGlyphs: numGlyphs,
+	}, nil
 }
 
 // Contours extracts raw contour points for the given glyph ID.
 // Returns nil, nil for composite or empty glyphs.
 func (p *cachedGlyfParser) Contours(gid GlyphID) (*GlyfContours, error) {
-	return extractSimpleGlyph(p.glyf, gid)
+	return extractGlyfContourOwn(p.glyfData, p.locaData, int(gid), p.isLong)
 }
 
 // NumGlyphs returns the number of glyphs in the font.
 func (p *cachedGlyfParser) NumGlyphs() int {
-	return len(p.glyf)
+	return p.numGlyphs
 }

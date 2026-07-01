@@ -4,8 +4,9 @@ import "sync"
 
 // Shaper converts text to positioned glyphs.
 // Implementations provide different levels of text shaping support:
-//   - BuiltinShaper: Uses golang.org/x/image/font for Latin, Cyrillic, Greek, CJK
-//   - HarfBuzz-compatible: Use SetShaper() with a go-text/typesetting implementation
+//   - OwnShaper: Pure Go shaper with GSUB/GPOS support (default, ADR-048)
+//   - BuiltinShaper: Simple LTR shaper for Latin, Cyrillic, Greek, CJK (no GSUB/GPOS)
+//   - GoTextShaper: HarfBuzz-level shaping via go-text/typesetting (opt-in)
 type Shaper interface {
 	// Shape converts text into positioned glyphs using the given face.
 	// The font size is obtained from face.Size().
@@ -13,23 +14,27 @@ type Shaper interface {
 	Shape(text string, face Face) []ShapedGlyph
 }
 
+// defaultShaper is initialized to OwnShaper in shaper_own.go init().
+// This variable is set before any concurrent access (during init).
+var defaultOwnShaper = NewOwnShaper()
+
 var (
 	shaperMu     sync.RWMutex
-	globalShaper Shaper = &BuiltinShaper{}
+	globalShaper Shaper = defaultOwnShaper
 )
 
 // SetShaper sets the global shaper used by Shape().
-// Pass nil to reset to the default BuiltinShaper.
+// Pass nil to reset to the default OwnShaper (Pure Go GSUB/GPOS).
 //
 // Example usage with a custom shaper:
 //
-//	text.SetShaper(myHarfBuzzShaper)
+//	text.SetShaper(myCustomShaper)
 //	defer text.SetShaper(nil) // Reset to default
 func SetShaper(s Shaper) {
 	shaperMu.Lock()
 	defer shaperMu.Unlock()
 	if s == nil {
-		s = &BuiltinShaper{}
+		s = defaultOwnShaper
 	}
 	globalShaper = s
 }

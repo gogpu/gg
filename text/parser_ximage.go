@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
 	"sync"
 
 	ot "github.com/go-text/typesetting/font/opentype"
@@ -307,4 +308,176 @@ func fixed1616ToFloat32(data []byte) float32 {
 // fixedToFloat64 converts fixed.Int26_6 to float64.
 func fixedToFloat64(x fixed.Int26_6) float64 {
 	return float64(x) / 64.0
+}
+
+// --- sfnt outline extraction (used by OutlineExtractor for ximage fonts) ---
+
+// ximageSfntExtractor implements sfntOutlineExtractor for ximageParsedFont.
+type ximageSfntExtractor struct {
+	buffer sfnt.Buffer
+}
+
+// extract implements sfntOutlineExtractor.extract.
+func (e *ximageSfntExtractor) extract(parsedFont ParsedFont, gid GlyphID, size float64, hinting Hinting) (*GlyphOutline, error) {
+	xparsed, ok := parsedFont.(*ximageParsedFont)
+	if !ok {
+		return nil, ErrUnsupportedFontType
+	}
+
+	ppem := fixed.Int26_6(size * 64)
+	segments, err := xparsed.font.LoadGlyph(&e.buffer, sfnt.GlyphIndex(gid), ppem, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	fontHinting := toFontHintingXimage(hinting)
+
+	if len(segments) == 0 {
+		advance := getGlyphAdvanceXimage(xparsed.font, &e.buffer, gid, size, fontHinting)
+		return &GlyphOutline{
+			Segments: nil,
+			GID:      gid,
+			Type:     GlyphTypeOutline,
+			Advance:  float32(advance),
+		}, nil
+	}
+
+	outline := &GlyphOutline{
+		Segments: make([]OutlineSegment, 0, len(segments)),
+		GID:      gid,
+		Type:     GlyphTypeOutline,
+	}
+
+	minX, minY := float64(1e10), float64(1e10)
+	maxX, maxY := float64(-1e10), float64(-1e10)
+
+	for _, seg := range segments {
+		outSeg := OutlineSegment{}
+
+		switch seg.Op {
+		case sfnt.SegmentOpMoveTo:
+			outSeg.Op = OutlineOpMoveTo
+			outSeg.Points[0] = fixedPointToOutline(seg.Args[0])
+			updateBounds(outSeg.Points[0], &minX, &minY, &maxX, &maxY)
+
+		case sfnt.SegmentOpLineTo:
+			outSeg.Op = OutlineOpLineTo
+			outSeg.Points[0] = fixedPointToOutline(seg.Args[0])
+			updateBounds(outSeg.Points[0], &minX, &minY, &maxX, &maxY)
+
+		case sfnt.SegmentOpQuadTo:
+			outSeg.Op = OutlineOpQuadTo
+			outSeg.Points[0] = fixedPointToOutline(seg.Args[0])
+			outSeg.Points[1] = fixedPointToOutline(seg.Args[1])
+			updateBounds(outSeg.Points[0], &minX, &minY, &maxX, &maxY)
+			updateBounds(outSeg.Points[1], &minX, &minY, &maxX, &maxY)
+
+		case sfnt.SegmentOpCubeTo:
+			outSeg.Op = OutlineOpCubicTo
+			outSeg.Points[0] = fixedPointToOutline(seg.Args[0])
+			outSeg.Points[1] = fixedPointToOutline(seg.Args[1])
+			outSeg.Points[2] = fixedPointToOutline(seg.Args[2])
+			updateBounds(outSeg.Points[0], &minX, &minY, &maxX, &maxY)
+			updateBounds(outSeg.Points[1], &minX, &minY, &maxX, &maxY)
+			updateBounds(outSeg.Points[2], &minX, &minY, &maxX, &maxY)
+		}
+
+		outline.Segments = append(outline.Segments, outSeg)
+	}
+
+	if len(outline.Segments) > 0 {
+		outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
+	}
+
+	outline.Advance = float32(getGlyphAdvanceXimage(xparsed.font, &e.buffer, gid, size, fontHinting))
+	return outline, nil
+}
+
+// fixedPointToOutline converts a fixed.Point26_6 to OutlinePoint.
+func fixedPointToOutline(p fixed.Point26_6) OutlinePoint {
+	return OutlinePoint{
+		X: float32(p.X) / 64.0,
+		Y: float32(p.Y) / 64.0,
+	}
+}
+
+// toFontHintingXimage converts Hinting enum to golang.org/x/image/font.Hinting.
+func toFontHintingXimage(h Hinting) font.Hinting {
+	switch h {
+	case HintingVertical:
+		return font.HintingVertical
+	case HintingFull:
+		return font.HintingFull
+	default:
+		return font.HintingNone
+	}
+}
+
+// getGlyphAdvanceXimage returns the advance width via sfnt.
+func getGlyphAdvanceXimage(f *sfnt.Font, buf *sfnt.Buffer, gid GlyphID, size float64, h font.Hinting) float64 {
+	ppem := fixed.Int26_6(size * 64)
+	advance, err := f.GlyphAdvance(buf, sfnt.GlyphIndex(gid), ppem, h)
+	if err != nil {
+		return 0
+	}
+	return float64(advance) / 64.0
+}
+
+// rasterizeGlyphXimage renders a glyph to an alpha mask using x/image/font.
+// Returns nil if the font type is not ximageParsedFont.
+func rasterizeGlyphXimage(parsed ParsedFont, glyphID GlyphID, ppem float64) *GlyphImage {
+	xparsed, ok := parsed.(*ximageParsedFont)
+	if !ok {
+		return nil
+	}
+
+	opts := &opentype.FaceOptions{
+		Size:    ppem,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	}
+
+	otFace, err := opentype.NewFace(xparsed.font, opts)
+	if err != nil {
+		return nil
+	}
+	defer func() {
+		_ = otFace.Close()
+	}()
+
+	bounds, advance, ok := otFace.GlyphBounds(rune(glyphID))
+	if !ok {
+		return nil
+	}
+
+	minX := int(bounds.Min.X) >> 6
+	minY := int(bounds.Min.Y) >> 6
+	maxX := int(bounds.Max.X+63) >> 6
+	maxY := int(bounds.Max.Y+63) >> 6
+
+	rect := image.Rect(minX, minY, maxX, maxY)
+	mask := image.NewAlpha(rect)
+
+	drawer := &font.Drawer{
+		Dst:  mask,
+		Src:  image.White,
+		Face: otFace,
+		Dot:  fixed.Point26_6{X: -bounds.Min.X, Y: -bounds.Min.Y},
+	}
+	drawer.DrawString(string(rune(glyphID)))
+
+	return &GlyphImage{
+		Mask:    mask,
+		Bounds:  rect,
+		Advance: fixedToFloat64(advance),
+	}
+}
+
+func init() {
+	// Register the ximage parser as an alternative (backward compat).
+	RegisterParser("ximage", &ximageParser{})
+
+	// Register the sfnt outline extractor so OutlineExtractor can handle
+	// ximageParsedFont without a hard dependency on x/image/font/sfnt.
+	RegisterSfntExtractor(&ximageSfntExtractor{})
 }

@@ -5,8 +5,6 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
-
-	"golang.org/x/image/font"
 )
 
 // Draw renders text to a destination image.
@@ -345,18 +343,4 @@ func Measure(text string, face Face) (width, height float64) {
 type DrawOptions struct {
 	// Color for the text (default: black)
 	Color color.Color
-}
-
-// mapHinting converts text.Hinting to font.Hinting.
-func mapHinting(h Hinting) font.Hinting {
-	switch h {
-	case HintingNone:
-		return font.HintingNone
-	case HintingVertical:
-		return font.HintingVertical
-	case HintingFull:
-		return font.HintingFull
-	default:
-		return font.HintingFull
-	}
 }

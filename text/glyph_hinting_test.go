@@ -22,16 +22,16 @@ func TestHinting_String(t *testing.T) {
 	}
 }
 
-func TestToFontHinting(t *testing.T) {
-	// Verify our enum maps to x/image/font.Hinting correctly.
-	if got := toFontHinting(HintingNone); got != 0 {
-		t.Errorf("toFontHinting(HintingNone) = %d, want 0", got)
+func TestHinting_Values(t *testing.T) {
+	// Verify our Hinting enum values (used by mapHinting and grid-fitting).
+	if HintingNone != 0 {
+		t.Errorf("HintingNone = %d, want 0", HintingNone)
 	}
-	if got := toFontHinting(HintingVertical); got != 1 {
-		t.Errorf("toFontHinting(HintingVertical) = %d, want 1", got)
+	if HintingVertical != 1 {
+		t.Errorf("HintingVertical = %d, want 1", HintingVertical)
 	}
-	if got := toFontHinting(HintingFull); got != 2 {
-		t.Errorf("toFontHinting(HintingFull) = %d, want 2", got)
+	if HintingFull != 2 {
+		t.Errorf("HintingFull = %d, want 2", HintingFull)
 	}
 }
 
