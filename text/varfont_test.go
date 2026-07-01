@@ -54,6 +54,44 @@ func requireVariableFont(t *testing.T) *FontSource {
 	return source
 }
 
+// requireTrueTypeVariableFont loads a TrueType variable font with glyf+gvar
+// tables, or skips the test. CFF2 variable fonts (which store variation data
+// inline in CFF2 charstrings, not in a separate gvar table) are not suitable
+// for gvar-specific tests.
+func requireTrueTypeVariableFont(t *testing.T) *FontSource {
+	t.Helper()
+	path := variableFontPath(t)
+	if path == "" {
+		t.Skip("No variable font available on this system")
+	}
+
+	source, err := NewFontSourceFromFile(path)
+	if err != nil {
+		t.Fatalf("Failed to load variable font %s: %v", path, err)
+	}
+
+	if !source.IsVariable() {
+		_ = source.Close()
+		t.Skipf("Font %s is not variable", path)
+	}
+
+	// Verify TrueType outlines (glyf+gvar) rather than CFF2.
+	parsed := source.Parsed()
+	ownFont, ok := parsed.(*ownParsedFont)
+	if !ok {
+		_ = source.Close()
+		t.Skip("test requires ownParsedFont")
+	}
+	_, hasGlyf := ownFont.tables["glyf"]
+	_, hasGvar := ownFont.tables["gvar"]
+	if !hasGlyf || !hasGvar {
+		_ = source.Close()
+		t.Skipf("Font %s is variable but uses CFF2 outlines (no glyf+gvar) — our gvar parser requires TrueType", path)
+	}
+
+	return source
+}
+
 // --------------------------------------------------------------------------
 // FontVariation type tests
 // --------------------------------------------------------------------------
@@ -592,7 +630,7 @@ func TestVariations_DefaultMatchesNoVariation(t *testing.T) {
 // — we tested that variations were stored on faces, but not that they actually
 // changed the rendered pixels.
 func TestVariations_AffectRendering(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	lightFace := source.Face(28, WithVariations(NewFontVariation("wght", 300)))
@@ -660,7 +698,7 @@ func TestVariations_NoVariation_UsesDefaultPath(t *testing.T) {
 // TestVariations_OutlineExtraction verifies that go-text outline extraction
 // produces valid outlines with variation-aware geometry.
 func TestVariations_OutlineExtraction(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	parsed := source.Parsed()
@@ -703,7 +741,7 @@ func TestVariations_OutlineExtraction(t *testing.T) {
 // This is the regression test for @tsl0922's report that TextModeAliased
 // didn't work with variable fonts.
 func TestVariations_AliasedRendering(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	boldFace := source.Face(28, WithVariations(NewFontVariation("wght", 700)))
@@ -747,7 +785,7 @@ func TestVariations_AliasedRendering(t *testing.T) {
 // TestVariations_AliasedVsAA verifies that aliased and AA rendering of variable
 // fonts produce different output — aliased should have fewer ink pixels (no fringe).
 func TestVariations_AliasedVsAA(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	face := source.Face(28, WithVariations(NewFontVariation("wght", 500)))

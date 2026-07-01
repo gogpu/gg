@@ -25,8 +25,8 @@ import (
 // If this test fails, it means the variable font path skips hinting steps
 // that the static path applies (the original bug).
 func TestOutline_VarDefaultVsStatic_IdenticalOutlines(t *testing.T) {
-	// Use Bahnschrift (Windows variable font with TT instructions).
-	source := requireVariableFont(t)
+	// Requires TrueType variable font with glyf+gvar (not CFF2).
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	parsed := source.Parsed()
@@ -118,7 +118,7 @@ func TestOutline_VarDefaultVsStatic_IdenticalOutlines(t *testing.T) {
 // at a non-default weight produces DIFFERENT outlines than at the default
 // weight. This confirms that gvar deltas are being applied.
 func TestOutline_VarNonDefault_DiffersFromDefault(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	parsed := source.Parsed()
@@ -178,7 +178,7 @@ func TestOutline_VarNonDefault_DiffersFromDefault(t *testing.T) {
 // font outlines produce pixel-aligned advances at small sizes (the hallmark
 // of TT bytecode hinting working correctly).
 func TestOutline_VarHinted_PixelAlignedAdvance(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	parsed := source.Parsed()
@@ -222,7 +222,7 @@ func TestOutline_VarHinted_PixelAlignedAdvance(t *testing.T) {
 // modifies the variable font outline. Without the fix, variable fonts only
 // got gridFitOutline (or nothing for AA mode) — this test catches that.
 func TestOutline_VarHintedVsUnhinted_Differs(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	parsed := source.Parsed()
@@ -271,7 +271,7 @@ func TestOutline_VarHintedVsUnhinted_Differs(t *testing.T) {
 // from static and variable@default paths are identical. This is the end-to-end
 // test that catches rendering differences caused by hinting divergence.
 func TestOutline_VarDefault_MatchesStaticRendering(t *testing.T) {
-	source := requireVariableFont(t)
+	source := requireTrueTypeVariableFont(t)
 	defer func() { _ = source.Close() }()
 
 	axes := source.VariationAxes()

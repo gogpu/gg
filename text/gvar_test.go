@@ -857,6 +857,253 @@ func TestOwnParsedFont_ApplyVariations_Default(t *testing.T) {
 	}
 }
 
+// TestGvar_DiagnosticDump dumps gvar parsing info for the system variable font.
+// This helps diagnose parsing failures on different platforms (e.g., SFNS on macOS).
+func TestGvar_DiagnosticDump(t *testing.T) {
+	path := variableFontPath(t)
+	if path == "" {
+		t.Skip("no variable font available")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read font %s: %v", path, err)
+	}
+
+	tables, err := parseFontTablesIndex(data, 0)
+	if err != nil {
+		t.Fatalf("parseFontTablesIndex: %v", err)
+	}
+
+	t.Logf("font: %s (%d bytes)", path, len(data))
+	t.Logf("tables: %d", len(tables))
+	for tag := range tables {
+		t.Logf("  table %q: %d bytes", tag, len(tables[tag]))
+	}
+
+	// Check for gvar.
+	gvarData, hasGvar := tables["gvar"]
+	if !hasGvar {
+		t.Fatal("font has no gvar table — variable font outlines likely use CFF2")
+	}
+
+	// Parse gvar header manually to dump raw values.
+	if len(gvarData) < 20 {
+		t.Fatalf("gvar table too short: %d bytes", len(gvarData))
+	}
+	major := binary.BigEndian.Uint16(gvarData[0:2])
+	minor := binary.BigEndian.Uint16(gvarData[2:4])
+	axisCount := binary.BigEndian.Uint16(gvarData[4:6])
+	sharedTupleCount := binary.BigEndian.Uint16(gvarData[6:8])
+	sharedTuplesOffset := binary.BigEndian.Uint32(gvarData[8:12])
+	glyphCount := binary.BigEndian.Uint16(gvarData[12:14])
+	flags := binary.BigEndian.Uint16(gvarData[14:16])
+	varDataOffset := binary.BigEndian.Uint32(gvarData[16:20])
+	longOffsets := (flags & 0x0001) != 0
+
+	t.Logf("gvar header:")
+	t.Logf("  version: %d.%d", major, minor)
+	t.Logf("  axisCount: %d", axisCount)
+	t.Logf("  sharedTupleCount: %d", sharedTupleCount)
+	t.Logf("  sharedTuplesOffset: %d", sharedTuplesOffset)
+	t.Logf("  glyphCount: %d", glyphCount)
+	t.Logf("  flags: 0x%04X (longOffsets=%v)", flags, longOffsets)
+	t.Logf("  glyphVariationDataArrayOffset: %d", varDataOffset)
+
+	// Parse gvar.
+	gvar, err := parseGvar(gvarData)
+	if err != nil {
+		t.Fatalf("parseGvar failed: %v", err)
+	}
+
+	// Count glyphs with variation data.
+	glyphsWithData := 0
+	for i := range len(gvar.glyphOffsets) - 1 {
+		if gvar.glyphOffsets[i+1] > gvar.glyphOffsets[i] {
+			glyphsWithData++
+		}
+	}
+	t.Logf("glyphs with variation data: %d/%d", glyphsWithData, glyphCount)
+
+	// Dump shared tuples.
+	for i, tuple := range gvar.sharedTuples {
+		if i >= 10 {
+			t.Logf("  ... (%d more shared tuples)", len(gvar.sharedTuples)-10)
+			break
+		}
+		t.Logf("  sharedTuple[%d]: %v", i, tuple)
+	}
+
+	// Parse fvar to get axis info.
+	fvarData, hasFvar := tables["fvar"]
+	if !hasFvar {
+		t.Fatal("no fvar table")
+	}
+	axes := parseFvarAxes(fvarData)
+	t.Logf("fvar axes: %d", len(axes))
+	for i, ax := range axes {
+		t.Logf("  axis[%d]: %s min=%.1f def=%.1f max=%.1f",
+			i, string(ax.Tag[:]), ax.MinValue, ax.DefaultValue, ax.MaxValue)
+	}
+
+	if int(axisCount) != len(axes) {
+		t.Errorf("gvar axisCount (%d) != fvar axisCount (%d) — MISMATCH!", axisCount, len(axes))
+	}
+
+	// Try to get glyph 'H' data.
+	parsed := &ownParser{}
+	font, err := parsed.ParseIndex(data, 0)
+	if err != nil {
+		t.Fatalf("parse font: %v", err)
+	}
+	hGID := GlyphID(font.GlyphIndex('H'))
+	if hGID == 0 {
+		t.Log("font does not have 'H' glyph, trying 'A'")
+		hGID = GlyphID(font.GlyphIndex('A'))
+	}
+	if hGID == 0 {
+		t.Fatal("font has neither 'H' nor 'A' glyph")
+	}
+	t.Logf("test glyph GID: %d", hGID)
+
+	// Check raw glyph variation data.
+	glyphData := gvar.glyphVarData(uint16(hGID))
+	if glyphData == nil {
+		t.Fatal("no glyph variation data for test glyph — offsets may be wrong")
+	}
+	t.Logf("glyph variation data: %d bytes", len(glyphData))
+
+	if len(glyphData) < 4 {
+		t.Fatal("glyph variation data too short")
+	}
+	tupleVarCountRaw := binary.BigEndian.Uint16(glyphData[0:2])
+	serializedDataOff := binary.BigEndian.Uint16(glyphData[2:4])
+	tupleCount := int(tupleVarCountRaw & 0x0FFF)
+	hasSharedPoints := (tupleVarCountRaw & 0x8000) != 0
+	t.Logf("glyph variation header: tupleCount=%d, hasSharedPoints=%v, serializedDataOffset=%d",
+		tupleCount, hasSharedPoints, serializedDataOff)
+
+	// Dump first few bytes of glyph var data for debugging.
+	dumpLen := len(glyphData)
+	if dumpLen > 64 {
+		dumpLen = 64
+	}
+	t.Logf("glyph var data hex (first %d bytes): %x", dumpLen, glyphData[:dumpLen])
+
+	// Test actual delta computation.
+	wghtIdx := -1
+	for i, ax := range axes {
+		if ax.Tag == [4]byte{'w', 'g', 'h', 't'} {
+			wghtIdx = i
+			break
+		}
+	}
+	if wghtIdx < 0 {
+		t.Fatal("no wght axis")
+	}
+
+	// Normalize to wght=max.
+	variations := []FontVariation{NewFontVariation("wght", axes[wghtIdx].MaxValue)}
+	coords := normalizeCoords(axes, variations)
+	t.Logf("normalized coords for wght=%.0f: %v", axes[wghtIdx].MaxValue, coords)
+
+	// Load avar and apply.
+	avarData, hasAvar := tables["avar"]
+	if hasAvar {
+		avar := parseAvar(avarData)
+		avar.apply(coords)
+		t.Logf("after avar: %v", coords)
+	} else {
+		t.Log("no avar table")
+	}
+
+	// Check if all coords are zero (would skip gvar).
+	allZero := true
+	for _, c := range coords {
+		if c != 0 {
+			allZero = false
+			break
+		}
+	}
+	if allZero {
+		t.Error("all normalized coords are zero at max weight — normalization bug!")
+	}
+
+	// Get outline points for delta computation.
+	glyfData, hasGlyf := tables["glyf"]
+	locaData, hasLoca := tables["loca"]
+	headData, hasHead := tables["head"]
+	if !hasGlyf || !hasLoca || !hasHead || len(headData) < 54 {
+		t.Fatal("missing glyf/loca/head tables")
+	}
+	isLong := binary.BigEndian.Uint16(headData[50:52]) != 0
+
+	off, length := locateGlyph(locaData, int(hGID), isLong)
+	if length == 0 {
+		t.Fatalf("glyph %d has no outline data in glyf", hGID)
+	}
+	t.Logf("glyph data in glyf: offset=%d, length=%d", off, length)
+
+	glyfGlyphData := glyfData[off : off+length]
+	numContours := int(int16(binary.BigEndian.Uint16(glyfGlyphData[0:2])))
+	t.Logf("numContours: %d", numContours)
+
+	if numContours < 0 {
+		t.Log("composite glyph — gvar deltas work differently for composites")
+		return
+	}
+
+	// Parse contour endpoints.
+	contourEnds := make([]uint16, numContours)
+	for i := range numContours {
+		contourEnds[i] = binary.BigEndian.Uint16(glyfGlyphData[10+i*2:])
+	}
+	numPoints := int(contourEnds[numContours-1]) + 1
+	t.Logf("numPoints: %d, contourEnds: %v", numPoints, contourEnds)
+
+	// Build placeholder points.
+	totalPoints := numPoints + 4
+	points := make([][2]int32, totalPoints)
+
+	// Compute deltas.
+	dx, dy := gvar.glyphVariationDeltas(uint16(hGID), coords, numPoints, contourEnds, points)
+	if dx == nil || dy == nil {
+		t.Error("glyphVariationDeltas returned nil — gvar deltas not applied!")
+		t.Log("possible causes:")
+		t.Log("  - glyph has no variation data (check offsets)")
+		t.Log("  - all tuple scalars are zero (check coordinate normalization)")
+		t.Log("  - serializedDataOffset is wrong (check per-glyph header)")
+		return
+	}
+
+	hasNonZero := false
+	for _, d := range dx {
+		if d != 0 {
+			hasNonZero = true
+			break
+		}
+	}
+	for _, d := range dy {
+		if d != 0 {
+			hasNonZero = true
+			break
+		}
+	}
+
+	if !hasNonZero {
+		t.Error("all gvar deltas are zero at max weight — gvar parsing bug!")
+	} else {
+		t.Log("gvar deltas are non-zero at max weight (SUCCESS)")
+		// Dump first few deltas.
+		maxDump := len(dx)
+		if maxDump > 10 {
+			maxDump = 10
+		}
+		t.Logf("first %d dx deltas: %v", maxDump, dx[:maxDump])
+		t.Logf("first %d dy deltas: %v", maxDump, dy[:maxDump])
+	}
+}
+
 // makeGvarHeader constructs a minimal gvar header for testing.
 func makeGvarHeader(major, minor, axisCount, glyphCount uint16, flags uint16) []byte {
 	buf := make([]byte, 20+int(glyphCount+1)*2)
