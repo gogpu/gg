@@ -137,8 +137,9 @@ type RawFontDataProvider interface {
 // to the given outline using raw contour points (Y-UP convention).
 //
 // Returns true if hinting was successfully applied via the contour-based
-// path. Returns false if raw font data is not available or the glyph is
-// not a simple TrueType glyph (composite, CFF, TTC parse failure).
+// path. Returns false if raw font data is not available or the glyph
+// has no outline (empty glyph, CFF font, TTC parse failure). Composite
+// glyphs are handled transparently by ParseGlyfContours.
 //
 // When false is returned, the caller should fall back to gridFitOutline
 // for basic grid-fitting. The legacy outline-based path is NOT used as
@@ -272,7 +273,8 @@ func computeAdjustedAdvance(fontUnitAdvance int32, xScale16dot16 int32, metrics 
 
 // autoHintViaContours applies auto-hinting via the raw contour point path.
 // Returns true if successful, false if the contour path is not applicable
-// (e.g., composite glyph, empty glyph, CFF font).
+// (e.g., empty glyph, CFF font). Composite glyphs are handled by
+// ParseGlyfContours which recursively flattens components.
 //
 // In addition to hinting coordinates, this computes adjusted advance widths
 // using the skrifa advance adjustment algorithm (instance.rs:127-183). The

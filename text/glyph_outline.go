@@ -341,7 +341,8 @@ func (e *OutlineExtractor) ExtractOutlineHinted(parsedFont ParsedFont, gid Glyph
 
 	// Priority 2: Auto-hinter (contour-based, Y-UP convention).
 	// Falls back to simple grid-fitting if contour data is unavailable
-	// (TTC fonts, composite glyphs, CFF fonts). The legacy outline-based
+	// (TTC fonts, CFF fonts). Composite glyphs are handled transparently
+	// by ParseGlyfContours (recursive flattening). The legacy outline-based
 	// auto-hinter is not used because sfnt outlines are Y-DOWN while the
 	// hinting pipeline operates in Y-UP — a convention mismatch that
 	// collapses all Y coordinates to the baseline.

@@ -155,7 +155,7 @@ func TestLoadGlyphOutline(t *testing.T) {
 			continue
 		}
 		if outline == nil {
-			continue // empty or composite glyph
+			continue // empty glyph (space, etc.)
 		}
 
 		// Verify structure.
@@ -768,6 +768,177 @@ func TestLoadGlyphOutline_OutOfRange(t *testing.T) {
 	_, err = loader.loadGlyphOutline(uint16(fp.numGlyphs+10), 1<<16)
 	if err == nil {
 		t.Error("expected error for out-of-range glyph ID")
+	}
+}
+
+// TestLoadGlyphOutline_AllGlyphs_Portable tests that all non-empty glyphs
+// in the bundled tthint_subset.ttf font are correctly loaded by the TT glyph
+// loader. This exercises both simple and composite code paths.
+func TestLoadGlyphOutline_AllGlyphs_Portable(t *testing.T) {
+	data := loadTTTestFont(t, "tthint_subset.ttf")
+
+	fp, err := loadTTFontProgram(data)
+	if err != nil || fp == nil {
+		t.Fatalf("loadTTFontProgram: %v", err)
+	}
+
+	loader, err := newTTGlyphLoader(data, fp)
+	if err != nil || loader == nil {
+		t.Fatalf("newTTGlyphLoader: %v", err)
+	}
+
+	ppem := int32(16)
+	scale := int32((int64(ppem) * 64 * (1 << 16)) / int64(fp.unitsPerEm))
+
+	// Load all glyphs in the font (3 total: .notdef, A, Aacute).
+	names := []string{".notdef", "A", "Aacute"}
+	for gid := uint16(0); gid < uint16(fp.numGlyphs) && gid < 3; gid++ {
+		outline, outlineErr := loader.loadGlyphOutline(gid, scale)
+		if outlineErr != nil {
+			t.Errorf("%s (GID=%d): error: %v", names[gid], gid, outlineErr)
+			continue
+		}
+
+		if outline == nil {
+			if gid == 0 {
+				t.Logf("%s (GID=%d): nil outline (empty glyph)", names[gid], gid)
+				continue
+			}
+			t.Errorf("%s (GID=%d): nil outline — glyph would be invisible", names[gid], gid)
+			continue
+		}
+
+		// Verify phantom points present.
+		totalPoints := len(outline.points)
+		if totalPoints < ttPhantomPointCount {
+			t.Errorf("%s (GID=%d): totalPoints=%d, want >= %d",
+				names[gid], gid, totalPoints, ttPhantomPointCount)
+		}
+
+		numContourPts := totalPoints - ttPhantomPointCount
+		advance := outline.hintedAdvance()
+		if gid > 0 && advance <= 0 {
+			t.Errorf("%s (GID=%d): advance=%d, expected > 0", names[gid], gid, advance)
+		}
+		if gid > 0 && numContourPts == 0 {
+			t.Errorf("%s (GID=%d): zero contour points — glyph would be invisible", names[gid], gid)
+		}
+
+		t.Logf("%s (GID=%d): %d contour pts, advance=%d (26.6), isComposite=%v",
+			names[gid], gid, numContourPts, advance, outline.isComposite)
+	}
+}
+
+// TestLoadCompositeGlyphOutline_SystemFont tests that composite glyphs
+// (i, j, accented chars stored as composites in system fonts) are correctly
+// loaded through the TT glyph loader. This verifies the
+// loadCompositeGlyphOutline code path with real composite glyphs.
+func TestLoadCompositeGlyphOutline_SystemFont(t *testing.T) {
+	fontPaths := []string{
+		"C:/Windows/Fonts/ARIALN.TTF",
+		"C:/Windows/Fonts/BOD_R.TTF",
+	}
+
+	var data []byte
+	for _, path := range fontPaths {
+		d, err := os.ReadFile(path)
+		if err == nil {
+			data = d
+			break
+		}
+	}
+	if data == nil {
+		t.Skip("no system font with composites available")
+	}
+
+	fp, err := loadTTFontProgram(data)
+	if err != nil || fp == nil {
+		t.Skipf("loadTTFontProgram: %v", err)
+	}
+
+	loader, err := newTTGlyphLoader(data, fp)
+	if err != nil || loader == nil {
+		t.Skipf("newTTGlyphLoader: %v", err)
+	}
+
+	parser := &ownParser{}
+	font, parseErr := parser.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse: %v", parseErr)
+	}
+
+	ppem := int32(16)
+	scale := int32((int64(ppem) * 64 * (1 << 16)) / int64(fp.unitsPerEm))
+
+	for _, ch := range []rune{'i', 'j', 'é', 'ñ'} {
+		gid := font.GlyphIndex(ch)
+		if gid == 0 {
+			continue
+		}
+
+		outline, outlineErr := loader.loadGlyphOutline(gid, scale)
+		if outlineErr != nil {
+			t.Errorf("'%c' (GID=%d): error: %v", ch, gid, outlineErr)
+			continue
+		}
+
+		// Critical: all visible glyphs must produce an outline.
+		if outline == nil {
+			t.Errorf("'%c' (GID=%d): nil outline — glyph would be invisible", ch, gid)
+			continue
+		}
+
+		numPts := len(outline.points) - ttPhantomPointCount
+		if numPts == 0 {
+			t.Errorf("'%c' (GID=%d): zero contour points — glyph invisible", ch, gid)
+		}
+
+		t.Logf("'%c' (GID=%d): %d contour pts, isComposite=%v, advance=%d",
+			ch, gid, numPts, outline.isComposite, outline.hintedAdvance())
+	}
+}
+
+// TestHintGlyphOutline_AllGlyphs_Portable tests that TT bytecode hinting
+// works correctly for all glyphs in the bundled tthint_subset.ttf font,
+// including any composite glyphs.
+func TestHintGlyphOutline_AllGlyphs_Portable(t *testing.T) {
+	data := loadTTTestFont(t, "tthint_subset.ttf")
+
+	cache := newTTHintCache(data)
+	if cache == nil {
+		t.Fatal("expected non-nil cache")
+	}
+
+	ppem := int32(16)
+
+	// Test all glyphs in the font.
+	for gid := uint16(0); gid < 3; gid++ {
+		outline, outlineErr := cache.hintGlyphOutline(gid, ppem)
+		if outlineErr != nil {
+			t.Errorf("GID=%d: error: %v", gid, outlineErr)
+			continue
+		}
+
+		if outline == nil {
+			if gid == 0 {
+				// .notdef may be empty/unhintable — acceptable.
+				continue
+			}
+			t.Errorf("GID=%d: nil — glyph hinting failed", gid)
+			continue
+		}
+
+		advance, ok := cache.hintedAdvanceWidth(gid, ppem)
+		if gid > 0 {
+			if !ok {
+				t.Errorf("GID=%d: hinted advance not available", gid)
+			}
+			if advance <= 0 {
+				t.Errorf("GID=%d: advance=%.2f, expected > 0", gid, advance)
+			}
+		}
+
+		t.Logf("GID=%d: hinted advance=%.2f px at %dppem", gid, advance, ppem)
 	}
 }
 

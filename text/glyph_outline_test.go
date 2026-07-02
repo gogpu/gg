@@ -1,6 +1,7 @@
 package text
 
 import (
+	"os"
 	"testing"
 )
 
@@ -399,5 +400,79 @@ func BenchmarkOutlineTransform(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = outline.Transform(transform)
+	}
+}
+
+// TestExtractOutlineHinted_AllGlyphs_Portable tests the full outline
+// extraction pipeline for all non-empty glyphs in tthint_subset.ttf,
+// exercising the end-to-end path:
+// ExtractOutlineHinted → extractFromOwn → ParseGlyfContours → hinting.
+// This covers both simple and composite glyph paths (the font may store
+// Aacute as either, depending on the subsetting tool).
+func TestExtractOutlineHinted_AllGlyphs_Portable(t *testing.T) {
+	data, err := os.ReadFile("testdata/tthint_subset.ttf")
+	if err != nil {
+		t.Skipf("cannot read tthint_subset.ttf: %v", err)
+	}
+
+	parser := &ownParser{}
+	parsed, err := parser.Parse(data)
+	if err != nil {
+		t.Fatalf("parse font: %v", err)
+	}
+
+	extractor := &OutlineExtractor{}
+	const ppem = 16.0
+
+	glyphs := []struct {
+		gid  GlyphID
+		name string
+	}{
+		{1, "A"},
+		{2, "Aacute"},
+	}
+
+	// Test all hinting modes to verify all glyphs work in every path.
+	hintModes := []struct {
+		name    string
+		hinting Hinting
+	}{
+		{"None", HintingNone},
+		{"Vertical", HintingVertical},
+		{"Full", HintingFull},
+	}
+
+	for _, g := range glyphs {
+		for _, hm := range hintModes {
+			t.Run(g.name+"/"+hm.name, func(t *testing.T) {
+				outline, outlineErr := extractor.ExtractOutlineHinted(parsed, g.gid, ppem, hm.hinting)
+				if outlineErr != nil {
+					t.Fatalf("ExtractOutlineHinted: %v", outlineErr)
+				}
+
+				// Non-empty glyphs must NOT return nil outline.
+				if outline == nil {
+					t.Fatalf("ExtractOutlineHinted: nil outline — glyph invisible")
+				}
+
+				// The outline must have segments (not empty).
+				if outline.IsEmpty() {
+					t.Fatalf("ExtractOutlineHinted: empty outline — glyph would be invisible")
+				}
+
+				// Verify advance is positive.
+				if outline.Advance <= 0 {
+					t.Errorf("advance=%f, expected > 0", outline.Advance)
+				}
+
+				// Verify bounds are non-degenerate.
+				if outline.Bounds.MaxX <= outline.Bounds.MinX || outline.Bounds.MaxY <= outline.Bounds.MinY {
+					t.Errorf("degenerate bounds: %+v", outline.Bounds)
+				}
+
+				t.Logf("%s (GID=%d, hinting=%s): %d segments, advance=%.2f",
+					g.name, g.gid, hm.name, outline.SegmentCount(), outline.Advance)
+			})
+		}
 	}
 }

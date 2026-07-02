@@ -90,11 +90,14 @@ func (c *ttHintCache) getInstance(ppem int32) (*ttHintInstance, error) {
 // points and phantom-point advance. This is the main entry point for TT
 // bytecode hinting of a single glyph.
 //
+// Both simple and composite glyphs are supported. Composite glyphs are
+// recursively loaded and merged by loadCompositeGlyphOutline before hinting.
+//
 // For empty glyphs (space, etc.), returns a phantom-only outline with rounded
 // phantom points but no contour points. The advance from such an outline is
 // integer-pixel, matching FreeType/skrifa behavior.
 //
-// Returns nil, nil for glyphs that cannot be hinted (composites, etc.).
+// Returns nil, nil for glyphs that cannot be hinted (e.g., hinting disabled).
 //
 //nolint:nilnil // nil result = "no hintable outline"
 func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutline, error) {
