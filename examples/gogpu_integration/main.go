@@ -43,7 +43,8 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GoGPU + gg: Six-Tier GPU Rendering").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(true))
 
 	// Load system fonts for Tier 4 (MSDF text rendering).
 	fontSource := loadFontSource()
