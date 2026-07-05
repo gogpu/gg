@@ -27,7 +27,8 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GPU-CLIP-003a: Arbitrary Path Clip Test").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(true))
 
 	log.Println("=== REBUILD MARKER 2026-05-01 22:30 ===")
 	fontSource := loadFontSource()

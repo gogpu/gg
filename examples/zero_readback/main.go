@@ -32,7 +32,8 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Zero-Readback Compositor (ADR-015/016)").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(true))
 
 	var fontFace text.Face
 	if src, err := text.NewFontSourceFromFile("C:/Windows/Fonts/arial.ttf"); err == nil {

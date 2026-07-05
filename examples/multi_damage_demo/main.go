@@ -30,7 +30,8 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("Multi-Rect Damage Demo (ADR-028)").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(true))
 
 	var (
 		canvas       *ggcanvas.Canvas

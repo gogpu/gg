@@ -42,7 +42,8 @@ func main() {
 
 	app := gogpu.NewApp(gogpu.DefaultConfig().
 		WithTitle("GoGPU + gg: Clip Demo").
-		WithSize(width, height))
+		WithSize(width, height).
+		WithContinuousRender(true))
 
 	// Load system font for text labels.
 	fontSource := loadFontSource()
