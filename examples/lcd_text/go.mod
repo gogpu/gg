@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/lcd_text
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.50.1
+	github.com/gogpu/gg v0.50.3
 	github.com/gogpu/gogpu v0.44.1
 )
 
@@ -16,5 +16,5 @@ require (
 	github.com/gogpu/wgpu v0.30.10 // indirect
 	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 )
