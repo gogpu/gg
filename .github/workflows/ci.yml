@@ -106,6 +106,58 @@ jobs:
         name: codecov-gg
         fail_ci_if_error: true
 
+  # GPU golden tests - Linux with Mesa software Vulkan (lavapipe)
+  # Follows wgpu CI pattern: install Mesa drivers, run GPU code on llvmpipe.
+  # Tests render same scene on CPU and GPU, compare output (Vello compare pattern).
+  # Non-blocking: failures produce warnings, not CI failures.
+  gpu-golden:
+    name: GPU Golden Tests (Mesa/lavapipe)
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 0
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Install Mesa for GPU testing
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          mesa-vulkan-drivers \
+          libegl-mesa0 \
+          libgl1-mesa-dri
+
+    - name: Verify Mesa installation
+      run: |
+        echo "=== Vulkan ICD files ==="
+        ls -la /usr/share/vulkan/icd.d/ 2>/dev/null || echo "No Vulkan ICD files found"
+        echo ""
+        echo "=== Mesa libraries ==="
+        ldconfig -p | grep -E 'vulkan|mesa' | head -10 || true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run GPU golden tests
+      env:
+        # Force software rendering via lavapipe
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        MESA_LOADER_DRIVER_OVERRIDE: "lvp"
+        VK_ICD_FILENAMES: "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
+      run: |
+        echo "=== Running GPU vs CPU golden comparison tests ==="
+        go test -v -count=1 -run 'TestGoldenSoftware' -timeout 5m ./internal/gpu/... || {
+          echo "::warning::GPU golden tests failed (non-blocking — software adapter differences expected)"
+          exit 0
+        }
+
   # Linting
   lint:
     name: Lint

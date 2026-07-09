@@ -14,6 +14,50 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+// gpuRenderStrategy controls which GPU rendering tiers are available based on
+// adapter capabilities. This follows the Skia Graphite PathRendererStrategy
+// pattern (RendererProvider.cpp:39-97) where the rendering approach is
+// auto-selected at init time based on adapter type and MSAA support:
+//
+//   - strategyFull: all tiers (SDF, stencil, MSDF text, compute) with MSAA
+//   - strategyNoMSAA: all tiers but without multi-sample anti-aliasing
+//   - strategyRasterAtlas: CPU shapes, GPU textures only (software adapter)
+//
+// Strategy is set once at GPU init and never changes (deterministic).
+type gpuRenderStrategy int
+
+const (
+	// strategyFull — all shapes via GPU with MSAA (hardware adapter, 4x MSAA).
+	// Matches Skia Graphite kComputeMSAA8 / kTessellation path.
+	strategyFull gpuRenderStrategy = iota
+
+	// strategyNoMSAA — GPU shapes without MSAA (hardware adapter, 1x sample).
+	// The GPU handles SDF, stencil, text, compute — but render passes use
+	// sampleCount=1 instead of 4. This produces lower-quality edges but avoids
+	// MSAA texture creation failures on backends with limited support.
+	strategyNoMSAA
+
+	// strategyRasterAtlas — CPU shapes, GPU textures only (software adapter).
+	// Matches Skia Graphite kRasterAtlas: shapes route to CPU rasterizer,
+	// GPU is used only for texture upload and compositing. Prevents SDF
+	// pipeline hangs on software/CPU adapters (BUG-SW-002).
+	strategyRasterAtlas
+)
+
+// String returns a human-readable description of the rendering strategy.
+func (s gpuRenderStrategy) String() string {
+	switch s {
+	case strategyFull:
+		return "Full GPU"
+	case strategyNoMSAA:
+		return "GPU (no MSAA)"
+	case strategyRasterAtlas:
+		return "Raster Atlas (CPU shapes, GPU textures)"
+	default:
+		return "Unknown"
+	}
+}
+
 // GPUShared holds GPU resources that are shared across all gg.Context instances.
 // This includes the device, queue, pipelines, and atlas engines — expensive to
 // create, immutable or append-only after initialization.
@@ -61,8 +105,9 @@ type GPUShared struct {
 	sampleCount uint32
 
 	gpuReady       bool
-	softwareMode   bool // true when software/CPU adapter detected (informational, does not disable GPU)
-	externalDevice bool // true when using shared device (don't destroy on Close)
+	softwareMode   bool              // true when software/CPU adapter detected (informational, does not disable GPU)
+	strategy       gpuRenderStrategy // auto-detected rendering strategy (Skia PathRendererStrategy pattern)
+	externalDevice bool              // true when using shared device (don't destroy on Close)
 }
 
 // NewGPUShared creates a new shared GPU resource holder. GPU initialization
@@ -182,6 +227,9 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
 	s.sampleCount = resolveSampleCount(s.device)
 
+	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
+	s.strategy = s.detectStrategy()
+
 	// Create pipelines with shared device.
 	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
@@ -193,18 +241,22 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	s.initVelloAccelerator(s.device, s.queue)
 
 	slogger().Info("gpu-shared: switched to shared GPU device",
+		"strategy", s.strategy.String(),
 		"adapter", fmt.Sprintf("%T", s.device),
 		"msaa_samples", s.sampleCount,
+		"softwareMode", s.softwareMode,
 	)
 	return nil
 }
 
 // CanRenderDirect reports whether the GPU is initialized and can render
-// directly to a surface. Returns false on CPU-only adapters (BUG-SW-002).
+// directly to a surface. Returns false when the rendering strategy is
+// strategyRasterAtlas (software/CPU adapters) — shapes route to CPU
+// rasterizer instead (BUG-SW-002, Skia kRasterAtlas pattern).
 func (s *GPUShared) CanRenderDirect() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.softwareMode {
+	if s.strategy == strategyRasterAtlas {
 		return false
 	}
 	return s.gpuReady
@@ -277,6 +329,30 @@ func (s *GPUShared) SampleCount() uint32 {
 		return 4 // default before init
 	}
 	return s.sampleCount
+}
+
+// detectStrategy determines the rendering strategy based on adapter type and
+// MSAA support. Must be called with s.mu held, after softwareMode and
+// sampleCount are resolved.
+//
+// This follows the Skia Graphite RendererProvider pattern
+// (RendererProvider.cpp:84-97):
+//
+//	prefer compute > tessellation > raster atlas
+//
+// Our equivalent:
+//
+//	softwareMode=false, MSAA=4x → strategyFull (all GPU tiers)
+//	softwareMode=false, MSAA=1x → strategyNoMSAA (GPU without MSAA)
+//	softwareMode=true            → strategyRasterAtlas (CPU shapes, GPU textures)
+func (s *GPUShared) detectStrategy() gpuRenderStrategy {
+	if s.softwareMode {
+		return strategyRasterAtlas
+	}
+	if s.sampleCount <= 1 {
+		return strategyNoMSAA
+	}
+	return strategyFull
 }
 
 // resolveSampleCount probes the device for 4x MSAA support by attempting
@@ -377,6 +453,9 @@ func (s *GPUShared) initGPU() error {
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
 	s.sampleCount = resolveSampleCount(s.device)
 
+	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
+	s.strategy = s.detectStrategy()
+
 	// Create pipelines (device stays alive for texture ops even in softwareMode).
 	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
@@ -388,6 +467,7 @@ func (s *GPUShared) initGPU() error {
 	s.initVelloAccelerator(s.device, s.queue)
 
 	slogger().Info("gpu-shared: GPU initialized",
+		"strategy", s.strategy.String(),
 		"adapter", adapterInfo.Name,
 		"msaa_samples", s.sampleCount,
 		"softwareMode", s.softwareMode,
