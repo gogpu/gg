@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.50.0
+## Current State: v0.50.4
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
@@ -104,49 +104,36 @@
 
 ## Current Release
 
-### v0.48.13 — Current
-- [x] **Dependencies** — gogpu v0.42.0 → v0.42.1
+### v0.50.4 — Current
+- [x] **Composite glyph DoS hardening** (#418) — fan-out budget, cycle detection, gvar guard
+- [x] **Software adapter hang fix** (#421) — SDF pipeline on software adapters
+- [x] **Tiered GPU rendering strategy** — gpuRenderStrategy enum (Full/NoMSAA/RasterAtlas)
+- [x] **CI GPU golden tests** — Mesa lavapipe, GPU/CPU dual-render comparison
+- [x] **Dependencies** — x/image v0.44.0, x/text v0.40.0
 
-### v0.48.12 ✅ Released
-- [x] **AMD stencil invert workaround** (#374, @lkmavi) — dynamic fill rule via `HadInnerJoin()`
-- [x] Smooth paths → NonZero (avoids buggy StencilOperationInvert on AMD D3D12)
-- [x] Sharp paths → EvenOdd (correct V-shape handling)
-- [x] 3 regression tests + 4 Vello accumulator tests updated
+### v0.50.0–v0.50.3 ✅ Released
+- [x] **HVAR variable font advance parser** (ADR-050, #405) — Pure Go, ItemVariationStore, diff=0 vs skrifa
+- [x] **TT GETINFO ClearType fix** — selector bits off-by-one vs skrifa/FreeType
+- [x] **Composite glyph tests** — portable tests for i, j, accented characters
+- [x] Dependencies: wgpu v0.30.10, gogpu v0.44.1
 
-### v0.48.11 ✅ Released
-- [x] **Vello StrokePath EvenOdd fill rule** (#369, ADR-043, @TimLai666) — thin strokes solid fill on GPU compute
+### v0.49.0–v0.49.6 ✅ Released
+- [x] **Variable font support** (#385, ADR-044) — FontVariation API, WithVariations FaceOption
+- [x] **MSAA runtime fallback** (BUG-GPU-001) — Skia Graphite pattern
+- [x] **Variable font rendering/hinting fixes** — aliased, outline, go-text grid-fit
+- [x] **Enterprise auto-hinter** — skrifa golden parity, 17/19 diff=0
 
-### v0.48.10 ✅ Released
-- [x] **Backdrop prefix sum boundary fix** (BUG-BACKDROP-001, ADR-042) — Vello backdrop_dyn pattern
-- [x] **wgpu v0.30.1 opaque handle migration** — DeviceFromHandle/AdapterFromHandle, zero unsafe.Pointer
-- [x] **Dependencies** — wgpu v0.30.1, gogpu v0.42.0, gpucontext v0.21.0
+### v0.48.7–v0.48.17 ✅ Released
+- [x] HiDPI text outline fix (#361 @TuSKan), OpenType font features (#362 @TuSKan)
+- [x] Glyph mask quadOffset fix, backdrop prefix sum, wgpu opaque handles
+- [x] Thin strokes compute fix (#369 @TimLai666), AMD stencil workaround (#374 @lkmavi)
+- [x] AMD/macOS stroke routing (#374), Metal stencil (#390 @samyfodil), glyph-mask hinting (#393 @samyfodil)
 
-### v0.48.9 ✅ Released
-- [x] **Glyph mask quadOffset fix** (BUG-GLYPHMASK-001, #365) — text invisible in offscreen GPU textures
-- [x] **Dependencies** — wgpu v0.29.15, naga v0.17.15, gogpu v0.41.14
-
-### v0.48.8 ✅ Released
-- [x] **HiDPI double-scale fix** (#361, @TuSKan) — deviceMatrix applied twice in text outlines
-- [x] **OpenType font features** (#362, @TuSKan) — WithFeatures(TabularNums), Language() fix
-
-### v0.48.6–v0.48.7 ✅ Released
-- [x] **SparseStripsFiller winding propagation** (BUG-SPARSE-STRIPS-001) — Vello backdrop.wgsl parity
-- [x] **SDF thin stroke fallback** (#346, ADR-040) — lineWidth < 2.0 → geometric expansion
-- [x] **Present damage union** — forwardDamageRects unions explicit + frame damage
-- [x] Dependencies update
-
-### v0.48.5 ✅ Released
-- [x] **TextModeAliased CPU fallback** (#353) — per-glyph NoAAFiller, works without GPU
-- [x] **Fractional glyph advances** (ADR-039) — Skia linearMetrics, letters no longer merge at 10-12px
-- [x] **Per-glyph text rendering** — text.Draw replaced font.Drawer with RasterizeHinted
-
-### v0.48.4 ✅ Released
-- [x] **Stroke inner join teeth** (#354, #353, ADR-038) — tiny-skia stroker.rs parity
-
-### v0.48.0–v0.48.3 ✅ Released
-- [x] Text stroke (ADR-033), TextModeAliased GPU (ADR-034), zero-alloc paint (ADR-036)
+### v0.48.0–v0.48.6 ✅ Released
+- [x] Text stroke (ADR-033), TextModeAliased (ADR-034), zero-alloc paint (ADR-036)
 - [x] Scissor coalescing (#335 @celer), NaN safety (ADR-035), polygon rotation (#334 @rcarlier)
-- [x] GPU stroke polyline fix (#347 @TuSKan), stroke expander kurbo parity, BUG-SDF-001
+- [x] Stroke inner join (#354, ADR-038), fractional advances (ADR-039), SparseStripsFiller winding
+- [x] SDF thin stroke fallback (ADR-040), present damage union
 
 ### v0.47.0–v0.47.4 ✅ Released
 - [x] Pixel-Perfect Mode (ADR-030), text batch coalescing (ADR-031)
@@ -307,17 +294,11 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.48.13** | 2026-06 | Deps: gogpu v0.42.1 |
-| v0.48.12 | 2026-06 | AMD stencil invert workaround (#374 @lkmavi), dynamic fill rule HadInnerJoin |
-| v0.48.11 | 2026-06 | Vello StrokePath EvenOdd (#369 @TimLai666), thin strokes solid fill fix |
-| v0.48.10 | 2026-06 | Backdrop prefix sum fix (ADR-042), wgpu v0.30.1 opaque handles, gogpu v0.42.0 |
-| v0.48.9 | 2026-06 | Glyph mask quadOffset fix (BUG-GLYPHMASK-001, #365), deps v0.29.15/v0.17.15/v0.41.14 |
-| v0.48.8 | 2026-06 | HiDPI fix (#361 @TuSKan), OpenType font features (#362 @TuSKan) |
-| v0.48.7 | 2026-05 | Dependencies update |
-| v0.48.6 | 2026-05 | SparseStripsFiller winding (Vello parity), SDF thin stroke fallback (#346), damage union |
-| v0.48.5 | 2026-05 | TextModeAliased CPU (#353), fractional advances (ADR-039), per-glyph rendering |
-| v0.48.4 | 2026-05 | Stroke inner join teeth (#354, ADR-038, tiny-skia parity) |
-| v0.48.0–3 | 2026-05 | Text stroke (ADR-033), aliased text GPU (ADR-034), GPU stroke fix (#347) |
+| **v0.50.4** | 2026-07 | Composite DoS hardening (#418), software hang fix (#421), tiered GPU, CI golden tests |
+| v0.50.0–3 | 2026-07 | HVAR advance parser (ADR-050), TT GETINFO fix, composite glyph tests |
+| v0.49.0–6 | 2026-06 | Variable font support (#385, ADR-044), MSAA fallback, auto-hinter skrifa parity |
+| v0.48.7–17 | 2026-05–06 | HiDPI (#361), AMD stencil (#374), Metal stencil (#390), glyph-mask hinting (#393) |
+| v0.48.0–6 | 2026-05 | Text stroke (ADR-033), aliased text (ADR-034), stroke inner join, SDF thin stroke |
 | v0.47.0–4 | 2026-05 | Pixel-Perfect Mode (ADR-030), text batch coalescing, HiDPI damage |
 | v0.46.0–11 | 2026-05 | CJK (ADR-027), damage pipeline (ADR-026), scene text (ADR-022), LCD auto-detect |
 | v0.43.0–v0.45.4 | 2026-04 | Compositor APIs, single command buffer, damage pipeline, GPU clips |

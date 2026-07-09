@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.4] - 2026-07-09
+
 ### Fixed
 
 - **Composite glyph DoS hardening** (#418) — added shared work budget
@@ -29,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison tests (Vello `compare_gpu_cpu` pattern). Non-blocking job with annotations.
 - **GPU/CPU golden test framework** — `computeImageDiff()` perceptual comparison,
   diff visualization, 6 test cases (circle, rectangle, line, stroke, triangle, overlapping).
+
+### Changed
+
+- **Dependencies:** golang.org/x/image v0.43.0 → v0.44.0,
+  golang.org/x/text v0.39.0 → v0.40.0.
 
 ## [0.50.3] - 2026-07-03
 
