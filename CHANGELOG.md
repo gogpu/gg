@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Software backend offscreen textures** — split `deviceReady` from `gpuReady`
+  in GPU shared state. On rasterAtlas strategy (software adapter), device is alive
+  for texture/buffer operations while shape pipelines (SDF/stencil/convex) are
+  skipped. `CreateOffscreenTexture` now checks `deviceReady` instead of `gpuReady`.
+  `ensurePipelines()` skips shape pipelines on rasterAtlas to prevent SPIR-V hang.
+  Follows Skia Graphite pattern: `TextureProxy::Make()` works under `kRasterAtlas`.
+
+- **GPU tests hardcoded MSAA sampleCount=4** — 48 test sites assumed hardware GPU
+  with 4x MSAA support. Replaced with `testSampleCount(t, device)` probe that
+  delegates to production `resolveSampleCount` (Skia Graphite pattern). Tests now
+  pass on software backends (llvmpipe, SwiftShader) that only support sampleCount=1.
+
 ## [0.50.4] - 2026-07-09
 
 ### Fixed

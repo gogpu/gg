@@ -755,7 +755,7 @@ func TestRenderSessionConvexOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -792,7 +792,7 @@ func TestRenderSessionMixedWithConvex(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -842,7 +842,7 @@ func TestRenderSessionConvexRendererSetter(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	if s.ConvexRendererRef() != nil {

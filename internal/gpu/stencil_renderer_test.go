@@ -10,6 +10,14 @@ import (
 	"github.com/gogpu/wgpu/hal/noop"
 )
 
+// testSampleCount probes the device for 4x MSAA support, falling back to 1x.
+// Mirrors the production resolveSampleCount (Skia Graphite pattern) so tests
+// work on software backends that reject SampleCount=4.
+func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
+	t.Helper()
+	return resolveSampleCount(device)
+}
+
 // createNoopDevice creates a noop-backed *wgpu.Device and *wgpu.Queue for testing.
 // Returns the device, queue, and a cleanup function.
 func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {

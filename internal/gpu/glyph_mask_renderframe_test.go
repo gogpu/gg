@@ -24,7 +24,7 @@ func TestGlyphMaskRenderFrameNonGrouped(t *testing.T) {
 	face := reproFont(t)
 
 	engine := NewGlyphMaskEngine()
-	session := NewGPURenderSession(device, queue, 4)
+	session := NewGPURenderSession(device, queue, testSampleCount(t, device))
 
 	var batches []GlyphMaskBatch
 	x := 6.0

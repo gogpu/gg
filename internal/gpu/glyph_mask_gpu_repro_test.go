@@ -41,7 +41,7 @@ func TestGlyphMaskGPURepro(t *testing.T) {
 	face := reproFont(t)
 
 	engine := NewGlyphMaskEngine()
-	session := NewGPURenderSession(device, queue, 4)
+	session := NewGPURenderSession(device, queue, testSampleCount(t, device))
 
 	// One batch per word — mirrors the live app's per-DrawText batches.
 	var batches []GlyphMaskBatch
