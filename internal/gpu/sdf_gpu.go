@@ -135,10 +135,17 @@ func (a *SDFAccelerator) ClearClipPath() {
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
-// Returns false on software adapters to prevent SDF pipeline hang — shapes
-// route to CPU rasterizer instead (Skia kRasterAtlas pattern, BUG-SW-002).
+// Returns false when the rendering strategy is strategyRasterAtlas (software
+// adapters) — shapes route to CPU rasterizer instead, preventing SDF pipeline
+// hang (Skia kRasterAtlas pattern, BUG-SW-002).
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
-	if a.IsSoftwareAdapter() {
+	if a.shared == nil {
+		return false
+	}
+	a.shared.mu.Lock()
+	strategy := a.shared.strategy
+	a.shared.mu.Unlock()
+	if strategy == strategyRasterAtlas {
 		return false
 	}
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0
