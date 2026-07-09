@@ -37,6 +37,7 @@ type SDFAccelerator struct {
 var _ gg.GPUAccelerator = (*SDFAccelerator)(nil)
 var _ gg.GPURenderContextProvider = (*SDFAccelerator)(nil)
 var _ gg.DirectRenderCapable = (*SDFAccelerator)(nil)
+var _ gg.AdapterAware = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.GPUGlyphMaskAccelerator = (*SDFAccelerator)(nil)
 var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
@@ -55,6 +56,18 @@ func (a *SDFAccelerator) Shared() *GPUShared {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.shared
+}
+
+// IsSoftwareAdapter reports whether the accelerator is running on a software
+// (CPU) adapter such as llvmpipe, SwiftShader, or WARP. Used by
+// AcceleratorCanRenderDirect in auto mode (ADR-020) to route shapes to CPU.
+func (a *SDFAccelerator) IsSoftwareAdapter() bool {
+	if a.shared == nil {
+		return false
+	}
+	a.shared.mu.Lock()
+	defer a.shared.mu.Unlock()
+	return a.shared.softwareMode
 }
 
 // NewGPURenderContext creates a new per-context GPU render context.
@@ -122,7 +135,12 @@ func (a *SDFAccelerator) ClearClipPath() {
 }
 
 // CanAccelerate reports whether this accelerator supports the given operation.
+// Returns false on software adapters to prevent SDF pipeline hang — shapes
+// route to CPU rasterizer instead (Skia kRasterAtlas pattern, BUG-SW-002).
 func (a *SDFAccelerator) CanAccelerate(op gg.AcceleratedOp) bool {
+	if a.IsSoftwareAdapter() {
+		return false
+	}
 	return op&(gg.AccelCircleSDF|gg.AccelRRectSDF|gg.AccelFill|gg.AccelStroke|gg.AccelText) != 0
 }
 
@@ -190,7 +208,9 @@ func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) e
 }
 
 // CanRenderDirect reports whether the GPU accelerator can render to a surface.
+// Returns false on software adapters — SDF pipelines hang on CPU (BUG-SW-002).
 func (a *SDFAccelerator) CanRenderDirect() bool {
+	// GPUShared.CanRenderDirect() already checks softwareMode under lock.
 	return a.shared.CanRenderDirect()
 }
 

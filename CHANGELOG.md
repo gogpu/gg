@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Software adapter hang** (#421) — SDF GPU pipeline hung on software/CPU adapters
+  (llvmpipe, SwiftShader, WARP). `SDFAccelerator` now implements `AdapterAware` —
+  shapes route to CPU rasterizer on software, GPU device stays alive for textures.
+  Follows Skia Graphite `kRasterAtlas` pattern. Regression from ADR-046 refactoring.
+
 ## [0.50.3] - 2026-07-03
 
 ### Changed
