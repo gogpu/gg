@@ -12,7 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Software adapter hang** (#421) — SDF GPU pipeline hung on software/CPU adapters
   (llvmpipe, SwiftShader, WARP). `SDFAccelerator` now implements `AdapterAware` —
   shapes route to CPU rasterizer on software, GPU device stays alive for textures.
-  Follows Skia Graphite `kRasterAtlas` pattern. Regression from ADR-046 refactoring.
+  SDF pipeline creation skipped on `strategyRasterAtlas` to prevent hang in
+  `SetDeviceProvider()` shared device path. Follows Skia Graphite `kRasterAtlas`
+  pattern. Regression from ADR-046 refactoring.
+
+### Added
+
+- **Tiered GPU rendering strategy** — `gpuRenderStrategy` enum (Full/NoMSAA/RasterAtlas)
+  auto-detected from adapter type + MSAA support. Replaces binary softwareMode checks.
+  Follows Skia Graphite `PathRendererStrategy` pattern.
+- **CI GPU golden tests** — Mesa lavapipe installed on Ubuntu CI. GPU/CPU dual-render
+  comparison tests (Vello `compare_gpu_cpu` pattern). Non-blocking job with annotations.
+- **GPU/CPU golden test framework** — `computeImageDiff()` perceptual comparison,
+  diff visualization, 6 test cases (circle, rectangle, line, stroke, triangle, overlapping).
 
 ## [0.50.3] - 2026-07-03
 
