@@ -773,33 +773,38 @@ func (e *OutlineExtractor) extractFromOwnVariableImpl(
 		}, nil, nil
 	}
 
-	// Build points array for applyVariations: [x, y] pairs + 4 phantom points.
-	nPts := len(contours.Points)
-	points := make([][2]int32, nPts+4)
-	for i, pt := range contours.Points {
-		points[i] = [2]int32{int32(pt.X), int32(pt.Y)}
-	}
+	// Skip gvar for composites: merged point-number space doesn't match
+	// gvar's per-component space (would silently corrupt geometry).
+	// Matches loadGlyphOutlineVar's existing skip for composites.
+	if !contours.IsComposite {
+		// Build points array for applyVariations: [x, y] pairs + 4 phantom points.
+		nPts := len(contours.Points)
+		points := make([][2]int32, nPts+4)
+		for i, pt := range contours.Points {
+			points[i] = [2]int32{int32(pt.X), int32(pt.Y)}
+		}
 
-	// Compute hmtx advance for phantom points.
-	var hmtxAdv int32
-	f.ensureHmtx()
-	if f.hmtxParsed && f.hmtxAdv != nil {
-		hmtxAdv = int32(hmtxAdvance(f.hmtxAdv, f.numHMetrics, uint16(gid)))
-	}
+		// Compute hmtx advance for phantom points.
+		var hmtxAdv int32
+		f.ensureHmtx()
+		if f.hmtxParsed && f.hmtxAdv != nil {
+			hmtxAdv = int32(hmtxAdvance(f.hmtxAdv, f.numHMetrics, uint16(gid)))
+		}
 
-	// Phantom points: [nPts+0]=origin, [nPts+1]=advance, [nPts+2/3]=vertical.
-	points[nPts] = [2]int32{0, 0}
-	points[nPts+1] = [2]int32{hmtxAdv, 0}
-	points[nPts+2] = [2]int32{0, 0}
-	points[nPts+3] = [2]int32{0, 0}
+		// Phantom points: [nPts+0]=origin, [nPts+1]=advance, [nPts+2/3]=vertical.
+		points[nPts] = [2]int32{0, 0}
+		points[nPts+1] = [2]int32{hmtxAdv, 0}
+		points[nPts+2] = [2]int32{0, 0}
+		points[nPts+3] = [2]int32{0, 0}
 
-	// Apply gvar deltas.
-	f.applyVariations(uint16(gid), points, contours.EndPts, variations)
+		// Apply gvar deltas.
+		f.applyVariations(uint16(gid), points, contours.EndPts, variations)
 
-	// Write modified points back to contours.
-	for i := range contours.Points {
-		contours.Points[i].X = int16(points[i][0])
-		contours.Points[i].Y = int16(points[i][1])
+		// Write modified points back to contours.
+		for i := range contours.Points {
+			contours.Points[i].X = int16(points[i][0])
+			contours.Points[i].Y = int16(points[i][1])
+		}
 	}
 
 	// Scale and convert to segments.

@@ -42,6 +42,9 @@ type GlyfContours struct {
 	YMin   int16
 	XMax   int16
 	YMax   int16
+
+	// gvar point-number space for composites != merged simple-glyph space.
+	IsComposite bool
 }
 
 // NumContours returns the number of contours in the glyph.
@@ -301,6 +304,15 @@ const (
 // Matches skrifa GLYF_COMPOSITE_RECURSION_LIMIT = 32.
 const compositeRecursionLimit = 32
 
+// maxCompositeComponents bounds the total number of composite-glyph
+// resolutions across an entire top-level glyph's recursion. The depth cap
+// alone does not bound multiplicative fan-out: F siblings × N levels =
+// F^N resolutions (e.g. 6 siblings × 32 levels ≈ 8×10^24). 4096
+// comfortably covers any legitimate composite (real fonts rarely exceed
+// single digits of components). Neither skrifa nor FreeType enforce a
+// component budget — this is additional hardening for untrusted fonts.
+const maxCompositeComponents = 4096
+
 // compositeComponent holds the parsed data for a single component of a
 // composite TrueType glyph.
 type compositeComponent struct {
@@ -401,22 +413,49 @@ func parseCompositeComponents(data []byte, startPos int) ([]compositeComponent, 
 }
 
 // extractCompositeContours recursively loads and merges component glyphs
-// for a composite glyph (numContours < 0) in the glyf table.
-//
-// For each component, the function:
-//  1. Reads flags, component GID, and offsets from the composite glyph data
-//  2. Recursively loads the component's contour points
-//  3. Applies the component's affine transform (offset, scale, 2x2 matrix)
-//  4. Merges all component points and contour endpoints into a single GlyfContours
+// for a composite glyph (numContours < 0). Entry point: seeds fresh
+// cycle-detection map and work budget for extractCompositeContoursGuarded.
 //
 // Reference: skrifa glyf/mod.rs:784-960 (load_composite)
-// Reference: https://learn.microsoft.com/en-us/typography/opentype/spec/glyf#composite-glyph-description
-//
-//nolint:nilnil // Intentional nil-nil for empty/missing glyphs.
 func extractCompositeContours(glyfData, locaData []byte, glyphIndex int, isLong bool, depth int) (*GlyfContours, error) {
+	return extractCompositeContoursGuarded(glyfData, locaData, glyphIndex, isLong, depth, nil, nil)
+}
+
+// extractCompositeContoursGuarded resolves composite components with shared
+// cycle map and work budget. Cycle hits degrade gracefully (nil, nil);
+// budget exhaustion is a hard error (adversarial font).
+//
+//nolint:nilnil // Intentional nil-nil for empty/missing/cyclic glyphs.
+func extractCompositeContoursGuarded(
+	glyfData, locaData []byte,
+	glyphIndex int,
+	isLong bool,
+	depth int,
+	visiting map[uint16]bool,
+	budget *int,
+) (*GlyfContours, error) {
 	if depth > compositeRecursionLimit {
 		return nil, fmt.Errorf("text: glyf parser: composite recursion limit exceeded for glyph %d", glyphIndex)
 	}
+
+	gid := uint16(glyphIndex) //nolint:gosec // glyph indices are inherently uint16 (glyf/loca/GlyphID)
+	if visiting == nil {
+		visiting = make(map[uint16]bool, 4)
+	}
+	if visiting[gid] {
+		return nil, nil // cycle in component graph — degrade gracefully
+	}
+
+	if budget == nil {
+		budget = new(int)
+	}
+	*budget++
+	if *budget > maxCompositeComponents {
+		return nil, fmt.Errorf("text: glyf parser: glyph %d: composite exceeds max component budget (>%d)", glyphIndex, maxCompositeComponents)
+	}
+
+	visiting[gid] = true
+	defer delete(visiting, gid)
 
 	off, length := locateGlyph(locaData, glyphIndex, isLong)
 	if length == 0 {
@@ -454,8 +493,9 @@ func extractCompositeContours(glyfData, locaData []byte, glyphIndex int, isLong 
 	var allEndPts []uint16
 
 	for _, comp := range components {
-		// Recursively load the component glyph.
-		componentContours, compErr := extractCompositeContours(glyfData, locaData, int(comp.glyphID), isLong, depth+1)
+		// Recursively load the component glyph, sharing the cycle map and
+		// work budget across all components at all depths.
+		componentContours, compErr := extractCompositeContoursGuarded(glyfData, locaData, int(comp.glyphID), isLong, depth+1, visiting, budget)
 		if compErr != nil {
 			return nil, fmt.Errorf("text: glyf parser: composite glyph %d component %d: %w", glyphIndex, comp.glyphID, compErr)
 		}
@@ -500,12 +540,13 @@ func extractCompositeContours(glyfData, locaData []byte, glyphIndex int, isLong 
 	}
 
 	return &GlyfContours{
-		Points: allPoints,
-		EndPts: allEndPts,
-		XMin:   xMin,
-		YMin:   yMin,
-		XMax:   xMax,
-		YMax:   yMax,
+		Points:      allPoints,
+		EndPts:      allEndPts,
+		XMin:        xMin,
+		YMin:        yMin,
+		XMax:        xMax,
+		YMax:        yMax,
+		IsComposite: true,
 	}, nil
 }
 
