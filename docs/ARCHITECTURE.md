@@ -69,7 +69,7 @@ Optional extension interfaces for gogpu integration:
 - **DeviceProviderAware** -- share GPU device with an external provider (e.g., gogpu window)
 - **Per-pass render target** -- `GPURenderTarget.View` (`gpucontext.TextureView`) enables GPU-direct rendering to any texture view (surface or offscreen). Follows WebGPU spec per-render-pass target pattern. ~~SurfaceTargetAware~~ (deprecated, use GPURenderTarget.View)
 
-### Six-Tier GPU Rendering
+### Seven-Tier GPU Rendering
 
 The GPU accelerator in `internal/gpu/` uses a unified render session (`GPURenderSession`) that
 dispatches shapes and text to six rendering tiers:
@@ -79,6 +79,7 @@ dispatches shapes and text to six rendering tiers:
 | **1** | SDF | Circles, ellipses, rounded rects | SDF shader evaluation per-pixel |
 | **2a** | Convex | Convex polygons | Fan tessellation (no stencil needed) |
 | **2b** | Stencil+Cover | Arbitrary paths | Stencil buffer for winding, then cover pass |
+| **3** | Textured Quad | DrawImage, GPU textures | GPU textured quad pipeline |
 | **4** | MSDF Text | Text glyphs (dynamic/animated) | Multi-channel SDF with median+smoothstep shader |
 | **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
 | **6** | Glyph Mask | Text glyphs (static/UI, ≤48px) | CPU-rasterized R8 alpha atlas, GPU textured quads, ClearType LCD subpixel, font hinting |
@@ -539,9 +540,11 @@ gg/
 │   ├── shaper_builtin.go   # Default shaper (basic LTR)
 │   ├── shaper_gotext.go    # HarfBuzz shaper (go-text)
 │   ├── layout.go           # Multi-line layout engine
+│   ├── glyf_parser.go      # TrueType glyf table parser (composite hardening: cycle detection + work budget)
+│   ├── tt_glyph.go         # TT bytecode glyph loader (composite hardening mirrors glyf_parser)
 │   ├── glyph_cache.go      # LRU glyph cache (16-shard)
 │   ├── glyph_run.go        # GlyphRunBuilder for batching
-│   ├── glyph_outline.go    # Outline extraction + grid-fit hinting
+│   ├── glyph_outline.go    # Outline extraction + grid-fit hinting + gvar composite guard
 │   ├── glyph_mask_rasterizer.go # CPU rasterization (grayscale + LCD/ClearType)
 │   ├── glyph_mask_atlas.go # R8 alpha atlas (shelf packing, LRU, LCD 3x, size buckets, frame-based compact)
 │   ├── lcd_filter.go       # ClearType 5-tap FIR filter, LCDLayout (RGB/BGR)
