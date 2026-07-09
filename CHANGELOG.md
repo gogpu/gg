@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Composite glyph DoS hardening** (#418) — added shared work budget
+  (`maxCompositeComponents=4096`) and cycle-detection map to both composite
+  recursion sites. The depth-only guard (32 levels) did not bound multiplicative
+  fan-out (F siblings × N levels = F^N resolutions). Cycle hits now degrade
+  gracefully; gvar delta application skipped for composites (wrong point-number
+  space corrupted variable font geometry). Patch contributed by issue author.
 - **Software adapter hang** (#421) — SDF GPU pipeline hung on software/CPU adapters
   (llvmpipe, SwiftShader, WARP). `SDFAccelerator` now implements `AdapterAware` —
   shapes route to CPU rasterizer on software, GPU device stays alive for textures.

@@ -346,16 +346,21 @@ func (l *ttGlyphLoader) loadGlyphOutline(glyphID uint16, scale int32) (*ttGlyphO
 }
 
 // loadCompositeGlyphOutline loads a composite glyph by recursively loading
-// each component glyph, applying transforms/offsets, and merging the result
-// into a single ttGlyphOutline with phantom points.
+// each component, applying transforms/offsets, and merging into a single
+// ttGlyphOutline. Entry point: seeds cycle-detection map (pre-marked with
+// own ID) and work budget for loadCompositeGlyphOutlineGuarded.
 //
-// This follows the skrifa load_composite pattern (glyf/mod.rs:784-960):
-// for each component, load its glyph (recursively), apply the 2x2 transform
-// and XY offset, then merge points and contour endpoints.
-//
-// Reference: skrifa glyf/mod.rs:784-960 (FreeTypeScaler::load_composite)
-// Reference: FreeType ttgload.c:1259-1330 (composite glyph loading)
+// Reference: skrifa glyf/mod.rs:784-960 (load_composite)
 func (l *ttGlyphLoader) loadCompositeGlyphOutline(glyphID uint16, scale int32, data []byte, depth int) (*ttGlyphOutline, error) {
+	visiting := map[uint16]bool{glyphID: true}
+	budget := new(int)
+	*budget = 1
+	return l.loadCompositeGlyphOutlineGuarded(glyphID, scale, data, depth, visiting, budget)
+}
+
+// loadCompositeGlyphOutlineGuarded is the merge logic with shared cycle
+// map and work budget. Caller has already marked glyphID in visiting.
+func (l *ttGlyphLoader) loadCompositeGlyphOutlineGuarded(glyphID uint16, scale int32, data []byte, depth int, visiting map[uint16]bool, budget *int) (*ttGlyphOutline, error) {
 	if depth > compositeRecursionLimit {
 		return nil, fmt.Errorf("tt: composite recursion limit exceeded for glyph %d", glyphID)
 	}
@@ -376,8 +381,9 @@ func (l *ttGlyphLoader) loadCompositeGlyphOutline(glyphID uint16, scale int32, d
 	var compositeInstructions []byte
 
 	for ci, comp := range components {
-		// Recursively load the component glyph.
-		componentOutline, compErr := l.loadGlyphOutlineRecursive(comp.glyphID, scale, depth+1)
+		// Recursively load the component glyph, sharing the cycle map and
+		// work budget across all components at all depths.
+		componentOutline, compErr := l.loadGlyphOutlineRecursive(comp.glyphID, scale, depth+1, visiting, budget)
 		if compErr != nil {
 			return nil, fmt.Errorf("tt: composite glyph %d component %d: %w", glyphID, comp.glyphID, compErr)
 		}
@@ -501,14 +507,25 @@ func (l *ttGlyphLoader) loadCompositeGlyphOutline(glyphID uint16, scale int32, d
 	return outline, nil
 }
 
-// loadGlyphOutlineRecursive loads a glyph outline, supporting recursion for
-// composite glyph components. This is the internal recursive entry point.
+// loadGlyphOutlineRecursive loads a glyph outline for a composite component.
+// Checks cycle detection and charges work budget before resolving.
+// Cycle hits degrade gracefully (nil, nil); budget exhaustion errors.
 //
 //nolint:nilnil // nil result = "no outline", not an error
-func (l *ttGlyphLoader) loadGlyphOutlineRecursive(glyphID uint16, scale int32, depth int) (*ttGlyphOutline, error) {
+func (l *ttGlyphLoader) loadGlyphOutlineRecursive(glyphID uint16, scale int32, depth int, visiting map[uint16]bool, budget *int) (*ttGlyphOutline, error) {
 	if depth > compositeRecursionLimit {
 		return nil, fmt.Errorf("tt: composite recursion limit exceeded for glyph %d", glyphID)
 	}
+	if visiting[glyphID] {
+		return nil, nil // cycle in component graph — degrade gracefully
+	}
+	*budget++
+	if *budget > maxCompositeComponents {
+		return nil, fmt.Errorf("tt: glyph %d: composite exceeds max component budget (>%d)", glyphID, maxCompositeComponents)
+	}
+	visiting[glyphID] = true
+	defer delete(visiting, glyphID)
+
 	if int(glyphID) >= len(l.glyfOff) {
 		return nil, fmt.Errorf("tt: glyph %d out of range (%d glyphs)", glyphID, len(l.glyfOff))
 	}
@@ -535,7 +552,7 @@ func (l *ttGlyphLoader) loadGlyphOutlineRecursive(glyphID uint16, scale int32, d
 
 	numContours := int16(binary.BigEndian.Uint16(data[0:2]))
 	if numContours < 0 {
-		return l.loadCompositeGlyphOutline(glyphID, scale, data, depth)
+		return l.loadCompositeGlyphOutlineGuarded(glyphID, scale, data, depth, visiting, budget)
 	}
 
 	// Simple glyph — delegate to the main loader (which won't recurse since numContours >= 0).
