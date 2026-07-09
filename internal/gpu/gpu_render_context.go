@@ -909,14 +909,15 @@ func (rc *GPURenderContext) effectivePipelineMode() gg.PipelineMode {
 }
 
 // CreateOffscreenTexture allocates a GPU texture for offscreen rendering.
-// The texture has usage flags suitable for both FlushGPUWithView (render to)
-// and DrawGPUTexture (sample from). Returns view + release function.
+// Checks deviceReady (not gpuReady): texture allocation needs a live device,
+// not shape pipelines. On rasterAtlas, gpuReady is false but device is alive.
+// Skia Graphite: TextureProxy::Make() works under kRasterAtlas.
 func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.TextureView, func()) {
 	if rc.shared == nil {
 		slogger().Warn("CreateOffscreenTexture: shared is nil")
 		return gpucontext.TextureView{}, nil
 	}
-	if !rc.shared.gpuReady {
+	if !rc.shared.deviceReady {
 		rc.shared.mu.Lock()
 		err := rc.shared.ensureGPU()
 		rc.shared.mu.Unlock()
@@ -924,8 +925,8 @@ func (rc *GPURenderContext) CreateOffscreenTexture(w, h int) (gpucontext.Texture
 			slogger().Warn("CreateOffscreenTexture: ensureGPU failed", "error", err)
 			return gpucontext.TextureView{}, nil
 		}
-		if !rc.shared.gpuReady {
-			slogger().Warn("CreateOffscreenTexture: GPU not ready after ensureGPU")
+		if !rc.shared.deviceReady {
+			slogger().Warn("CreateOffscreenTexture: device not ready after ensureGPU")
 			return gpucontext.TextureView{}, nil
 		}
 	}

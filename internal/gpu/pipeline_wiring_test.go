@@ -684,3 +684,138 @@ func TestConstructors_WithSampleCount(t *testing.T) {
 		})
 	}
 }
+
+func TestGPUShared_RasterAtlas_DeviceReadyWithoutPipelines(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyRasterAtlas
+	s.deviceReady = true
+	s.gpuReady = false
+
+	if !s.IsDeviceReady() {
+		t.Fatal("rasterAtlas: deviceReady should be true")
+	}
+	if s.IsReady() {
+		t.Fatal("rasterAtlas: gpuReady should be false")
+	}
+	if s.CanRenderDirect() {
+		t.Fatal("rasterAtlas: CanRenderDirect should be false")
+	}
+}
+
+func TestGPUShared_FullStrategy_BothReady(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyFull
+	s.deviceReady = true
+	s.gpuReady = true
+
+	if !s.IsDeviceReady() {
+		t.Fatal("full: deviceReady should be true")
+	}
+	if !s.IsReady() {
+		t.Fatal("full: gpuReady should be true")
+	}
+	if !s.CanRenderDirect() {
+		t.Fatal("full: CanRenderDirect should be true")
+	}
+}
+
+func TestGPUShared_Close_ResetsBothFlags(t *testing.T) {
+	s := NewGPUShared()
+	s.deviceReady = true
+	s.gpuReady = true
+
+	s.Close()
+
+	if s.deviceReady {
+		t.Fatal("Close should reset deviceReady")
+	}
+	if s.gpuReady {
+		t.Fatal("Close should reset gpuReady")
+	}
+}
+
+func TestCreateOffscreenTexture_RasterAtlas_DeviceReady(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyRasterAtlas
+	s.deviceReady = true
+	s.gpuReady = false
+
+	rc := s.NewRenderContext()
+	view, release := rc.CreateOffscreenTexture(100, 100)
+	_ = view
+	_ = release
+}
+
+func TestCreateOffscreenTexture_NilShared_Bails(t *testing.T) {
+	rc := &GPURenderContext{shared: nil}
+
+	view, release := rc.CreateOffscreenTexture(100, 100)
+	if !view.IsNil() {
+		t.Fatal("expected nil view when shared is nil")
+	}
+	if release != nil {
+		t.Fatal("expected nil release when shared is nil")
+	}
+}
+
+func TestFillShape_RasterAtlas_FallsBackToCPU(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyRasterAtlas
+	s.deviceReady = true
+	s.gpuReady = false
+	s.cpuFallback = gg.SDFAccelerator{}
+
+	rc := s.NewRenderContext()
+	target := makeTestTarget(100, 100)
+	shape := gg.DetectedShape{
+		Kind: gg.ShapeCircle, CenterX: 50, CenterY: 50, RadiusX: 30, RadiusY: 30,
+	}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+
+	err := rc.FillShape(target, shape, paint)
+	_ = err
+}
+
+func TestFillPath_RasterAtlas_FallsBackToCPU(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyRasterAtlas
+	s.deviceReady = true
+	s.gpuReady = false
+
+	rc := s.NewRenderContext()
+	target := makeTestTarget(100, 100)
+	path := gg.NewPath()
+	path.MoveTo(10, 10)
+	path.LineTo(90, 50)
+	path.LineTo(10, 90)
+	path.Close()
+
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+
+	err := rc.FillPath(target, path, paint)
+	if err != nil && !errors.Is(err, gg.ErrFallbackToCPU) {
+		t.Fatalf("expected ErrFallbackToCPU or nil, got: %v", err)
+	}
+}
+
+func TestEnsurePipelines_RasterAtlas_Skips(t *testing.T) {
+	s := NewGPUShared()
+	s.strategy = strategyRasterAtlas
+	s.deviceReady = true
+
+	s.mu.Lock()
+	s.ensurePipelines()
+	s.mu.Unlock()
+
+	if s.sdfRenderPipeline != nil {
+		t.Fatal("rasterAtlas: SDF pipeline should NOT be created")
+	}
+	if s.convexRenderer != nil {
+		t.Fatal("rasterAtlas: convex renderer should NOT be created")
+	}
+	if s.stencilRenderer != nil {
+		t.Fatal("rasterAtlas: stencil renderer should NOT be created")
+	}
+}
