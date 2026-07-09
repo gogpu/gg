@@ -230,7 +230,19 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
 	s.strategy = s.detectStrategy()
 
-	// Create pipelines with shared device.
+	if s.strategy == strategyRasterAtlas {
+		// Software adapter: skip SDF pipeline creation — they hang on our
+		// SPIR-V interpreter. Device stays alive for texture operations
+		// (offscreen compositing, blit, present) per ADR-046.
+		// Shapes route to CPU rasterizer via CanAccelerate()=false.
+		slogger().Info("gpu-shared: rasterAtlas strategy — SDF pipelines skipped, CPU shapes",
+			"strategy", s.strategy.String(),
+			"softwareMode", s.softwareMode,
+		)
+		return nil
+	}
+
+	// Create pipelines with shared device (hardware adapters only).
 	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
 	s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
@@ -244,7 +256,6 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 		"strategy", s.strategy.String(),
 		"adapter", fmt.Sprintf("%T", s.device),
 		"msaa_samples", s.sampleCount,
-		"softwareMode", s.softwareMode,
 	)
 	return nil
 }
