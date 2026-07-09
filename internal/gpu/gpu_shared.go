@@ -200,10 +200,13 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 }
 
 // CanRenderDirect reports whether the GPU is initialized and can render
-// directly to a surface. Returns false on CPU-only adapters.
+// directly to a surface. Returns false on CPU-only adapters (BUG-SW-002).
 func (s *GPUShared) CanRenderDirect() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.softwareMode {
+		return false
+	}
 	return s.gpuReady
 }
 
@@ -356,6 +359,14 @@ func (s *GPUShared) initGPU() error {
 		return fmt.Errorf("request adapter: %w", err)
 	}
 
+	// Check for software/CPU adapter before creating device.
+	adapterInfo := adapter.Info()
+	if adapterInfo.DeviceType == gputypes.DeviceTypeCPU {
+		slogger().Info("gpu-shared: software adapter detected, SDF pipeline disabled",
+			"adapter", adapterInfo.Name)
+		s.softwareMode = true
+	}
+
 	device, err := adapter.RequestDevice(&wgpu.DeviceDescriptor{Label: "gg-shared"})
 	if err != nil {
 		return fmt.Errorf("request device: %w", err)
@@ -366,7 +377,7 @@ func (s *GPUShared) initGPU() error {
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
 	s.sampleCount = resolveSampleCount(s.device)
 
-	// Create pipelines.
+	// Create pipelines (device stays alive for texture ops even in softwareMode).
 	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	s.convexRenderer = NewConvexRenderer(s.device, s.queue, s.sampleCount)
 	s.stencilRenderer = NewStencilRenderer(s.device, s.queue, s.sampleCount)
@@ -377,8 +388,9 @@ func (s *GPUShared) initGPU() error {
 	s.initVelloAccelerator(s.device, s.queue)
 
 	slogger().Info("gpu-shared: GPU initialized",
-		"adapter", adapter.Info().Name,
+		"adapter", adapterInfo.Name,
 		"msaa_samples", s.sampleCount,
+		"softwareMode", s.softwareMode,
 	)
 	return nil
 }
