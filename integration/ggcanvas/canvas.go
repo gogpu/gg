@@ -688,10 +688,11 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	// Zero-copy software path: write pixmap directly to surface framebuffer.
 	// Eliminates 3-copy chain (WriteTexture → render pass → blit) with 1 memcpy.
 	if pw, ok := dc.(SurfacePixelWriter); ok {
+		// Forward damage rects BEFORE PresentPixels — it reads ws.damageRects internally.
+		c.forwardDamageRects(dc, damageRects)
 		pixmap := c.ctx.ResizeTarget()
 		if err := pw.WriteSurfacePixels(pixmap.Data(), uint32(c.ctx.PixelWidth()), uint32(c.ctx.PixelHeight())); err == nil {
 			c.dirty = false
-			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}
 	}
