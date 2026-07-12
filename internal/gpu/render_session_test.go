@@ -16,7 +16,7 @@ func TestRenderSessionCreation(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	if s == nil {
 		t.Fatal("expected non-nil session")
 	}
@@ -36,7 +36,7 @@ func TestRenderSessionTextures(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	err := s.EnsureTextures(800, 600)
@@ -74,7 +74,7 @@ func TestRenderSessionTexturesIdempotent(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	err := s.EnsureTextures(640, 480)
@@ -107,7 +107,7 @@ func TestRenderSessionTexturesResize(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	err := s.EnsureTextures(800, 600)
@@ -134,7 +134,7 @@ func TestRenderSessionDestroyAndRecreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 
 	err := s.EnsureTextures(256, 256)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestRenderSessionEmpty(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -195,7 +195,7 @@ func TestRenderSessionSDFOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -239,7 +239,7 @@ func TestRenderSessionStencilOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -278,7 +278,7 @@ func TestRenderSessionMixed(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -336,7 +336,7 @@ func TestRenderSessionMultipleFrames(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -371,7 +371,7 @@ func TestRenderSessionPipelineSetters(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	// Initially nil.
@@ -504,7 +504,7 @@ func TestRenderSessionSurfaceMode(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	// Initially in offscreen mode.
@@ -564,7 +564,7 @@ func TestRenderSessionSurfaceModeReset(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	// Enter surface mode.
@@ -614,7 +614,7 @@ func TestRenderSessionSurfaceModeTextures(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	tex, view := createMockSurfaceView(t, device, 1024, 768)
@@ -661,7 +661,7 @@ func TestRenderSessionSurfaceModeResize(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	tex1, view1 := createMockSurfaceView(t, device, 800, 600)
@@ -719,7 +719,7 @@ func TestRenderSessionSurfaceModeStencilPaths(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	tex, view := createMockSurfaceView(t, device, 400, 300)
@@ -763,7 +763,7 @@ func TestRenderSessionDestroyClearsSurface(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 
 	tex, view := createMockSurfaceView(t, device, 640, 480)
 	defer view.Release()
@@ -965,7 +965,7 @@ func TestRenderSession_EncoderLifecycleRecovery(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -1040,7 +1040,7 @@ func TestRenderSession_EncoderLifecycleSurface(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	// Create a texture to use as the surface view.
@@ -1106,7 +1106,7 @@ func TestRenderSessionEnsurePipelines_FullFlow(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	// Simulate the normal RenderFrame flow.
@@ -1150,7 +1150,7 @@ func TestIsBlitOnly(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	baseRes := &imageFrameResources{
@@ -1213,7 +1213,7 @@ func TestReadbackGrouped_NilTexturesReturnsError(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -1236,7 +1236,7 @@ func TestReadback_NilTexturesReturnsError(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{
@@ -1258,7 +1258,7 @@ func TestCopySubmitAndReadback_NilResolveTexReturnsError(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	target := gg.GPURenderTarget{

@@ -627,6 +627,13 @@ type DamageRectSetter interface {
 	SetDamageRects(rects []image.Rectangle)
 }
 
+// SurfacePixelWriter is an optional interface for RenderTargets that support
+// direct pixel upload to the surface framebuffer (software backend zero-copy).
+// Bypasses texture creation, render pass, and SPIR-V — single memcpy+swizzle.
+type SurfacePixelWriter interface {
+	WriteSurfacePixels(data []byte, width, height uint32) error
+}
+
 // Render presents canvas content to the screen. Works on all backends.
 //
 // On GPU backends (Vulkan, DX12, Metal, GLES): renders directly to surface
@@ -674,6 +681,18 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		sw, sh := dc.SurfaceSize()
 		if err := c.RenderDirect(sv, sw, sh); err == nil {
 			c.forwardDamageRects(dc, damageRects)
+			return nil
+		}
+	}
+
+	// Zero-copy software path: write pixmap directly to surface framebuffer.
+	// Eliminates 3-copy chain (WriteTexture → render pass → blit) with 1 memcpy.
+	if pw, ok := dc.(SurfacePixelWriter); ok {
+		// Forward damage rects BEFORE PresentPixels — it reads ws.damageRects internally.
+		c.forwardDamageRects(dc, damageRects)
+		pixmap := c.ctx.ResizeTarget()
+		if err := pw.WriteSurfacePixels(pixmap.Data(), uint32(c.ctx.PixelWidth()), uint32(c.ctx.PixelHeight())); err == nil {
+			c.dirty = false
 			return nil
 		}
 	}

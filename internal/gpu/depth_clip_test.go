@@ -220,7 +220,7 @@ func TestHasAnyDepthClip(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	tests := []struct {
@@ -290,7 +290,7 @@ func TestRecordGroupDraws_NoDepthClip_Regression(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	if err := s.EnsureTextures(200, 200); err != nil {
@@ -421,7 +421,7 @@ func TestDepthLoadOp_AlwaysClear_Regression(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	s := NewGPURenderSession(device, queue, 4)
+	s := NewGPURenderSession(device, queue, testSampleCount(t, device))
 	defer s.Destroy()
 
 	if err := s.EnsureTextures(200, 200); err != nil {

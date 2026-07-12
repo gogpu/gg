@@ -104,7 +104,8 @@ type GPUShared struct {
 	// Resolved via resolveSampleCount() which probes the device.
 	sampleCount uint32
 
-	gpuReady       bool
+	deviceReady    bool              // device available for texture/buffer ops (true on all strategies incl. rasterAtlas)
+	gpuReady       bool              // shape/text rendering pipelines initialized (false on rasterAtlas)
 	softwareMode   bool              // true when software/CPU adapter detected (informational, does not disable GPU)
 	strategy       gpuRenderStrategy // auto-detected rendering strategy (Skia PathRendererStrategy pattern)
 	externalDevice bool              // true when using shared device (don't destroy on Close)
@@ -133,11 +134,20 @@ func (s *GPUShared) NewRenderContext() *GPURenderContext {
 	}
 }
 
-// IsReady reports whether the GPU is initialized and ready for rendering.
+// IsReady reports whether the GPU shape/text pipelines are initialized.
 func (s *GPUShared) IsReady() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.gpuReady
+}
+
+// IsDeviceReady reports whether the GPU device is available for texture
+// and buffer operations. True on all strategies including rasterAtlas.
+// Skia Graphite: TextureProxy::Make() works under kRasterAtlas.
+func (s *GPUShared) IsDeviceReady() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deviceReady
 }
 
 // Device returns the shared wgpu device, or nil if not initialized.
@@ -230,12 +240,10 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
 	s.strategy = s.detectStrategy()
 
+	s.deviceReady = true
+
 	if s.strategy == strategyRasterAtlas {
-		// Software adapter: skip SDF pipeline creation — they hang on our
-		// SPIR-V interpreter. Device stays alive for texture operations
-		// (offscreen compositing, blit, present) per ADR-046.
-		// Shapes route to CPU rasterizer via CanAccelerate()=false.
-		slogger().Info("gpu-shared: rasterAtlas strategy — SDF pipelines skipped, CPU shapes",
+		slogger().Info("gpu-shared: rasterAtlas strategy — SDF pipelines skipped, device ready for textures",
 			"strategy", s.strategy.String(),
 			"softwareMode", s.softwareMode,
 		)
@@ -329,6 +337,7 @@ func (s *GPUShared) Close() {
 		s.instance = nil
 	}
 	s.queue = nil
+	s.deviceReady = false
 	s.gpuReady = false
 	s.externalDevice = false
 }
@@ -401,9 +410,13 @@ func (s *GPUShared) ensureGPU() error {
 	return s.initGPU()
 }
 
-// ensurePipelines lazily creates pipelines if they don't exist.
-// Must be called with s.mu held and device initialized.
+// ensurePipelines lazily creates shape rendering pipelines. Skipped on
+// rasterAtlas — SDF/stencil/convex pipelines hang on software SPIR-V
+// interpreter (BUG-SW-002). Must be called with s.mu held.
 func (s *GPUShared) ensurePipelines() {
+	if s.strategy == strategyRasterAtlas {
+		return
+	}
 	if s.sdfRenderPipeline == nil {
 		s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)
 	}
@@ -466,6 +479,8 @@ func (s *GPUShared) initGPU() error {
 
 	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
 	s.strategy = s.detectStrategy()
+
+	s.deviceReady = true
 
 	// Create pipelines (device stays alive for texture ops even in softwareMode).
 	s.sdfRenderPipeline = NewSDFRenderPipeline(s.device, s.queue, s.sampleCount)

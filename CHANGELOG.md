@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Software backend offscreen textures** — split `deviceReady` from `gpuReady`
+  in GPU shared state. On rasterAtlas strategy (software adapter), device is alive
+  for texture/buffer operations while shape pipelines (SDF/stencil/convex) are
+  skipped. `CreateOffscreenTexture` now checks `deviceReady` instead of `gpuReady`.
+  `ensurePipelines()` skips shape pipelines on rasterAtlas to prevent SPIR-V hang.
+  Follows Skia Graphite pattern: `TextureProxy::Make()` works under `kRasterAtlas`.
+
+- **GPU tests hardcoded MSAA sampleCount=4** — 48 test sites assumed hardware GPU
+  with 4x MSAA support. Replaced with `testSampleCount(t, device)` probe that
+  delegates to production `resolveSampleCount` (Skia Graphite pattern). Tests now
+  pass on software backends (llvmpipe, SwiftShader) that only support sampleCount=1.
+
+### Added
+
+- **Software offscreen upload** — `uploadPixmapToView()` uploads CPU-rasterized
+  pixmap to offscreen GPU texture via `Queue.WriteTexture` on rasterAtlas strategy.
+  No render pass needed. RGBA→BGRA swizzle. `CopyDst` usage on offscreen textures.
+
+- **SurfacePixelWriter zero-copy path** — duck-typed interface in `ggcanvas.Render()`.
+  On software backend, writes pixmap directly to surface framebuffer via
+  `wgpu.Surface.PresentPixels` (single memcpy+swizzle, no render pass).
+  Damage rects forwarded before present for partial window blit.
+
+### Changed
+
+- **Dependencies:** wgpu v0.30.10 → v0.30.19, gogpu v0.44.1 → v0.44.6,
+  gpucontext v0.21.0 → v0.21.1, goffi v0.5.6 → v0.6.0,
+  golang.org/x/image v0.43.0 → v0.44.0, golang.org/x/text v0.39.0 → v0.40.0,
+  golang.org/x/sys v0.46.0 → v0.47.0.
+
 ## [0.50.4] - 2026-07-09
 
 ### Fixed
