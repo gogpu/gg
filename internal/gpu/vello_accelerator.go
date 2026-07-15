@@ -255,7 +255,8 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	}
 
 	// Build a gg.Path from the expanded outline.
-	fillPath := strokeResultToPath(outVerbs, outCoords)
+	fillPath := gg.NewPath()
+	strokeResultToPath(fillPath, outVerbs, outCoords)
 
 	// EvenOdd correctly handles both stroke topologies:
 	//   - Smooth paths: 2-contour ring, center toggled twice → empty.

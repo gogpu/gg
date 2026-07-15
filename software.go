@@ -45,6 +45,12 @@ type SoftwareRenderer struct {
 	// scratchStrokePath reuses path allocation across Stroke calls.
 	// Matches Skia fOuter.reset() pattern — zero per-stroke allocation.
 	scratchStrokePath *Path
+
+	// Clip bounds for scanline/tile skipping (ADR-052 Layer A).
+	// When hasClip is true, both the AnalyticFiller and CoverageFiller
+	// skip scanlines/tiles outside the clip rectangle at zero per-pixel cost.
+	clipLeft, clipTop, clipRight, clipBottom int
+	hasClip                                  bool
 }
 
 // NewSoftwareRenderer creates a new software renderer with analytic anti-aliasing.
@@ -86,6 +92,18 @@ func (r *SoftwareRenderer) SetAntiAlias(enabled bool) {
 	r.antiAlias = enabled
 }
 
+// SetRasterizerMode sets the rasterization algorithm for the next Fill call.
+// RasterizerAuto (default) uses intelligent auto-selection based on path
+// complexity. RasterizerAnalytic forces the scanline AnalyticFiller, which is
+// required for stroke-expanded multi-contour paths where SparseStripsFiller
+// cannot correctly track per-scanline winding.
+//
+// The mode is NOT auto-reset after each call — the caller is responsible for
+// restoring it (matching the Context.doStroke pattern).
+func (r *SoftwareRenderer) SetRasterizerMode(mode RasterizerMode) {
+	r.rasterizerMode = mode
+}
+
 // SetDeviceScale sets the HiDPI device scale factor for the renderer.
 // When scale > 1.0, curve flattening tolerance is reduced for finer
 // subdivision on HiDPI displays (femtovg pattern: tol = baseTol / scale).
@@ -98,6 +116,25 @@ func (r *SoftwareRenderer) SetDeviceScale(scale float32) {
 	if scale > 1.0 {
 		r.edgeBuilder.SetFlattenTolerance(0.1 / scale)
 	}
+}
+
+// SetClipBounds sets the clip rectangle for scanline and tile skipping.
+// Scanlines outside [top, bottom) and tiles outside [left, right) are skipped
+// entirely at zero per-pixel cost. This is Layer A of the three-tier clip
+// architecture (ADR-052, Skia SkRectClipBlitter pattern).
+func (r *SoftwareRenderer) SetClipBounds(left, top, right, bottom int) {
+	r.clipLeft = left
+	r.clipTop = top
+	r.clipRight = right
+	r.clipBottom = bottom
+	r.hasClip = true
+	r.analyticFiller.SetClipBounds(left, top, right, bottom)
+}
+
+// ClearClipBounds removes the clip rectangle, restoring full rendering.
+func (r *SoftwareRenderer) ClearClipBounds() {
+	r.hasClip = false
+	r.analyticFiller.ClearClipBounds()
 }
 
 // convertGGPathToCorePath converts a gg.Path to raster.PathLike.
@@ -261,12 +298,26 @@ func (r *SoftwareRenderer) fillWithCoverageFiller(
 	if paint.FillRule == FillRuleEvenOdd {
 		fillRule = FillRuleEvenOdd
 	}
+
+	// Layer A (ADR-052): pass clip bounds to tile filler for tile skipping.
+	var cb *ClipBounds
+	if r.hasClip {
+		cb = &ClipBounds{
+			XMin: r.clipLeft, YMin: r.clipTop,
+			XMax: r.clipRight, YMax: r.clipBottom,
+		}
+	}
+
 	clipFn := paint.ClipCoverage
 	maskFn := paint.MaskCoverage
+	clipMask := paint.ClipMask
+	clipMaskW := paint.ClipMaskW
+	clipMaskX := paint.ClipMaskX
+	clipMaskY := paint.ClipMaskY
 	if color, ok := solidColorFromPaint(paint); ok {
-		r.fillCoverageSolidPath(pixmap, p, filler, fillRule, color, clipFn, maskFn)
+		r.fillCoverageSolidPath(pixmap, p, filler, fillRule, cb, color, clipFn, maskFn, clipMask, clipMaskW, clipMaskX, clipMaskY)
 	} else {
-		r.fillCoveragePaintPath(pixmap, p, filler, fillRule, paint, clipFn, maskFn)
+		r.fillCoveragePaintPath(pixmap, p, filler, fillRule, cb, paint, clipFn, maskFn, clipMask, clipMaskW, clipMaskX, clipMaskY)
 	}
 }
 
@@ -274,11 +325,13 @@ func (r *SoftwareRenderer) fillWithCoverageFiller(
 // applying optional clip and mask coverage.
 func (r *SoftwareRenderer) fillCoverageSolidPath(
 	pixmap *Pixmap, p *Path, filler CoverageFiller,
-	fillRule FillRule, color RGBA, clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	fillRule FillRule, cb *ClipBounds, color RGBA,
+	clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
 ) {
-	filler.FillCoverage(p, r.width, r.height, fillRule,
+	filler.FillCoverage(p, r.width, r.height, fillRule, cb,
 		func(x, y int, coverage uint8) {
-			coverage = applyClipCoverage(clipFn, x, y, coverage)
+			coverage = applyClipCoverageFromMaskOrFn(clipMask, clipMaskW, clipMaskX, clipMaskY, clipFn, x, y, coverage)
 			coverage = applyMaskCoverage(maskFn, x, y, coverage)
 			if coverage == 0 {
 				return
@@ -291,11 +344,13 @@ func (r *SoftwareRenderer) fillCoverageSolidPath(
 // applying optional clip and mask coverage.
 func (r *SoftwareRenderer) fillCoveragePaintPath(
 	pixmap *Pixmap, p *Path, filler CoverageFiller,
-	fillRule FillRule, paint *Paint, clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	fillRule FillRule, cb *ClipBounds, paint *Paint,
+	clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
 ) {
-	filler.FillCoverage(p, r.width, r.height, fillRule,
+	filler.FillCoverage(p, r.width, r.height, fillRule, cb,
 		func(x, y int, coverage uint8) {
-			coverage = applyClipCoverage(clipFn, x, y, coverage)
+			coverage = applyClipCoverageFromMaskOrFn(clipMask, clipMaskW, clipMaskX, clipMaskY, clipFn, x, y, coverage)
 			coverage = applyMaskCoverage(maskFn, x, y, coverage)
 			if coverage == 0 {
 				return
@@ -304,9 +359,51 @@ func (r *SoftwareRenderer) fillCoveragePaintPath(
 		})
 }
 
+// applyClipCoverageFromMaskOrFn applies clip coverage using pre-rasterized mask
+// (Layer B, ADR-052) with legacy closure fallback. The mask lookup (~0.5ns/pixel)
+// replaces the per-pixel closure call (~8ns/pixel) for non-rect clips.
+//
+// Priority: clipMask > clipFn > no-op (both nil).
+func applyClipCoverageFromMaskOrFn(
+	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
+	clipFn func(x, y float64) byte,
+	px, py int, coverage uint8,
+) uint8 {
+	if len(clipMask) > 0 {
+		return applyClipFromMask(clipMask, clipMaskW, clipMaskX, clipMaskY, px, py, coverage)
+	}
+	// Legacy fallback: per-pixel closure.
+	return applyClipCoverage(clipFn, px, py, coverage)
+}
+
+// applyClipFromMask looks up clip coverage from a pre-rasterized alpha mask.
+// Returns 0 for pixels outside mask bounds (fully clipped).
+func applyClipFromMask(clipMask []uint8, clipMaskW, clipMaskX, clipMaskY, px, py int, coverage uint8) uint8 {
+	mx := px - clipMaskX
+	my := py - clipMaskY
+	if mx < 0 || my < 0 || mx >= clipMaskW {
+		return 0
+	}
+	idx := my*clipMaskW + mx
+	if idx < 0 || idx >= len(clipMask) {
+		return 0
+	}
+	cc := clipMask[idx]
+	if cc == 0 {
+		return 0
+	}
+	if cc == 255 {
+		return coverage
+	}
+	return uint8(uint16(coverage) * uint16(cc) / 255)
+}
+
 // applyClipCoverage multiplies pixel coverage by the clip mask coverage.
 // Returns 0 if the pixel is fully clipped. When clipFn is nil, returns the
 // original coverage unchanged.
+//
+// Deprecated: Use applyClipCoverageFromMaskOrFn for new code paths.
+// Kept for backward compatibility in existing AnalyticFiller blend paths.
 func applyClipCoverage(clipFn func(x, y float64) byte, px, py int, coverage uint8) uint8 {
 	if clipFn == nil {
 		return coverage
@@ -425,15 +522,17 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 		// Fast path: solid color
 		clipFn := paint.ClipCoverage
 		maskFn := paint.MaskCoverage
+		cm, cmW, cmX, cmY := paint.ClipMask, paint.ClipMaskW, paint.ClipMaskX, paint.ClipMaskY
 		r.analyticFiller.Fill(r.edgeBuilder, coreFillRule, func(y int, runs *raster.AlphaRuns) {
-			r.blendAlphaRunsFromCoreRuns(pixmap, y, runs, color, clipFn, maskFn)
+			r.blendAlphaRunsFromCoreRuns(pixmap, y, runs, color, clipFn, maskFn, cm, cmW, cmX, cmY)
 		})
 	} else {
 		// Pattern/gradient path: per-pixel color sampling
 		clipFn := paint.ClipCoverage
 		maskFn := paint.MaskCoverage
+		cm, cmW, cmX, cmY := paint.ClipMask, paint.ClipMaskW, paint.ClipMaskX, paint.ClipMaskY
 		r.analyticFiller.Fill(r.edgeBuilder, coreFillRule, func(y int, runs *raster.AlphaRuns) {
-			r.blendAlphaRunsFromCoreRunsPaint(pixmap, y, runs, paint, clipFn, maskFn)
+			r.blendAlphaRunsFromCoreRunsPaint(pixmap, y, runs, paint, clipFn, maskFn, cm, cmW, cmX, cmY)
 		})
 	}
 
@@ -555,6 +654,25 @@ func noaaPixelCoverage(x, y int, clipFn func(float64, float64) byte, maskFn func
 	return cov
 }
 
+// clipMaskCoverage looks up clip mask coverage for a pixel from a pre-rasterized
+// mask (Layer B, ADR-052). Returns (coverage, true) if the mask is non-nil and
+// covers the pixel, or (0, false) if no mask is active.
+func clipMaskCoverage(clipMask []uint8, clipMaskW, clipMaskX, clipMaskY, px, py int) (uint8, bool) {
+	if len(clipMask) == 0 {
+		return 0, false
+	}
+	mx := px - clipMaskX
+	my := py - clipMaskY
+	if mx < 0 || my < 0 || mx >= clipMaskW {
+		return 0, true // Outside mask = fully clipped.
+	}
+	idx := my*clipMaskW + mx
+	if idx < 0 || idx >= len(clipMask) {
+		return 0, true
+	}
+	return clipMask[idx], true
+}
+
 // blendCoverageSolid blends a single pixel with solid color and coverage.
 // Uses premultiplied source-over compositing.
 func (r *SoftwareRenderer) blendCoverageSolid(pixmap *Pixmap, x, y int, coverage uint8, color RGBA) {
@@ -662,12 +780,13 @@ func solidColorFromPaint(paint *Paint) (RGBA, bool) {
 // Uses source-over compositing for proper alpha blending.
 // When clipFn is non-nil, each pixel's alpha is multiplied by the clip coverage.
 // When maskFn is non-nil, each pixel's alpha is multiplied by the mask coverage.
-func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, runs *raster.AlphaRuns, color RGBA, clipFn func(x, y float64) byte, maskFn func(x, y int) uint8) {
+func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, runs *raster.AlphaRuns, color RGBA,
+	clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
+) {
 	if y < 0 || y >= pixmap.Height() {
 		return
 	}
-
-	fy := float64(y) + 0.5
 
 	for x, alpha := range runs.Iter() {
 		if alpha == 0 {
@@ -677,16 +796,11 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, run
 			continue
 		}
 
-		// Apply clip coverage if active.
-		if clipFn != nil {
-			cc := clipFn(float64(x)+0.5, fy)
-			if cc == 0 {
-				continue
-			}
-			alpha = uint8(uint16(alpha) * uint16(cc) / 255)
-			if alpha == 0 {
-				continue
-			}
+		// Apply clip coverage: pre-rasterized mask (Layer B, ADR-052) has
+		// priority over legacy closure. Unified with CoverageFiller path.
+		alpha = applyClipCoverageFromMaskOrFn(clipMask, clipMaskW, clipMaskX, clipMaskY, clipFn, x, y, alpha)
+		if alpha == 0 {
+			continue
 		}
 
 		// Apply mask coverage if active.
@@ -724,12 +838,13 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, run
 // the paint color at each pixel instead of using a single constant color.
 // When clipFn is non-nil, each pixel's alpha is multiplied by the clip coverage.
 // When maskFn is non-nil, each pixel's alpha is multiplied by the mask coverage.
-func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int, runs *raster.AlphaRuns, paint *Paint, clipFn func(x, y float64) byte, maskFn func(x, y int) uint8) {
+func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int, runs *raster.AlphaRuns, paint *Paint,
+	clipFn func(x, y float64) byte, maskFn func(x, y int) uint8,
+	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
+) {
 	if y < 0 || y >= pixmap.Height() {
 		return
 	}
-
-	fy := float64(y) + 0.5
 
 	for x, alpha := range runs.Iter() {
 		if alpha == 0 {
@@ -739,18 +854,10 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 			continue
 		}
 
-		fx := float64(x) + 0.5
-
-		// Apply clip coverage if active.
-		if clipFn != nil {
-			cc := clipFn(fx, fy)
-			if cc == 0 {
-				continue
-			}
-			alpha = uint8(uint16(alpha) * uint16(cc) / 255)
-			if alpha == 0 {
-				continue
-			}
+		// Apply clip coverage: mask > closure > no-op (ADR-052).
+		alpha = applyClipCoverageFromMaskOrFn(clipMask, clipMaskW, clipMaskX, clipMaskY, clipFn, x, y, alpha)
+		if alpha == 0 {
+			continue
 		}
 
 		// Apply mask coverage if active.
@@ -758,6 +865,9 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 		if alpha == 0 {
 			continue
 		}
+
+		fx := float64(x) + 0.5
+		fy := float64(y) + 0.5
 
 		// Sample color from paint at pixel center
 		color := paint.ColorAt(fx, fy)

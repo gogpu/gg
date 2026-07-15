@@ -486,7 +486,11 @@ func (c *Context) FrameDamage() []image.Rectangle {
 	if len(c.frameDamageRects) == 0 {
 		return nil
 	}
-	return c.frameDamageRects
+	// Defensive copy — ResetFrameDamage truncates backing array via [:0],
+	// subsequent trackDamage appends would mutate the returned slice.
+	out := make([]image.Rectangle, len(c.frameDamageRects))
+	copy(out, c.frameDamageRects)
+	return out
 }
 
 // FrameDamageUnion returns the bounding box of all damage rects this frame.
@@ -886,7 +890,14 @@ func (c *Context) Fill() error {
 // The RasterizerMode set via SetRasterizerMode controls algorithm selection.
 // Returns an error if the rendering operation fails.
 func (c *Context) Stroke() error {
-	c.trackDamage(c.path.Bounds())
+	bounds := c.path.Bounds()
+	// Inflate by half line width + 1px AA margin. Stroke extends beyond path bounds.
+	inset := int(math.Ceil(c.paint.LineWidth/2)) + 1
+	bounds.Min.X -= inset
+	bounds.Min.Y -= inset
+	bounds.Max.X += inset
+	bounds.Max.Y += inset
+	c.trackDamage(bounds)
 	err := c.doStroke()
 	c.path.Clear()
 	return err
@@ -1712,7 +1723,7 @@ func (c *Context) doFill() error {
 	// The GPU render-pass path ignores paint.ClipCoverage (uses shader-based
 	// clipping), so setting it early is harmless for the GPU path.
 	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
+	defer c.clearClipFromPaint()
 
 	c.applyMaskToPaint()
 	defer func() { c.paint.MaskCoverage = nil }()
@@ -1761,7 +1772,7 @@ func (c *Context) doStroke() error {
 	// Set clip/mask coverage BEFORE GPU attempt so that CPU SDF fallback
 	// (SDFAccelerator.StrokeShape) can apply per-pixel clip+mask coverage.
 	c.applyClipToPaint()
-	defer func() { c.paint.ClipCoverage = nil }()
+	defer c.clearClipFromPaint()
 
 	c.applyMaskToPaint()
 	defer func() { c.paint.MaskCoverage = nil }()
@@ -1795,16 +1806,74 @@ func (c *Context) doStroke() error {
 	return c.renderer.Stroke(c.pixmap, devicePath, c.paint)
 }
 
-// applyClipToPaint sets the ClipCoverage function on the paint when a clip
-// stack is active and has entries. This allows the renderer to apply per-pixel
-// clip masks during compositing.
+// applyClipToPaint configures the paint for clip application using the three-tier
+// clip architecture (ADR-052, Skia pattern):
+//
+//   - Layer A: Sets clip bounds on the SoftwareRenderer for scanline/tile skipping.
+//     Rect-only clips get ZERO per-pixel cost — scanlines outside [top, bottom)
+//     are never generated.
+//
+//   - Layer B: Pre-rasterizes a clip mask for non-rect clips (RRect, path).
+//     The mask is stored as paint.ClipMask (uint8 array, ~0.5ns/pixel lookup)
+//     instead of the per-pixel ClipCoverage closure (~8ns/pixel).
+//
+//   - Legacy: ClipCoverage closure is still set as fallback for code paths
+//     that haven't migrated to mask-based clipping (e.g. AnalyticFiller).
 func (c *Context) applyClipToPaint() {
 	if c.clipStack == nil || c.clipStack.Depth() == 0 {
 		return
 	}
 	cs := c.clipStack
+	bounds := cs.Bounds()
+
+	// Layer A: set clip bounds on the SoftwareRenderer for scanline skipping.
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.SetClipBounds(
+			int(bounds.X), int(bounds.Y),
+			int(bounds.X+bounds.W+0.5), int(bounds.Y+bounds.H+0.5),
+		)
+	}
+
+	// Layer B: pre-rasterize clip mask for non-rect clips.
+	// Only needed on rasterAtlas (CPU dispatch). GPU uses hardware scissor + depth clip.
+	needsMask := !cs.IsRectOnly() && !AcceleratorCanRenderDirect()
+	if needsMask {
+		w := int(bounds.W + 0.5)
+		h := int(bounds.H + 0.5)
+		if w > 0 && h > 0 {
+			mask := make([]uint8, w*h)
+			originX := int(bounds.X)
+			originY := int(bounds.Y)
+			for py := 0; py < h; py++ {
+				for px := 0; px < w; px++ {
+					mask[py*w+px] = cs.Coverage(float64(originX+px)+0.5, float64(originY+py)+0.5)
+				}
+			}
+			c.paint.ClipMask = mask
+			c.paint.ClipMaskW = w
+			c.paint.ClipMaskH = h
+			c.paint.ClipMaskX = originX
+			c.paint.ClipMaskY = originY
+		}
+	}
+
+	// Legacy: closure fallback for AnalyticFiller blend paths.
 	c.paint.ClipCoverage = func(x, y float64) byte {
 		return cs.Coverage(x, y)
+	}
+}
+
+// clearClipFromPaint clears all clip state from the paint and renderer.
+// Must be called (via defer) after applyClipToPaint.
+func (c *Context) clearClipFromPaint() {
+	c.paint.ClipCoverage = nil
+	c.paint.ClipMask = nil
+	c.paint.ClipMaskW = 0
+	c.paint.ClipMaskH = 0
+	c.paint.ClipMaskX = 0
+	c.paint.ClipMaskY = 0
+	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
+		sr.ClearClipBounds()
 	}
 }
 

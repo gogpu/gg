@@ -13,9 +13,11 @@ import (
 type SparseStripsFiller struct{}
 
 // FillCoverage rasterizes the path using SparseStrips and calls callback
-// for each pixel with non-zero coverage.
+// for each pixel with non-zero coverage. If clipBounds is non-nil, tiles
+// entirely outside the clip rectangle are skipped (ADR-052 Layer A).
 func (f *SparseStripsFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
+	clipBounds *gg.ClipBounds,
 	callback func(x, y int, coverage uint8),
 ) {
 	if path == nil || path.NumVerbs() == 0 {
@@ -38,10 +40,20 @@ func (f *SparseStripsFiller) FillCoverage(
 	ssr.RasterizePath(scenePath, scene.IdentityAffine(), FlattenTolerance)
 
 	// 4. Walk TileGrid → callback
+	// Layer A (ADR-052): skip tiles entirely outside clip bounds.
 	grid := ssr.Grid()
 	grid.ForEach(func(tile *Tile) {
 		baseX := int(tile.PixelX())
 		baseY := int(tile.PixelY())
+
+		// Tile-level clip bounds check: skip entire tile if outside clip rect.
+		if clipBounds != nil {
+			if baseX+TileSize <= clipBounds.XMin || baseX >= clipBounds.XMax ||
+				baseY+TileSize <= clipBounds.YMin || baseY >= clipBounds.YMax {
+				return // Entire tile is clipped — zero cost.
+			}
+		}
+
 		for py := 0; py < TileSize; py++ {
 			y := baseY + py
 			if y < 0 || y >= height {

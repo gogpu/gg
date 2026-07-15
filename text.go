@@ -3,6 +3,8 @@ package gg
 import (
 	"fmt"
 	"hash/fnv"
+	"image"
+	"math"
 	"os"
 	"strings"
 
@@ -75,6 +77,17 @@ func (c *Context) Font() text.Face {
 func (c *Context) DrawString(s string, x, y float64) {
 	if c.face == nil {
 		return
+	}
+
+	// Track damage for partial present (ADR-021 Phase 5).
+	// Text bounding box: baseline at y, ascent above, descent below.
+	if c.damageTrackingEnabled {
+		w, _ := text.Measure(s, c.face)
+		m := c.face.Metrics()
+		c.trackDamage(image.Rect(
+			int(x), int(y-m.Ascent),
+			int(math.Ceil(x+w))+1, int(math.Ceil(y+m.Descent))+1,
+		))
 	}
 
 	// Set GPU scissor rect for rectangular clips.
