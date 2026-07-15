@@ -46,7 +46,7 @@ const (
 // time, regardless of whether draws route through GPU or CPU.
 type drawCommand struct {
 	kind    drawCommandKind
-	sortKey uint64 //nolint:unused // ADR-053 Phase 0: pipeline grouping key. Zero = FIFO order.
+	sortKey uint64 //nolint:unused // ADR-053 Phase 0: reserved for pipeline grouping.
 
 	// Geometry — only one group populated per kind (Skia Geometry union pattern).
 	shape     gg.DetectedShape // drawCmdFillShape, drawCmdStrokeShape

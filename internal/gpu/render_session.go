@@ -902,17 +902,8 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	defer s.releasePendingBindGroups()
 
 	if activeView == nil {
-		// Readback path uses recordGroupDraws (pipelineWithStencil), not the blit
-		// pipeline. When earlyBlitOnly skipped ensurePipelines(), the image pipeline's
-		// render variant is nil → Draw silently fails → transparent readback.
-		// Create only the image pipeline (lightweight: one textured_quad.wgsl shader).
-		if earlyBlitOnly && s.imagePipeline != nil {
-			if err := s.ensureClipBindLayout(); err == nil {
-				s.imagePipeline.SetClipBindLayout(s.clipBindLayout)
-			}
-			if err := s.imagePipeline.ensurePipelineWithStencil(); err != nil {
-				return fmt.Errorf("ensure image pipeline for readback: %w", err)
-			}
+		if earlyBlitOnly {
+			s.ensureBlitOnlyReadbackPipeline()
 		}
 		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 	}
@@ -952,6 +943,21 @@ func (s *GPURenderSession) releasePendingBindGroups() {
 		}
 	}
 	s.pendingBindGroupRelease = s.pendingBindGroupRelease[:0]
+}
+
+// ensureBlitOnlyReadbackPipeline creates the image pipeline's render variant
+// when earlyBlitOnly skipped ensurePipelines(). The readback path uses
+// recordGroupDraws (pipelineWithStencil), not the blit pipeline.
+func (s *GPURenderSession) ensureBlitOnlyReadbackPipeline() {
+	if s.imagePipeline == nil {
+		return
+	}
+	if err := s.ensureClipBindLayout(); err == nil {
+		s.imagePipeline.SetClipBindLayout(s.clipBindLayout)
+	}
+	if err := s.imagePipeline.ensurePipelineWithStencil(); err != nil {
+		slogger().Warn("ensure image pipeline for readback failed", "err", err)
+	}
 }
 
 func (s *GPURenderSession) releaseDepthClipResources(grpRes []groupResources) {
