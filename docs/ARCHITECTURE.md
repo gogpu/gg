@@ -104,6 +104,38 @@ Key design:
 - `PipelineMode` (Auto/RenderPass/Compute) selects the appropriate pipeline
 - CPU raster always available as fallback
 
+### Software Backend Strategy (v0.50.4+, rasterAtlas)
+
+On CPU-only adapters (llvmpipe, SwiftShader, WARP, no-GPU), gg uses the
+`rasterAtlas` strategy (Skia Graphite `kRasterAtlas` pattern):
+
+```
+Fill()/Stroke()
+    │
+    ├── GPU shape pipelines (SDF, convex, stencil) → SKIPPED (hang on SPIR-V interpreter)
+    │
+    └── All shapes → pendingDraws → CPU SoftwareRenderer dispatch
+         │
+         ├── Main surface (View=nil):
+         │    flushCPUToPixmap → shapes rendered to c.pixmap
+         │    GPU texture commands (DrawGPUTexture, DrawImage) → retained in pendingDraws
+         │    → session render → SPIR-V textured quad → readback → composite into pixmap
+         │    → WriteSurfacePixels (zero-copy to window)
+         │
+         └── Offscreen (View=offscreen texture):
+              flushCPUToView → shapes rendered to tmpPixmap → RGBA→BGRA → WriteTexture
+```
+
+Key invariants:
+- `deviceReady=true, gpuReady=false` — GPU device alive for texture operations,
+  shape pipelines disabled (Skia `TextureProxy::Make()` pattern)
+- `earlyBlitOnly` optimization skips `ensurePipelines()` for texture-only frames
+  but `ensurePipelineWithStencil()` must be ensured for readback path
+- `uploadPixmapToView` must NOT run after `flushCPUToView` (would overwrite
+  offscreen content with `c.pixmap` background data)
+- BGRA textures require R/B swap in SPIR-V `readTexel` and `writeRasterToTarget`
+- `CopyTextureToBuffer` must respect `BytesPerRow` alignment (256-byte boundary)
+
 ### Vello Compute Pipeline (Tier 5, v0.30.0)
 
 The compute pipeline is a port of [vello](https://github.com/linebender/vello)'s

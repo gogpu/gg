@@ -60,11 +60,11 @@ func main() {
 		lastDraw time.Time
 
 		// Offscreen textures (created and rendered once, composited every frame).
-		offscreen1View     gpucontext.TextureView
-		offscreen1Release  func()
-		offscreen2View     gpucontext.TextureView
-		offscreen2Release  func()
-		offscreenRendered  bool
+		offscreen1View    gpucontext.TextureView
+		offscreen1Release func()
+		offscreen2View    gpucontext.TextureView
+		offscreen2Release func()
+		offscreenRendered bool
 
 		// FPS tracking.
 		fpsFrames   int

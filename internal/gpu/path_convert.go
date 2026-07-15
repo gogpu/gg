@@ -149,29 +149,30 @@ func convertPathVerbsToStroke(verbs []gg.PathVerb) []stroke.PathVerb {
 	return result
 }
 
-// strokeResultToPath converts stroke output (verbs+coords) back to gg.Path.
-func strokeResultToPath(verbs []stroke.PathVerb, coords []float64) *gg.Path {
-	p := gg.NewPath()
+// strokeResultToPath converts stroke output (verbs+coords) into an existing
+// gg.Path. The destination is Reset before use so it can be reused across calls
+// (P3 optimization — eliminates 1 KB allocation per stroke expansion).
+func strokeResultToPath(dst *gg.Path, verbs []stroke.PathVerb, coords []float64) {
+	dst.Reset()
 	ci := 0
 	for _, v := range verbs {
 		switch v {
 		case stroke.VerbMoveTo:
-			p.MoveTo(coords[ci], coords[ci+1])
+			dst.MoveTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbLineTo:
-			p.LineTo(coords[ci], coords[ci+1])
+			dst.LineTo(coords[ci], coords[ci+1])
 			ci += 2
 		case stroke.VerbQuadTo:
-			p.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			dst.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
 			ci += 4
 		case stroke.VerbCubicTo:
-			p.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			dst.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
 			ci += 6
 		case stroke.VerbClose:
-			p.Close()
+			dst.Close()
 		}
 	}
-	return p
 }
 
 // convertShapeToPathDef converts a detected shape (circle, rect, rrect, ellipse)

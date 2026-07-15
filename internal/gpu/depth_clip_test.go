@@ -467,11 +467,11 @@ func TestDepthLoadOp_AlwaysClear_Regression(t *testing.T) {
 // circle clip appearing empty: each Fill() call creates SetClipRect +
 // SetClipPath (2 segments at setup) + ClearClipPath + ClearClipRect (2
 // segments at cleanup), producing 4 segments per fill. buildScissorGroups
-// must correctly assign content to the segment that has the clipPath set.
+// must correctly assign content to the group that has the clipPath set.
 func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
-	rc := &GPURenderContext{
-		shared: &GPUShared{},
-	}
+	s := NewGPUShared()
+	rc := s.NewRenderContext()
+	defer rc.Close()
 
 	// Build a circle clip path (device-space).
 	circlePath := &gg.Path{}
@@ -482,8 +482,12 @@ func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
 	}
 	circlePath.Close()
 
+	target := makeTestTarget(200, 200)
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.Solid(gg.Red))
+
 	// Simulate 3 Fill() calls inside a circle clip, each following the
-	// setGPUClipRect → setGPUClipPath → QueueShape → ClearClipPath → ClearClipRect
+	// setGPUClipRect → setGPUClipPath → FillShape → ClearClipPath → ClearClipRect
 	// pattern from context.go doFill().
 	clipRect := [4]uint32{20, 20, 160, 160}
 
@@ -492,22 +496,25 @@ func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
 		rc.SetClipRect(clipRect[0], clipRect[1], clipRect[2], clipRect[3])
 		rc.SetClipPath(circlePath)
 
-		// GPU fill: queue SDF shape.
-		rc.pendingShapes = append(rc.pendingShapes, SDFRenderShape{
-			Kind:    1,
-			CenterX: 100, CenterY: float32(40 + i*40),
-			Param1: 80, Param2: 20,
-			ColorR: 1, ColorA: 1,
-		})
+		// GPU fill: queue SDF shape via the unified draw queue.
+		shape := gg.DetectedShape{
+			Kind: gg.ShapeCircle, CenterX: 100, CenterY: float64(40 + i*40),
+			RadiusX: 20, RadiusY: 20,
+		}
+		if err := rc.FillShape(target, shape, paint); err != nil {
+			t.Fatalf("FillShape[%d]: %v", i, err)
+		}
 
 		// Cleanup: ClearClipPath then ClearClipRect (deferred from setGPUClipPath).
 		rc.ClearClipPath()
 		rc.ClearClipRect()
 	}
 
-	groups := rc.buildScissorGroups()
+	groups := rc.buildScissorGroupsFromDraws()
 
-	// Count groups that have content (non-empty SDF shapes) AND a clip path.
+	// All 3 draws have the same clip (same circlePath pointer + same clipRect),
+	// so buildScissorGroupsFromDraws groups them into 1 ScissorGroup.
+	// This is correct: per-draw clip snapshot means identical clips = 1 group.
 	clippedGroupCount := 0
 	totalClippedShapes := 0
 	for _, g := range groups {
@@ -517,8 +524,8 @@ func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
 		}
 	}
 
-	if clippedGroupCount != 3 {
-		t.Errorf("expected 3 groups with clipPath + SDF content, got %d (total groups: %d)", clippedGroupCount, len(groups))
+	if clippedGroupCount != 1 {
+		t.Errorf("expected 1 group with clipPath + SDF content (same clip = 1 group), got %d (total groups: %d)", clippedGroupCount, len(groups))
 		for i, g := range groups {
 			t.Logf("  group[%d]: sdf=%d clipPath=%v rect=%v", i, len(g.SDFShapes), g.ClipPath != nil, g.Rect != nil)
 		}

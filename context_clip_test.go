@@ -276,7 +276,7 @@ func TestConvertPathToClipVerbs(t *testing.T) {
 	path.CubicTo(70, 60, 50, 70, 30, 70)
 	path.Close()
 
-	clipVerbs, clipCoords := convertPathToClipVerbs(path)
+	clipVerbs, clipCoords := ConvertPathToClipVerbs(path)
 
 	// Should have same number of verbs
 	if len(clipVerbs) != path.NumVerbs() {
