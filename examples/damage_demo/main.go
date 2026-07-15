@@ -104,15 +104,18 @@ func main() {
 		fpsFrames++
 		if time.Since(lastFPS) >= time.Second {
 			currentFPS = float64(fpsFrames) / time.Since(lastFPS).Seconds()
-			damage := canvas.LastDamage()
 			totalPx := w * h
-			damagePx := damage.Dx() * damage.Dy()
+			rects := canvas.LastDamageRects()
+			damagePx := 0
+			for _, r := range rects {
+				damagePx += r.Dx() * r.Dy()
+			}
 			savings := 0.0
 			if totalPx > 0 {
 				savings = (1.0 - float64(damagePx)/float64(totalPx)) * 100
 			}
-			log.Printf("%.0f FPS | damage: %dx%d (%d px, %.0f%% saved) | total: %dx%d",
-				currentFPS, damage.Dx(), damage.Dy(), damagePx, savings, w, h)
+			log.Printf("%.0f FPS | damage: %d rects (%d px, %.0f%% saved) | total: %dx%d",
+				currentFPS, len(rects), damagePx, savings, w, h)
 			fpsFrames = 0
 			lastFPS = time.Now()
 		}

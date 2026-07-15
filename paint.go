@@ -95,8 +95,28 @@ type Paint struct {
 	// ClipCoverage is a function that returns the clip coverage (0-255)
 	// at a given pixel coordinate. When non-nil, the renderer multiplies
 	// pixel alpha by this coverage to apply the clip mask.
+	//
+	// Deprecated: Use ClipMask for pre-rasterized clip masks (0.5ns/pixel
+	// array lookup vs 8ns/pixel closure call). ClipCoverage is maintained
+	// as a legacy fallback during the transition period.
 	// Set automatically by Context before rendering when a clip is active.
 	ClipCoverage func(x, y float64) byte
+
+	// ClipMask is a pre-rasterized alpha mask for per-pixel clip coverage.
+	// When non-nil, the renderer multiplies pixel alpha by the mask value
+	// at the pixel's position instead of calling the ClipCoverage closure.
+	// This replaces per-pixel closure calls (~8ns) with array lookups (~0.5ns).
+	//
+	// The mask is stored as a flat uint8 array in row-major order, with
+	// stride ClipMaskW. Values: 0 = fully clipped, 255 = fully visible.
+	// ClipMaskX/ClipMaskY define the mask origin in device pixel coordinates.
+	//
+	// Set automatically by Context.applyClipToPaint() for non-rect clips.
+	ClipMask  []uint8
+	ClipMaskW int // mask width (stride in pixels)
+	ClipMaskH int // mask height
+	ClipMaskX int // mask origin X in device pixels
+	ClipMaskY int // mask origin Y in device pixels
 
 	// MaskCoverage is a function that returns the alpha mask coverage (0-255)
 	// at a given pixel coordinate. When non-nil, the renderer multiplies

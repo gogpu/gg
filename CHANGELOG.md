@@ -5,39 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.50.6] - 2026-07-15
 
 ### Fixed
 
-- **Software backend offscreen textures** — split `deviceReady` from `gpuReady`
-  in GPU shared state. On rasterAtlas strategy (software adapter), device is alive
-  for texture/buffer operations while shape pipelines (SDF/stencil/convex) are
-  skipped. `CreateOffscreenTexture` now checks `deviceReady` instead of `gpuReady`.
-  `ensurePipelines()` skips shape pipelines on rasterAtlas to prevent SPIR-V hang.
-  Follows Skia Graphite pattern: `TextureProxy::Make()` works under `kRasterAtlas`.
-
-- **GPU tests hardcoded MSAA sampleCount=4** — 48 test sites assumed hardware GPU
-  with 4x MSAA support. Replaced with `testSampleCount(t, device)` probe that
-  delegates to production `resolveSampleCount` (Skia Graphite pattern). Tests now
-  pass on software backends (llvmpipe, SwiftShader) that only support sampleCount=1.
+- **Software backend GPU texture compositing** — five latent bugs fixed in the
+  software SPIR-V render path, enabling `DrawGPUTexture` overlays (RepaintBoundary
+  pattern) on CPU-only adapters. Coordinated fixes across wgpu `hal/software/`
+  (3 bugs) and gg `internal/gpu/` (2 bugs):
+  - wgpu: `CopyTextureToBuffer` row stride — row-by-row copy respecting
+    `BytesPerRow` alignment (was flat memcpy, causing 128-byte/row shift at 800px).
+  - wgpu: `configureRasterPipeline` blend state — extract premultiplied alpha
+    blend from `Fragment.Targets[0].Blend` (was always `BlendDisabled`).
+  - wgpu: `readTexel` BGRA format — swap R/B channels for `BGRA8Unorm` textures
+    (was always reading as RGBA).
+  - gg: `ensurePipelineWithStencil` for readback — create image pipeline when
+    `earlyBlitOnly` skips `ensurePipelines()` on blit-only readback path.
+  - gg: `uploadPixmapToView` overwrite guard — prevent `c.pixmap` background from
+    overwriting offscreen texture content after `flushCPUToView` upload.
 
 ### Added
 
-- **Software offscreen upload** — `uploadPixmapToView()` uploads CPU-rasterized
-  pixmap to offscreen GPU texture via `Queue.WriteTexture` on rasterAtlas strategy.
-  No render pass needed. RGBA→BGRA swizzle. `CopyDst` usage on offscreen textures.
-
-- **SurfacePixelWriter zero-copy path** — duck-typed interface in `ggcanvas.Render()`.
-  On software backend, writes pixmap directly to surface framebuffer via
-  `wgpu.Surface.PresentPixels` (single memcpy+swizzle, no render pass).
-  Damage rects forwarded before present for partial window blit.
+- `examples/compositing/` — boundary texture test with offscreen textures,
+  DrawGPUTexture, DrawImage, text, animated shapes on all backends.
+- `examples/software_overlay/` — minimal DrawGPUTexture regression test.
 
 ### Changed
 
-- **Dependencies:** wgpu v0.30.10 → v0.30.19, gogpu v0.44.1 → v0.44.6,
-  gpucontext v0.21.0 → v0.21.1, goffi v0.5.6 → v0.6.0,
-  golang.org/x/image v0.43.0 → v0.44.0, golang.org/x/text v0.39.0 → v0.40.0,
-  golang.org/x/sys v0.46.0 → v0.47.0.
+- **Dependencies:** wgpu v0.30.20 → v0.30.21 (software backend fixes).
+- **ARCHITECTURE.md:** new Software Backend Strategy section.
+- `glyphMaskDebugLog` uses `slogger().Debug()` instead of `fmt.Fprintf(os.Stderr)`.
+
+## [0.50.5] - 2026-07-14
+
+### Added
+
+- **Backend-agnostic draw queue** (ADR-051) — shapes enqueued at draw time with
+  paint/path value copies and pre-tessellation, dispatched at flush time to GPU
+  render pass (strategyFull) or CPU SoftwareRenderer (strategyRasterAtlas).
+  Matches Skia Graphite DrawList / Flutter DisplayList pattern.
+
+- **Three-tier clip architecture** (ADR-052) — Layer A: rect bounds for scanline/tile
+  skip (zero per-pixel cost). Layer B: pre-rasterized ClipMask `[]uint8` snapshot
+  at queue time for deferred dispatch. Replaces stale closure-based ClipCoverage.
+
+- **Enterprise test suite** — 80+ new tests across 5 files: canvas.Render mock tests
+  (all 3 present paths), draw queue dispatch, scissor group splitting, clip mask
+  lifetime safety, stroke dispatch pixel verification (TDD, diff=0). 30 profiling
+  benchmarks. Test files split by domain (dispatch, queue, coverage, profiling).
+
+- **SurfacePixelWriter zero-copy path** — capability-based routing via error return
+  (no backend type check). On software backend, writes pixmap directly to surface
+  framebuffer via `PresentPixels`. Coordinated with wgpu v0.30.20 (check-before-
+  mutate) and gogpu v0.44.7 (`pixelPresented` frame lifecycle flag).
+
+- `SetRasterizerMode()` exported method on SoftwareRenderer.
+- FPS counter in gogpu_integration example.
+
+### Fixed
+
+- **SurfacePixelWriter regression** (bb69045) — `PresentPixels` on GPU backends
+  discarded acquired texture before checking backend support, causing 3 FPS on
+  Vulkan. Damage rects incorrectly forwarded for full-frame pixel upload, causing
+  partial blit trails on software backend. Three coordinated fixes across wgpu
+  (check-before-mutate), gogpu (`pixelPresented` flag), gg (capability routing).
+
+- **Double stroke expansion** (C-1) — `dispatchDrawsToSoftware` called `sr.Stroke()`
+  on pre-expanded fill path, producing double-width geometry. Fixed to `sr.Fill()`.
+
+- **Stroke filler regression** — SparseStripsFiller (4x4 tiles) cannot handle
+  multi-contour stroke geometry (inner+outer ring with EvenOdd). Draw queue
+  dispatch now forces RasterizerAnalytic for pre-expanded stroke paths, matching
+  `SoftwareRenderer.Stroke()` internal behavior.
+
+- **Software backend offscreen textures** — split `deviceReady` from `gpuReady`.
+  `CreateOffscreenTexture` checks `deviceReady`. `ensurePipelines()` skips shape
+  pipelines on rasterAtlas (Skia Graphite `TextureProxy::Make()` pattern).
+
+- **Stale ClipCoverage closure** — cleared at queue time (4 enqueue sites) to
+  prevent stale clip stack reference reaching dispatch without cleanup.
+
+### Performance
+
+- **BGRA swizzle buffer pooled** (P0) — 8.3 MB/frame → 0 allocs steady state, 20% faster.
+- **SoftwareRenderer cached** (P1) — 13 allocs/flush → 0, 3300x faster (1.5ns vs 5μs).
+- **scratchStrokePath reuse** (P3) — 1 alloc/stroke → 0, 7x faster (46ns vs 324ns).
+- **GC retention zeroed** (P2) — `pendingDraws` pointer fields zeroed before `[:0]`
+  truncation (Skia OpChain::reset pattern).
+- **tmpPixmap cached** (P4) — offscreen pixmap reused across frames.
+
+### Changed
+
+- **Dependencies:** wgpu v0.30.20 → v0.30.21 (software backend fixes), gogpu v0.44.7.
 
 ## [0.50.4] - 2026-07-09
 

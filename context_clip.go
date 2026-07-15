@@ -17,7 +17,7 @@ func (c *Context) Clip() {
 	// Path elements are in user-space; clip stack operates in device-space.
 	// Transform through deviceMatrix to get device coordinates.
 	devicePath := c.deviceSpacePath()
-	clipVerbs, clipCoords := convertPathToClipVerbs(devicePath)
+	clipVerbs, clipCoords := ConvertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
@@ -40,7 +40,7 @@ func (c *Context) ClipPreserve() {
 
 	// Path elements are in user-space; clip stack operates in device-space.
 	devicePath := c.deviceSpacePath()
-	clipVerbs, clipCoords := convertPathToClipVerbs(devicePath)
+	clipVerbs, clipCoords := ConvertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
 	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
@@ -136,9 +136,10 @@ func (c *Context) initClipStack() {
 	c.clipStack = clip.NewClipStack(bounds)
 }
 
-// convertPathToClipVerbs converts a gg.Path to clip.PathVerb + coords slices.
+// ConvertPathToClipVerbs converts a gg.Path to clip.PathVerb + coords slices.
 // Both PathVerb types have identical byte values, so this is a simple cast.
-func convertPathToClipVerbs(p *Path) ([]clip.PathVerb, []float64) {
+// Exported for use by internal/gpu CPU clip dispatch (ADR-052).
+func ConvertPathToClipVerbs(p *Path) ([]clip.PathVerb, []float64) {
 	verbs := p.Verbs()
 	result := make([]clip.PathVerb, len(verbs))
 	for i, v := range verbs {

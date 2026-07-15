@@ -100,6 +100,13 @@ type AnalyticFiller struct {
 
 	// windingCompat is a float32 buffer for WindingCallback compatibility.
 	windingCompat []float32
+
+	// Clip bounds for scanline skipping (Skia SkRectClipBlitter pattern).
+	// When hasClip is true, scanlines outside [clipTop, clipBottom) are
+	// skipped entirely at zero per-pixel cost. This is Layer A of the
+	// three-tier clip architecture (ADR-052).
+	clipLeft, clipRight, clipTop, clipBottom int
+	hasClip                                  bool
 }
 
 // NewAnalyticFiller creates a new analytic filler for the given dimensions.
@@ -118,6 +125,24 @@ func (af *AnalyticFiller) Reset() {
 	af.aet.Reset()
 	af.alphaRuns.Reset()
 	af.edgeIdx = 0
+}
+
+// SetClipBounds sets the clip rectangle for scanline skipping.
+// Scanlines outside [top, bottom) are skipped entirely at zero cost.
+// Within clipped scanlines, only pixels in [left, right) are blended.
+// This is Layer A of the three-tier clip architecture (ADR-052, Skia
+// SkRectClipBlitter pattern).
+func (af *AnalyticFiller) SetClipBounds(left, top, right, bottom int) {
+	af.clipLeft = left
+	af.clipTop = top
+	af.clipRight = right
+	af.clipBottom = bottom
+	af.hasClip = true
+}
+
+// ClearClipBounds removes the clip rectangle, restoring full rendering.
+func (af *AnalyticFiller) ClearClipBounds() {
+	af.hasClip = false
 }
 
 // Fill renders a path using Skia AAA trapezoid decomposition.
@@ -148,6 +173,18 @@ func (af *AnalyticFiller) Fill(
 	}
 	if yMax > af.height {
 		yMax = af.height
+	}
+
+	// Layer A (ADR-052): clamp Y range to clip bounds.
+	// Scanlines outside [clipTop, clipBottom) are never processed.
+	// This is zero-cost rect clipping at the rasterizer level.
+	if af.hasClip {
+		if yMin < af.clipTop {
+			yMin = af.clipTop
+		}
+		if yMax > af.clipBottom {
+			yMax = af.clipBottom
+		}
 	}
 
 	af.aet.Reset()

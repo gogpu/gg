@@ -47,9 +47,11 @@ func (f *AdaptiveFiller) ComputeFiller() gg.CoverageFiller {
 
 // FillCoverage rasterizes the path using the appropriate tile-based filler.
 // It estimates segment count from path element count and selects TileCompute
-// only for very complex paths on large canvases.
+// only for very complex paths on large canvases. The clipBounds parameter
+// is forwarded to the selected filler for tile/scanline skipping (ADR-052).
 func (f *AdaptiveFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
+	clipBounds *gg.ClipBounds,
 	callback func(x, y int, coverage uint8),
 ) {
 	elements := path.NumVerbs()
@@ -57,8 +59,8 @@ func (f *AdaptiveFiller) FillCoverage(
 	canvasArea := width * height
 
 	if estimatedSegments > extremeSegmentThreshold && canvasArea > largeBBoxThreshold {
-		f.compute.FillCoverage(path, width, height, fillRule, callback)
+		f.compute.FillCoverage(path, width, height, fillRule, clipBounds, callback)
 		return
 	}
-	f.sparse.FillCoverage(path, width, height, fillRule, callback)
+	f.sparse.FillCoverage(path, width, height, fillRule, clipBounds, callback)
 }

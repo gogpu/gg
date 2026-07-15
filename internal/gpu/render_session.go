@@ -5,12 +5,13 @@ package gpu
 import (
 	"context"
 	"fmt"
+	"image"
+	"os"
+
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"image"
-	"os"
 )
 
 // glyphMaskDebugCount caps the GOGPU_TEXT_DEBUG dump to the first handful of
@@ -25,17 +26,17 @@ func glyphMaskDebugLog(viewportW, viewportH, batchIdx int, b GlyphMaskBatch) {
 		return
 	}
 	if glyphMaskDebugCount == 0 {
-		fmt.Fprintf(os.Stderr, "[GOGPU_TEXT_DEBUG] viewport=%dx%d\n", viewportW, viewportH)
+		slogger().Debug("glyph mask debug", "viewportW", viewportW, "viewportH", viewportH)
 	}
 	glyphMaskDebugCount++
 	t := b.Transform
 	q := b.Quads[0]
 	devX := t.A*float64(q.X0) + t.B*float64(q.Y0) + t.C
 	devY := t.D*float64(q.X0) + t.E*float64(q.Y0) + t.F
-	fmt.Fprintf(os.Stderr,
-		"  batch %d: T{A=%.4f B=%.4f C=%.2f D=%.4f E=%.4f F=%.2f} quads=%d  quad0 user=(%.2f,%.2f) w=%.2f h=%.2f -> device=(%.3f,%.3f)\n",
-		batchIdx, t.A, t.B, t.C, t.D, t.E, t.F, len(b.Quads),
-		q.X0, q.Y0, float64(q.X1-q.X0), float64(q.Y1-q.Y0), devX, devY)
+	slogger().Debug("glyph mask batch",
+		"batch", batchIdx, "quads", len(b.Quads),
+		"scaleA", t.A, "scaleE", t.E, "transC", t.C, "transF", t.F,
+		"userX", q.X0, "userY", q.Y0, "devX", devX, "devY", devY)
 }
 
 // ScissorGroup holds a subset of draw commands that share the same scissor
@@ -682,9 +683,18 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	if err := s.ensureClipBindLayout(); err != nil {
 		return fmt.Errorf("ensure clip bind layout: %w", err)
 	}
-	if err := s.ensurePipelines(); err != nil {
-		return fmt.Errorf("ensure pipelines: %w", err)
+	// Determine early if this frame is blit-only (GPU textures only, no vector shapes).
+	// On rasterAtlas (software backend), only GPU texture commands reach here —
+	// blit-only path needs ensureBlitPipeline() (trivial textured_quad.wgsl),
+	// NOT ensurePipelines() which creates SDF/Convex/Stencil (SPIR-V hang).
+	// Skia Graphite: lazy pipeline creation — unused pipelines never compiled.
+	earlyBlitOnly := s.isBlitOnlyFromGroups(groups, baseLayer)
+	if !earlyBlitOnly {
+		if err := s.ensurePipelines(); err != nil {
+			return fmt.Errorf("ensure pipelines: %w", err)
+		}
 	}
+
 	// Reset clip pool usage for this frame.
 	s.clipPoolUsed = 0
 
@@ -892,6 +902,9 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	defer s.releasePendingBindGroups()
 
 	if activeView == nil {
+		if earlyBlitOnly {
+			s.ensureBlitOnlyReadbackPipeline()
+		}
 		return s.encodeSubmitReadbackGrouped(w, h, grpRes, target, baseLayerRes)
 	}
 
@@ -930,6 +943,21 @@ func (s *GPURenderSession) releasePendingBindGroups() {
 		}
 	}
 	s.pendingBindGroupRelease = s.pendingBindGroupRelease[:0]
+}
+
+// ensureBlitOnlyReadbackPipeline creates the image pipeline's render variant
+// when earlyBlitOnly skipped ensurePipelines(). The readback path uses
+// recordGroupDraws (pipelineWithStencil), not the blit pipeline.
+func (s *GPURenderSession) ensureBlitOnlyReadbackPipeline() {
+	if s.imagePipeline == nil {
+		return
+	}
+	if err := s.ensureClipBindLayout(); err == nil {
+		s.imagePipeline.SetClipBindLayout(s.clipBindLayout)
+	}
+	if err := s.imagePipeline.ensurePipelineWithStencil(); err != nil {
+		slogger().Warn("ensure image pipeline for readback failed", "err", err)
+	}
 }
 
 func (s *GPURenderSession) releaseDepthClipResources(grpRes []groupResources) {
@@ -1972,8 +2000,11 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	if len(cmds) == 0 {
 		return nil, nil //nolint:nilnil // no GPU texture commands
 	}
-	if err := s.ensurePipelines(); err != nil {
-		return nil, fmt.Errorf("ensure pipelines: %w", err)
+	// Lazy-create imagePipeline if not yet initialized. On rasterAtlas the
+	// blit-only path skips ensurePipelines() (which creates SDF/Convex/Stencil),
+	// but GPU texture compositing still needs the image pipeline for bind groups.
+	if s.imagePipeline == nil {
+		s.imagePipeline = NewTexturedQuadPipeline(s.device, s.queue, s.sampleCount)
 	}
 
 	totalVertBytes := len(cmds) * 6 * imageVertexStride //nolint:mnd // 6 verts per quad
@@ -2986,6 +3017,27 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 
 	// Encode copy and submit, then read back pixels to the target.
 	return s.copySubmitAndReadback(encoder, w, h, target)
+}
+
+// isBlitOnlyFromGroups determines blit-only status from raw ScissorGroups
+// BEFORE resource building. On rasterAtlas (software backend), this prevents
+// ensurePipelines() from creating SDF/Convex/Stencil shaders that hang the
+// SPIR-V interpreter. Skia Graphite: lazy pipeline creation pattern.
+func (s *GPURenderSession) isBlitOnlyFromGroups(groups []ScissorGroup, baseLayer *GPUTextureDrawCommand) bool {
+	hasBase := baseLayer != nil
+	hasOverlay := false
+	for i := range groups {
+		g := &groups[i]
+		if len(g.SDFShapes) > 0 || len(g.ConvexCommands) > 0 ||
+			len(g.StencilPaths) > 0 || len(g.ImageCommands) > 0 ||
+			len(g.TextBatches) > 0 || len(g.GlyphMaskBatches) > 0 {
+			return false
+		}
+		if len(g.GPUTextureCommands) > 0 {
+			hasOverlay = true
+		}
+	}
+	return hasBase || hasOverlay
 }
 
 // isBlitOnly returns true when the frame contains only textured quads (base

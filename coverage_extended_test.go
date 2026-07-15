@@ -86,7 +86,7 @@ func TestRegisterCoverageFiller(t *testing.T) {
 type mockCoverageFiller struct{}
 
 func (m *mockCoverageFiller) FillCoverage(_ *Path, _, _ int, _ FillRule,
-	_ func(x, y int, coverage uint8)) {
+	_ *ClipBounds, _ func(x, y int, coverage uint8)) {
 	// No-op mock
 }
 

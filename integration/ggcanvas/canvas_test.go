@@ -1110,6 +1110,10 @@ func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
 	}
 	defer c.Close()
 
+	// Warm up past first-frame full-window damage.
+	dc0 := &mockRenderTarget{}
+	c.forwardDamageRects(dc0, nil)
+
 	rects := []image.Rectangle{
 		image.Rect(10, 10, 30, 30),
 		image.Rect(40, 0, 50, 20),
@@ -1143,15 +1147,19 @@ func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
 	}
 	defer c.Close()
 
-	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
+	// Warm up past first-frame full-window damage.
 	dc := &mockRenderTarget{}
-	c.forwardDamageRects(dc, frameDamage)
+	c.forwardDamageRects(dc, nil)
 
-	if dc.damageSetCount != 1 {
-		t.Errorf("SetDamageRects called %d times, want 1", dc.damageSetCount)
+	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
+	dc2 := &mockRenderTarget{}
+	c.forwardDamageRects(dc2, frameDamage)
+
+	if dc2.damageSetCount != 1 {
+		t.Errorf("SetDamageRects called %d times, want 1", dc2.damageSetCount)
 	}
-	if len(dc.damageRects) != 1 || dc.damageRects[0] != frameDamage[0] {
-		t.Errorf("damageRects = %v, want %v", dc.damageRects, frameDamage)
+	if len(dc2.damageRects) != 1 || dc2.damageRects[0] != frameDamage[0] {
+		t.Errorf("damageRects = %v, want %v", dc2.damageRects, frameDamage)
 	}
 }
 
@@ -1162,6 +1170,10 @@ func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer c.Close()
+
+	// Warm up past first-frame full-window damage.
+	dc0 := &mockRenderTarget{}
+	c.forwardDamageRects(dc0, nil)
 
 	explicit := []image.Rectangle{image.Rect(20, 20, 40, 40)}
 	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
@@ -1181,7 +1193,7 @@ func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
 	}
 }
 
-func TestSetPresentDamage_NilRectsNoCall(t *testing.T) {
+func TestSetPresentDamage_FirstFrameFullWindow(t *testing.T) {
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1192,8 +1204,15 @@ func TestSetPresentDamage_NilRectsNoCall(t *testing.T) {
 	dc := &mockRenderTarget{}
 	c.forwardDamageRects(dc, nil)
 
-	if dc.damageSetCount != 0 {
-		t.Errorf("SetDamageRects called %d times, want 0 for nil rects", dc.damageSetCount)
+	// First frame: full-window damage regardless of frameDamage content.
+	if dc.damageSetCount != 1 {
+		t.Errorf("first frame: SetDamageRects called %d times, want 1 (full-window)", dc.damageSetCount)
+	}
+
+	// Second frame with nil frameDamage: no damage → no call.
+	c.forwardDamageRects(dc, nil)
+	if dc.damageSetCount != 1 {
+		t.Errorf("second frame nil: SetDamageRects called %d times, want still 1", dc.damageSetCount)
 	}
 }
 

@@ -50,19 +50,21 @@ type resourceTracker interface {
 // Canvas is NOT safe for concurrent use. Create one Canvas per goroutine,
 // or use external synchronization.
 type Canvas struct {
-	ctx          *gg.Context
-	provider     gpucontext.DeviceProvider
-	texture      any             // Lazy-created texture (*gogpu.Texture)
-	oldTexture   any             // Previous texture awaiting deferred destruction
-	dirty        bool            // Needs GPU upload
-	dirtyRect    image.Rectangle // Accumulated dirty region (zero = full upload)
-	regionBuf    []byte          // Reusable buffer for partial texture upload
-	sizeChanged  bool            // Resize pending — texture must be recreated
-	width        int
-	height       int
-	closed       bool
-	tracked      bool               // true if auto-registered with a ResourceTracker
-	damageFlashs damageOverlayState // debug overlay fade state
+	ctx                  *gg.Context
+	provider             gpucontext.DeviceProvider
+	texture              any             // Lazy-created texture (*gogpu.Texture)
+	oldTexture           any             // Previous texture awaiting deferred destruction
+	dirty                bool            // Needs GPU upload
+	dirtyRect            image.Rectangle // Accumulated dirty region (zero = full upload)
+	regionBuf            []byte          // Reusable buffer for partial texture upload
+	sizeChanged          bool            // Resize pending — texture must be recreated
+	width                int
+	height               int
+	closed               bool
+	tracked              bool               // true if auto-registered with a ResourceTracker
+	damageFlashs         damageOverlayState // debug overlay fade state
+	lastFrameDamageRects []image.Rectangle  // damage rects from last Render (for diagnostics)
+	prevFrameDamageRects []image.Rectangle  // previous frame damage for 2-frame union (Wayland pattern)
 
 	// presentDamageRects holds damage rects for the next present call (ADR-021 Phase 4).
 	// Set by caller (e.g. ui retained tree) via SetPresentDamage().
@@ -300,9 +302,9 @@ func (c *Canvas) LastDamage() image.Rectangle {
 	return c.dirtyRect
 }
 
-// LastDamageRects returns individual damage rectangles from the most recent frame.
+// LastDamageRects returns individual damage rectangles from the most recent Render.
 func (c *Canvas) LastDamageRects() []image.Rectangle {
-	return c.ctx.FrameDamage()
+	return c.lastFrameDamageRects
 }
 
 // NeedsAnimationFrame reports whether the canvas needs another frame
@@ -344,23 +346,50 @@ func (c *Canvas) SetPresentDamage(rects []image.Rectangle) {
 // forwardDamageRects sends damage rects to the OS compositor via SetDamageRects
 // (ADR-021 Level 4). Unions explicit rects from SetPresentDamage with
 // immediate-mode FrameDamage — never lets caller understate actual damage.
+// Includes previous frame damage (2-frame ring, Wayland wlr_damage_ring pattern)
+// so moved objects don't leave trails on double-buffered surfaces.
 // Clears presentDamageRects after forwarding (one-shot per frame).
 func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectangle) {
 	setter, ok := dc.(DamageRectSetter)
 	if !ok {
 		c.presentDamageRects = nil
+		c.prevFrameDamageRects = frameDamage
 		return
 	}
+
+	// First frame or after Resize: full-window damage. The pixmap is complete
+	// but the window surface is uninitialized — must blit everything.
+	if c.prevFrameDamageRects == nil {
+		setter.SetDamageRects([]image.Rectangle{
+			image.Rect(0, 0, c.width, c.height),
+		})
+		c.presentDamageRects = nil
+		// Empty (not nil) marks "initialized" — nil means "first frame".
+		if frameDamage != nil {
+			c.prevFrameDamageRects = frameDamage
+		} else {
+			c.prevFrameDamageRects = []image.Rectangle{}
+		}
+		return
+	}
+
 	rects := c.presentDamageRects
 	if len(rects) == 0 {
 		rects = frameDamage
 	} else if len(frameDamage) > 0 {
 		rects = append(rects, frameDamage...)
 	}
+	// 2-frame damage union: include previous frame rects so partial blit
+	// covers both old and new positions of moved objects. Without this,
+	// double-buffered surfaces show trails at old position.
+	if len(c.prevFrameDamageRects) > 0 {
+		rects = append(rects, c.prevFrameDamageRects...)
+	}
 	if len(rects) > 0 {
 		setter.SetDamageRects(rects)
 	}
 	c.presentDamageRects = nil
+	c.prevFrameDamageRects = frameDamage
 }
 
 // MarkDirtyRegion flags a rectangular region of the canvas as dirty.
@@ -441,6 +470,7 @@ func (c *Canvas) Resize(width, height int) error {
 	c.height = height
 	c.sizeChanged = true
 	c.dirty = true
+	c.prevFrameDamageRects = nil
 
 	return nil
 }
@@ -658,6 +688,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	// Collect per-frame damage rects BEFORE GPU-direct path attempt.
 	// Damage overlay needs these regardless of which present path is used.
 	damageRects := c.ctx.FrameDamage()
+	c.lastFrameDamageRects = damageRects
 	c.ctx.ResetFrameDamage()
 
 	// Debug damage overlay (ADR-021 Phase 6a).
@@ -687,8 +718,14 @@ func (c *Canvas) Render(dc RenderTarget) error {
 
 	// Zero-copy software path: write pixmap directly to surface framebuffer.
 	// Eliminates 3-copy chain (WriteTexture → render pass → blit) with 1 memcpy.
+	// Capability-based routing: WriteSurfacePixels returns error on GPU backends
+	// (PresentPixels checks hal.PixelPresenter), so no type check needed.
+	// Damage rects forwarded for partial blit optimization — WritePixels writes
+	// full pixmap to DIB, blitDamageRectsToWindow copies only changed areas.
 	if pw, ok := dc.(SurfacePixelWriter); ok {
-		// Forward damage rects BEFORE PresentPixels — it reads ws.damageRects internally.
+		if err := c.ctx.FlushGPU(); err != nil {
+			gg.Logger().Debug("ggcanvas: FlushGPU before PresentPixels failed", "err", err)
+		}
 		c.forwardDamageRects(dc, damageRects)
 		pixmap := c.ctx.ResizeTarget()
 		if err := pw.WriteSurfacePixels(pixmap.Data(), uint32(c.ctx.PixelWidth()), uint32(c.ctx.PixelHeight())); err == nil {

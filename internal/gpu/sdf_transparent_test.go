@@ -8,52 +8,53 @@ import (
 	"github.com/gogpu/gg"
 )
 
-// TestQueueShape_SkipsZeroAlpha verifies that QueueShape skips shapes with
-// zero alpha color (BUG-SDF-001). This prevents transparent fills from
-// interfering with subsequent strokes via MSAA coverage weighting.
+// TestFillShape_SkipsZeroAlpha verifies that FillShape via the draw queue
+// skips shapes with zero alpha color at ScissorGroup build time (BUG-SDF-001).
+// This prevents transparent fills from interfering with subsequent strokes
+// via MSAA coverage weighting.
 // Enterprise pattern: Skia nothingToDraw(), Cairo nothing_to_do().
-func TestQueueShape_SkipsZeroAlpha(t *testing.T) {
+func TestFillShape_SkipsZeroAlpha(t *testing.T) {
 	shared := NewGPUShared()
 	rc := shared.NewRenderContext()
 
 	target := gg.GPURenderTarget{Width: 100, Height: 100, Data: make([]byte, 100*100*4), Stride: 400}
 
-	// Transparent fill — should be skipped
+	// Transparent fill — queued but skipped at ScissorGroup build.
 	transparentPaint := gg.NewPaint()
 	transparentPaint.SetBrush(gg.Solid(gg.RGBA{R: 0, G: 0, B: 0, A: 0}))
 
 	shape := gg.DetectedShape{
-		Kind:    gg.ShapeRRect,
-		CenterX: 50, CenterY: 50,
-		Width: 80, Height: 60,
+		Kind:         gg.ShapeRRect,
+		CenterX:      50,
+		CenterY:      50,
+		Width:        80,
+		Height:       60,
 		CornerRadius: 8,
 	}
 
-	err := rc.QueueShape(target, shape, transparentPaint, false)
+	err := rc.FillShape(target, shape, transparentPaint)
 	if err != nil {
-		t.Fatalf("QueueShape(transparent): %v", err)
+		t.Fatalf("FillShape(transparent): %v", err)
 	}
-	if rc.PendingCount() != 0 {
-		t.Errorf("transparent fill should be skipped, got %d pending shapes", rc.PendingCount())
-	}
-
-	// Visible stroke — should be queued
-	visiblePaint := gg.NewPaint()
-	visiblePaint.SetBrush(gg.Solid(gg.RGBA{R: 0.2, G: 0.6, B: 0.85, A: 1.0}))
-	visiblePaint.SetStroke(gg.Stroke{Width: 1.5})
-
-	err = rc.QueueShape(target, shape, visiblePaint, true)
-	if err != nil {
-		t.Fatalf("QueueShape(visible): %v", err)
-	}
+	// The draw command is queued, but the ScissorGroup builder will skip
+	// zero-alpha shapes. Verify it's queued:
 	if rc.PendingCount() != 1 {
-		t.Errorf("visible stroke should be queued, got %d pending shapes", rc.PendingCount())
+		t.Errorf("expected 1 pending draw, got %d", rc.PendingCount())
+	}
+
+	// Build groups — zero-alpha should be filtered out.
+	groups := rc.buildScissorGroupsFromDraws()
+	if len(groups) == 0 {
+		t.Fatal("expected at least 1 group")
+	}
+	if len(groups[0].SDFShapes) != 0 {
+		t.Errorf("zero-alpha shape should be skipped in ScissorGroup, got %d SDFShapes", len(groups[0].SDFShapes))
 	}
 }
 
-// TestQueueShape_KeepsSemiTransparent verifies that shapes with partial
+// TestFillShape_KeepsSemiTransparent verifies that shapes with partial
 // alpha (e.g., 0.5) are NOT skipped — only fully transparent (alpha=0).
-func TestQueueShape_KeepsSemiTransparent(t *testing.T) {
+func TestFillShape_KeepsSemiTransparent(t *testing.T) {
 	shared := NewGPUShared()
 	rc := shared.NewRenderContext()
 
@@ -64,15 +65,26 @@ func TestQueueShape_KeepsSemiTransparent(t *testing.T) {
 
 	shape := gg.DetectedShape{
 		Kind:    gg.ShapeCircle,
-		CenterX: 50, CenterY: 50,
-		RadiusX: 30, RadiusY: 30,
+		CenterX: 50,
+		CenterY: 50,
+		RadiusX: 30,
+		RadiusY: 30,
 	}
 
-	err := rc.QueueShape(target, shape, semiPaint, false)
+	err := rc.FillShape(target, shape, semiPaint)
 	if err != nil {
-		t.Fatalf("QueueShape(semi-transparent): %v", err)
+		t.Fatalf("FillShape(semi-transparent): %v", err)
 	}
 	if rc.PendingCount() != 1 {
 		t.Errorf("semi-transparent shape should be queued, got %d pending", rc.PendingCount())
+	}
+
+	// Build groups — semi-transparent should be kept.
+	groups := rc.buildScissorGroupsFromDraws()
+	if len(groups) == 0 {
+		t.Fatal("expected at least 1 group")
+	}
+	if len(groups[0].SDFShapes) != 1 {
+		t.Errorf("semi-transparent shape should be in ScissorGroup, got %d SDFShapes", len(groups[0].SDFShapes))
 	}
 }

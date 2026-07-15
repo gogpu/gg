@@ -14,6 +14,107 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+// drawCommandKind identifies the type of a backend-agnostic draw command.
+// Shapes and paths are stored in their original gg representation at queue time
+// and converted to GPU-specific or CPU-specific data at Flush dispatch time.
+// This separation follows the Skia Graphite DrawList / Flutter DisplayList pattern.
+type drawCommandKind uint8
+
+const (
+	drawCmdFillShape     drawCommandKind = iota // SDF shapes (circle, rect, rrect, ellipse)
+	drawCmdStrokeShape                          // SDF stroked shapes
+	drawCmdFillPath                             // complex paths -> convex/stencil
+	drawCmdStrokePath                           // stroked paths (pre-expanded)
+	drawCmdText                                 // MSDF text batch (Phase 2)
+	drawCmdGlyphMaskText                        // glyph-mask text batch (Phase 2)
+	drawCmdImage                                // DrawImage (Phase 2)
+	drawCmdGPUTexture                           // DrawGPUTexture overlay (Phase 2)
+	drawCmdBaseLayer                            // DrawGPUTextureBase, z-order: always first (Phase 2)
+)
+
+// drawCommand is a backend-agnostic draw command stored at queue time.
+// It holds the original shape/path + paint so dispatch can choose between
+// GPU render passes or CPU SoftwareRenderer at Flush time.
+//
+// For GPU path commands (drawCmdFillPath, drawCmdStrokePath), tessellation
+// is performed eagerly at draw time and stored in convexPoints/stencilCmd.
+// This avoids re-tessellating every frame at Flush time, which was causing
+// 3 FPS regression on animated paths (ADR-051 fix).
+//
+// Clip state is snapshotted at queue time (Skia Graphite per-draw clip pattern).
+// This ensures clip changes between draws produce correct ScissorGroups at flush
+// time, regardless of whether draws route through GPU or CPU.
+type drawCommand struct {
+	kind    drawCommandKind
+	sortKey uint64 //nolint:unused // ADR-053 Phase 0: reserved for pipeline grouping.
+
+	// Geometry — only one group populated per kind (Skia Geometry union pattern).
+	shape     gg.DetectedShape // drawCmdFillShape, drawCmdStrokeShape
+	path      *gg.Path         // drawCmdFillPath, drawCmdStrokePath (COPIED at queue time)
+	textBatch any              // drawCmdText: TextBatch, drawCmdGlyphMaskText: GlyphMaskBatch
+	imageCmd  any              // drawCmdImage: ImageDrawCommand
+	gpuTexCmd any              // drawCmdGPUTexture, drawCmdBaseLayer: GPUTextureDrawCommand
+
+	// Style.
+	paint gg.Paint // fill/stroke params (value copy)
+
+	// Pre-tessellated GPU data (computed at draw time, avoids re-tessellation
+	// at flush). Exactly one of convexPoints or stencilCmd is set for path
+	// commands; both nil for shape commands (SDF pipeline, no tessellation).
+	convexPoints []gg.Point          // convex polygon fast-path (Tier 2a)
+	stencilCmd   *StencilPathCommand // fan-tessellated vertices (Tier 2b)
+
+	// Per-draw clip state snapshot (ADR-051 Phase 1.1).
+	// Captured at queue time so flush can build ScissorGroups from per-draw
+	// clip rather than relying on legacy recordScissorSegment timeline.
+	clipRect  *[4]uint32  // scissor rect; nil = full framebuffer
+	clipRRect *ClipParams // analytic RRect clip; nil = no RRect clip
+	clipPath  *gg.Path    // arbitrary clip path for depth clipping; nil = no clip
+}
+
+// copyClipRect returns a deep copy of a scissor rect pointer.
+// Returns nil if the source is nil (no scissor).
+func copyClipRect(r *[4]uint32) *[4]uint32 {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	return &c
+}
+
+// copyClipRRect returns a deep copy of a ClipParams pointer.
+// Returns nil if the source is nil (no RRect clip).
+func copyClipRRect(p *ClipParams) *ClipParams {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	return &c
+}
+
+// drawClipEqual reports whether two draw commands have the same clip state.
+// Used to group consecutive same-clip draws into a single ScissorGroup.
+// clipPath uses pointer equality — same path object means same clip region
+// (paths are immutable after being set as clip).
+func drawClipEqual(a, b *drawCommand) bool {
+	// Compare clipRect.
+	if (a.clipRect == nil) != (b.clipRect == nil) {
+		return false
+	}
+	if a.clipRect != nil && *a.clipRect != *b.clipRect {
+		return false
+	}
+	// Compare clipRRect.
+	if (a.clipRRect == nil) != (b.clipRRect == nil) {
+		return false
+	}
+	if a.clipRRect != nil && *a.clipRRect != *b.clipRRect {
+		return false
+	}
+	// Compare clipPath (pointer equality — same path object = same clip).
+	return a.clipPath == b.clipPath
+}
+
 // GPURenderContext holds per-gg.Context GPU state: pending draw commands,
 // clip state, frame tracking, and its own render session. Each gg.Context
 // lazily creates one GPURenderContext, ensuring isolated pending command
@@ -30,30 +131,19 @@ type GPURenderContext struct {
 	// Per-context render session (owns frame textures: MSAA, depth, resolve).
 	session *GPURenderSession
 
-	// Per-context pending command queues.
-	pendingShapes             []SDFRenderShape
-	pendingConvexCommands     []ConvexDrawCommand
-	pendingStencilPaths       []StencilPathCommand
-	pendingImageCommands      []ImageDrawCommand
-	pendingGPUTextureCommands []GPUTextureDrawCommand
-	pendingTextBatches        []TextBatch
-	pendingGlyphMaskBatches   []GlyphMaskBatch
-	baseLayer                 *GPUTextureDrawCommand
-	pendingTarget             gg.GPURenderTarget
-	hasPendingTarget          bool
+	// Backend-agnostic draw command queue (ADR-051 Phase 1).
+	// Shapes and paths are stored here at queue time in their original gg
+	// representation. At Flush time, commands are dispatched to either GPU
+	// render passes or CPU SoftwareRenderer depending on strategy.
+	pendingDraws []drawCommand
+
+	pendingTarget    gg.GPURenderTarget
+	hasPendingTarget bool
 
 	// Per-context clip state.
-	clipRect        *[4]uint32
-	clipRRect       *ClipParams
-	clipPath        *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
-	scissorSegments []scissorSegment
-
-	// Per-tier batch seal flags prevent merging across scissor boundaries.
-	// Two separate flags needed: a single shared flag would be consumed by
-	// the first Queue call (e.g., QueueText), allowing the second tier
-	// (e.g., QueueGlyphMask) to merge across the same boundary.
-	textBatchSealed  bool // seals QueueText (MSDF Tier 4)
-	glyphBatchSealed bool // seals QueueGlyphMask (Tier 6)
+	clipRect  *[4]uint32
+	clipRRect *ClipParams
+	clipPath  *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 
 	// Per-context frame tracking (fixes LoadOp corruption).
 	// When frameRendered is true, subsequent render passes use LoadOpLoad.
@@ -72,17 +162,53 @@ type GPURenderContext struct {
 	// When set, Flush records render passes into this encoder instead of
 	// creating its own + submitting. The caller owns Finish + Submit.
 	sharedEncoder *wgpu.CommandEncoder
+
+	// --- Cached resources for per-frame allocation elimination ---
+
+	// P0: Pooled BGRA swizzle buffer — avoids 8 MB/frame allocation at 1080p.
+	// Grow-only: reused across frames, only reallocated when frame size increases.
+	bgraBuffer []byte
+
+	// P0: Cached tmpPixmap for flushCPUToView — avoids 1.9 MB/frame at 800x600.
+	// Recreated only when dimensions change (which is <1% of frames).
+	cachedPixmap       *gg.Pixmap
+	cachedPixmapWidth  int
+	cachedPixmapHeight int
+
+	// P1: Cached SoftwareRenderer — avoids 13 allocs + 12-17 KB per flush.
+	// Resize() is called only when dimensions change; steady state = 0 allocs.
+	cachedSR       *gg.SoftwareRenderer
+	cachedSRWidth  int
+	cachedSRHeight int
+
+	// P3: Scratch stroke path — avoids 1 KB allocation per strokeResultToPath.
+	// Reset and reused across strokes within a frame; same pattern as
+	// SoftwareRenderer.scratchStrokePath (Skia fOuter.reset()).
+	scratchStrokePath *gg.Path
 }
 
-// PendingCount returns the total number of pending commands (for testing).
+// DrawRecording is an immutable snapshot of draw commands (Skia Recording pattern).
+// Created by Snap(), designed for transfer to a dispatch goroutine (ADR-053 Phase 1+).
+// Once created, the commands slice is never modified.
+type DrawRecording struct {
+	commands []drawCommand
+}
+
+// Len returns the number of commands in the recording.
+func (r DrawRecording) Len() int { return len(r.commands) }
+
+// Snap produces an immutable DrawRecording and resets the queue.
+// Follows Skia Graphite Recorder::snap() (Recorder.cpp:196) — ownership of the
+// backing array transfers to the recording; the queue starts fresh.
+func (rc *GPURenderContext) Snap() DrawRecording {
+	rec := DrawRecording{commands: rc.pendingDraws}
+	rc.pendingDraws = nil
+	return rec
+}
+
+// PendingCount returns the total number of pending draw commands (for testing).
 func (rc *GPURenderContext) PendingCount() int {
-	n := len(rc.pendingShapes) + len(rc.pendingConvexCommands) +
-		len(rc.pendingStencilPaths) + len(rc.pendingImageCommands) + len(rc.pendingGPUTextureCommands) +
-		len(rc.pendingTextBatches) + len(rc.pendingGlyphMaskBatches)
-	if rc.baseLayer != nil {
-		n++
-	}
-	return n
+	return len(rc.pendingDraws)
 }
 
 // SetPipelineMode sets the pipeline mode for this context's operations.
@@ -96,17 +222,16 @@ func (rc *GPURenderContext) SetAntiAlias(enabled bool) {
 	rc.antiAlias = enabled
 }
 
-// SetClipRect records a scissor rect change for this context.
+// SetClipRect sets the scissor rect for this context. Per-draw clip state is
+// snapshotted at queue time, so this only sets the context-level state.
 func (rc *GPURenderContext) SetClipRect(x, y, w, h uint32) {
 	rect := [4]uint32{x, y, w, h}
 	rc.clipRect = &rect
-	rc.recordScissorSegment(&rect)
 }
 
 // ClearClipRect removes the scissor rect for this context.
 func (rc *GPURenderContext) ClearClipRect() {
 	rc.clipRect = nil
-	rc.recordScissorSegment(nil)
 }
 
 // SetClipRRect sets the rounded rectangle clip for this context.
@@ -119,13 +244,11 @@ func (rc *GPURenderContext) SetClipRRect(x, y, w, h, radius float32) {
 		Radius:  radius,
 		Enabled: 1.0,
 	}
-	rc.recordScissorSegment(rc.clipRect)
 }
 
 // ClearClipRRect removes the rounded rectangle clip for this context.
 func (rc *GPURenderContext) ClearClipRRect() {
 	rc.clipRRect = nil
-	rc.recordScissorSegment(rc.clipRect)
 }
 
 // SetClipPath sets an arbitrary clip path for depth-based clipping (GPU-CLIP-003a).
@@ -135,13 +258,11 @@ func (rc *GPURenderContext) ClearClipRRect() {
 // the clip depth so only pixels within the clipped region pass.
 func (rc *GPURenderContext) SetClipPath(path *gg.Path) {
 	rc.clipPath = path
-	rc.recordScissorSegment(rc.clipRect)
 }
 
 // ClearClipPath removes the arbitrary clip path, restoring full rendering.
 func (rc *GPURenderContext) ClearClipPath() {
 	rc.clipPath = nil
-	rc.recordScissorSegment(rc.clipRect)
 }
 
 // BeginFrame resets per-frame state so the first render pass clears the surface.
@@ -150,8 +271,6 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.clipPath = nil
 	rc.frameRendered = false
 	rc.lastView = nil
-	rc.textBatchSealed = false
-	rc.glyphBatchSealed = false
 }
 
 // SetSharedEncoder sets a shared command encoder for single-command-buffer
@@ -209,84 +328,43 @@ func (rc *GPURenderContext) SceneStats() gg.SceneStats {
 	return rc.sceneStats
 }
 
-// QueueShape accumulates an SDF shape for batch dispatch.
-func (rc *GPURenderContext) QueueShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint, stroked bool) error {
-	// If target changed, flush previous batch first.
-	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		if err := rc.Flush(rc.pendingTarget); err != nil {
-			return err
-		}
-	}
-
-	rs, ok := DetectedShapeToRenderShape(shape, paint, stroked)
-	if !ok {
-		return gg.ErrFallbackToCPU
-	}
-
-	// Skip zero-alpha shapes — premultiplied SrcOver with (0,0,0,0) is a
-	// mathematical no-op but wastes GPU bandwidth and can interfere with
-	// MSAA sample coverage weighting (BUG-SDF-001: transparent fill makes
-	// subsequent stroke invisible). Enterprise pattern: Skia nothingToDraw()
-	// (SkPaint.cpp:273), Cairo nothing_to_do() (cairo-surface.c:2148).
-	if rs.ColorA == 0 {
-		return nil
-	}
-
-	rc.pendingShapes = append(rc.pendingShapes, rs)
-
-	rc.pendingTarget = target
-	rc.hasPendingTarget = true
-	return nil
-}
-
-// QueueConvex accumulates a convex polygon for batch dispatch.
-func (rc *GPURenderContext) QueueConvex(target gg.GPURenderTarget, cmd ConvexDrawCommand) {
-	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
-			slogger().Warn("auto-flush failed", "err", fErr)
-		}
-	}
-	rc.pendingConvexCommands = append(rc.pendingConvexCommands, cmd)
-	rc.pendingTarget = target
-	rc.hasPendingTarget = true
-}
-
-// QueueStencil accumulates a stencil path for batch dispatch.
-func (rc *GPURenderContext) QueueStencil(target gg.GPURenderTarget, cmd StencilPathCommand) {
-	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
-		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
-			slogger().Warn("auto-flush failed", "err", fErr)
-		}
-	}
-	rc.pendingStencilPaths = append(rc.pendingStencilPaths, cmd)
-	rc.pendingTarget = target
-	rc.hasPendingTarget = true
-}
-
-// QueueText accumulates an MSDF text batch for dispatch.
-// Adjacent batches with identical visual properties (transform, color, atlas,
-// MSDF parameters) are coalesced into a single batch to minimize GPU draw calls (ADR-031).
+// QueueText accumulates an MSDF text batch for dispatch via the unified draw
+// queue (ADR-051 Phase 2). Adjacent batches with identical clip AND visual
+// properties (transform, color, atlas, MSDF parameters) are coalesced into a
+// single batch to minimize GPU draw calls (ADR-031).
 func (rc *GPURenderContext) QueueText(target gg.GPURenderTarget, batch TextBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
 			slogger().Warn("auto-flush failed", "err", fErr)
 		}
 	}
-	// Coalesce with last pending batch if same visual properties (ADR-031).
-	// Skip merging if a scissor boundary was crossed since the last batch was
-	// queued (textBatchSealed=true); this keeps text batches within the
-	// correct scissor group so text is not clipped by a sibling element's rect.
-	if n := len(rc.pendingTextBatches); n > 0 && !rc.textBatchSealed {
-		last := &rc.pendingTextBatches[n-1]
-		if last.CanMerge(batch) {
-			last.Quads = append(last.Quads, batch.Quads...)
-			rc.pendingTarget = target
-			rc.hasPendingTarget = true
-			return
+
+	cmd := drawCommand{
+		kind:      drawCmdText,
+		textBatch: batch,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	}
+
+	// Coalesce with last pending draw if same clip AND same visual properties
+	// (ADR-031). Per-draw clip replaces the legacy textBatchSealed flag —
+	// clip change = different drawCommand = no merge, naturally.
+	if n := len(rc.pendingDraws); n > 0 {
+		last := &rc.pendingDraws[n-1]
+		if last.kind == drawCmdText && drawClipEqual(last, &cmd) {
+			lastBatch := last.textBatch.(TextBatch)
+			if lastBatch.CanMerge(batch) {
+				lastBatch.Quads = append(lastBatch.Quads, batch.Quads...)
+				last.textBatch = lastBatch
+				rc.pendingTarget = target
+				rc.hasPendingTarget = true
+				return
+			}
 		}
 	}
-	rc.textBatchSealed = false // new batch started; allow future merges within same scissor region
-	rc.pendingTextBatches = append(rc.pendingTextBatches, batch)
+
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
@@ -318,33 +396,63 @@ func (rc *GPURenderContext) QueueImageDraw(target gg.GPURenderTarget, pixelData 
 	rc.queueImageCmd(target, cmd)
 }
 
-// queueImageCmd accumulates an image draw command for Tier 3 dispatch.
+// queueImageCmd accumulates an image draw command for Tier 3 dispatch via the
+// unified draw queue (ADR-051 Phase 2 Step 4). Per-draw clip is snapshotted at
+// queue time (same pattern as QueueText from Step 3).
 func (rc *GPURenderContext) queueImageCmd(target gg.GPURenderTarget, cmd ImageDrawCommand) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
 			slogger().Warn("auto-flush failed", "err", fErr)
 		}
 	}
-	rc.pendingImageCommands = append(rc.pendingImageCommands, cmd)
+	rc.pendingDraws = append(rc.pendingDraws, drawCommand{
+		kind:      drawCmdImage,
+		imageCmd:  cmd,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	})
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
 
 // QueueBaseLayer sets the compositor base layer — a textured quad drawn BEFORE
-// all tiers in the render pass. Last call wins. Used for CPU pixmap compositing
-// in zero-readback rendering (ADR-015, Flutter OffsetLayer pattern).
+// all tiers in the render pass. Last call wins: subsequent calls overwrite the
+// previous base layer command. Used for CPU pixmap compositing in zero-readback
+// rendering (ADR-015, Flutter OffsetLayer pattern).
+//
+// ADR-051 Phase 2 Step 5: routed through pendingDraws with drawCmdBaseLayer
+// kind. At flush time, the base layer is extracted from pendingDraws and passed
+// as a separate parameter to RenderFrameGrouped (preserving existing API).
 func (rc *GPURenderContext) QueueBaseLayer(target gg.GPURenderTarget, view gpucontext.TextureView,
 	dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32,
 ) {
-	rc.baseLayer = &GPUTextureDrawCommand{
-		View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
-		Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+	cmd := drawCommand{
+		kind: drawCmdBaseLayer,
+		gpuTexCmd: GPUTextureDrawCommand{
+			View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
+			Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+		},
 	}
+
+	// Last call wins: replace any existing drawCmdBaseLayer in pendingDraws.
+	for i := range rc.pendingDraws {
+		if rc.pendingDraws[i].kind == drawCmdBaseLayer {
+			rc.pendingDraws[i] = cmd
+			rc.pendingTarget = target
+			rc.hasPendingTarget = true
+			return
+		}
+	}
+
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
 
-// QueueGPUTextureDraw queues a GPU-to-GPU texture compositing command.
+// QueueGPUTextureDraw queues a GPU-to-GPU texture compositing command via
+// the unified draw queue (ADR-051 Phase 2 Step 5). Per-draw clip is
+// snapshotted at queue time (same pattern as QueueText from Step 3).
 // The texture view is sampled directly — zero CPU readback, zero upload.
 func (rc *GPURenderContext) QueueGPUTextureDraw(target gg.GPURenderTarget, view gpucontext.TextureView,
 	dstX, dstY, dstW, dstH, opacity float32, vpW, vpH uint32,
@@ -354,38 +462,57 @@ func (rc *GPURenderContext) QueueGPUTextureDraw(target gg.GPURenderTarget, view 
 			slogger().Warn("auto-flush failed", "err", fErr)
 		}
 	}
-	rc.pendingGPUTextureCommands = append(rc.pendingGPUTextureCommands, GPUTextureDrawCommand{
-		View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
-		Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+	rc.pendingDraws = append(rc.pendingDraws, drawCommand{
+		kind: drawCmdGPUTexture,
+		gpuTexCmd: GPUTextureDrawCommand{
+			View: view, DstX: dstX, DstY: dstY, DstW: dstW, DstH: dstH,
+			Opacity: opacity, ViewportWidth: vpW, ViewportHeight: vpH,
+		},
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
 	})
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
 
-// QueueGlyphMask accumulates a glyph mask batch for dispatch.
-// Adjacent batches with identical visual properties (transform, color, LCD mode,
-// atlas page) are coalesced into a single batch to minimize GPU draw calls (ADR-031).
+// QueueGlyphMask accumulates a glyph mask batch for dispatch via the unified
+// draw queue (ADR-051 Phase 2). Adjacent batches with identical clip AND visual
+// properties (transform, color, LCD mode, atlas page) are coalesced into a
+// single batch to minimize GPU draw calls (ADR-031).
 func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch GlyphMaskBatch) {
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if fErr := rc.Flush(rc.pendingTarget); fErr != nil {
 			slogger().Warn("auto-flush failed", "err", fErr)
 		}
 	}
-	// Coalesce with last pending batch if same visual properties (ADR-031).
-	// Skip merging if a scissor boundary was crossed since the last batch was
-	// queued (glyphBatchSealed=true); this keeps glyph batches within the
-	// correct scissor group so text is not clipped by a sibling element's rect.
-	if n := len(rc.pendingGlyphMaskBatches); n > 0 && !rc.glyphBatchSealed {
-		last := &rc.pendingGlyphMaskBatches[n-1]
-		if last.CanMerge(batch) {
-			last.Quads = append(last.Quads, batch.Quads...)
-			rc.pendingTarget = target
-			rc.hasPendingTarget = true
-			return
+
+	cmd := drawCommand{
+		kind:      drawCmdGlyphMaskText,
+		textBatch: batch,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	}
+
+	// Coalesce with last pending draw if same clip AND same visual properties
+	// (ADR-031). Per-draw clip replaces the legacy glyphBatchSealed flag —
+	// clip change = different drawCommand = no merge, naturally.
+	if n := len(rc.pendingDraws); n > 0 {
+		last := &rc.pendingDraws[n-1]
+		if last.kind == drawCmdGlyphMaskText && drawClipEqual(last, &cmd) {
+			lastBatch := last.textBatch.(GlyphMaskBatch)
+			if lastBatch.CanMerge(batch) {
+				lastBatch.Quads = append(lastBatch.Quads, batch.Quads...)
+				last.textBatch = lastBatch
+				rc.pendingTarget = target
+				rc.hasPendingTarget = true
+				return
+			}
 		}
 	}
-	rc.glyphBatchSealed = false
-	rc.pendingGlyphMaskBatches = append(rc.pendingGlyphMaskBatches, batch)
+
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
 	rc.pendingTarget = target
 	rc.hasPendingTarget = true
 }
@@ -537,21 +664,14 @@ func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, f
 	return nil
 }
 
-// FillPath queues a filled path for GPU rendering.
+// FillPath queues a filled path as a backend-agnostic draw command (ADR-051).
+// The path is cloned at queue time so the caller can reuse or mutate it.
+// At Flush time, the path is dispatched to either GPU (convex/stencil) or CPU.
 func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
-	if !rc.shared.gpuReady {
-		rc.shared.mu.Lock()
-		err := rc.shared.ensureGPU()
-		rc.shared.mu.Unlock()
-		if err != nil || !rc.shared.gpuReady {
-			return gg.ErrFallbackToCPU
-		}
-	}
-
 	rc.sceneStats.PathCount++
 	rc.sceneStats.ShapeCount++
 
-	// If in Compute mode, delegate to VelloAccelerator.
+	// Compute mode delegates directly to VelloAccelerator (separate pipeline).
 	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel
@@ -562,57 +682,36 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 		}
 	}
 
-	// If target changed, flush previous batch first.
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if err := rc.Flush(rc.pendingTarget); err != nil {
 			return err
 		}
 	}
 
-	color := getColorFromPaint(paint)
-	premulR := float32(color.R * color.A)
-	premulG := float32(color.G * color.A)
-	premulB := float32(color.B * color.A)
-	premulA := float32(color.A)
-
-	// Try convex fast-path (NonZero fill rule only).
-	// The convex renderer uses centroid fan tessellation without stencil buffer,
-	// which is structurally equivalent to NonZero fill. For EvenOdd paths
-	// (e.g., stroke-expanded ring outlines), the stencil-then-cover path below
-	// must be used — it correctly implements EvenOdd via stencil bit inversion.
-	// Skia Ganesh gates its convex fast-path on isSimpleFill() for the same reason.
-	if paint.FillRule != gg.FillRuleEvenOdd {
-		if points, ok := extractConvexPolygon(path); ok {
-			slogger().Debug("FillPath: convex fast-path", "points", len(points), "fillRule", paint.FillRule)
-			cmd := ConvexDrawCommand{
-				Points: points,
-				Color:  [4]float32{premulR, premulG, premulB, premulA},
-			}
-			rc.QueueConvex(target, cmd)
-			return nil
-		}
+	cmd := drawCommand{
+		kind:      drawCmdFillPath,
+		path:      path.Clone(),
+		paint:     *paint,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
 	}
+	cmd.paint.ClipCoverage = nil //nolint:staticcheck // M-1: intentional clear of deprecated stale closure
 
-	// Fall back to stencil-then-cover.
-	tess := NewFanTessellator()
-	tess.TessellatePath(path)
-	fanVerts := tess.Vertices()
-	if len(fanVerts) == 0 {
-		return nil
-	}
+	// Pre-tessellate at draw time to avoid re-tessellation every frame at
+	// Flush (ADR-051 fix: 3 FPS → 60 FPS on animated paths). CPU dispatch
+	// path uses cmd.path directly via SoftwareRenderer — tessellated data
+	// is only consumed by the GPU scissor-group builder.
+	rc.preTessellateFill(&cmd)
 
-	cmd := StencilPathCommand{
-		Vertices:  make([]float32, len(fanVerts)),
-		CoverQuad: tess.CoverQuad(),
-		Color:     [4]float32{premulR, premulG, premulB, premulA},
-		FillRule:  paint.FillRule,
-	}
-	copy(cmd.Vertices, fanVerts)
-	rc.QueueStencil(target, cmd)
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
 	return nil
 }
 
-// StrokePath renders a stroked path by expanding to filled outline.
+// StrokePath queues a stroked path as a backend-agnostic draw command (ADR-051).
+// Dashed strokes fall back to CPU. The path is cloned at queue time.
 func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
 	if paint.IsDashed() {
 		return gg.ErrFallbackToCPU
@@ -621,10 +720,7 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 	rc.sceneStats.PathCount++
 	rc.sceneStats.ShapeCount++
 
-	// In PipelineModeCompute, delegate strokes to Vello compute pipeline.
-	// Default (Auto) uses stencil-then-cover which handles target.View correctly.
-	// Vello compute currently lacks GPU-direct output (writes to CPU pixmap only),
-	// so broad routing breaks FlushGPUWithView — see TASK-GG-STROKE-REGRESSION-374.
+	// Compute mode delegates directly to VelloAccelerator (separate pipeline).
 	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel
@@ -639,43 +735,41 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 		return nil
 	}
 
-	strokeVerbs := convertPathVerbsToStroke(path.Verbs())
-	style := stroke.Stroke{
-		Width:      paint.EffectiveLineWidth(),
-		Cap:        stroke.LineCap(paint.EffectiveLineCap()),
-		Join:       stroke.LineJoin(paint.EffectiveLineJoin()),
-		MiterLimit: paint.EffectiveMiterLimit(),
-	}
-	expander := stroke.NewStrokeExpander(style)
-	outVerbs, outCoords := expander.Expand(strokeVerbs, path.Coords())
-	if len(outVerbs) == 0 {
-		return nil
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if err := rc.Flush(rc.pendingTarget); err != nil {
+			return err
+		}
 	}
 
-	fillPath := strokeResultToPath(outVerbs, outCoords)
+	cmd := drawCommand{
+		kind:      drawCmdStrokePath,
+		path:      path.Clone(),
+		paint:     *paint,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	}
+	cmd.paint.ClipCoverage = nil //nolint:staticcheck // M-1: intentional clear of deprecated stale closure
 
-	// EvenOdd correctly handles both stroke topologies:
-	//   - Smooth paths (round-rects, circles): 2-contour ring (outer CW + inner CCW).
-	//     Each pixel in the hollow center is toggled twice → stencil=0 → empty.
-	//   - Sharp paths (rectangles): inner-pivot V-shapes create self-intersections.
-	//     V-shape area is toggled twice → stencil=0 → correctly hollow.
-	// The stencil EvenOdd pipeline uses IncrementWrap+WriteMask=0x01 (parity toggle)
-	// instead of StencilOperationInvert, which has a driver bug on AMD D3D12 (#374).
-	// NonZero would miscount V-shape area as winding=2 → solid fill (wrong for sharp paths).
-	strokePaint := *paint
-	strokePaint.FillRule = gg.FillRuleEvenOdd
-	return rc.FillPath(target, fillPath, &strokePaint)
+	// Pre-tessellate at draw time: expand stroke geometry, then tessellate
+	// the expanded fill path (ADR-051 fix). The expanded path replaces
+	// cmd.path so CPU dispatch can use it directly via SoftwareRenderer.
+	rc.preTessellateStroke(&cmd)
+
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+	return nil
 }
 
-// FillShape accumulates a filled shape for batch dispatch.
+// FillShape queues a filled shape as a backend-agnostic draw command (ADR-051).
+// The shape is dispatched at Flush time to either GPU render passes (SDF/convex)
+// or CPU SoftwareRenderer depending on strategy. This ensures offscreen targets
+// get isolated rendering regardless of backend.
 func (rc *GPURenderContext) FillShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	rc.sceneStats.ShapeCount++
 
-	if !rc.shared.gpuReady {
-		return rc.shared.cpuFallback.FillShape(target, shape, paint)
-	}
-
-	// If in Compute mode, delegate to VelloAccelerator.
+	// Compute mode delegates directly to VelloAccelerator (separate pipeline).
 	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel
@@ -686,23 +780,40 @@ func (rc *GPURenderContext) FillShape(target gg.GPURenderTarget, shape gg.Detect
 		}
 	}
 
-	return rc.QueueShape(target, shape, paint, false)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if err := rc.Flush(rc.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	cmd := drawCommand{
+		kind:      drawCmdFillShape,
+		shape:     shape,
+		paint:     *paint,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	}
+	cmd.paint.ClipCoverage = nil //nolint:staticcheck // M-1: intentional clear of deprecated stale closure
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
+
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+	return nil
 }
 
-// StrokeShape accumulates a stroked shape for batch dispatch.
+// StrokeShape queues a stroked shape as a backend-agnostic draw command (ADR-051).
+// Thin strokes (< 2px) fall back to CPU geometric expansion because SDF annular
+// ring is thinner than the smoothstep AA zone (ADR-040).
 func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.DetectedShape, paint *gg.Paint) error {
 	rc.sceneStats.ShapeCount++
 
-	if !rc.shared.gpuReady {
-		return rc.shared.cpuFallback.StrokeShape(target, shape, paint)
-	}
-
-	// Thin strokes (< 2px) fall back to geometric expansion — SDF annular ring
-	// is thinner than smoothstep AA zone, producing near-zero coverage (ADR-040).
+	// Thin strokes fall back to geometric expansion regardless of strategy.
 	if paint.EffectiveLineWidth() < 2.0 {
 		return gg.ErrFallbackToCPU
 	}
 
+	// Compute mode delegates directly to VelloAccelerator (separate pipeline).
 	if rc.pipelineMode == gg.PipelineModeCompute {
 		rc.shared.mu.Lock()
 		va := rc.shared.velloAccel
@@ -713,15 +824,49 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 		}
 	}
 
-	return rc.QueueShape(target, shape, paint, true)
+	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
+		if err := rc.Flush(rc.pendingTarget); err != nil {
+			return err
+		}
+	}
+
+	cmd := drawCommand{
+		kind:      drawCmdStrokeShape,
+		shape:     shape,
+		paint:     *paint,
+		clipRect:  copyClipRect(rc.clipRect),
+		clipRRect: copyClipRRect(rc.clipRRect),
+		clipPath:  rc.clipPath,
+	}
+	cmd.paint.ClipCoverage = nil //nolint:staticcheck // M-1: intentional clear of deprecated stale closure
+	rc.pendingDraws = append(rc.pendingDraws, cmd)
+
+	rc.pendingTarget = target
+	rc.hasPendingTarget = true
+	return nil
 }
 
 // Flush dispatches all pending commands for this context via the render session.
 func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cyclop,gocognit,gocyclo,funlen // sequential resource setup + group dispatch
-	pending := rc.PendingCount()
-	if pending == 0 {
+	// Dispatch backend-agnostic draw commands (ADR-051).
+	// rasterAtlas: mixed CPU/GPU dispatch — shape commands are CPU-dispatched
+	// immediately; non-shape commands (images, GPU textures, base layers)
+	// are retained in pendingDraws for the standard GPU flush path below.
+	// GPU path: all draw types stay in pendingDraws for buildScissorGroupsFromDraws.
+	rasterAtlasDispatched := false
+	if len(rc.pendingDraws) > 0 && rc.shared.strategy == strategyRasterAtlas {
+		rasterAtlasDispatched = true
+		if err := rc.dispatchRasterAtlasDraws(target); err != nil {
+			return err
+		}
+	}
+
+	// Check if we have anything to render via the draw queue or Vello.
+	if len(rc.pendingDraws) == 0 {
 		// rasterAtlas: CPU shapes already in pixmap, upload to offscreen texture.
-		if !target.View.IsNil() && rc.shared.strategy == strategyRasterAtlas {
+		// Skip if dispatchRasterAtlasDraws already called flushCPUToView —
+		// re-uploading would overwrite the offscreen content with c.pixmap data.
+		if !target.View.IsNil() && rc.shared.strategy == strategyRasterAtlas && !rasterAtlasDispatched {
 			return rc.uploadPixmapToView(target)
 		}
 		return rc.flushVello(target)
@@ -761,53 +906,24 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	// Transfer per-context frame tracking to session before rendering.
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)
 
-	// Build scissor groups from the timeline.
-	groups := rc.buildScissorGroups()
-
-	// Deep-copy each group's slices so we own the data, then clear pending.
-	ownedGroups := make([]ScissorGroup, len(groups))
-	for i := range groups {
-		g := &groups[i]
-		ownedGroups[i] = ScissorGroup{Rect: g.Rect, ClipRRect: g.ClipRRect, ClipPath: g.ClipPath, ClipDepthLevel: g.ClipDepthLevel}
-		if len(g.SDFShapes) > 0 {
-			ownedGroups[i].SDFShapes = make([]SDFRenderShape, len(g.SDFShapes))
-			copy(ownedGroups[i].SDFShapes, g.SDFShapes)
-		}
-		if len(g.ConvexCommands) > 0 {
-			ownedGroups[i].ConvexCommands = make([]ConvexDrawCommand, len(g.ConvexCommands))
-			copy(ownedGroups[i].ConvexCommands, g.ConvexCommands)
-		}
-		if len(g.StencilPaths) > 0 {
-			ownedGroups[i].StencilPaths = make([]StencilPathCommand, len(g.StencilPaths))
-			copy(ownedGroups[i].StencilPaths, g.StencilPaths)
-		}
-		if len(g.ImageCommands) > 0 {
-			ownedGroups[i].ImageCommands = make([]ImageDrawCommand, len(g.ImageCommands))
-			copy(ownedGroups[i].ImageCommands, g.ImageCommands)
-		}
-		if len(g.GPUTextureCommands) > 0 {
-			ownedGroups[i].GPUTextureCommands = make([]GPUTextureDrawCommand, len(g.GPUTextureCommands))
-			copy(ownedGroups[i].GPUTextureCommands, g.GPUTextureCommands)
-		}
-		if len(g.TextBatches) > 0 {
-			ownedGroups[i].TextBatches = make([]TextBatch, len(g.TextBatches))
-			copy(ownedGroups[i].TextBatches, g.TextBatches)
-		}
-		if len(g.GlyphMaskBatches) > 0 {
-			ownedGroups[i].GlyphMaskBatches = make([]GlyphMaskBatch, len(g.GlyphMaskBatches))
-			copy(ownedGroups[i].GlyphMaskBatches, g.GlyphMaskBatches)
+	// Extract baseLayer from pendingDraws before building ScissorGroups.
+	// BaseLayer is passed as a separate parameter to RenderFrameGrouped
+	// (renders BEFORE all tiers) — not part of ScissorGroups.
+	var baseLayer *GPUTextureDrawCommand
+	for i := range rc.pendingDraws {
+		if rc.pendingDraws[i].kind == drawCmdBaseLayer {
+			bl := rc.pendingDraws[i].gpuTexCmd.(GPUTextureDrawCommand)
+			baseLayer = &bl
+			break
 		}
 	}
 
-	// Clear pending state.
-	rc.pendingShapes = rc.pendingShapes[:0]
-	rc.pendingConvexCommands = rc.pendingConvexCommands[:0]
-	rc.pendingStencilPaths = rc.pendingStencilPaths[:0]
-	rc.pendingImageCommands = rc.pendingImageCommands[:0]
-	rc.pendingGPUTextureCommands = rc.pendingGPUTextureCommands[:0]
-	rc.pendingTextBatches = rc.pendingTextBatches[:0]
-	rc.pendingGlyphMaskBatches = rc.pendingGlyphMaskBatches[:0]
-	rc.scissorSegments = rc.scissorSegments[:0]
+	// Build ScissorGroups from per-draw clip state. All command types flow
+	// through pendingDraws: shapes, paths, text, images, GPU textures.
+	ownedGroups := rc.buildScissorGroupsFromDraws()
+
+	// Clear pending state (P2 GC retention prevention).
+	rc.clearPendingDraws()
 	rc.hasPendingTarget = false
 	rc.sceneStats = gg.SceneStats{}
 
@@ -862,9 +978,6 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 		}
 	}
 
-	baseLayer := rc.baseLayer
-	rc.baseLayer = nil
-
 	err := rc.session.RenderFrameGrouped(target, ownedGroups, baseLayer, rc.sharedEncoder)
 	if err != nil {
 		total := 0
@@ -880,6 +993,415 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	rc.frameRendered, rc.lastView = rc.session.FrameState()
 
 	return err
+}
+
+// buildScissorGroupsFromDraws converts backend-agnostic drawCommands into
+// ScissorGroups using per-draw clip state (ADR-051 Phase 1.1 + Phase 2).
+//
+// Consecutive draws with the same clip state are grouped together. Each group
+// is a ScissorGroup with the clip rect/rrect/path from the draws. This replaces
+// the legacy recordScissorSegment timeline for all draw types.
+//
+// All command types flow through pendingDraws: shapes, paths, text batches
+// (MSDF + glyph mask), images, and GPU textures. BaseLayer commands are
+// skipped here and extracted separately at flush time.
+func (rc *GPURenderContext) buildScissorGroupsFromDraws() []ScissorGroup {
+	if len(rc.pendingDraws) == 0 {
+		return nil
+	}
+
+	var groups []ScissorGroup
+	groupStart := 0
+
+	for i := 1; i <= len(rc.pendingDraws); i++ {
+		// Detect clip boundary: either end-of-slice or clip changed.
+		clipChanged := i < len(rc.pendingDraws) &&
+			!drawClipEqual(&rc.pendingDraws[i], &rc.pendingDraws[groupStart])
+		atEnd := i == len(rc.pendingDraws)
+
+		if clipChanged || atEnd {
+			end := i
+			if clipChanged {
+				end = i // commands [groupStart, i) share the same clip
+			}
+
+			// Build one ScissorGroup from draws [groupStart, end).
+			g := rc.drawsToScissorGroup(rc.pendingDraws[groupStart:end])
+			groups = append(groups, g)
+
+			groupStart = i
+		}
+	}
+
+	return groups
+}
+
+// drawsToScissorGroup converts a slice of same-clip drawCommands into a single
+// ScissorGroup populated with GPU-specific command data. The clip state is taken
+// from the first draw (all draws in the slice share the same clip).
+func (rc *GPURenderContext) drawsToScissorGroup(draws []drawCommand) ScissorGroup {
+	g := ScissorGroup{
+		Rect:      copyClipRect(draws[0].clipRect),
+		ClipRRect: copyClipRRect(draws[0].clipRRect),
+		ClipPath:  draws[0].clipPath,
+	}
+
+	for i := range draws {
+		cmd := &draws[i]
+		switch cmd.kind {
+		case drawCmdFillShape:
+			rs, ok := DetectedShapeToRenderShape(cmd.shape, &cmd.paint, false)
+			if !ok || rs.ColorA == 0 {
+				continue
+			}
+			g.SDFShapes = append(g.SDFShapes, rs)
+
+		case drawCmdStrokeShape:
+			rs, ok := DetectedShapeToRenderShape(cmd.shape, &cmd.paint, true)
+			if !ok || rs.ColorA == 0 {
+				continue
+			}
+			g.SDFShapes = append(g.SDFShapes, rs)
+
+		case drawCmdFillPath, drawCmdStrokePath:
+			// Use pre-tessellated data from draw time (ADR-051 fix).
+			// No re-tessellation at flush — convexPoints or stencilCmd was
+			// computed once in FillPath()/StrokePath().
+			if cmd.convexPoints != nil {
+				color := premulColorFromPaint(&cmd.paint)
+				g.ConvexCommands = append(g.ConvexCommands, ConvexDrawCommand{
+					Points: cmd.convexPoints,
+					Color:  color,
+				})
+			} else if cmd.stencilCmd != nil {
+				g.StencilPaths = append(g.StencilPaths, *cmd.stencilCmd)
+			}
+
+		case drawCmdText:
+			g.TextBatches = append(g.TextBatches, cmd.textBatch.(TextBatch))
+
+		case drawCmdGlyphMaskText:
+			g.GlyphMaskBatches = append(g.GlyphMaskBatches, cmd.textBatch.(GlyphMaskBatch))
+
+		case drawCmdImage:
+			g.ImageCommands = append(g.ImageCommands, cmd.imageCmd.(ImageDrawCommand))
+
+		case drawCmdGPUTexture:
+			g.GPUTextureCommands = append(g.GPUTextureCommands, cmd.gpuTexCmd.(GPUTextureDrawCommand))
+
+		case drawCmdBaseLayer:
+			// BaseLayer is extracted separately at flush time — skip here.
+		}
+	}
+
+	return g
+}
+
+// preTessellateFill tessellates a fill path command at draw time.
+// Stores the result in cmd.convexPoints (Tier 2a) or cmd.stencilCmd (Tier 2b).
+// This is called once at queue time so flush never re-tessellates.
+func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
+	if cmd.path == nil || cmd.path.NumVerbs() == 0 {
+		return
+	}
+
+	color := premulColorFromPaint(&cmd.paint)
+
+	// Convex fast-path (NonZero fill rule only).
+	if cmd.paint.FillRule != gg.FillRuleEvenOdd {
+		if points, ok := extractConvexPolygon(cmd.path); ok {
+			cmd.convexPoints = points
+			// Store premul color in paint for later retrieval at flush time.
+			return
+		}
+	}
+
+	// Stencil-then-cover.
+	tess := NewFanTessellator()
+	tess.TessellatePath(cmd.path)
+	fanVerts := tess.Vertices()
+	if len(fanVerts) == 0 {
+		return
+	}
+
+	sc := StencilPathCommand{
+		Vertices:  make([]float32, len(fanVerts)),
+		CoverQuad: tess.CoverQuad(),
+		Color:     color,
+		FillRule:  cmd.paint.FillRule,
+	}
+	copy(sc.Vertices, fanVerts)
+	cmd.stencilCmd = &sc
+}
+
+// preTessellateStroke expands stroke geometry and tessellates the result at draw
+// time. The expanded path replaces cmd.path (so CPU dispatch can use it via
+// SoftwareRenderer.Fill with EvenOdd). GPU data is stored in convexPoints or
+// stencilCmd just like fills.
+func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
+	if cmd.path == nil || cmd.path.NumVerbs() == 0 {
+		return
+	}
+
+	// Expand stroke to fill geometry.
+	strokeVerbs := convertPathVerbsToStroke(cmd.path.Verbs())
+	style := stroke.Stroke{
+		Width:      cmd.paint.EffectiveLineWidth(),
+		Cap:        stroke.LineCap(cmd.paint.EffectiveLineCap()),
+		Join:       stroke.LineJoin(cmd.paint.EffectiveLineJoin()),
+		MiterLimit: cmd.paint.EffectiveMiterLimit(),
+	}
+	expander := stroke.NewStrokeExpander(style)
+	outVerbs, outCoords := expander.Expand(strokeVerbs, cmd.path.Coords())
+	if len(outVerbs) == 0 {
+		return
+	}
+
+	// Expand stroke verbs/coords into a scratch path, then clone into
+	// cmd.path. The scratch path is reused across strokes within a frame
+	// (P3 optimization — avoids 1 KB alloc per strokeResultToPath).
+	if rc.scratchStrokePath == nil {
+		rc.scratchStrokePath = gg.NewPath()
+	}
+	strokeResultToPath(rc.scratchStrokePath, outVerbs, outCoords)
+	cmd.path = rc.scratchStrokePath.Clone()
+	cmd.paint.FillRule = gg.FillRuleEvenOdd // stroke topology
+
+	// Tessellate the expanded fill path for GPU.
+	rc.preTessellateFill(cmd)
+}
+
+// premulColorFromPaint extracts a premultiplied RGBA color from a Paint.
+func premulColorFromPaint(paint *gg.Paint) [4]float32 {
+	color := getColorFromPaint(paint)
+	return [4]float32{
+		float32(color.R * color.A),
+		float32(color.G * color.A),
+		float32(color.B * color.A),
+		float32(color.A),
+	}
+}
+
+// dispatchRasterAtlasDraws performs mixed CPU/GPU dispatch on the rasterAtlas
+// strategy (software adapter). Shape commands (fill/stroke shape/path) are
+// CPU-dispatched via SoftwareRenderer; non-shape commands (images, GPU textures,
+// base layers) are retained in pendingDraws for the standard GPU flush path.
+//
+// The device is alive on rasterAtlas (deviceReady=true), so image/texture
+// draws can proceed through GPU render passes even though shape pipelines
+// are unavailable (gpuReady=false). Without this split, clearPendingDraws
+// would drop texture commands and make UI boundary content invisible.
+func (rc *GPURenderContext) dispatchRasterAtlasDraws(target gg.GPURenderTarget) error {
+	if !target.View.IsNil() {
+		if err := rc.flushCPUToView(target); err != nil {
+			rc.clearPendingDraws()
+			return err
+		}
+	} else {
+		rc.flushCPUToPixmap(target)
+	}
+
+	// Retain non-shape commands for GPU flush (images, textures, base layer).
+	// dispatchDrawsToSoftware already skipped them (no matching switch case).
+	n := 0
+	for i := range rc.pendingDraws {
+		switch rc.pendingDraws[i].kind {
+		case drawCmdFillShape, drawCmdStrokeShape, drawCmdFillPath, drawCmdStrokePath:
+			// Already CPU-dispatched — drop.
+		default:
+			rc.pendingDraws[n] = rc.pendingDraws[i]
+			n++
+		}
+	}
+	// Zero removed tail slots to release GC references (P2 pattern).
+	for i := n; i < len(rc.pendingDraws); i++ {
+		rc.pendingDraws[i] = drawCommand{}
+	}
+	rc.pendingDraws = rc.pendingDraws[:n]
+	return nil
+}
+
+// dispatchDrawsToSoftware renders pendingDraws into a pixmap using
+// SoftwareRenderer. Shared dispatch loop for both surface (flushCPUToPixmap)
+// and offscreen (flushCPUToView) paths. Skia Graphite pattern: one dispatch,
+// target provided by caller.
+func (rc *GPURenderContext) dispatchDrawsToSoftware(pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
+	w, h := pm.Width(), pm.Height()
+	sdfTarget := gg.GPURenderTarget{Data: pm.Data(), Width: w, Height: h, Stride: w * 4}
+
+	for i := range rc.pendingDraws {
+		cmd := &rc.pendingDraws[i]
+
+		// Apply per-draw clip from value copies (ADR-052 three-tier clip).
+		rc.applyDrawClipToSoftware(cmd, sr)
+
+		hasClip := len(cmd.paint.ClipMask) > 0
+
+		switch cmd.kind {
+		case drawCmdFillShape:
+			rc.dispatchFillShape(hasClip, sdfTarget, cmd, pm, sr)
+
+		case drawCmdStrokeShape:
+			rc.dispatchStrokeShape(hasClip, sdfTarget, cmd, pm, sr)
+
+		case drawCmdFillPath:
+			if err := sr.Fill(pm, cmd.path, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: Fill failed", "err", err)
+			}
+
+		case drawCmdStrokePath:
+			// preTessellateStroke already expanded stroke → fill path with EvenOdd.
+			// Use Fill (not Stroke) to avoid double expansion.
+			//
+			// Force RasterizerAnalytic: stroke expansion produces multi-contour
+			// fill paths (inner + outer outline) that require per-scanline winding
+			// tracking. SparseStripsFiller cannot handle this correctly and
+			// produces visible artifacts inside the stroke ring. This matches
+			// SoftwareRenderer.Stroke() which forces Analytic for the same reason.
+			sr.SetRasterizerMode(gg.RasterizerAnalytic)
+			if err := sr.Fill(pm, cmd.path, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: StrokePath Fill failed", "err", err)
+			}
+			sr.SetRasterizerMode(gg.RasterizerAuto)
+		}
+	}
+}
+
+// applyDrawClipToSoftware sets clip state on SoftwareRenderer and paint from
+// per-draw value copies (ADR-052). Layer A: rect bounds for scanline skip.
+// Layer B: pre-rasterized mask for RRect/path clips.
+func (rc *GPURenderContext) applyDrawClipToSoftware(cmd *drawCommand, sr *gg.SoftwareRenderer) {
+	// Layer A: rect bounds → scanline/tile skip (zero cost).
+	if cmd.clipRect != nil {
+		r := cmd.clipRect
+		sr.SetClipBounds(int(r[0]), int(r[1]), int(r[0]+r[2]), int(r[1]+r[3]))
+	} else {
+		sr.ClearClipBounds()
+	}
+
+	// Layer B: paint.ClipMask is already set by Context.applyClipToPaint()
+	// at queue time — pre-rasterized []uint8 snapshot, safe for deferred use.
+	// ClipCoverage closure is stale (captures mutable clipStack), clear it.
+	cmd.paint.ClipCoverage = nil //nolint:staticcheck // intentional clear of deprecated stale closure
+}
+
+// dispatchFillShape handles a single FillShape draw command in CPU dispatch.
+// Clipped shapes go through SoftwareRenderer (supports ClipMask); unclipped
+// shapes use SDFAccelerator (faster SDF per-pixel coverage).
+func (rc *GPURenderContext) dispatchFillShape(hasClip bool, sdfTarget gg.GPURenderTarget, cmd *drawCommand, pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
+	if hasClip {
+		if shapePath := shapeToPath(cmd.shape); shapePath != nil {
+			if err := sr.Fill(pm, shapePath, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: clipped shape Fill failed", "err", err, "shape", cmd.shape.Kind)
+			}
+		}
+		return
+	}
+	if err := rc.shared.cpuFallback.FillShape(sdfTarget, cmd.shape, &cmd.paint); err != nil {
+		if shapePath := shapeToPath(cmd.shape); shapePath != nil {
+			if err := sr.Fill(pm, shapePath, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: shape→path Fill failed", "err", err, "shape", cmd.shape.Kind)
+			}
+		}
+	}
+}
+
+// dispatchStrokeShape handles a single StrokeShape draw command in CPU dispatch.
+func (rc *GPURenderContext) dispatchStrokeShape(hasClip bool, sdfTarget gg.GPURenderTarget, cmd *drawCommand, pm *gg.Pixmap, sr *gg.SoftwareRenderer) {
+	if hasClip {
+		if shapePath := shapeToPath(cmd.shape); shapePath != nil {
+			if err := sr.Stroke(pm, shapePath, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: clipped shape Stroke failed", "err", err, "shape", cmd.shape.Kind)
+			}
+		}
+		return
+	}
+	if err := rc.shared.cpuFallback.StrokeShape(sdfTarget, cmd.shape, &cmd.paint); err != nil {
+		if shapePath := shapeToPath(cmd.shape); shapePath != nil {
+			if err := sr.Stroke(pm, shapePath, &cmd.paint); err != nil {
+				slogger().Debug("dispatchDrawsToSoftware: shape→path Stroke failed", "err", err, "shape", cmd.shape.Kind)
+			}
+		}
+	}
+}
+
+// flushCPUToPixmap renders pending draw commands into the shared window pixmap.
+func (rc *GPURenderContext) flushCPUToPixmap(target gg.GPURenderTarget) {
+	if len(target.Data) == 0 {
+		return
+	}
+	w, h := target.Width, target.Height
+	pm := gg.NewPixmapFromBuffer(target.Data, w, h)
+	sr := rc.getSoftwareRenderer(w, h) // P1: cached, 0 allocs steady-state
+	rc.dispatchDrawsToSoftware(pm, sr)
+	rc.sceneStats = gg.SceneStats{}
+}
+
+// flushCPUToView renders pending draw commands into a temporary pixmap,
+// then uploads to the offscreen GPU texture via WriteTexture.
+func (rc *GPURenderContext) flushCPUToView(target gg.GPURenderTarget) error {
+	w, h := int(target.ViewWidth), int(target.ViewHeight)
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+
+	queue := rc.shared.Queue()
+	if queue == nil {
+		return fmt.Errorf("flushCPUToView: GPU queue not available")
+	}
+
+	wgpuView := (*wgpu.TextureView)(target.View.Pointer())
+	if wgpuView == nil {
+		return fmt.Errorf("flushCPUToView: nil texture view")
+	}
+	tex := wgpuView.Texture()
+	if tex == nil {
+		return fmt.Errorf("flushCPUToView: texture view has no backing texture")
+	}
+
+	tmpPixmap := rc.getPixmap(w, h)    // P0: cached, 0 allocs steady-state
+	sr := rc.getSoftwareRenderer(w, h) // P1: cached, 0 allocs steady-state
+	rc.dispatchDrawsToSoftware(tmpPixmap, sr)
+
+	pixels := tmpPixmap.Data()
+	bgra := rc.ensureBGRABuffer(len(pixels)) // P0: pooled, 0 allocs steady-state
+	for i := 0; i < len(pixels); i += 4 {
+		bgra[i+0] = pixels[i+2]
+		bgra[i+1] = pixels[i+1]
+		bgra[i+2] = pixels[i+0]
+		bgra[i+3] = pixels[i+3]
+	}
+
+	return queue.WriteTexture(
+		&wgpu.ImageCopyTexture{Texture: tex, MipLevel: 0},
+		bgra,
+		&wgpu.ImageDataLayout{BytesPerRow: uint32(w) * 4, RowsPerImage: uint32(h)}, //nolint:gosec // bounded by pixmap
+		&wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1}, //nolint:gosec // bounded by pixmap
+	)
+}
+
+// shapeToPath converts a DetectedShape to a Path for CPU rendering fallback.
+// Returns nil for unknown shape kinds.
+func shapeToPath(shape gg.DetectedShape) *gg.Path {
+	p := gg.NewPath()
+	switch shape.Kind {
+	case gg.ShapeCircle, gg.ShapeEllipse:
+		p.Ellipse(shape.CenterX, shape.CenterY, shape.RadiusX, shape.RadiusY)
+		p.Close()
+	case gg.ShapeRect:
+		x := shape.CenterX - shape.Width/2
+		y := shape.CenterY - shape.Height/2
+		p.Rectangle(x, y, shape.Width, shape.Height)
+		p.Close()
+	case gg.ShapeRRect:
+		x := shape.CenterX - shape.Width/2
+		y := shape.CenterY - shape.Height/2
+		p.RoundedRectangle(x, y, shape.Width, shape.Height, shape.CornerRadius)
+		p.Close()
+	default:
+		return nil
+	}
+	return p
 }
 
 // flushVello flushes Vello compute if it has pending paths and the effective
@@ -923,7 +1445,7 @@ func (rc *GPURenderContext) uploadPixmapToView(target gg.GPURenderTarget) error 
 	w, h := uint32(target.Width), uint32(target.Height) //nolint:gosec // bounded by pixmap
 
 	// Pixmap is RGBA, offscreen texture is BGRA8Unorm — swizzle R↔B.
-	bgra := make([]byte, len(target.Data))
+	bgra := rc.ensureBGRABuffer(len(target.Data)) // P0: pooled, 0 allocs steady-state
 	for i := 0; i < len(target.Data); i += 4 {
 		bgra[i+0] = target.Data[i+2]
 		bgra[i+1] = target.Data[i+1]
@@ -1026,135 +1548,76 @@ func (rc *GPURenderContext) Close() {
 		rc.session.Destroy()
 		rc.session = nil
 	}
-	rc.pendingShapes = nil
-	rc.pendingConvexCommands = nil
-	rc.pendingStencilPaths = nil
-	rc.pendingImageCommands = nil
-	rc.pendingGPUTextureCommands = nil
-	rc.baseLayer = nil
-	rc.pendingTextBatches = nil
-	rc.pendingGlyphMaskBatches = nil
+	rc.pendingDraws = nil
 	rc.hasPendingTarget = false
 	rc.clipRect = nil
 	rc.clipRRect = nil
 	rc.clipPath = nil
-	rc.scissorSegments = nil
-	rc.textBatchSealed = false
-	rc.glyphBatchSealed = false
 	rc.sceneStats = gg.SceneStats{}
+
+	// Release cached resources (P0/P1/P3 optimization pools).
+	rc.bgraBuffer = nil
+	rc.cachedPixmap = nil
+	rc.cachedSR = nil
+	rc.scratchStrokePath = nil
 }
 
-// recordScissorSegment records a scissor state change in the timeline.
-// It seals both text tiers so the next QueueGlyphMask/QueueText starts
-// a new batch instead of merging across the scissor boundary.
-func (rc *GPURenderContext) recordScissorSegment(rect *[4]uint32) {
-	rc.textBatchSealed = true
-	rc.glyphBatchSealed = true
-	seg := scissorSegment{
-		sdfCount:     len(rc.pendingShapes),
-		convexCount:  len(rc.pendingConvexCommands),
-		stencilCount: len(rc.pendingStencilPaths),
-		imageCount:   len(rc.pendingImageCommands),
-		gpuTexCount:  len(rc.pendingGPUTextureCommands),
-		textCount:    len(rc.pendingTextBatches),
-		glyphCount:   len(rc.pendingGlyphMaskBatches),
+// getSoftwareRenderer returns a cached SoftwareRenderer for the given dimensions.
+// On first call or dimension change, a new renderer is created; otherwise the
+// existing one is reused (0 allocs steady-state). This eliminates 13 allocs +
+// 12-17 KB per flush (P1 optimization, profiling report M-3).
+func (rc *GPURenderContext) getSoftwareRenderer(w, h int) *gg.SoftwareRenderer {
+	if rc.cachedSR != nil && rc.cachedSRWidth == w && rc.cachedSRHeight == h {
+		return rc.cachedSR
 	}
-	if rect != nil {
-		seg.rect = *rect
-		seg.hasRect = true
+	if rc.cachedSR == nil {
+		rc.cachedSR = gg.NewSoftwareRenderer(w, h)
+	} else {
+		rc.cachedSR.Resize(w, h)
 	}
-	if rc.clipRRect != nil {
-		seg.clipRRect = *rc.clipRRect
-		seg.hasClipRRect = true
-	}
-	seg.clipPath = rc.clipPath
-	rc.scissorSegments = append(rc.scissorSegments, seg)
+	rc.cachedSRWidth = w
+	rc.cachedSRHeight = h
+	return rc.cachedSR
 }
 
-// buildScissorGroups builds scissor groups from the pending commands and timeline.
-func (rc *GPURenderContext) buildScissorGroups() []ScissorGroup {
-	if len(rc.scissorSegments) == 0 {
-		return []ScissorGroup{{
-			Rect:               nil,
-			SDFShapes:          rc.pendingShapes,
-			ConvexCommands:     rc.pendingConvexCommands,
-			StencilPaths:       rc.pendingStencilPaths,
-			ImageCommands:      rc.pendingImageCommands,
-			GPUTextureCommands: rc.pendingGPUTextureCommands,
-			TextBatches:        rc.pendingTextBatches,
-			GlyphMaskBatches:   rc.pendingGlyphMaskBatches,
-		}}
+// getPixmap returns a cached Pixmap for the given dimensions. On first call or
+// dimension change, a new pixmap is created; otherwise the existing one is
+// reused and zeroed. This eliminates 1.9 MB/frame allocation for offscreen
+// targets (P0 optimization, profiling report P4 stretch).
+func (rc *GPURenderContext) getPixmap(w, h int) *gg.Pixmap {
+	if rc.cachedPixmap != nil && rc.cachedPixmapWidth == w && rc.cachedPixmapHeight == h {
+		// Clear pixel data for the new frame (Pixmap is reused).
+		data := rc.cachedPixmap.Data()
+		clear(data)
+		return rc.cachedPixmap
 	}
+	rc.cachedPixmap = gg.NewPixmap(w, h)
+	rc.cachedPixmapWidth = w
+	rc.cachedPixmapHeight = h
+	return rc.cachedPixmap
+}
 
-	var groups []ScissorGroup
-
-	firstSeg := rc.scissorSegments[0]
-	if firstSeg.sdfCount > 0 || firstSeg.convexCount > 0 || firstSeg.stencilCount > 0 ||
-		firstSeg.imageCount > 0 || firstSeg.gpuTexCount > 0 || firstSeg.textCount > 0 || firstSeg.glyphCount > 0 {
-		groups = append(groups, ScissorGroup{
-			Rect:               nil,
-			SDFShapes:          rc.pendingShapes[:firstSeg.sdfCount],
-			ConvexCommands:     rc.pendingConvexCommands[:firstSeg.convexCount],
-			StencilPaths:       rc.pendingStencilPaths[:firstSeg.stencilCount],
-			ImageCommands:      rc.pendingImageCommands[:firstSeg.imageCount],
-			GPUTextureCommands: rc.pendingGPUTextureCommands[:firstSeg.gpuTexCount],
-			TextBatches:        rc.pendingTextBatches[:firstSeg.textCount],
-			GlyphMaskBatches:   rc.pendingGlyphMaskBatches[:firstSeg.glyphCount],
-		})
+// ensureBGRABuffer returns a BGRA swizzle buffer with at least 'needed' bytes.
+// Grow-only: the buffer is reused across frames and only reallocated when the
+// frame size increases. This eliminates 8 MB/frame allocation at 1080p
+// (P0 optimization, profiling report M-2).
+func (rc *GPURenderContext) ensureBGRABuffer(needed int) []byte {
+	if cap(rc.bgraBuffer) >= needed {
+		return rc.bgraBuffer[:needed]
 	}
+	rc.bgraBuffer = make([]byte, needed)
+	return rc.bgraBuffer
+}
 
-	for i, seg := range rc.scissorSegments {
-		var endSDF, endConvex, endStencil, endImage, endGPUTex, endText, endGlyph int
-		if i+1 < len(rc.scissorSegments) {
-			next := rc.scissorSegments[i+1]
-			endSDF = next.sdfCount
-			endConvex = next.convexCount
-			endStencil = next.stencilCount
-			endImage = next.imageCount
-			endGPUTex = next.gpuTexCount
-			endText = next.textCount
-			endGlyph = next.glyphCount
-		} else {
-			endSDF = len(rc.pendingShapes)
-			endConvex = len(rc.pendingConvexCommands)
-			endStencil = len(rc.pendingStencilPaths)
-			endImage = len(rc.pendingImageCommands)
-			endGPUTex = len(rc.pendingGPUTextureCommands)
-			endText = len(rc.pendingTextBatches)
-			endGlyph = len(rc.pendingGlyphMaskBatches)
-		}
-
-		if seg.sdfCount == endSDF && seg.convexCount == endConvex &&
-			seg.stencilCount == endStencil && seg.imageCount == endImage &&
-			seg.gpuTexCount == endGPUTex && seg.textCount == endText && seg.glyphCount == endGlyph {
-			continue
-		}
-
-		var groupRect *[4]uint32
-		if seg.hasRect {
-			r := seg.rect
-			groupRect = &r
-		}
-		var groupClip *ClipParams
-		if seg.hasClipRRect {
-			c := seg.clipRRect
-			groupClip = &c
-		}
-		groups = append(groups, ScissorGroup{
-			Rect:               groupRect,
-			ClipRRect:          groupClip,
-			ClipPath:           seg.clipPath,
-			SDFShapes:          rc.pendingShapes[seg.sdfCount:endSDF],
-			ConvexCommands:     rc.pendingConvexCommands[seg.convexCount:endConvex],
-			StencilPaths:       rc.pendingStencilPaths[seg.stencilCount:endStencil],
-			ImageCommands:      rc.pendingImageCommands[seg.imageCount:endImage],
-			GPUTextureCommands: rc.pendingGPUTextureCommands[seg.gpuTexCount:endGPUTex],
-			TextBatches:        rc.pendingTextBatches[seg.textCount:endText],
-			GlyphMaskBatches:   rc.pendingGlyphMaskBatches[seg.glyphCount:endGlyph],
-		})
+// clearPendingDraws zeroes pointer fields in pendingDraws before truncating
+// to prevent GC reference retention (P2 optimization, Skia OpChain::reset
+// pattern). Without this, stale *Path, *StencilPathCommand, and []Point
+// references remain in the backing array, retaining ~125 KB per 50 draws.
+func (rc *GPURenderContext) clearPendingDraws() {
+	for i := range rc.pendingDraws {
+		rc.pendingDraws[i] = drawCommand{}
 	}
-
-	return groups
+	rc.pendingDraws = rc.pendingDraws[:0]
 }
 
 // syncTextAtlases uploads dirty MSDF atlas pages. Must be called with shared.mu held.

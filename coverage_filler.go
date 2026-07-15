@@ -2,6 +2,16 @@ package gg
 
 import "sync"
 
+// ClipBounds defines an axis-aligned integer clip rectangle for scanline/tile
+// skipping (Skia SkRectClipBlitter pattern). When passed to a CoverageFiller,
+// tiles or scanlines entirely outside these bounds are skipped at zero cost.
+//
+// Coordinates are in device pixels (physical). XMax/YMax are exclusive
+// (the pixel at XMax is NOT inside the clip).
+type ClipBounds struct {
+	XMin, YMin, XMax, YMax int
+}
+
 // CoverageFiller is a tile-based coverage rasterizer for complex paths.
 //
 // When registered via RegisterCoverageFiller, the SoftwareRenderer auto-selects
@@ -11,13 +21,20 @@ import "sync"
 // The callback receives per-pixel coverage values (0-255) that the caller
 // composites onto the target pixmap using source-over blending.
 //
+// The clipBounds parameter, when non-nil, allows the filler to skip tiles
+// or scanlines that fall entirely outside the clip rectangle. This provides
+// zero-cost rectangular clip culling at the rasterizer level (Skia pattern).
+//
 // Implementations:
 //   - SparseStripsFiller (4x4 tiles, CPU/SIMD-optimized) — default
 //   - TileComputeFiller (16x16 tiles, GPU workgroup-ready) — alternative
 type CoverageFiller interface {
 	// FillCoverage rasterizes the path and calls callback for each pixel
 	// with non-zero coverage. The coverage value is 0-255 (anti-aliased alpha).
+	// If clipBounds is non-nil, tiles/scanlines outside the clip rectangle
+	// are skipped entirely (zero per-pixel overhead for rect clips).
 	FillCoverage(path *Path, width, height int, fillRule FillRule,
+		clipBounds *ClipBounds,
 		callback func(x, y int, coverage uint8))
 }
 

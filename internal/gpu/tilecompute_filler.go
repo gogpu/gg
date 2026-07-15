@@ -14,9 +14,11 @@ import (
 type TileComputeFiller struct{}
 
 // FillCoverage rasterizes the path using tilecompute and calls callback
-// for each pixel with non-zero coverage.
+// for each pixel with non-zero coverage. If clipBounds is non-nil, pixels
+// outside the clip rectangle are skipped (ADR-052 Layer A).
 func (f *TileComputeFiller) FillCoverage(
 	path *gg.Path, width, height int, fillRule gg.FillRule,
+	clipBounds *gg.ClipBounds,
 	callback func(x, y int, coverage uint8),
 ) {
 	if path == nil || path.NumVerbs() == 0 {
@@ -52,8 +54,12 @@ func (f *TileComputeFiller) FillCoverage(
 	alphas := rast.Rasterize(lines, tcFillRule)
 
 	// 4. Convert float32 alphas → uint8 → callback
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	// Layer A (ADR-052): restrict iteration to clip bounds if provided.
+	yStart, yEnd := 0, height
+	xStart, xEnd := 0, width
+	yStart, yEnd, xStart, xEnd = clampToClipBounds(clipBounds, yStart, yEnd, xStart, xEnd)
+	for y := yStart; y < yEnd; y++ {
+		for x := xStart; x < xEnd; x++ {
 			a := alphas[y*width+x]
 			if a > 0 {
 				c := uint8(a*255 + 0.5) //nolint:gosec // Intentional float-to-uint8 with rounding
@@ -63,6 +69,27 @@ func (f *TileComputeFiller) FillCoverage(
 			}
 		}
 	}
+}
+
+// clampToClipBounds restricts iteration ranges to clip bounds.
+// If clipBounds is nil, the original ranges are returned unchanged.
+func clampToClipBounds(cb *gg.ClipBounds, yStart, yEnd, xStart, xEnd int) (int, int, int, int) {
+	if cb == nil {
+		return yStart, yEnd, xStart, xEnd
+	}
+	if cb.YMin > yStart {
+		yStart = cb.YMin
+	}
+	if cb.YMax < yEnd {
+		yEnd = cb.YMax
+	}
+	if cb.XMin > xStart {
+		xStart = cb.XMin
+	}
+	if cb.XMax < xEnd {
+		xEnd = cb.XMax
+	}
+	return yStart, yEnd, xStart, xEnd
 }
 
 // segmentsToLineSoup converts SparseStrips SegmentList to tilecompute LineSoup.

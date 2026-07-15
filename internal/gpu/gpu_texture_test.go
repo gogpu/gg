@@ -136,11 +136,12 @@ func TestQueueGPUTextureDraw_OverlayCoordinates(t *testing.T) {
 	rc.QueueGPUTextureDraw(target, view,
 		100, 100, 48, 48, 1.0, 600, 400)
 
-	if len(rc.pendingGPUTextureCommands) != 1 {
-		t.Fatalf("expected 1 pending command, got %d", len(rc.pendingGPUTextureCommands))
+	cmds := collectGPUTextureDraws(rc)
+	if len(cmds) != 1 {
+		t.Fatalf("expected 1 pending GPU texture draw, got %d", len(cmds))
 	}
 
-	cmd := rc.pendingGPUTextureCommands[0]
+	cmd := cmds[0]
 	assertFloat(t, cmd.DstX, 100, "DstX")
 	assertFloat(t, cmd.DstY, 100, "DstY")
 	assertFloat(t, cmd.DstW, 48, "DstW")
@@ -157,8 +158,8 @@ func TestQueueGPUTextureDraw_OpacityPassthrough(t *testing.T) {
 
 	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.5, 600, 400)
 
-	cmd := rc.pendingGPUTextureCommands[0]
-	assertFloat(t, cmd.Opacity, 0.5, "opacity")
+	cmds := collectGPUTextureDraws(rc)
+	assertFloat(t, cmds[0].Opacity, 0.5, "opacity")
 }
 
 func TestQueueGPUTextureDraw_OpacityZero(t *testing.T) {
@@ -168,8 +169,8 @@ func TestQueueGPUTextureDraw_OpacityZero(t *testing.T) {
 
 	rc.QueueGPUTextureDraw(target, view, 0, 0, 48, 48, 0.0, 600, 400)
 
-	cmd := rc.pendingGPUTextureCommands[0]
-	assertFloat(t, cmd.Opacity, 0.0, "opacity zero")
+	cmds := collectGPUTextureDraws(rc)
+	assertFloat(t, cmds[0].Opacity, 0.0, "opacity zero")
 }
 
 func TestQueueBaseLayer_FullScreen(t *testing.T) {
@@ -181,13 +182,36 @@ func TestQueueBaseLayer_FullScreen(t *testing.T) {
 	rc.QueueBaseLayer(target, view,
 		0, 0, 600, 400, 1.0, 600, 400)
 
-	if rc.baseLayer == nil {
-		t.Fatal("expected baseLayer to be set")
+	bl := findBaseLayerDraw(rc)
+	if bl == nil {
+		t.Fatal("expected baseLayer draw in pendingDraws")
 	}
-	assertFloat(t, rc.baseLayer.DstX, 0, "base DstX")
-	assertFloat(t, rc.baseLayer.DstY, 0, "base DstY")
-	assertFloat(t, rc.baseLayer.DstW, 600, "base DstW")
-	assertFloat(t, rc.baseLayer.DstH, 400, "base DstH")
+	assertFloat(t, bl.DstX, 0, "base DstX")
+	assertFloat(t, bl.DstY, 0, "base DstY")
+	assertFloat(t, bl.DstW, 600, "base DstW")
+	assertFloat(t, bl.DstH, 400, "base DstH")
+}
+
+// collectGPUTextureDraws extracts GPUTextureDrawCommand entries from pendingDraws.
+func collectGPUTextureDraws(rc *GPURenderContext) []GPUTextureDrawCommand {
+	var out []GPUTextureDrawCommand
+	for i := range rc.pendingDraws {
+		if rc.pendingDraws[i].kind == drawCmdGPUTexture {
+			out = append(out, rc.pendingDraws[i].gpuTexCmd.(GPUTextureDrawCommand))
+		}
+	}
+	return out
+}
+
+// findBaseLayerDraw returns the GPUTextureDrawCommand for the base layer, or nil.
+func findBaseLayerDraw(rc *GPURenderContext) *GPUTextureDrawCommand {
+	for i := range rc.pendingDraws {
+		if rc.pendingDraws[i].kind == drawCmdBaseLayer {
+			bl := rc.pendingDraws[i].gpuTexCmd.(GPUTextureDrawCommand)
+			return &bl
+		}
+	}
+	return nil
 }
 
 // --- PendingCount tests ---
