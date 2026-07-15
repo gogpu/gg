@@ -1,4 +1,4 @@
-module github.com/gogpu/gg/examples/gogpu_integration
+module github.com/gogpu/gg/examples/compositing
 
 go 1.25.0
 

@@ -63,6 +63,9 @@ func main() {
 	paused := false
 	var animTime float64
 	var lastDrawTime time.Time
+	var fpsFrames int
+	var lastFPSTime time.Time
+	var currentFPS float64
 
 	app.OnDraw(func(dc *gogpu.Context) {
 		if frame == 0 {
@@ -110,9 +113,17 @@ func main() {
 		}
 
 		elapsed := animTime
+		fpsFrames++
+		if time.Since(lastFPSTime) >= time.Second {
+			currentFPS = float64(fpsFrames) / time.Since(lastFPSTime).Seconds()
+			fpsFrames = 0
+			lastFPSTime = time.Now()
+		}
+
 		faces := [4]text.Face{fontFace, face28, face18, face14}
+		fps := currentFPS
 		if err := canvas.Draw(func(cc *gg.Context) {
-			renderFrame(cc, elapsed, cw, ch, faces, frame)
+			renderFrame(cc, elapsed, cw, ch, faces, frame, fps)
 		}); err != nil {
 			log.Printf("Draw error: %v", err)
 		}
@@ -168,7 +179,7 @@ func main() {
 }
 
 // renderFrame draws animated 2D graphics demonstrating all four GPU tiers.
-func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]text.Face, frame int) {
+func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]text.Face, frame int, fps float64) {
 	face28, face18, face14 := faces[1], faces[2], faces[3]
 
 	// Dark background (GPU fill for GPU-direct mode).
@@ -276,7 +287,7 @@ func renderFrame(cc *gg.Context, elapsed float64, width, height int, faces [4]te
 	if face14 != nil {
 		cc.SetFont(face14)
 		cc.SetRGBA(0.7, 0.7, 0.7, 0.8)
-		fpsText := fmt.Sprintf("Frame %d | %.1fs", frame, elapsed)
+		fpsText := fmt.Sprintf("Frame %d | %.1fs | %.0f FPS", frame, elapsed, fps)
 		cc.DrawString(fpsText, 10, float64(height)-10)
 	}
 }
