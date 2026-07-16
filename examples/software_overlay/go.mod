@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/software_overlay
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.50.5
+	github.com/gogpu/gg v0.50.6
 	github.com/gogpu/gogpu v0.44.8
 	github.com/gogpu/gpucontext v0.21.1
 )
