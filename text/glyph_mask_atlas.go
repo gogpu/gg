@@ -41,6 +41,10 @@ type GlyphMaskKey struct {
 	// Bit 0 (GlyphMaskFlagAliased): binary coverage (0/255 only, NoAAFiller).
 	// Bits 1-7: reserved for future use.
 	Flags uint8
+
+	// VariationHash distinguishes masks for different variable font instances.
+	// Zero for static fonts. Computed via [VariationHash] (ADR-054).
+	VariationHash uint64
 }
 
 // GlyphMaskFlagAliased marks the glyph mask as rasterized with binary coverage

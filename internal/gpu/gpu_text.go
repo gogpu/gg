@@ -121,6 +121,10 @@ func (e *GPUTextEngine) LayoutText(
 	fontSource := face.Source()
 	fontID := computeFontID(fontSource)
 
+	// ADR-054: pass variations for variable font gvar deltas.
+	variations := face.Variations()
+	varHash := text.VariationHash(variations)
+
 	// ADR-027: detect CJK from first rune → select appropriate atlas.
 	isCJK := false
 	for _, r := range s {
@@ -163,16 +167,17 @@ func (e *GPUTextEngine) LayoutText(
 			ratio = logicalSize / refSize
 		}
 
-		outline, err := e.extractor.ExtractOutline(fontSource.Parsed(), glyph.GID, glyphRefSize)
+		outline, err := e.extractor.ExtractOutlineHintedVar(fontSource.Parsed(), glyph.GID, glyphRefSize, text.HintingNone, variations)
 		if err != nil || outline == nil || outline.IsEmpty() {
 			outlineSkip++
 			continue
 		}
 
 		key := msdf.GlyphKey{
-			FontID:  fontID,
-			GlyphID: uint16(glyph.GID),    //nolint:gosec // GlyphID is uint16
-			Size:    int16(glyphMsdfSize), //nolint:gosec // msdfSize fits int16
+			FontID:        fontID,
+			GlyphID:       uint16(glyph.GID),    //nolint:gosec // GlyphID is uint16
+			Size:          int16(glyphMsdfSize), //nolint:gosec // msdfSize fits int16
+			VariationHash: varHash,
 		}
 		region, err := glyphAtlas.Get(key, outline)
 		if err != nil {

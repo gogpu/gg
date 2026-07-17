@@ -155,14 +155,19 @@ func (r *TextRenderer) RenderGlyph(glyph text.ShapedGlyph, face text.Face) (*Ren
 	fontID := computeSceneTextFontID(source)
 	sizeKey := computeSizeKey(size)
 
+	// ADR-054: pass variations for variable font gvar deltas.
+	variations := face.Variations()
+	varHash := text.VariationHash(variations)
+
 	cacheKey := text.OutlineCacheKey{
-		FontID:  fontID,
-		GID:     glyph.GID,
-		Size:    sizeKey,
-		Hinting: text.HintingNone,
+		FontID:        fontID,
+		GID:           glyph.GID,
+		Size:          sizeKey,
+		Hinting:       text.HintingNone,
+		VariationHash: varHash,
 	}
 	outline := cache.GetOrCreate(cacheKey, func() *text.GlyphOutline {
-		o, err := r.extractor.ExtractOutline(parsed, glyph.GID, size)
+		o, err := r.extractor.ExtractOutlineHintedVar(parsed, glyph.GID, size, text.HintingNone, variations)
 		if err != nil || o == nil || o.IsEmpty() {
 			return nil
 		}
@@ -217,6 +222,10 @@ func (r *TextRenderer) RenderGlyphs(glyphs []text.ShapedGlyph, face text.Face) (
 	fontID := computeSceneTextFontID(source)
 	sizeKey := computeSizeKey(size)
 
+	// ADR-054: pass variations for variable font gvar deltas.
+	variations := face.Variations()
+	varHash := text.VariationHash(variations)
+
 	// Render all glyphs
 	rendered := make([]*RenderedGlyph, len(glyphs))
 	for i, glyph := range glyphs {
@@ -230,13 +239,14 @@ func (r *TextRenderer) RenderGlyphs(glyphs []text.ShapedGlyph, face text.Face) (
 		}
 
 		cacheKey := text.OutlineCacheKey{
-			FontID:  fontID,
-			GID:     glyph.GID,
-			Size:    sizeKey,
-			Hinting: text.HintingNone,
+			FontID:        fontID,
+			GID:           glyph.GID,
+			Size:          sizeKey,
+			Hinting:       text.HintingNone,
+			VariationHash: varHash,
 		}
 		outline := cache.GetOrCreate(cacheKey, func() *text.GlyphOutline {
-			o, err := r.extractor.ExtractOutline(parsed, glyph.GID, size)
+			o, err := r.extractor.ExtractOutlineHintedVar(parsed, glyph.GID, size, text.HintingNone, variations)
 			if err != nil || o == nil || o.IsEmpty() {
 				return nil
 			}

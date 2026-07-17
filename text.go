@@ -198,7 +198,7 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 
 // drawShapedGlyphsAsOutlines renders pre-shaped glyphs as vector outlines.
 // CPU fallback when GPU shaped text is unavailable.
-// When the face has variations, uses go-text for outline extraction (gvar support).
+// ADR-054: uses ExtractOutlineHintedVar to apply gvar deltas for variable fonts.
 func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
 	source := face.Source()
 	if source == nil {
@@ -207,9 +207,10 @@ func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face tex
 
 	parsed := source.Parsed()
 	extractor := text.NewOutlineExtractor()
+	variations := face.Variations()
 
 	outlineFunc := func(gid text.GlyphID) *text.GlyphOutline {
-		outline, err := extractor.ExtractOutline(parsed, gid, face.Size())
+		outline, err := extractor.ExtractOutlineHintedVar(parsed, gid, face.Size(), text.HintingNone, variations)
 		if err != nil {
 			return nil
 		}
@@ -775,19 +776,24 @@ func (c *Context) textOutlinePath(s string, x, y float64) *Path {
 		sizeKey = int16(fontSize) //nolint:gosec // bounds checked above
 	}
 
+	// ADR-054: pass variations for variable font gvar deltas (enterprise invariant).
+	variations := c.face.Variations()
+	varHash := text.VariationHash(variations)
+
 	path := NewPath()
 	hasContour := false
 
 	shaped := text.Shape(s, c.face)
 	for _, sg := range shaped {
 		cacheKey := text.OutlineCacheKey{
-			FontID:  fontID,
-			GID:     sg.GID,
-			Size:    sizeKey,
-			Hinting: text.HintingNone,
+			FontID:        fontID,
+			GID:           sg.GID,
+			Size:          sizeKey,
+			Hinting:       text.HintingNone,
+			VariationHash: varHash,
 		}
 		outline := cache.GetOrCreate(cacheKey, func() *text.GlyphOutline {
-			o, err := extractor.ExtractOutline(parsed, sg.GID, fontSize)
+			o, err := extractor.ExtractOutlineHintedVar(parsed, sg.GID, fontSize, text.HintingNone, variations)
 			if err != nil || o == nil || o.IsEmpty() {
 				return nil
 			}

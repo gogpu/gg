@@ -18,6 +18,10 @@ type RenderParams struct {
 	// Opacity is the overall opacity [0, 1].
 	// 1.0 means fully opaque, 0.0 means fully transparent.
 	Opacity float64
+
+	// Variations holds font variation settings for variable fonts (ADR-054).
+	// nil for static fonts. When set, gvar deltas are applied to glyph outlines.
+	Variations []FontVariation
 }
 
 // DefaultRenderParams returns default rendering parameters.
@@ -118,17 +122,21 @@ func (r *GlyphRenderer) RenderGlyph(
 	// Get font ID for cache key
 	fontID := computeFontID(font)
 
+	// ADR-054: pass variations for variable font gvar deltas.
+	varHash := VariationHash(params.Variations)
+
 	// Build cache key
 	key := OutlineCacheKey{
-		FontID:  fontID,
-		GID:     glyph.GID,
-		Size:    sizeToInt16(size),
-		Hinting: HintingNone,
+		FontID:        fontID,
+		GID:           glyph.GID,
+		Size:          sizeToInt16(size),
+		Hinting:       HintingNone,
+		VariationHash: varHash,
 	}
 
 	// Get or create outline
 	outline := r.cache.GetOrCreate(key, func() *GlyphOutline {
-		o, err := r.extractor.ExtractOutline(font, glyph.GID, size)
+		o, err := r.extractor.ExtractOutlineHintedVar(font, glyph.GID, size, HintingNone, params.Variations)
 		if err != nil {
 			return nil
 		}
@@ -174,6 +182,11 @@ func (r *GlyphRenderer) RenderRun(run *ShapedRun, params RenderParams) []*GlyphO
 	font := run.Face.Source().Parsed()
 	if font == nil {
 		return nil
+	}
+
+	// ADR-054: propagate variations from face if not set in params.
+	if len(params.Variations) == 0 {
+		params.Variations = run.Face.Variations()
 	}
 
 	return r.RenderGlyphs(run.Glyphs, font, run.Size, params)
