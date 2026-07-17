@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.7] - 2026-07-17
+
+### Fixed
+
+- **Variable font outlines under transforms** ([#405](https://github.com/gogpu/gg/issues/405)) —
+  when `dc.Shear()` or `dc.Rotate()` was applied, variable font variations
+  (e.g. `wght=700`) were silently ignored because the vector outline path called
+  `ExtractOutline()` without gvar deltas. All 7 outline extraction paths now use
+  `ExtractOutlineHintedVar()` with `face.Variations()`, matching the Skia/skrifa/
+  FreeType invariant: gvar deltas are glyph geometry, applied unconditionally.
+  Cache keys (`OutlineCacheKey`, `GlyphMaskKey`, `msdf.GlyphKey`) now include
+  `VariationHash` to prevent cross-variation cache poisoning.
+
+### Added
+
+- `GlyphMaskRasterizer.RasterizeHintedVar()` — rasterize glyph masks with
+  font variations applied (gvar + hinting in one pass).
+- `GlyphMaskRasterizer.RasterizeAliasedVar()` — aliased (binary coverage)
+  variant with font variations.
+- `RenderParams.Variations` field — propagates font variations through
+  `GlyphRenderer` for vector outline extraction.
+- `GlyphMaskKey.VariationHash` — distinguishes glyph mask cache entries for
+  different variable font instances.
+- `msdf.GlyphKey.VariationHash` — distinguishes MSDF atlas entries for
+  different variable font instances.
+- 17 enterprise tests covering all fixed paths (context-level shear/rotation,
+  text package cache keys, rasterizer variations, MSDF atlas keys).
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.21 → v0.30.22.
+
 ## [0.50.6] - 2026-07-15
 
 ### Fixed

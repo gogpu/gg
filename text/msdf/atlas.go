@@ -215,6 +215,10 @@ type GlyphKey struct {
 	// Size is the MSDF texture size (not font size).
 	// Different MSDF sizes produce different textures.
 	Size int16
+
+	// VariationHash distinguishes glyphs from different variable font instances.
+	// Zero for static fonts. Computed via text.VariationHash (ADR-054).
+	VariationHash uint64
 }
 
 // AtlasManager manages multiple MSDF atlases.

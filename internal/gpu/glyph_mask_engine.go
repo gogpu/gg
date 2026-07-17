@@ -145,7 +145,7 @@ func (e *GlyphMaskEngine) LayoutText(
 		shaped = append(shaped, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y, IsCJK: text.IsCJKRune(glyph.Rune)})
 	}
 
-	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
 }
 
 // LayoutTextAliased converts a text string into a GlyphMaskBatch with binary
@@ -203,7 +203,7 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 
 	lcdLayout := text.LCDLayoutNone
 	var lcdFilter text.LCDFilter
-	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, true), nil
+	return e.layoutGlyphs(shaped, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, true), nil
 }
 
 // LayoutShapedGlyphs lays out pre-shaped glyphs into a GlyphMaskBatch.
@@ -243,7 +243,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	}
 
 	lcdFilter := e.lcdFilter
-	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
 }
 
 // snapXGrid precomputes the integer device-space X position for each glyph by
@@ -303,6 +303,7 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 	hinting text.Hinting,
 	useLCD bool,
 	lcdLayout text.LCDLayout,
+	variations []text.FontVariation,
 	lcdFilter *text.LCDFilter,
 	batchColor [4]float32,
 	matrix gg.Matrix,
@@ -312,6 +313,9 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 ) GlyphMaskBatch {
 	var quads []GlyphMaskQuad
 	var batchIsLCD bool
+
+	// ADR-054: compute variation hash for cache key differentiation.
+	varHash := text.VariationHash(variations)
 
 	// Full hinting grid-fits stems to the integer pixel grid, so fully hinted
 	// glyphs must be placed at integer device pixels (snapXGrid). LCD keeps
@@ -354,8 +358,10 @@ func (e *GlyphMaskEngine) layoutGlyphs(
 		if aliased {
 			key.Flags = text.GlyphMaskFlagAliased
 		}
+		// ADR-054: include variation hash in cache key.
+		key.VariationHash = varHash
 
-		region, rErr := e.rasterizeGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, useLCD, aliased, *lcdFilter, lcdLayout)
+		region, rErr := e.rasterizeGlyph(key, parsed, glyph.GID, rasterSize, fracX, fracY, hinting, useLCD, aliased, *lcdFilter, lcdLayout, variations)
 		if rErr != nil {
 			slogger().Warn("glyph mask rasterize failed", "gid", glyph.GID, "err", rErr)
 			continue
@@ -437,13 +443,14 @@ func (e *GlyphMaskEngine) rasterizeGlyph(
 	useLCD, aliased bool,
 	lcdFilter text.LCDFilter,
 	lcdLayout text.LCDLayout,
+	variations []text.FontVariation,
 ) (text.GlyphMaskRegion, error) {
 	switch {
 	case useLCD:
 		return e.rasterizeLCDGlyph(key, parsed, gid, size, fracX, fracY, hinting, lcdFilter, lcdLayout)
 	case aliased:
 		return e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-			result, err := e.rasterizer.RasterizeAliased(parsed, gid, size, fracX, fracY, hinting)
+			result, err := e.rasterizer.RasterizeAliasedVar(parsed, gid, size, fracX, fracY, hinting, variations)
 			if err != nil {
 				return nil, 0, 0, 0, 0, err
 			}
@@ -454,7 +461,7 @@ func (e *GlyphMaskEngine) rasterizeGlyph(
 		})
 	default:
 		return e.atlas.GetOrRasterize(key, func() ([]byte, int, int, float32, float32, error) {
-			result, err := e.rasterizer.RasterizeHinted(parsed, gid, size, fracX, fracY, hinting)
+			result, err := e.rasterizer.RasterizeHintedVar(parsed, gid, size, fracX, fracY, hinting, variations)
 			if err != nil {
 				return nil, 0, 0, 0, 0, err
 			}

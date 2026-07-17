@@ -110,6 +110,27 @@ func (r *GlyphMaskRasterizer) RasterizeHinted(
 	return r.rasterizeOutline(outline, subpixelX, subpixelY)
 }
 
+// RasterizeHintedVar renders a glyph with font variations applied (ADR-054).
+// Same as RasterizeHinted but uses ExtractOutlineHintedVar to apply gvar deltas.
+func (r *GlyphMaskRasterizer) RasterizeHintedVar(
+	font ParsedFont,
+	gid GlyphID,
+	size float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+	variations []FontVariation,
+) (*GlyphMaskResult, error) {
+	outline, err := r.extractor.ExtractOutlineHintedVar(font, gid, size, hinting, variations)
+	if err != nil {
+		return nil, err
+	}
+	if outline == nil || outline.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
+	}
+
+	return r.rasterizeOutline(outline, subpixelX, subpixelY)
+}
+
 // RasterizeOutline renders a pre-extracted glyph outline into an R8 alpha mask.
 // This is useful when the outline has already been extracted (e.g., from cache).
 func (r *GlyphMaskRasterizer) RasterizeOutline(
@@ -161,6 +182,27 @@ func (r *GlyphMaskRasterizer) RasterizeAliased(
 ) (*GlyphMaskResult, error) {
 	// Extract outline at the target size with hinting.
 	outline, err := r.extractor.ExtractOutlineHinted(font, gid, size, hinting)
+	if err != nil {
+		return nil, err
+	}
+	if outline == nil || outline.IsEmpty() {
+		return nil, nil //nolint:nilnil // nil result = empty glyph, not an error
+	}
+
+	return r.rasterizeOutlineAliased(outline, subpixelX, subpixelY)
+}
+
+// RasterizeAliasedVar renders a glyph with binary coverage and font variations (ADR-054).
+// Same as RasterizeAliased but uses ExtractOutlineHintedVar to apply gvar deltas.
+func (r *GlyphMaskRasterizer) RasterizeAliasedVar(
+	font ParsedFont,
+	gid GlyphID,
+	size float64,
+	subpixelX, subpixelY float64,
+	hinting Hinting,
+	variations []FontVariation,
+) (*GlyphMaskResult, error) {
+	outline, err := r.extractor.ExtractOutlineHintedVar(font, gid, size, hinting, variations)
 	if err != nil {
 		return nil, err
 	}
