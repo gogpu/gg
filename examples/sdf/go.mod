@@ -2,7 +2,7 @@ module github.com/gogpu/gg/examples/sdf
 
 go 1.25.0
 
-require github.com/gogpu/gg v0.50.6
+require github.com/gogpu/gg v0.50.7
 
 require (
 	github.com/gogpu/gpucontext v0.21.1 // indirect
