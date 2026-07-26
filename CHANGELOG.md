@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Common Patterns" section in README: FillPreserve+Stroke, Clear vs
   ClearWithColor, LoadFontFace, ScaleAbout.
 
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.22 → v0.30.23, `gogpu/naga` v0.17.15 → v0.17.16,
+  `go-webgpu/goffi` v0.6.0 → v0.6.2, `go-webgpu/webgpu` v0.5.3 → v0.5.4.
+
 ## [0.50.7] - 2026-07-17
 
 ### Fixed
