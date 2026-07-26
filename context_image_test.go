@@ -323,9 +323,9 @@ func TestSetFillPattern(t *testing.T) {
 	// Set as fill pattern
 	dc.SetFillPattern(pattern)
 
-	// Verify pattern is set
-	if dc.paint.Pattern == nil {
-		t.Error("Expected paint pattern to be set")
+	// Verify pattern is set on fill side
+	if dc.paint.fill.pattern == nil {
+		t.Error("Expected fill pattern to be set")
 	}
 }
 
@@ -343,9 +343,9 @@ func TestSetStrokePattern(t *testing.T) {
 	// Set as stroke pattern
 	dc.SetStrokePattern(pattern)
 
-	// Verify pattern is set
-	if dc.paint.Pattern == nil {
-		t.Error("Expected paint pattern to be set")
+	// Verify pattern is set on stroke side
+	if dc.paint.stroke.pattern == nil {
+		t.Error("Expected stroke pattern to be set")
 	}
 }
 

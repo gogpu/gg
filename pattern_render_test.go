@@ -92,40 +92,41 @@ func TestSolidFillStillWorks(t *testing.T) {
 	}
 }
 
-// TestSetFillPatternUpdatesBrush verifies SetFillPattern keeps Brush in sync.
+// TestSetFillPatternUpdatesBrush verifies SetFillPattern keeps brush in sync.
 func TestSetFillPatternUpdatesBrush(t *testing.T) {
 	dc := NewContext(100, 100)
 
 	pattern := &testPattern{colorFn: func(_, _ float64) RGBA { return Cyan }}
 	dc.SetFillPattern(pattern)
 
-	// Brush should now reflect the pattern
-	brush := dc.paint.Brush
+	// Fill brush should now reflect the pattern
+	brush := dc.paint.fill.brush
 	if brush == nil {
-		t.Fatal("Brush is nil after SetFillPattern")
+		t.Fatal("fill.brush is nil after SetFillPattern")
 	}
 
 	c := brush.ColorAt(0, 0)
 	if c != Cyan {
-		t.Errorf("Brush.ColorAt = %v, want Cyan", c)
+		t.Errorf("fill.brush.ColorAt = %v, want Cyan", c)
 	}
 }
 
-// TestSetStrokePatternUpdatesBrush verifies SetStrokePattern keeps Brush in sync.
+// TestSetStrokePatternUpdatesBrush verifies SetStrokePattern keeps brush in sync.
 func TestSetStrokePatternUpdatesBrush(t *testing.T) {
 	dc := NewContext(100, 100)
 
 	pattern := &testPattern{colorFn: func(_, _ float64) RGBA { return Magenta }}
 	dc.SetStrokePattern(pattern)
 
-	brush := dc.paint.Brush
+	// Stroke brush should now reflect the pattern
+	brush := dc.paint.stroke.brush
 	if brush == nil {
-		t.Fatal("Brush is nil after SetStrokePattern")
+		t.Fatal("stroke.brush is nil after SetStrokePattern")
 	}
 
 	c := brush.ColorAt(0, 0)
 	if c != Magenta {
-		t.Errorf("Brush.ColorAt = %v, want Magenta", c)
+		t.Errorf("stroke.brush.ColorAt = %v, want Magenta", c)
 	}
 }
 
@@ -164,9 +165,8 @@ func TestSolidColorFromPaint(t *testing.T) {
 	})
 
 	t.Run("solid pattern", func(t *testing.T) {
-		paint := &Paint{
-			Pattern: NewSolidPattern(Blue),
-		}
+		paint := &Paint{}
+		paint.fill.pattern = NewSolidPattern(Blue)
 		color, ok := solidColorFromPaint(paint)
 		if !ok {
 			t.Fatal("expected ok=true for solid pattern")
@@ -186,9 +186,8 @@ func TestSolidColorFromPaint(t *testing.T) {
 	})
 
 	t.Run("custom pattern", func(t *testing.T) {
-		paint := &Paint{
-			Pattern: &testPattern{colorFn: func(_, _ float64) RGBA { return Green }},
-		}
+		paint := &Paint{}
+		paint.fill.pattern = &testPattern{colorFn: func(_, _ float64) RGBA { return Green }}
 		_, ok := solidColorFromPaint(paint)
 		if ok {
 			t.Error("expected ok=false for custom pattern")

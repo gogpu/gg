@@ -404,9 +404,9 @@ func TestGetColorFromPaint(t *testing.T) {
 
 	t.Run("pattern", func(t *testing.T) {
 		paint := NewPaint()
-		paint.isSolid = false // bypass inline solid path
-		paint.Brush = nil
-		paint.Pattern = NewSolidPattern(Green)
+		paint.fill.isSolid = false // bypass inline solid path
+		paint.fill.brush = nil
+		paint.fill.pattern = NewSolidPattern(Green)
 		c := getColorFromPaint(paint)
 		if c.G != 1.0 {
 			t.Errorf("color.G = %f, want 1.0", c.G)
@@ -415,9 +415,9 @@ func TestGetColorFromPaint(t *testing.T) {
 
 	t.Run("nil everything", func(t *testing.T) {
 		paint := NewPaint()
-		paint.isSolid = false // bypass inline solid path
-		paint.Brush = nil
-		paint.Pattern = nil
+		paint.fill.isSolid = false // bypass inline solid path
+		paint.fill.brush = nil
+		paint.fill.pattern = nil
 		c := getColorFromPaint(paint)
 		// Should return Black
 		if c.R != 0 || c.G != 0 || c.B != 0 {

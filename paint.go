@@ -34,26 +34,126 @@ const (
 	FillRuleEvenOdd
 )
 
-// Paint represents the styling information for drawing.
-type Paint struct {
+// brushState holds the color/brush/pattern state for one side (fill or stroke)
+// of the dual-brush Paint model. Each side independently tracks whether its
+// color is stored as an inline solid color (zero allocation) or via a Brush/Pattern
+// interface. This matches the Canvas 2D model where fill and stroke styles
+// are independent (ADR-055).
+type brushState struct {
 	// solidColor stores the solid color inline (Skia fColor4f pattern).
 	// When isSolid is true, this is the authoritative color source —
-	// Brush and Pattern are nil, avoiding interface boxing allocations.
+	// brush and pattern are nil, avoiding interface boxing allocations.
 	solidColor RGBA
 
-	// isSolid is true when the paint represents a single solid color
-	// stored in solidColor. When true, Brush and Pattern are nil.
+	// isSolid is true when the state represents a single solid color
+	// stored in solidColor. When true, brush and pattern are nil.
 	isSolid bool
 
-	// Pattern is the fill or stroke pattern.
-	//
-	// Deprecated: Use Brush instead. Pattern is maintained for backward compatibility.
-	Pattern Pattern
+	// brush is the fill or stroke brush (vello/peniko pattern).
+	// When both brush and pattern are set, brush takes precedence.
+	brush Brush
 
-	// Brush is the fill or stroke brush (vello/peniko pattern).
-	// When both Brush and Pattern are set, Brush takes precedence.
-	// Use SetBrush() to set the brush, which also updates Pattern for compatibility.
-	Brush Brush
+	// pattern is the fill or stroke pattern.
+	//
+	// Deprecated: Use brush instead. Pattern is maintained for backward compatibility.
+	pattern Pattern
+}
+
+// setBrush sets the brush for this state.
+// For solid colors, the color is stored inline (zero allocations).
+// For non-solid brushes, it also updates the pattern field for backward compatibility.
+func (s *brushState) setBrush(b Brush) {
+	if sb, ok := b.(SolidBrush); ok {
+		s.solidColor = sb.Color
+		s.isSolid = true
+		s.brush = nil
+		s.pattern = nil
+		return
+	}
+	s.brush = b
+	s.pattern = PatternFromBrush(b)
+	s.isSolid = false
+}
+
+// setPattern sets the pattern for this state.
+// For solid patterns, stores the color inline (zero allocations).
+// Also updates the brush field for consistency with ColorAt precedence.
+func (s *brushState) setPattern(p Pattern) {
+	if sp, ok := p.(*SolidPattern); ok {
+		s.solidColor = sp.Color
+		s.isSolid = true
+		s.brush = nil
+		s.pattern = nil
+		return
+	}
+	s.pattern = p
+	s.brush = BrushFromPattern(p)
+	s.isSolid = false
+}
+
+// setSolidColor sets a solid color inline (zero allocation).
+func (s *brushState) setSolidColor(c RGBA) {
+	s.solidColor = c
+	s.isSolid = true
+	s.brush = nil
+	s.pattern = nil
+}
+
+// colorAt returns the color at the given position.
+// For solid colors, returns the inline color directly (no interface dispatch).
+// For non-solid states, uses brush if set, otherwise falls back to pattern.
+func (s *brushState) colorAt(x, y float64) RGBA {
+	if s.isSolid {
+		return s.solidColor
+	}
+	if s.brush != nil {
+		return s.brush.ColorAt(x, y)
+	}
+	if s.pattern != nil {
+		return s.pattern.ColorAt(x, y)
+	}
+	return Black
+}
+
+// solidColor returns the inline solid color and true if the state is a solid
+// color. Returns (zero, false) for non-solid states (gradients, patterns).
+func (s *brushState) getSolidColor() (RGBA, bool) {
+	if s.isSolid {
+		return s.solidColor, true
+	}
+	return RGBA{}, false
+}
+
+// getBrush returns the current brush.
+// For solid colors, returns a SolidBrush value (no allocation).
+// If brush is nil and not solid, it returns a brush converted from pattern.
+func (s *brushState) getBrush() Brush {
+	if s.isSolid {
+		return SolidBrush{Color: s.solidColor}
+	}
+	if s.brush != nil {
+		return s.brush
+	}
+	if s.pattern != nil {
+		return BrushFromPattern(s.pattern)
+	}
+	return SolidBrush{Color: Black}
+}
+
+// Paint represents the styling information for drawing.
+//
+// Paint uses a dual-brush model (ADR-055) where fill and stroke operations
+// have independent color/brush/pattern state. This matches the Canvas 2D
+// specification where fillStyle and strokeStyle are separate properties.
+//
+// Legacy methods (SetBrush, ColorAt, etc.) operate on BOTH sides for backward
+// compatibility. Use the explicit Fill/Stroke variants for independent control.
+type Paint struct {
+	// fill holds the color state for fill operations.
+	fill brushState
+
+	// stroke holds the color state for stroke operations.
+	stroke brushState
 
 	// LineWidth is the width of strokes.
 	//
@@ -132,10 +232,12 @@ type Paint struct {
 }
 
 // NewPaint creates a new Paint with default values.
+// Both fill and stroke sides are initialized to solid Black.
 func NewPaint() *Paint {
+	defaultBrush := brushState{solidColor: Black, isSolid: true}
 	return &Paint{
-		solidColor: Black,
-		isSolid:    true,
+		fill:       defaultBrush,
+		stroke:     defaultBrush,
 		LineWidth:  1.0,
 		LineCap:    LineCapButt,
 		LineJoin:   LineJoinMiter,
@@ -147,12 +249,11 @@ func NewPaint() *Paint {
 }
 
 // Clone creates a copy of the Paint.
+// Both fill and stroke brush states are copied independently.
 func (p *Paint) Clone() *Paint {
 	clone := &Paint{
-		solidColor: p.solidColor,
-		isSolid:    p.isSolid,
-		Pattern:    p.Pattern,
-		Brush:      p.Brush,
+		fill:       p.fill,
+		stroke:     p.stroke,
 		LineWidth:  p.LineWidth,
 		LineCap:    p.LineCap,
 		LineJoin:   p.LineJoin,
@@ -168,68 +269,107 @@ func (p *Paint) Clone() *Paint {
 	return clone
 }
 
-// SetBrush sets the brush for this Paint.
+// SetBrush sets the brush for BOTH fill and stroke (backward compatibility).
 // For solid colors, the color is stored inline (zero allocations).
 // For non-solid brushes, it also updates the Pattern field for backward compatibility.
 func (p *Paint) SetBrush(b Brush) {
-	if sb, ok := b.(SolidBrush); ok {
-		p.solidColor = sb.Color
-		p.isSolid = true
-		p.Brush = nil
-		p.Pattern = nil
-		return
-	}
-	p.Brush = b
-	p.Pattern = PatternFromBrush(b)
-	p.isSolid = false
+	p.fill.setBrush(b)
+	p.stroke.setBrush(b)
 }
 
-// GetBrush returns the current brush.
+// SetFillBrush sets the brush for fill operations only.
+// This does not affect the stroke brush.
+func (p *Paint) SetFillBrush(b Brush) {
+	p.fill.setBrush(b)
+}
+
+// SetStrokeBrush sets the brush for stroke operations only.
+// This does not affect the fill brush.
+func (p *Paint) SetStrokeBrush(b Brush) {
+	p.stroke.setBrush(b)
+}
+
+// GetBrush returns the current fill brush (backward compatibility alias).
 // For solid colors, returns a SolidBrush value (no allocation).
-// If Brush is nil and not solid, it returns a brush converted from Pattern.
+//
+// Deprecated: Use FillBrush() or StrokeBrush() for explicit side selection.
 func (p *Paint) GetBrush() Brush {
-	if p.isSolid {
-		return SolidBrush{Color: p.solidColor}
-	}
-	if p.Brush != nil {
-		return p.Brush
-	}
-	if p.Pattern != nil {
-		return BrushFromPattern(p.Pattern)
-	}
-	return SolidBrush{Color: Black}
+	return p.fill.getBrush()
 }
 
-// ColorAt returns the color at the given position.
+// FillBrush returns the current fill brush.
+func (p *Paint) FillBrush() Brush {
+	return p.fill.getBrush()
+}
+
+// StrokeBrush returns the current stroke brush.
+func (p *Paint) StrokeBrush() Brush {
+	return p.stroke.getBrush()
+}
+
+// ColorAt returns the fill color at the given position (backward compatibility).
 // For solid colors, returns the inline color directly (no interface dispatch).
-// For non-solid paints, uses Brush if set, otherwise falls back to Pattern.
+//
+// Deprecated: Use FillColorAt() or StrokeColorAt() for explicit side selection.
 func (p *Paint) ColorAt(x, y float64) RGBA {
-	if p.isSolid {
-		return p.solidColor
-	}
-	if p.Brush != nil {
-		return p.Brush.ColorAt(x, y)
-	}
-	if p.Pattern != nil {
-		return p.Pattern.ColorAt(x, y)
-	}
-	return Black
+	return p.fill.colorAt(x, y)
 }
 
-// SolidColor returns the inline solid color and true if the paint is a solid
+// FillColorAt returns the fill color at the given position.
+func (p *Paint) FillColorAt(x, y float64) RGBA {
+	return p.fill.colorAt(x, y)
+}
+
+// StrokeColorAt returns the stroke color at the given position.
+func (p *Paint) StrokeColorAt(x, y float64) RGBA {
+	return p.stroke.colorAt(x, y)
+}
+
+// SolidColor returns the inline fill solid color and true if the fill is a solid
 // color. Returns (zero, false) for non-solid paints (gradients, patterns).
-// This is the recommended way for external packages to check solid color
-// without interface type assertions on Brush/Pattern.
+//
+// Deprecated: Use FillSolidColor() or StrokeSolidColor() for explicit side selection.
 func (p *Paint) SolidColor() (RGBA, bool) {
-	if p.isSolid {
-		return p.solidColor, true
-	}
-	return RGBA{}, false
+	return p.fill.getSolidColor()
 }
 
-// IsSolid reports whether the paint is a solid color stored inline.
+// FillSolidColor returns the inline fill solid color and true if the fill is
+// solid. Returns (zero, false) for non-solid fills (gradients, patterns).
+func (p *Paint) FillSolidColor() (RGBA, bool) {
+	return p.fill.getSolidColor()
+}
+
+// StrokeSolidColor returns the inline stroke solid color and true if the stroke
+// is solid. Returns (zero, false) for non-solid strokes (gradients, patterns).
+func (p *Paint) StrokeSolidColor() (RGBA, bool) {
+	return p.stroke.getSolidColor()
+}
+
+// IsSolid reports whether the fill paint is a solid color stored inline.
+//
+// Deprecated: Use IsFillSolid() or IsStrokeSolid() for explicit side selection.
 func (p *Paint) IsSolid() bool {
-	return p.isSolid
+	return p.fill.isSolid
+}
+
+// IsFillSolid reports whether the fill paint is a solid color stored inline.
+func (p *Paint) IsFillSolid() bool {
+	return p.fill.isSolid
+}
+
+// IsStrokeSolid reports whether the stroke paint is a solid color stored inline.
+func (p *Paint) IsStrokeSolid() bool {
+	return p.stroke.isSolid
+}
+
+// colorAtForMode returns a closure that reads from the fill or stroke side
+// depending on strokeMode. Used by SoftwareRenderer to avoid threading a
+// mode parameter through every blend function.
+func (p *Paint) colorAtForMode(strokeMode bool) func(x, y float64) RGBA {
+	if strokeMode {
+		return p.stroke.colorAt
+	}
+	return p.fill.colorAt
 }
 
 // GetStroke returns the effective stroke style.

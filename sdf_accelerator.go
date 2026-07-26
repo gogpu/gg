@@ -137,7 +137,7 @@ func shapeTooSmallForSDF(shape DetectedShape) bool {
 // fillCircleSDF renders a filled circle using SDF coverage.
 func (a *SDFAccelerator) fillCircleSDF(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	cx, cy, r := shape.CenterX, shape.CenterY, shape.RadiusX
-	color := getColorFromPaint(paint)
+	color := getFillColorFromPaint(paint)
 
 	// Bounding box with 1px padding for anti-aliasing.
 	minX := int(math.Max(0, math.Floor(cx-r-1)))
@@ -159,7 +159,7 @@ func (a *SDFAccelerator) fillCircleSDF(target GPURenderTarget, shape DetectedSha
 // strokeCircleSDF renders a stroked circle using SDF coverage.
 func (a *SDFAccelerator) strokeCircleSDF(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	cx, cy, r := shape.CenterX, shape.CenterY, shape.RadiusX
-	color := getColorFromPaint(paint)
+	color := getStrokeColorFromPaint(paint)
 	halfW := paint.EffectiveLineWidth() / 2
 
 	// Bounding box with stroke width + 1px padding.
@@ -184,7 +184,7 @@ func (a *SDFAccelerator) strokeCircleSDF(target GPURenderTarget, shape DetectedS
 func (a *SDFAccelerator) fillEllipseSDF(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	cx, cy := shape.CenterX, shape.CenterY
 	rx, ry := shape.RadiusX, shape.RadiusY
-	color := getColorFromPaint(paint)
+	color := getFillColorFromPaint(paint)
 
 	// Bounding box with 1px padding.
 	minX := int(math.Max(0, math.Floor(cx-rx-1)))
@@ -211,7 +211,7 @@ func (a *SDFAccelerator) fillEllipseSDF(target GPURenderTarget, shape DetectedSh
 func (a *SDFAccelerator) strokeEllipseSDF(target GPURenderTarget, shape DetectedShape, paint *Paint) error {
 	cx, cy := shape.CenterX, shape.CenterY
 	rx, ry := shape.RadiusX, shape.RadiusY
-	color := getColorFromPaint(paint)
+	color := getStrokeColorFromPaint(paint)
 	halfW := paint.EffectiveLineWidth() / 2
 
 	pad := halfW + 1
@@ -240,7 +240,7 @@ func (a *SDFAccelerator) fillRRectSDF(target GPURenderTarget, shape DetectedShap
 	cx, cy := shape.CenterX, shape.CenterY
 	halfW, halfH := shape.Width/2, shape.Height/2
 	cr := shape.CornerRadius
-	color := getColorFromPaint(paint)
+	color := getFillColorFromPaint(paint)
 
 	// Bounding box with 1px padding.
 	minX := int(math.Max(0, math.Floor(cx-halfW-1)))
@@ -264,7 +264,7 @@ func (a *SDFAccelerator) strokeRRectSDF(target GPURenderTarget, shape DetectedSh
 	cx, cy := shape.CenterX, shape.CenterY
 	halfW, halfH := shape.Width/2, shape.Height/2
 	cr := shape.CornerRadius
-	color := getColorFromPaint(paint)
+	color := getStrokeColorFromPaint(paint)
 	halfStroke := paint.EffectiveLineWidth() / 2
 
 	pad := halfStroke + 1
@@ -284,20 +284,38 @@ func (a *SDFAccelerator) strokeRRectSDF(target GPURenderTarget, shape DetectedSh
 	return nil
 }
 
-// getColorFromPaint extracts a solid color from the paint.
+// getColorFromPaint extracts a solid fill color from the paint.
 // If the paint uses a gradient or pattern, returns the color at (0, 0).
+//
+// Deprecated: Use getFillColorFromPaint or getStrokeColorFromPaint.
 func getColorFromPaint(paint *Paint) RGBA {
-	if paint.isSolid {
-		return paint.solidColor
+	return getColorFromBrushState(&paint.fill)
+}
+
+// getFillColorFromPaint extracts the fill color from the paint.
+func getFillColorFromPaint(paint *Paint) RGBA {
+	return getColorFromBrushState(&paint.fill)
+}
+
+// getStrokeColorFromPaint extracts the stroke color from the paint.
+func getStrokeColorFromPaint(paint *Paint) RGBA {
+	return getColorFromBrushState(&paint.stroke)
+}
+
+// getColorFromBrushState extracts a solid color from a brushState.
+// If the state uses a gradient or pattern, returns the color at (0, 0).
+func getColorFromBrushState(s *brushState) RGBA {
+	if s.isSolid {
+		return s.solidColor
 	}
-	if paint.Brush != nil {
-		if sb, ok := paint.Brush.(SolidBrush); ok {
+	if s.brush != nil {
+		if sb, ok := s.brush.(SolidBrush); ok {
 			return sb.Color
 		}
-		return paint.Brush.ColorAt(0, 0)
+		return s.brush.ColorAt(0, 0)
 	}
-	if paint.Pattern != nil {
-		return paint.Pattern.ColorAt(0, 0)
+	if s.pattern != nil {
+		return s.pattern.ColorAt(0, 0)
 	}
 	return Black
 }

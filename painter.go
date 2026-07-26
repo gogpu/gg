@@ -33,31 +33,41 @@ func (p *FuncPainter) PaintSpan(dest []RGBA, x, y, length int) {
 	}
 }
 
-// PainterFromPaint creates the appropriate Painter for a Paint.
+// PainterFromPaint creates the appropriate Painter for the fill side of a Paint.
 // Solid paints return SolidPainter (fast). Non-solid paints return FuncPainter
-// that samples paint.ColorAt per pixel.
+// that samples the fill brush per pixel.
 func PainterFromPaint(paint *Paint) Painter {
+	return painterFromBrushState(&paint.fill)
+}
+
+// PainterFromPaintStroke creates the appropriate Painter for the stroke side of a Paint.
+func PainterFromPaintStroke(paint *Paint) Painter {
+	return painterFromBrushState(&paint.stroke)
+}
+
+// painterFromBrushState creates the appropriate Painter for a brushState.
+func painterFromBrushState(s *brushState) Painter {
 	// Fast path: inline solid color (no interface dispatch).
-	if paint.isSolid {
-		return &SolidPainter{Color: paint.solidColor}
+	if s.isSolid {
+		return &SolidPainter{Color: s.solidColor}
 	}
-	// Check Brush first (takes precedence)
-	if paint.Brush != nil {
-		if sb, ok := paint.Brush.(SolidBrush); ok {
+	// Check brush first (takes precedence)
+	if s.brush != nil {
+		if sb, ok := s.brush.(SolidBrush); ok {
 			return &SolidPainter{Color: sb.Color}
 		}
 		// Check if the Brush itself implements Painter (power-user opt-in)
-		if p, ok := paint.Brush.(Painter); ok {
+		if p, ok := s.brush.(Painter); ok {
 			return p
 		}
-		return &FuncPainter{Fn: paint.Brush.ColorAt}
+		return &FuncPainter{Fn: s.brush.ColorAt}
 	}
-	// Fall back to Pattern
-	if paint.Pattern != nil {
-		if sp, ok := paint.Pattern.(*SolidPattern); ok {
+	// Fall back to pattern
+	if s.pattern != nil {
+		if sp, ok := s.pattern.(*SolidPattern); ok {
 			return &SolidPainter{Color: sp.Color}
 		}
-		return &FuncPainter{Fn: paint.Pattern.ColorAt}
+		return &FuncPainter{Fn: s.pattern.ColorAt}
 	}
 	return &SolidPainter{Color: Black}
 }

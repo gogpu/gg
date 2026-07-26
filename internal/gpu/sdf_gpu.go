@@ -319,16 +319,42 @@ func (a *SDFAccelerator) ensureDefaultCtx() {
 	}
 }
 
-// getColorFromPaint extracts the solid color from a paint.
+// getColorFromPaint extracts the solid fill color from a paint.
+// Uses the public FillSolidColor/FillBrush accessors to read from the fill side.
+//
+// In the GPU pipeline, paint is copied by value at queue time into drawCommand.
+// The drawCommand knows its kind (fill vs stroke), so the GPU dispatchers call
+// the appropriate color extraction function.
 func getColorFromPaint(paint *gg.Paint) gg.RGBA {
-	if color, ok := paint.SolidColor(); ok {
+	return getFillColorFromPaint(paint)
+}
+
+// getFillColorFromPaint extracts the fill color from a paint.
+func getFillColorFromPaint(paint *gg.Paint) gg.RGBA {
+	if color, ok := paint.FillSolidColor(); ok {
 		return color
 	}
-	if paint.Brush != nil {
-		if sb, isSolid := paint.Brush.(gg.SolidBrush); isSolid {
+	b := paint.FillBrush()
+	if b != nil {
+		if sb, isSolid := b.(gg.SolidBrush); isSolid {
 			return sb.Color
 		}
-		return paint.Brush.ColorAt(0, 0)
+		return b.ColorAt(0, 0)
+	}
+	return gg.Black
+}
+
+// getStrokeColorFromPaint extracts the stroke color from a paint.
+func getStrokeColorFromPaint(paint *gg.Paint) gg.RGBA {
+	if color, ok := paint.StrokeSolidColor(); ok {
+		return color
+	}
+	b := paint.StrokeBrush()
+	if b != nil {
+		if sb, isSolid := b.(gg.SolidBrush); isSolid {
+			return sb.Color
+		}
+		return b.ColorAt(0, 0)
 	}
 	return gg.Black
 }

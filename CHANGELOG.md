@@ -31,12 +31,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 115 enterprise blend mode tests with pixel-level verification for all
   29 modes, gradient fills, anti-aliased geometry, semi-transparent
   foreground, stroke blending, and byte-level formula validation.
+- **Shaper HVAR advances for variable fonts** ([#405](https://github.com/gogpu/gg/issues/405)) —
+  OwnShaper and BuiltinShaper used base-weight hmtx advances while outlines
+  had gvar deltas applied (ADR-054). Bold glyphs at narrower spacing caused
+  letters to overlap under shear/rotation. Fix: shapers now use
+  `GlyphAdvanceVar` (HVAR-adjusted) when face has variations, matching
+  the skrifa invariant.
 - `ScaleAbout(sx, sy, x, y)` — scale around a point, matching `RotateAbout`
   ([#442](https://github.com/gogpu/gg/issues/442)). Also `ShearAbout`.
 - `LoadFontFace` undeprecated — convenience one-liner for quick start.
   Advanced usage (variable fonts, features) still uses `text.NewFontSourceFromFile`.
 - "Common Patterns" section in README: FillPreserve+Stroke, Clear vs
   ClearWithColor, LoadFontFace, ScaleAbout.
+- **Separate fill and stroke brushes** ([#438](https://github.com/gogpu/gg/issues/438)) —
+  `SetFillBrush` and `SetStrokeBrush` are now genuinely independent, matching
+  HTML5 Canvas `fillStyle`/`strokeStyle` semantics. Previously they aliased to
+  the same brush. `SetColor`/`SetRGB`/`SetHexColor` set both (backward compat).
+  Paint internally uses a `brushState` struct for each side with explicit
+  `FillColorAt`/`StrokeColorAt` methods. SoftwareRenderer and GPU pipeline
+  route fill/stroke operations to the correct brush. ADR-055.
+- **Push/Pop saves paint state** — `Push`/`Pop` now save and restore fill brush,
+  stroke brush, and blend mode (matching Cairo `cairo_save`/Canvas `ctx.save`).
+  Previously paint was not saved — pre-existing bug.
 
 ### Changed
 

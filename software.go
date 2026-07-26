@@ -46,6 +46,13 @@ type SoftwareRenderer struct {
 	// Matches Skia fOuter.reset() pattern — zero per-stroke allocation.
 	scratchStrokePath *Path
 
+	// strokeMode is set by the Stroke() entry point to indicate that shared
+	// blend functions should read from the stroke brush state instead of fill.
+	// The Fill() entry clears this to false. This avoids threading a parameter
+	// through every blend function — the renderer already carries state
+	// (rasterizerMode, antiAlias) that is set contextually per-call.
+	strokeMode bool
+
 	// Clip bounds for scanline/tile skipping (ADR-052 Layer A).
 	// When hasClip is true, both the AnalyticFiller and CoverageFiller
 	// skip scanlines/tiles outside the clip rectangle at zero per-pixel cost.
@@ -315,7 +322,7 @@ func (r *SoftwareRenderer) fillWithCoverageFiller(
 	clipMaskX := paint.ClipMaskX
 	clipMaskY := paint.ClipMaskY
 	bfn := lookupBlendFuncForPaint(paint)
-	if color, ok := solidColorFromPaint(paint); ok {
+	if color, ok := solidColorForMode(paint, r.strokeMode); ok {
 		r.fillCoverageSolidPath(pixmap, p, filler, fillRule, cb, color, clipFn, maskFn, clipMask, clipMaskW, clipMaskX, clipMaskY, bfn)
 	} else {
 		r.fillCoveragePaintPath(pixmap, p, filler, fillRule, cb, paint, clipFn, maskFn, clipMask, clipMaskW, clipMaskX, clipMaskY, bfn)
@@ -368,6 +375,7 @@ func (r *SoftwareRenderer) fillCoveragePaintPath(
 	clipMask []uint8, clipMaskW, clipMaskX, clipMaskY int,
 	bfn blendFunc,
 ) {
+	colorAt := paint.colorAtForMode(r.strokeMode)
 	if bfn == nil {
 		filler.FillCoverage(p, r.width, r.height, fillRule, cb,
 			func(x, y int, coverage uint8) {
@@ -376,7 +384,8 @@ func (r *SoftwareRenderer) fillCoveragePaintPath(
 				if coverage == 0 {
 					return
 				}
-				r.blendCoveragePaint(pixmap, x, y, coverage, paint)
+				c := colorAt(float64(x)+0.5, float64(y)+0.5)
+				r.blendCoverageSolid(pixmap, x, y, coverage, c)
 			})
 		return
 	}
@@ -388,7 +397,7 @@ func (r *SoftwareRenderer) fillCoveragePaintPath(
 			if coverage == 0 {
 				return
 			}
-			c := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+			c := colorAt(float64(x)+0.5, float64(y)+0.5)
 			r.blendCoverageSolidMode(pixmap, x, y, coverage, c, bfn)
 		})
 }
@@ -474,6 +483,11 @@ func applyMaskCoverage(maskFn func(x, y int) uint8, px, py int, coverage uint8) 
 // When rasterizerMode is set (via Context.SetRasterizerMode), the forced
 // algorithm is used instead of auto-selection.
 func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// strokeMode is set by the caller (Context.doFill → false, Context.doStroke → true)
+	// or by SoftwareRenderer.Stroke → true. Fill does NOT override it because
+	// Stroke expands the stroke to a fill path and calls Fill internally —
+	// overriding strokeMode here would break the stroke color routing.
+
 	// Non-AA path: completely separate code path (Skia/tiny-skia pattern).
 	// Integer scanline, binary coverage, no CoverageFiller/AnalyticFiller.
 	if !r.antiAlias {
@@ -553,7 +567,7 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 
 	bfn := lookupBlendFuncForPaint(paint)
-	if color, ok := solidColorFromPaint(paint); ok {
+	if color, ok := solidColorForMode(paint, r.strokeMode); ok {
 		// Fast path: solid color
 		clipFn := paint.ClipCoverage
 		maskFn := paint.MaskCoverage
@@ -623,7 +637,7 @@ func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 	maskFn := paint.MaskCoverage
 
 	bfn := lookupBlendFuncForPaint(paint)
-	if color, ok := solidColorFromPaint(paint); ok {
+	if color, ok := solidColorForMode(paint, r.strokeMode); ok {
 		r.noAAFiller.Fill(r.noAAEdgeBuilder, coreFillRule, func(y, left, spanWidth int) {
 			r.blitNoAASolidSpan(pixmap, y, left, spanWidth, color, clipFn, maskFn, bfn)
 		})
@@ -662,18 +676,20 @@ func (r *SoftwareRenderer) blitNoAASolidSpan(
 }
 
 // blitNoAAPaintSpan blits a paint-sampled span with optional clip and mask.
+// Reads from fill or stroke brush state based on r.strokeMode.
 func (r *SoftwareRenderer) blitNoAAPaintSpan(
 	pixmap *Pixmap, y, left, spanWidth int, paint *Paint,
 	clipFn func(float64, float64) byte, maskFn func(int, int) uint8,
 	bfn blendFunc,
 ) {
+	colorAt := paint.colorAtForMode(r.strokeMode)
 	if bfn != nil {
 		for x := left; x < left+spanWidth; x++ {
 			cov := noaaPixelCoverage(x, y, clipFn, maskFn)
 			if cov == 0 {
 				continue
 			}
-			c := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+			c := colorAt(float64(x)+0.5, float64(y)+0.5)
 			r.blendCoverageSolidMode(pixmap, x, y, cov, c, bfn)
 		}
 		return
@@ -683,7 +699,7 @@ func (r *SoftwareRenderer) blitNoAAPaintSpan(
 		if cov == 0 {
 			continue
 		}
-		c := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+		c := colorAt(float64(x)+0.5, float64(y)+0.5)
 		r.blendCoverageSolid(pixmap, x, y, cov, c)
 	}
 }
@@ -840,12 +856,18 @@ func lerpByte(a, b, t byte) byte {
 
 // blendCoveragePaint blends a single pixel with paint-sampled color and coverage.
 // Uses premultiplied source-over compositing.
+// Reads from fill or stroke brush state based on r.strokeMode.
 func (r *SoftwareRenderer) blendCoveragePaint(pixmap *Pixmap, x, y int, coverage uint8, paint *Paint) {
 	if x < 0 || x >= pixmap.Width() || y < 0 || y >= pixmap.Height() {
 		return
 	}
 
-	color := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+	var color RGBA
+	if r.strokeMode {
+		color = paint.StrokeColorAt(float64(x)+0.5, float64(y)+0.5)
+	} else {
+		color = paint.FillColorAt(float64(x)+0.5, float64(y)+0.5)
+	}
 
 	if coverage == 255 && color.A == 1.0 {
 		pixmap.SetPixel(x, y, color)
@@ -891,22 +913,35 @@ func (r *SoftwareRenderer) forcedFiller(mode RasterizerMode) CoverageFiller {
 	}
 }
 
-// solidColorFromPaint returns the solid color if paint is solid.
+// solidColorFromPaint returns the solid fill color if paint fill is solid.
 // Returns (color, true) for solid paints, (zero, false) for patterns/gradients.
+//
+// Deprecated: Use solidColorForMode for fill/stroke-aware color extraction.
 func solidColorFromPaint(paint *Paint) (RGBA, bool) {
-	// Fast path: inline solid color (zero allocation, no interface dispatch).
-	if paint.isSolid {
-		return paint.solidColor, true
+	return solidColorFromBrushState(&paint.fill)
+}
+
+// solidColorForMode returns the solid color from the fill or stroke side,
+// depending on strokeMode.
+func solidColorForMode(paint *Paint, strokeMode bool) (RGBA, bool) {
+	if strokeMode {
+		return solidColorFromBrushState(&paint.stroke)
 	}
-	// Check Brush first (takes precedence)
-	if paint.Brush != nil {
-		if sb, ok := paint.Brush.(SolidBrush); ok {
+	return solidColorFromBrushState(&paint.fill)
+}
+
+// solidColorFromBrushState extracts a solid color from a brushState.
+func solidColorFromBrushState(s *brushState) (RGBA, bool) {
+	if s.isSolid {
+		return s.solidColor, true
+	}
+	if s.brush != nil {
+		if sb, ok := s.brush.(SolidBrush); ok {
 			return sb.Color, true
 		}
 		return RGBA{}, false
 	}
-	// Fall back to Pattern
-	if sp, ok := paint.Pattern.(*SolidPattern); ok {
+	if sp, ok := s.pattern.(*SolidPattern); ok {
 		return sp.Color, true
 	}
 	return RGBA{}, false
@@ -993,6 +1028,7 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRuns(pixmap *Pixmap, y int, run
 
 // blendAlphaRunsFromCoreRunsPaint is like blendAlphaRunsFromCoreRuns but samples
 // the paint color at each pixel instead of using a single constant color.
+// Reads from fill or stroke brush state based on r.strokeMode.
 // When clipFn is non-nil, each pixel's alpha is multiplied by the clip coverage.
 // When maskFn is non-nil, each pixel's alpha is multiplied by the mask coverage.
 func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int, runs *raster.AlphaRuns, paint *Paint,
@@ -1003,6 +1039,8 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 	if y < 0 || y >= pixmap.Height() {
 		return
 	}
+
+	colorAt := paint.colorAtForMode(r.strokeMode)
 
 	// Non-SourceOver: dispatch via blend function.
 	if bfn != nil {
@@ -1018,7 +1056,7 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 			if alpha == 0 {
 				continue
 			}
-			c := paint.ColorAt(float64(x)+0.5, float64(y)+0.5)
+			c := colorAt(float64(x)+0.5, float64(y)+0.5)
 			r.blendCoverageSolidMode(pixmap, x, y, alpha, c, bfn)
 		}
 		return
@@ -1049,7 +1087,7 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 		fy := float64(y) + 0.5
 
 		// Sample color from paint at pixel center
-		color := paint.ColorAt(fx, fy)
+		color := colorAt(fx, fy)
 
 		if alpha == 255 && color.A == 1.0 {
 			pixmap.SetPixel(x, y, color)
@@ -1078,6 +1116,10 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 // Strokes are expanded to fill paths and rendered with the Fill method,
 // which provides analytic anti-aliased results.
 func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
+	// Stroke reads from the stroke brush state.
+	r.strokeMode = true
+	defer func() { r.strokeMode = false }()
+
 	// Get effective line width
 	width := paint.EffectiveLineWidth()
 
