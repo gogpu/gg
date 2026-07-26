@@ -479,7 +479,8 @@ func TestDetectedShapeToRenderShapeCircle(t *testing.T) {
 		CenterX: 100, CenterY: 200,
 		RadiusX: 50, RadiusY: 50,
 	}
-	paint := &gg.Paint{Brush: gg.SolidBrush{Color: gg.RGBA{R: 1, G: 0, B: 0, A: 1}}}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 1, G: 0, B: 0, A: 1}})
 
 	rs, ok := DetectedShapeToRenderShape(shape, paint, false)
 	if !ok {
@@ -509,7 +510,8 @@ func TestDetectedShapeToRenderShapeEllipse(t *testing.T) {
 		CenterX: 50, CenterY: 50,
 		RadiusX: 40, RadiusY: 20,
 	}
-	paint := &gg.Paint{Brush: gg.SolidBrush{Color: gg.RGBA{R: 0, G: 1, B: 0, A: 0.5}}}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 0, G: 1, B: 0, A: 0.5}})
 
 	rs, ok := DetectedShapeToRenderShape(shape, paint, false)
 	if !ok {
@@ -537,7 +539,8 @@ func TestDetectedShapeToRenderShapeRRect(t *testing.T) {
 		Width: 200, Height: 100,
 		CornerRadius: 15,
 	}
-	paint := &gg.Paint{Brush: gg.SolidBrush{Color: gg.RGBA{R: 0, G: 0, B: 1, A: 1}}}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 0, G: 0, B: 1, A: 1}})
 
 	rs, ok := DetectedShapeToRenderShape(shape, paint, false)
 	if !ok {
@@ -561,7 +564,8 @@ func TestDetectedShapeToRenderShapeRect(t *testing.T) {
 		CenterX: 50, CenterY: 50,
 		Width: 80, Height: 60,
 	}
-	paint := &gg.Paint{Brush: gg.SolidBrush{Color: gg.RGBA{R: 1, G: 1, B: 1, A: 1}}}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 1, G: 1, B: 1, A: 1}})
 
 	rs, ok := DetectedShapeToRenderShape(shape, paint, false)
 	if !ok {
@@ -581,10 +585,9 @@ func TestDetectedShapeToRenderShapeStroked(t *testing.T) {
 		CenterX: 100, CenterY: 100,
 		RadiusX: 50, RadiusY: 50,
 	}
-	paint := &gg.Paint{
-		Brush:     gg.SolidBrush{Color: gg.RGBA{R: 1, G: 0, B: 0, A: 1}},
-		LineWidth: 4,
-	}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 1, G: 0, B: 0, A: 1}})
+	paint.SetStroke(gg.Stroke{Width: 4, Cap: gg.LineCapButt, Join: gg.LineJoinMiter, MiterLimit: 10})
 
 	rs, ok := DetectedShapeToRenderShape(shape, paint, true)
 	if !ok {
@@ -600,7 +603,8 @@ func TestDetectedShapeToRenderShapeStroked(t *testing.T) {
 
 func TestDetectedShapeToRenderShapeUnknown(t *testing.T) {
 	shape := gg.DetectedShape{Kind: gg.ShapeUnknown}
-	paint := &gg.Paint{Brush: gg.SolidBrush{Color: gg.RGBA{R: 1, A: 1}}}
+	paint := gg.NewPaint()
+	paint.SetBrush(gg.SolidBrush{Color: gg.RGBA{R: 1, A: 1}})
 
 	_, ok := DetectedShapeToRenderShape(shape, paint, false)
 	if ok {

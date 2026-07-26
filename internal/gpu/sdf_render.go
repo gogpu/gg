@@ -684,7 +684,13 @@ func DetectedShapeToRenderShape(shape gg.DetectedShape, paint *gg.Paint, stroked
 		rs.IsStroked = 1.0
 	}
 
-	color := getColorFromPaint(paint)
+	// Read color from the appropriate side: fill for filled shapes, stroke for stroked.
+	var color gg.RGBA
+	if stroked {
+		color = getStrokeColorFromPaint(paint)
+	} else {
+		color = getFillColorFromPaint(paint)
+	}
 	// Premultiply color for GPU blending.
 	rs.ColorR = float32(color.R * color.A)
 	rs.ColorG = float32(color.G * color.A)

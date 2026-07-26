@@ -1177,7 +1177,7 @@ func TestDrawCommand_PaintCopied(t *testing.T) {
 		t.Fatalf("expected 1 pendingDraw, got %d", len(rc.pendingDraws))
 	}
 
-	queuedColor, ok := rc.pendingDraws[0].paint.SolidColor()
+	queuedColor, ok := rc.pendingDraws[0].paint.FillSolidColor()
 	if !ok {
 		t.Fatal("expected solid color in queued paint")
 	}

@@ -19,9 +19,8 @@ func TestPainterFromPaint_Solid(t *testing.T) {
 }
 
 func TestPainterFromPaint_SolidPattern(t *testing.T) {
-	paint := &Paint{
-		Pattern: NewSolidPattern(Blue),
-	}
+	paint := &Paint{}
+	paint.fill.pattern = NewSolidPattern(Blue)
 
 	painter := PainterFromPaint(paint)
 	sp, ok := painter.(*SolidPainter)
@@ -47,9 +46,8 @@ func TestPainterFromPaint_CustomBrush(t *testing.T) {
 }
 
 func TestPainterFromPaint_CustomPattern(t *testing.T) {
-	paint := &Paint{
-		Pattern: &testPattern{colorFn: func(_, _ float64) RGBA { return Green }},
-	}
+	paint := &Paint{}
+	paint.fill.pattern = &testPattern{colorFn: func(_, _ float64) RGBA { return Green }}
 
 	painter := PainterFromPaint(paint)
 	fp, ok := painter.(*FuncPainter)

@@ -318,6 +318,20 @@ func (r *Recorder) RotateAbout(angle, x, y float64) {
 	r.Translate(-x, -y)
 }
 
+// ScaleAbout scales around a specific point.
+func (r *Recorder) ScaleAbout(sx, sy, x, y float64) {
+	r.Translate(x, y)
+	r.Scale(sx, sy)
+	r.Translate(-x, -y)
+}
+
+// ShearAbout shears around a specific point.
+func (r *Recorder) ShearAbout(sx, sy, x, y float64) {
+	r.Translate(x, y)
+	r.Shear(sx, sy)
+	r.Translate(-x, -y)
+}
+
 // Shear applies a shear transformation.
 func (r *Recorder) Shear(x, y float64) {
 	r.transform = r.transform.Multiply(Shear(x, y))

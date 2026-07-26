@@ -441,19 +441,16 @@ func (c *Context) MeasureString(s string) (w, h float64) {
 }
 
 // LoadFontFace loads a font from a file and sets it as the current font.
-// The size is specified in points.
+// The size is specified in points. This is a convenience method equivalent to:
 //
-// Deprecated: Use text.NewFontSourceFromFile and SetFont instead.
-// This method is provided for convenience and backward compatibility.
-//
-// Example (new way):
-//
-//	source, err := text.NewFontSourceFromFile("font.ttf")
+//	source, err := text.NewFontSourceFromFile(path)
 //	if err != nil {
 //	    return err
 //	}
-//	face := source.Face(12.0)
-//	ctx.SetFont(face)
+//	dc.SetFont(source.Face(points))
+//
+// For advanced usage (variable fonts, OpenType features, font reuse across
+// contexts), use [text.NewFontSourceFromFile] and [Context.SetFont] directly.
 func (c *Context) LoadFontFace(path string, points float64) error {
 	source, err := text.NewFontSourceFromFile(path)
 	if err != nil {

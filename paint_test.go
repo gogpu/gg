@@ -78,7 +78,7 @@ func TestPaintSetBrush(t *testing.T) {
 		p := NewPaint()
 		p.SetBrush(Solid(Blue))
 
-		// Solid brushes are stored inline — Brush and Pattern are nil.
+		// Solid brushes are stored inline — brush and pattern are nil.
 		if !p.IsSolid() {
 			t.Error("IsSolid = false after SetBrush(Solid)")
 		}
@@ -86,11 +86,11 @@ func TestPaintSetBrush(t *testing.T) {
 		if !ok || c != Blue {
 			t.Errorf("SolidColor = %v, %v, want Blue, true", c, ok)
 		}
-		if p.Brush != nil {
-			t.Error("Brush should be nil for solid color")
+		if p.fill.brush != nil {
+			t.Error("fill.brush should be nil for solid color")
 		}
-		if p.Pattern != nil {
-			t.Error("Pattern should be nil for solid color")
+		if p.fill.pattern != nil {
+			t.Error("fill.pattern should be nil for solid color")
 		}
 	})
 
@@ -102,11 +102,11 @@ func TestPaintSetBrush(t *testing.T) {
 		if p.IsSolid() {
 			t.Error("IsSolid = true after SetBrush(CustomBrush)")
 		}
-		if p.Brush == nil {
-			t.Error("Brush = nil after SetBrush(CustomBrush)")
+		if p.fill.brush == nil {
+			t.Error("fill.brush = nil after SetBrush(CustomBrush)")
 		}
-		if p.Pattern == nil {
-			t.Error("Pattern = nil after SetBrush(CustomBrush)")
+		if p.fill.pattern == nil {
+			t.Error("fill.pattern = nil after SetBrush(CustomBrush)")
 		}
 	})
 }
@@ -124,8 +124,8 @@ func TestPaintGetBrush(t *testing.T) {
 
 	t.Run("with brush field set directly", func(t *testing.T) {
 		p := &Paint{}
-		p.Brush = Solid(Green) // Direct field write bypasses SetBrush
-		p.isSolid = false      // Explicitly not inline
+		p.fill.brush = Solid(Green) // Direct field write bypasses SetBrush
+		p.fill.isSolid = false      // Explicitly not inline
 		brush := p.GetBrush()
 		if sb, ok := brush.(SolidBrush); !ok || sb.Color != Green {
 			t.Error("GetBrush did not return set brush")
@@ -133,9 +133,8 @@ func TestPaintGetBrush(t *testing.T) {
 	})
 
 	t.Run("with only pattern set", func(t *testing.T) {
-		p := &Paint{
-			Pattern: NewSolidPattern(Yellow),
-		}
+		p := &Paint{}
+		p.fill.pattern = NewSolidPattern(Yellow)
 		brush := p.GetBrush()
 		if brush == nil {
 			t.Error("GetBrush returned nil for Pattern-only paint")
@@ -172,7 +171,8 @@ func TestPaintColorAt(t *testing.T) {
 	})
 
 	t.Run("with brush field directly", func(t *testing.T) {
-		p := &Paint{Brush: Solid(Red)}
+		p := &Paint{}
+		p.fill.brush = Solid(Red)
 		c := p.ColorAt(0, 0)
 		if c != Red {
 			t.Errorf("ColorAt = %v, want Red", c)
@@ -180,9 +180,8 @@ func TestPaintColorAt(t *testing.T) {
 	})
 
 	t.Run("with only pattern set", func(t *testing.T) {
-		p := &Paint{
-			Pattern: NewSolidPattern(Blue),
-		}
+		p := &Paint{}
+		p.fill.pattern = NewSolidPattern(Blue)
 		c := p.ColorAt(0, 0)
 		if c != Blue {
 			t.Errorf("ColorAt = %v, want Blue", c)
@@ -198,10 +197,9 @@ func TestPaintColorAt(t *testing.T) {
 	})
 
 	t.Run("brush takes precedence over pattern", func(t *testing.T) {
-		p := &Paint{
-			Pattern: NewSolidPattern(Blue),
-			Brush:   Solid(Red),
-		}
+		p := &Paint{}
+		p.fill.pattern = NewSolidPattern(Blue)
+		p.fill.brush = Solid(Red)
 		c := p.ColorAt(0, 0)
 		if c != Red {
 			t.Errorf("ColorAt = %v, want Red (brush should take precedence)", c)
@@ -209,12 +207,11 @@ func TestPaintColorAt(t *testing.T) {
 	})
 
 	t.Run("isSolid takes precedence over both", func(t *testing.T) {
-		p := &Paint{
-			solidColor: Green,
-			isSolid:    true,
-			Pattern:    NewSolidPattern(Blue),
-			Brush:      Solid(Red),
-		}
+		p := &Paint{}
+		p.fill.solidColor = Green
+		p.fill.isSolid = true
+		p.fill.pattern = NewSolidPattern(Blue)
+		p.fill.brush = Solid(Red)
 		c := p.ColorAt(0, 0)
 		if c != Green {
 			t.Errorf("ColorAt = %v, want Green (isSolid takes precedence)", c)
@@ -280,7 +277,7 @@ func TestContextSetColorUpdatesInlineSolid(t *testing.T) {
 		t.Errorf("brush color = %v, want Red", c)
 	}
 
-	// Verify inline solid storage (Brush and Pattern are nil for zero alloc)
+	// Verify inline solid storage (brush and pattern are nil for zero alloc)
 	if !dc.paint.IsSolid() {
 		t.Error("IsSolid = false after SetRGB")
 	}
@@ -288,11 +285,283 @@ func TestContextSetColorUpdatesInlineSolid(t *testing.T) {
 	if !ok || sc != Red {
 		t.Errorf("SolidColor = %v, %v, want Red, true", sc, ok)
 	}
-	if dc.paint.Brush != nil {
-		t.Error("Brush should be nil after SetRGB (stored inline)")
+	if dc.paint.fill.brush != nil {
+		t.Error("fill.brush should be nil after SetRGB (stored inline)")
 	}
-	if dc.paint.Pattern != nil {
-		t.Error("Pattern should be nil after SetRGB (stored inline)")
+	if dc.paint.fill.pattern != nil {
+		t.Error("fill.pattern should be nil after SetRGB (stored inline)")
+	}
+}
+
+// TestDualBrushIndependence verifies that fill and stroke brushes are independent.
+// This is the core behavioral test for ADR-055.
+func TestDualBrushIndependence(t *testing.T) {
+	t.Run("SetFillBrush does not affect stroke", func(t *testing.T) {
+		p := NewPaint()
+		p.SetFillBrush(Solid(Red))
+
+		// Fill should be red
+		fc := p.FillColorAt(0, 0)
+		if fc != Red {
+			t.Errorf("FillColorAt = %v, want Red", fc)
+		}
+
+		// Stroke should still be black (default)
+		sc := p.StrokeColorAt(0, 0)
+		if sc != Black {
+			t.Errorf("StrokeColorAt = %v, want Black", sc)
+		}
+	})
+
+	t.Run("SetStrokeBrush does not affect fill", func(t *testing.T) {
+		p := NewPaint()
+		p.SetStrokeBrush(Solid(Blue))
+
+		// Fill should still be black (default)
+		fc := p.FillColorAt(0, 0)
+		if fc != Black {
+			t.Errorf("FillColorAt = %v, want Black", fc)
+		}
+
+		// Stroke should be blue
+		sc := p.StrokeColorAt(0, 0)
+		if sc != Blue {
+			t.Errorf("StrokeColorAt = %v, want Blue", sc)
+		}
+	})
+
+	t.Run("SetBrush sets both sides", func(t *testing.T) {
+		p := NewPaint()
+		p.SetBrush(Solid(Green))
+
+		fc := p.FillColorAt(0, 0)
+		sc := p.StrokeColorAt(0, 0)
+		if fc != Green {
+			t.Errorf("FillColorAt = %v, want Green", fc)
+		}
+		if sc != Green {
+			t.Errorf("StrokeColorAt = %v, want Green", sc)
+		}
+	})
+
+	t.Run("SetColor sets both sides", func(t *testing.T) {
+		dc := NewContext(100, 100)
+		dc.SetRGB(1, 0, 0) // Red
+
+		fc := dc.paint.FillColorAt(0, 0)
+		sc := dc.paint.StrokeColorAt(0, 0)
+		if fc != Red {
+			t.Errorf("FillColorAt = %v, want Red", fc)
+		}
+		if sc != Red {
+			t.Errorf("StrokeColorAt = %v, want Red", sc)
+		}
+	})
+
+	t.Run("independent fill and stroke colors", func(t *testing.T) {
+		dc := NewContext(100, 100)
+		dc.SetFillBrush(Solid(Red))
+		dc.SetStrokeBrush(Solid(Blue))
+
+		fb := dc.FillBrush()
+		sb := dc.StrokeBrush()
+
+		fc := fb.ColorAt(0, 0)
+		sc := sb.ColorAt(0, 0)
+
+		if fc != Red {
+			t.Errorf("FillBrush color = %v, want Red", fc)
+		}
+		if sc != Blue {
+			t.Errorf("StrokeBrush color = %v, want Blue", sc)
+		}
+	})
+}
+
+// TestDualBrushClone verifies Clone copies both sides independently.
+func TestDualBrushClone(t *testing.T) {
+	p := NewPaint()
+	p.SetFillBrush(Solid(Red))
+	p.SetStrokeBrush(Solid(Blue))
+
+	clone := p.Clone()
+
+	// Verify clone has independent colors
+	fc, _ := clone.FillSolidColor()
+	sc, _ := clone.StrokeSolidColor()
+	if fc != Red {
+		t.Errorf("clone FillSolidColor = %v, want Red", fc)
+	}
+	if sc != Blue {
+		t.Errorf("clone StrokeSolidColor = %v, want Blue", sc)
+	}
+
+	// Modify clone, verify original unchanged
+	clone.SetFillBrush(Solid(Green))
+	origFC, _ := p.FillSolidColor()
+	if origFC != Red {
+		t.Errorf("original FillSolidColor = %v after clone mutation, want Red", origFC)
+	}
+}
+
+// TestDualBrushGradient verifies gradient fill with solid stroke.
+func TestDualBrushGradient(t *testing.T) {
+	p := NewPaint()
+	grad := NewLinearGradientBrush(0, 0, 100, 0)
+	grad.AddColorStop(0, Red)
+	grad.AddColorStop(1, Blue)
+
+	p.SetFillBrush(grad)
+	p.SetStrokeBrush(Solid(Green))
+
+	// Fill should not be solid (it's a gradient)
+	if p.IsFillSolid() {
+		t.Error("IsFillSolid = true for gradient")
+	}
+
+	// Stroke should be solid green
+	if !p.IsStrokeSolid() {
+		t.Error("IsStrokeSolid = false for solid brush")
+	}
+	sc, ok := p.StrokeSolidColor()
+	if !ok || sc != Green {
+		t.Errorf("StrokeSolidColor = %v, %v, want Green, true", sc, ok)
+	}
+
+	// Verify gradient samples
+	fc := p.FillColorAt(0, 0) // at x=0, should be ~Red
+	if fc.R < 0.9 {
+		t.Errorf("FillColorAt(0,0) red component = %f, want ~1.0", fc.R)
+	}
+}
+
+// TestDualBrushNewPaint verifies both sides initialized to Black.
+func TestDualBrushNewPaint(t *testing.T) {
+	p := NewPaint()
+
+	fc, fOK := p.FillSolidColor()
+	sc, sOK := p.StrokeSolidColor()
+
+	if !fOK || fc != Black {
+		t.Errorf("NewPaint fill = %v, %v, want Black, true", fc, fOK)
+	}
+	if !sOK || sc != Black {
+		t.Errorf("NewPaint stroke = %v, %v, want Black, true", sc, sOK)
+	}
+}
+
+// TestDualBrushPattern verifies SetFillPattern and SetStrokePattern independence.
+func TestDualBrushPattern(t *testing.T) {
+	dc := NewContext(100, 100)
+	dc.SetFillPattern(NewSolidPattern(Red))
+	dc.SetStrokePattern(NewSolidPattern(Blue))
+
+	fc := dc.paint.FillColorAt(0, 0)
+	sc := dc.paint.StrokeColorAt(0, 0)
+	if fc != Red {
+		t.Errorf("FillColorAt after SetFillPattern = %v, want Red", fc)
+	}
+	if sc != Blue {
+		t.Errorf("StrokeColorAt after SetStrokePattern = %v, want Blue", sc)
+	}
+}
+
+// TestDualBrushColorAtBackwardCompat verifies backward compatibility.
+// ColorAt reads from fill side (backward compat for code that doesn't
+// distinguish fill/stroke).
+func TestDualBrushColorAtBackwardCompat(t *testing.T) {
+	p := NewPaint()
+	p.SetFillBrush(Solid(Red))
+	p.SetStrokeBrush(Solid(Blue))
+
+	// ColorAt (deprecated) reads from fill
+	c := p.ColorAt(0, 0)
+	if c != Red {
+		t.Errorf("ColorAt = %v, want Red (backward compat reads fill)", c)
+	}
+
+	// SolidColor (deprecated) reads from fill
+	sc, ok := p.SolidColor()
+	if !ok || sc != Red {
+		t.Errorf("SolidColor = %v, %v, want Red, true", sc, ok)
+	}
+
+	// IsSolid (deprecated) reads from fill
+	if !p.IsSolid() {
+		t.Error("IsSolid = false, want true (backward compat reads fill)")
+	}
+}
+
+// TestDualBrushRendering verifies that FillPreserve + Stroke with different
+// brushes produces correct pixel colors (ADR-055 integration test).
+func TestDualBrushRendering(t *testing.T) {
+	dc := NewContext(100, 100)
+	dc.SetFillBrush(Solid(Red))
+	dc.SetStrokeBrush(Solid(Blue))
+	dc.SetLineWidth(4)
+
+	// Draw a 60x60 rectangle centered in the canvas.
+	dc.DrawRectangle(20, 20, 60, 60)
+	if err := dc.FillPreserve(); err != nil {
+		t.Fatalf("FillPreserve: %v", err)
+	}
+	if err := dc.Stroke(); err != nil {
+		t.Fatalf("Stroke: %v", err)
+	}
+
+	// Center of rectangle should be red (fill color).
+	img := dc.Image()
+	centerPixel := img.At(50, 50)
+	cr, cg, cb, _ := centerPixel.RGBA()
+	if cr>>8 < 200 || cg>>8 > 50 || cb>>8 > 50 {
+		t.Errorf("center pixel = (%d,%d,%d), want red", cr>>8, cg>>8, cb>>8)
+	}
+
+	// Edge of rectangle should be blue (stroke color).
+	// Check left edge at y=50 (inside the 4px stroke centered on x=20).
+	edgePixel := img.At(20, 50)
+	er, eg, eb, _ := edgePixel.RGBA()
+	if eb>>8 < 150 || er>>8 > 100 {
+		t.Errorf("edge pixel = (%d,%d,%d), want blue", er>>8, eg>>8, eb>>8)
+	}
+}
+
+// TestDualBrushSetColorOverridesBoth verifies SetColor overrides both sides.
+func TestDualBrushSetColorOverridesBoth(t *testing.T) {
+	dc := NewContext(100, 100)
+
+	// Set independent colors
+	dc.SetFillBrush(Solid(Red))
+	dc.SetStrokeBrush(Solid(Blue))
+
+	// Now SetColor should reset both to green
+	dc.SetRGB(0, 1, 0)
+
+	fc := dc.paint.FillColorAt(0, 0)
+	sc := dc.paint.StrokeColorAt(0, 0)
+	if fc != Green {
+		t.Errorf("FillColorAt after SetRGB = %v, want Green", fc)
+	}
+	if sc != Green {
+		t.Errorf("StrokeColorAt after SetRGB = %v, want Green", sc)
+	}
+}
+
+// TestDualBrushSetHexColorOverridesBoth verifies SetHexColor overrides both.
+func TestDualBrushSetHexColorOverridesBoth(t *testing.T) {
+	dc := NewContext(100, 100)
+	dc.SetFillBrush(Solid(Red))
+	dc.SetStrokeBrush(Solid(Blue))
+
+	dc.SetHexColor("#00FF00")
+	fc := dc.paint.FillColorAt(0, 0)
+	sc := dc.paint.StrokeColorAt(0, 0)
+	// Both should be green
+	if fc.G < 0.99 || fc.R > 0.01 {
+		t.Errorf("fill after SetHexColor = %v, want green", fc)
+	}
+	if sc.G < 0.99 || sc.R > 0.01 {
+		t.Errorf("stroke after SetHexColor = %v, want green", sc)
 	}
 }
 

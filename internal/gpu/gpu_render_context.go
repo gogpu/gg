@@ -1068,7 +1068,13 @@ func (rc *GPURenderContext) drawsToScissorGroup(draws []drawCommand) ScissorGrou
 			// No re-tessellation at flush — convexPoints or stencilCmd was
 			// computed once in FillPath()/StrokePath().
 			if cmd.convexPoints != nil {
-				color := premulColorFromPaint(&cmd.paint)
+				// Stroke paths read from stroke brush, fill paths from fill brush.
+				var color [4]float32
+				if cmd.kind == drawCmdStrokePath {
+					color = premulStrokeColorFromPaint(&cmd.paint)
+				} else {
+					color = premulFillColorFromPaint(&cmd.paint)
+				}
 				g.ConvexCommands = append(g.ConvexCommands, ConvexDrawCommand{
 					Points: cmd.convexPoints,
 					Color:  color,
@@ -1105,7 +1111,13 @@ func (rc *GPURenderContext) preTessellateFill(cmd *drawCommand) {
 		return
 	}
 
-	color := premulColorFromPaint(&cmd.paint)
+	// Stroke paths read from stroke brush, fill paths from fill brush.
+	var color [4]float32
+	if cmd.kind == drawCmdStrokePath {
+		color = premulStrokeColorFromPaint(&cmd.paint)
+	} else {
+		color = premulFillColorFromPaint(&cmd.paint)
+	}
 
 	// Convex fast-path (NonZero fill rule only).
 	if cmd.paint.FillRule != gg.FillRuleEvenOdd {
@@ -1171,9 +1183,20 @@ func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	rc.preTessellateFill(cmd)
 }
 
-// premulColorFromPaint extracts a premultiplied RGBA color from a Paint.
-func premulColorFromPaint(paint *gg.Paint) [4]float32 {
-	color := getColorFromPaint(paint)
+// premulFillColorFromPaint extracts a premultiplied RGBA fill color from a Paint.
+func premulFillColorFromPaint(paint *gg.Paint) [4]float32 {
+	color := getFillColorFromPaint(paint)
+	return [4]float32{
+		float32(color.R * color.A),
+		float32(color.G * color.A),
+		float32(color.B * color.A),
+		float32(color.A),
+	}
+}
+
+// premulStrokeColorFromPaint extracts a premultiplied RGBA stroke color from a Paint.
+func premulStrokeColorFromPaint(paint *gg.Paint) [4]float32 {
+	color := getStrokeColorFromPaint(paint)
 	return [4]float32{
 		float32(color.R * color.A),
 		float32(color.G * color.A),

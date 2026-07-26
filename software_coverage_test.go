@@ -240,9 +240,9 @@ func TestSolidColorFromPaintExtended(t *testing.T) {
 
 	t.Run("solid pattern fallback", func(t *testing.T) {
 		paint := NewPaint()
-		paint.isSolid = false // bypass inline solid path
-		paint.Brush = nil     // clear brush so pattern is used
-		paint.Pattern = NewSolidPattern(Blue)
+		paint.fill.isSolid = false // bypass inline solid path
+		paint.fill.brush = nil     // clear brush so pattern is used
+		paint.fill.pattern = NewSolidPattern(Blue)
 		color, ok := solidColorFromPaint(paint)
 		if !ok {
 			t.Fatal("expected solid color from SolidPattern")
@@ -254,9 +254,9 @@ func TestSolidColorFromPaintExtended(t *testing.T) {
 
 	t.Run("nil brush and nil pattern", func(t *testing.T) {
 		paint := NewPaint()
-		paint.isSolid = false // bypass inline solid path
-		paint.Brush = nil
-		paint.Pattern = nil
+		paint.fill.isSolid = false // bypass inline solid path
+		paint.fill.brush = nil
+		paint.fill.pattern = nil
 		// With both nil, should return Black (default) or false
 		color, ok := solidColorFromPaint(paint)
 		if ok {

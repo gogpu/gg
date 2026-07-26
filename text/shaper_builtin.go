@@ -40,6 +40,13 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 	runes := []rune(text)
 	result := make([]ShapedGlyph, 0, len(runes))
 
+	// ADR-054: HVAR-adjusted advances for variable fonts.
+	var varProv VariableAdvanceProvider
+	variations := face.Variations()
+	if len(variations) > 0 {
+		varProv, _ = parsed.(VariableAdvanceProvider)
+	}
+
 	var x float64
 
 	for cluster, r := range runes {
@@ -53,12 +60,15 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 		var advance float64
 
 		if r == '\t' {
-			// Tab: use space GID (empty outline) with tab-stop advance.
-			// Space GID has no contours → correctly skipped by outline renderer.
 			gid, advance = tabAdvance(parsed, size)
 		} else {
 			gid = parsed.GlyphIndex(r)
-			advance = parsed.GlyphAdvance(gid, size)
+			// ADR-054: use HVAR-adjusted advance for variable fonts.
+			if varProv != nil {
+				advance = varProv.GlyphAdvanceVar(gid, size, variations)
+			} else {
+				advance = parsed.GlyphAdvance(gid, size)
+			}
 		}
 
 		result = append(result, ShapedGlyph{

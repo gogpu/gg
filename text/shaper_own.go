@@ -112,7 +112,13 @@ func (s *OwnShaper) Shape(text string, face Face) []ShapedGlyph {
 	}
 
 	// Step 7: Build positioned glyph output.
-	return buildShapedGlyphs(glyphs, adjustments, sc, size, runes, kernFallback)
+	// ADR-054: pass HVAR provider so advances match gvar-adjusted outlines.
+	var varProvider VariableAdvanceProvider
+	variations := face.Variations()
+	if len(variations) > 0 {
+		varProvider, _ = parsed.(VariableAdvanceProvider)
+	}
+	return buildShapedGlyphs(glyphs, adjustments, sc, size, runes, kernFallback, varProvider, variations)
 }
 
 // ClearCache removes all cached shaping data.
@@ -362,6 +368,8 @@ func gposHasKern(gpos *gposTable, scriptTag, langTag [4]byte) bool {
 }
 
 // buildShapedGlyphs converts internal glyph entries + adjustments to ShapedGlyph output.
+// When varProvider is non-nil, HVAR-adjusted advances are used instead of base hmtx
+// advances, matching the skrifa invariant: advance_source == outline_variation_source.
 func buildShapedGlyphs(
 	glyphs []shapingGlyph,
 	adjustments []gposAdjustment,
@@ -369,6 +377,8 @@ func buildShapedGlyphs(
 	size float64,
 	runes []rune,
 	kernFallback bool,
+	varProvider VariableAdvanceProvider,
+	variations []FontVariation,
 ) []ShapedGlyph {
 	if len(glyphs) == 0 {
 		return nil
@@ -381,8 +391,12 @@ func buildShapedGlyphs(
 	for i := range glyphs {
 		ge := &glyphs[i]
 
-		// Get base advance (font units).
+		// Get advance — HVAR-adjusted when variations are present (skrifa parity).
 		var advFU uint16
+		var useVarAdvance bool
+		if varProvider != nil && len(variations) > 0 {
+			useVarAdvance = true
+		}
 		if sc.hmtxAdv != nil {
 			advFU = hmtxAdvance(sc.hmtxAdv, sc.numHMtx, ge.gid)
 		}
@@ -417,7 +431,12 @@ func buildShapedGlyphs(
 		}
 
 		// Scale to pixels.
-		xAdv := float64(advFU)*scale + float64(adj.xAdvance)*scale
+		var xAdv float64
+		if useVarAdvance {
+			xAdv = varProvider.GlyphAdvanceVar(ge.gid, size, variations) + float64(adj.xAdvance)*scale
+		} else {
+			xAdv = float64(advFU)*scale + float64(adj.xAdvance)*scale
+		}
 		yAdv := float64(adj.yAdvance) * scale
 		xOff := float64(adj.xPlacement) * scale
 		yOff := float64(adj.yPlacement) * scale

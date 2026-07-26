@@ -94,6 +94,30 @@ func main() {
 }
 ```
 
+### Common Patterns
+
+```go
+// Fill AND stroke the same shape (use FillPreserve to keep the path):
+dc.SetHexColor("#3498db")
+dc.DrawRoundedRectangle(50, 50, 200, 100, 10)
+dc.FillPreserve()               // fill WITHOUT clearing the path
+dc.SetHexColor("#2c3e50")
+dc.SetLineWidth(3)
+dc.Stroke()                     // stroke the same path
+
+// Clear canvas: Clear() fills transparent, ClearWithColor() fills with color:
+dc.ClearWithColor(gg.White)     // white background (recommended)
+dc.Clear()                      // transparent background (for compositing)
+
+// Load a font (one-liner):
+dc.LoadFontFace("arial.ttf", 24)
+dc.DrawString("Hello!", 50, 50)
+
+// Scale/rotate around a point:
+dc.ScaleAbout(2, 2, 100, 100)   // 2x zoom centered at (100,100)
+dc.RotateAbout(0.5, 200, 200)   // rotate 0.5 rad around (200,200)
+```
+
 ---
 
 ## Rendering

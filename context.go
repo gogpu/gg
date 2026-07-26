@@ -65,8 +65,9 @@ type Context struct {
 	rasterizerMode RasterizerMode // CPU rasterizer selection mode
 
 	// Anti-aliasing
-	antiAlias      bool   // anti-aliasing enabled (default: true)
-	antiAliasStack []bool // Push/Pop stack for antiAlias state
+	antiAlias      bool     // anti-aliasing enabled (default: true)
+	antiAliasStack []bool   // Push/Pop stack for antiAlias state
+	paintStack     []*Paint // Push/Pop stack for paint state (fill/stroke brushes, blend mode)
 
 	// Text rendering
 	textMode         TextMode               // text strategy selection (default: Auto)
@@ -593,40 +594,38 @@ func (c *Context) FillRectCPU(x, y, w, h float64, col RGBA) {
 	c.pixmap.FillRect(image.Rect(px0, py0, px1, py1), pr, pg, pb, pa)
 }
 
-// SetColor sets the current drawing color.
+// SetColor sets the current drawing color for BOTH fill and stroke.
+// This is the backward-compatible color setter — it updates both sides
+// so that existing code using SetColor → Fill/Stroke works unchanged.
 func (c *Context) SetColor(col color.Color) {
-	c.paint.solidColor = FromColor(col)
-	c.paint.isSolid = true
-	c.paint.Brush = nil
-	c.paint.Pattern = nil
+	rgba := FromColor(col)
+	c.paint.fill.setSolidColor(rgba)
+	c.paint.stroke.setSolidColor(rgba)
 }
 
-// SetRGB sets the current color using RGB values (0-1).
+// SetRGB sets the current color for BOTH fill and stroke using RGB values (0-1).
 func (c *Context) SetRGB(r, g, b float64) {
-	c.paint.solidColor = RGBA{R: r, G: g, B: b, A: 1}
-	c.paint.isSolid = true
-	c.paint.Brush = nil
-	c.paint.Pattern = nil
+	rgba := RGBA{R: r, G: g, B: b, A: 1}
+	c.paint.fill.setSolidColor(rgba)
+	c.paint.stroke.setSolidColor(rgba)
 }
 
-// SetRGBA sets the current color using RGBA values (0-1).
+// SetRGBA sets the current color for BOTH fill and stroke using RGBA values (0-1).
 func (c *Context) SetRGBA(r, g, b, a float64) {
-	c.paint.solidColor = RGBA{R: r, G: g, B: b, A: a}
-	c.paint.isSolid = true
-	c.paint.Brush = nil
-	c.paint.Pattern = nil
+	rgba := RGBA{R: r, G: g, B: b, A: a}
+	c.paint.fill.setSolidColor(rgba)
+	c.paint.stroke.setSolidColor(rgba)
 }
 
-// SetHexColor sets the current color using a hex string.
+// SetHexColor sets the current color for BOTH fill and stroke using a hex string.
 func (c *Context) SetHexColor(hex string) {
-	c.paint.solidColor = Hex(hex)
-	c.paint.isSolid = true
-	c.paint.Brush = nil
-	c.paint.Pattern = nil
+	rgba := Hex(hex)
+	c.paint.fill.setSolidColor(rgba)
+	c.paint.stroke.setSolidColor(rgba)
 }
 
-// SetFillBrush sets the brush used for fill operations.
-// This is the preferred way to set fill styling in new code.
+// SetFillBrush sets the brush used for fill operations only.
+// This does not affect the stroke brush.
 //
 // Example:
 //
@@ -634,30 +633,28 @@ func (c *Context) SetHexColor(hex string) {
 //	ctx.SetFillBrush(gg.SolidHex("#FF5733"))
 //	ctx.SetFillBrush(gg.HorizontalGradient(gg.Red, gg.Blue, 0, 100))
 func (c *Context) SetFillBrush(b Brush) {
-	c.paint.SetBrush(b)
+	c.paint.SetFillBrush(b)
 }
 
-// SetStrokeBrush sets the brush used for stroke operations.
-// Note: In the current implementation, fill and stroke share the same brush.
-// This method is provided for API symmetry and future extensibility.
+// SetStrokeBrush sets the brush used for stroke operations only.
+// This does not affect the fill brush.
 //
 // Example:
 //
 //	ctx.SetStrokeBrush(gg.Solid(gg.Black))
 //	ctx.SetStrokeBrush(gg.SolidRGB(0.5, 0.5, 0.5))
 func (c *Context) SetStrokeBrush(b Brush) {
-	c.paint.SetBrush(b)
+	c.paint.SetStrokeBrush(b)
 }
 
 // FillBrush returns the current fill brush.
 func (c *Context) FillBrush() Brush {
-	return c.paint.GetBrush()
+	return c.paint.FillBrush()
 }
 
 // StrokeBrush returns the current stroke brush.
-// Note: In the current implementation, fill and stroke share the same brush.
 func (c *Context) StrokeBrush() Brush {
-	return c.paint.GetBrush()
+	return c.paint.StrokeBrush()
 }
 
 // SetLineWidth sets the line width for stroking.
@@ -939,6 +936,10 @@ func (c *Context) Push() {
 
 	// Save current anti-aliasing state
 	c.antiAliasStack = append(c.antiAliasStack, c.antiAlias)
+
+	// Save current paint state (fill/stroke brushes, blend mode).
+	// Matches Cairo cairo_save/Canvas ctx.save — style state is part of the stack.
+	c.paintStack = append(c.paintStack, c.paint.Clone())
 }
 
 // Pop restores the last saved state.
@@ -979,6 +980,12 @@ func (c *Context) Pop() {
 		c.antiAlias = c.antiAliasStack[len(c.antiAliasStack)-1]
 		c.antiAliasStack = c.antiAliasStack[:len(c.antiAliasStack)-1]
 	}
+
+	// Restore paint state (fill/stroke brushes, blend mode).
+	if len(c.paintStack) > 0 {
+		c.paint = c.paintStack[len(c.paintStack)-1]
+		c.paintStack = c.paintStack[:len(c.paintStack)-1]
+	}
 }
 
 // Identity resets the user transformation matrix to the identity matrix.
@@ -1007,6 +1014,21 @@ func (c *Context) Rotate(angle float64) {
 func (c *Context) RotateAbout(angle, x, y float64) {
 	c.Translate(x, y)
 	c.Rotate(angle)
+	c.Translate(-x, -y)
+}
+
+// ScaleAbout scales around a specific point.
+// This is equivalent to Translate(x,y) → Scale(sx,sy) → Translate(-x,-y).
+func (c *Context) ScaleAbout(sx, sy, x, y float64) {
+	c.Translate(x, y)
+	c.Scale(sx, sy)
+	c.Translate(-x, -y)
+}
+
+// ShearAbout shears around a specific point.
+func (c *Context) ShearAbout(sx, sy, x, y float64) {
+	c.Translate(x, y)
+	c.Shear(sx, sy)
 	c.Translate(-x, -y)
 }
 
@@ -1210,19 +1232,20 @@ func (c *Context) DrawEllipticalArc(x, y, rx, ry, angle1, angle2 float64) {
 	c.Pop()
 }
 
-// currentColor returns the current drawing color from the paint.
-// If the paint is a solid color, returns that color.
+// currentColor returns the current fill color from the paint.
+// Text is always a fill operation, so this reads from the fill side.
+// If the paint fill is a solid color, returns that color.
 // Otherwise returns black as a fallback.
 func (c *Context) currentColor() color.Color {
-	if c.paint.isSolid {
-		return c.paint.solidColor.Color()
+	if c.paint.fill.isSolid {
+		return c.paint.fill.solidColor.Color()
 	}
-	if c.paint.Brush != nil {
-		if sb, ok := c.paint.Brush.(SolidBrush); ok {
+	if c.paint.fill.brush != nil {
+		if sb, ok := c.paint.fill.brush.(SolidBrush); ok {
 			return sb.Color.Color()
 		}
 	}
-	if p, ok := c.paint.Pattern.(*SolidPattern); ok {
+	if p, ok := c.paint.fill.pattern.(*SolidPattern); ok {
 		return p.Color.Color()
 	}
 	return color.Black
@@ -1758,9 +1781,11 @@ func (c *Context) doFill() error {
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
 		sr.rasterizerMode = cpuMode
 		sr.antiAlias = c.antiAlias
+		sr.strokeMode = false // Fill reads from fill brush state.
 		defer func() {
 			sr.rasterizerMode = RasterizerAuto
 			sr.antiAlias = true
+			sr.strokeMode = false
 		}()
 	}
 
@@ -1808,9 +1833,11 @@ func (c *Context) doStroke() error {
 	if sr, ok := c.renderer.(*SoftwareRenderer); ok {
 		sr.rasterizerMode = cpuMode
 		sr.antiAlias = c.antiAlias
+		sr.strokeMode = true // Stroke reads from stroke brush state.
 		defer func() {
 			sr.rasterizerMode = RasterizerAuto
 			sr.antiAlias = true
+			sr.strokeMode = false
 		}()
 	}
 
