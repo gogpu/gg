@@ -66,6 +66,12 @@ type GPURenderTarget struct {
 	ViewWidth  uint32
 	ViewHeight uint32
 
+	// PreserveContent signals that the surface view already has content
+	// from an external renderer (e.g., g3d). When true, the render session
+	// uses LoadOp::Load instead of LoadOp::Clear to preserve existing content.
+	// Set by gogpu after MarkExternalContent(). ADR-059.
+	PreserveContent bool
+
 	// Damage-aware compositing (ADR-026/028): when non-empty, compositor
 	// uses LoadOpLoad (preserve previous frame) and per-rect scissor.
 	// Single rect: one scissor for entire pass.

@@ -905,6 +905,7 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 
 	// Transfer per-context frame tracking to session before rendering.
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)
+	rc.session.preserveContent = target.PreserveContent // ADR-059
 
 	// Extract baseLayer from pendingDraws before building ScissorGroups.
 	// BaseLayer is passed as a separate parameter to RenderFrameGrouped
