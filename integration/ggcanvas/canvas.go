@@ -564,6 +564,10 @@ func (c *Canvas) FlushPixmap() (any, error) {
 //	    canvas.RenderDirect(dc.RenderTarget().SurfaceView(), w, h)
 //	})
 func (c *Canvas) RenderDirect(surfaceView gpucontext.TextureView, width, height uint32) error {
+	return c.renderDirect(surfaceView, width, height, false)
+}
+
+func (c *Canvas) renderDirect(surfaceView gpucontext.TextureView, width, height uint32, preserveContent bool) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
@@ -590,7 +594,12 @@ func (c *Canvas) RenderDirect(surfaceView gpucontext.TextureView, width, height 
 	// GPU commands with LoadOpClear. Calling BeginFrame here would reset
 	// frameRendered=false, causing the final FlushGPU to wipe that content
 	// with a second LoadOpClear. See RENDER-DIRECT-003.
-	err := c.ctx.FlushGPUWithView(surfaceView, width, height)
+	var err error
+	if preserveContent {
+		err = c.ctx.FlushGPUWithViewPreserveContent(surfaceView, width, height)
+	} else {
+		err = c.ctx.FlushGPUWithView(surfaceView, width, height)
+	}
 
 	c.dirty = false
 	c.dirtyRect = image.Rectangle{}
@@ -648,6 +657,13 @@ type RenderTarget interface {
 	SurfaceView() gpucontext.TextureView
 	SurfaceSize() (uint32, uint32)
 	PresentTexture(tex any) error
+}
+
+// ContentPreserver is an optional RenderTarget capability that reports whether
+// the surface already contains content from an earlier render pass. When true,
+// ggcanvas loads that content before drawing instead of clearing the surface.
+type ContentPreserver interface {
+	PreserveContent() bool
 }
 
 // DamageRectSetter is an optional interface for RenderTargets that support
@@ -710,7 +726,11 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	sv := dc.SurfaceView()
 	if !sv.IsNil() && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
-		if err := c.RenderDirect(sv, sw, sh); err == nil {
+		preserveContent := false
+		if preserver, ok := dc.(ContentPreserver); ok {
+			preserveContent = preserver.PreserveContent()
+		}
+		if err := c.renderDirect(sv, sw, sh, preserveContent); err == nil {
 			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}

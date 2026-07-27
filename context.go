@@ -1422,12 +1422,24 @@ func (c *Context) FlushGPU() error {
 // This is the per-pass render target path for ggcanvas.RenderDirect.
 // When view is nil/zero, behaves identically to FlushGPU (CPU readback).
 func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height uint32) error {
+	return c.flushGPUWithView(view, width, height, false)
+}
+
+// FlushGPUWithViewPreserveContent is like FlushGPUWithView, but loads the
+// existing view contents instead of clearing them on the first render pass.
+// Use this when another renderer has already drawn to the view in this frame.
+func (c *Context) FlushGPUWithViewPreserveContent(view gpucontext.TextureView, width, height uint32) error {
+	return c.flushGPUWithView(view, width, height, true)
+}
+
+func (c *Context) flushGPUWithView(view gpucontext.TextureView, width, height uint32, preserveContent bool) error {
 	t := c.gpuRenderTarget()
 	if !view.IsNil() {
 		t.View = view
 		t.ViewWidth = width
 		t.ViewHeight = height
 	}
+	t.PreserveContent = preserveContent
 	rc := c.gpuCtxOps()
 	if rc != nil {
 		return rc.Flush(t)
