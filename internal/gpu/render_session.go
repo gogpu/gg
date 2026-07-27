@@ -251,6 +251,10 @@ type GPURenderSession struct {
 	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
 	frameRendered bool
 
+	// preserveContent signals that the surface has external content (e.g., g3d).
+	// When true, view changes do NOT reset frameRendered → LoadOp::Load. ADR-059.
+	preserveContent bool
+
 	// antiAlias determines SDF coverage computation mode.
 	// When true (default), smoothstep produces smooth edges.
 	// When false, binary step produces aliased edges.
@@ -2660,8 +2664,17 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	// (e.g., two gg.Context instances rendering to different targets),
 	// reset frameRendered so the new view gets LoadOpClear on its first
 	// pass. This prevents shapes from one Context leaking into another.
+	//
+	// ADR-059: PreserveContent skips the reset — the view already has
+	// content from an external renderer (e.g., g3d). LoadOp::Load
+	// preserves it. Enterprise pattern: Qt beginExternal/endExternal,
+	// Flutter InlinePassContext pass_count, Unity Camera.DontClear.
 	if view != s.lastView {
-		s.frameRendered = false
+		if !s.preserveContent {
+			s.frameRendered = false
+		} else {
+			s.frameRendered = true
+		}
 		s.lastView = view
 	}
 
