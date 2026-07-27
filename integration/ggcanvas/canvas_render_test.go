@@ -7,7 +7,9 @@ import (
 	"errors"
 	"image"
 	"testing"
+	"unsafe"
 
+	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
 )
 
@@ -63,6 +65,43 @@ func (m *renderMockWithCreator) TextureCreator() gpucontext.TextureCreator {
 	return m.renderer
 }
 
+type renderMockContentPreserver struct {
+	mockRenderTarget
+	preserveContent bool
+}
+
+func (m *renderMockContentPreserver) PreserveContent() bool { return m.preserveContent }
+
+type renderTargetCaptureAccelerator struct {
+	lastTarget gg.GPURenderTarget
+	flushes    int
+}
+
+func (a *renderTargetCaptureAccelerator) Name() string { return "render-target-capture" }
+func (a *renderTargetCaptureAccelerator) Init() error  { return nil }
+func (a *renderTargetCaptureAccelerator) Close()       {}
+func (a *renderTargetCaptureAccelerator) CanAccelerate(gg.AcceleratedOp) bool {
+	return false
+}
+func (a *renderTargetCaptureAccelerator) FillPath(gg.GPURenderTarget, *gg.Path, *gg.Paint) error {
+	return gg.ErrFallbackToCPU
+}
+func (a *renderTargetCaptureAccelerator) StrokePath(gg.GPURenderTarget, *gg.Path, *gg.Paint) error {
+	return gg.ErrFallbackToCPU
+}
+func (a *renderTargetCaptureAccelerator) FillShape(gg.GPURenderTarget, gg.DetectedShape, *gg.Paint) error {
+	return gg.ErrFallbackToCPU
+}
+func (a *renderTargetCaptureAccelerator) StrokeShape(gg.GPURenderTarget, gg.DetectedShape, *gg.Paint) error {
+	return gg.ErrFallbackToCPU
+}
+func (a *renderTargetCaptureAccelerator) Flush(target gg.GPURenderTarget) error {
+	a.lastTarget = target
+	a.flushes++
+	return nil
+}
+func (a *renderTargetCaptureAccelerator) CanRenderDirect() bool { return true }
+
 // TestRender_NotDirty_Noop verifies that Render returns nil without presenting
 // when the canvas is not dirty.
 func TestRender_NotDirty_Noop(t *testing.T) {
@@ -99,6 +138,65 @@ func TestRender_Closed_ReturnsError(t *testing.T) {
 	err = c.Render(dc)
 	if !errors.Is(err, ErrCanvasClosed) {
 		t.Errorf("Render on closed canvas: err = %v, want ErrCanvasClosed", err)
+	}
+}
+
+func TestRender_PreserveContentForwardedToGPU(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &renderTargetCaptureAccelerator{}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int))) //nolint:gosec // non-nil opaque handle for routing test
+	defaultTarget := &mockRenderTarget{surfaceView: view, surfaceW: 10, surfaceH: 10}
+	preservingTarget := &renderMockContentPreserver{
+		mockRenderTarget: *defaultTarget,
+		preserveContent:  true,
+	}
+
+	tests := []struct {
+		name             string
+		render           func(*Canvas) error
+		wantPreservation bool
+	}{
+		{
+			name:   "RenderDirect defaults to clear",
+			render: func(c *Canvas) error { return c.RenderDirect(view, 10, 10) },
+		},
+		{
+			name:   "RenderTarget without capability defaults to clear",
+			render: func(c *Canvas) error { return c.Render(defaultTarget) },
+		},
+		{
+			name:             "RenderTarget forwards preservation",
+			render:           func(c *Canvas) error { return c.Render(preservingTarget) },
+			wantPreservation: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accelerator.lastTarget = gg.GPURenderTarget{}
+			accelerator.flushes = 0
+
+			canvas, err := New(newMockProvider(), 10, 10)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			defer canvas.Close()
+
+			if err := tt.render(canvas); err != nil {
+				t.Fatalf("render: %v", err)
+			}
+			if accelerator.flushes != 1 {
+				t.Fatalf("accelerator Flush calls = %d, want 1", accelerator.flushes)
+			}
+			if got := accelerator.lastTarget.PreserveContent; got != tt.wantPreservation {
+				t.Errorf("GPURenderTarget.PreserveContent = %v, want %v", got, tt.wantPreservation)
+			}
+		})
 	}
 }
 
