@@ -846,6 +846,23 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 	return nil
 }
 
+// selectBaseLayer returns the queued compositor base unless the destination
+// surface already supplies it. With PreserveContent, external rendering is the
+// base layer; drawing the full-surface pixmap base would hide that content.
+// Callers that need another texture above external content use DrawGPUTexture.
+func selectBaseLayer(draws []drawCommand, preserveContent bool) *GPUTextureDrawCommand {
+	if preserveContent {
+		return nil
+	}
+	for i := range draws {
+		if draws[i].kind == drawCmdBaseLayer {
+			baseLayer := draws[i].gpuTexCmd.(GPUTextureDrawCommand)
+			return &baseLayer
+		}
+	}
+	return nil
+}
+
 // Flush dispatches all pending commands for this context via the render session.
 func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cyclop,gocognit,gocyclo,funlen // sequential resource setup + group dispatch
 	// Dispatch backend-agnostic draw commands (ADR-051).
@@ -907,17 +924,10 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)
 	rc.session.preserveContent = target.PreserveContent // ADR-059
 
-	// Extract baseLayer from pendingDraws before building ScissorGroups.
-	// BaseLayer is passed as a separate parameter to RenderFrameGrouped
-	// (renders BEFORE all tiers) — not part of ScissorGroups.
-	var baseLayer *GPUTextureDrawCommand
-	for i := range rc.pendingDraws {
-		if rc.pendingDraws[i].kind == drawCmdBaseLayer {
-			bl := rc.pendingDraws[i].gpuTexCmd.(GPUTextureDrawCommand)
-			baseLayer = &bl
-			break
-		}
-	}
+	// The queued base layer renders before every other tier. PreserveContent
+	// makes the existing surface content the base instead, so selecting the
+	// pixmap layer here would immediately cover the external renderer's output.
+	baseLayer := selectBaseLayer(rc.pendingDraws, target.PreserveContent)
 
 	// Build ScissorGroups from per-draw clip state. All command types flow
 	// through pendingDraws: shapes, paths, text, images, GPU textures.

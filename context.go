@@ -1425,9 +1425,10 @@ func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height ui
 	return c.flushGPUWithView(view, width, height, false)
 }
 
-// FlushGPUWithViewPreserveContent is like FlushGPUWithView, but loads the
-// existing view contents instead of clearing them on the first render pass.
-// Use this when another renderer has already drawn to the view in this frame.
+// FlushGPUWithViewPreserveContent is like FlushGPUWithView, but treats the
+// existing view contents as the compositor base instead of clearing or covering
+// them with a queued DrawGPUTextureBase layer. Use this when another renderer
+// has already drawn to the view in this frame.
 func (c *Context) FlushGPUWithViewPreserveContent(view gpucontext.TextureView, width, height uint32) error {
 	return c.flushGPUWithView(view, width, height, true)
 }

@@ -66,9 +66,10 @@ type GPURenderTarget struct {
 	ViewWidth  uint32
 	ViewHeight uint32
 
-	// PreserveContent signals that the surface view already has content
-	// from an external renderer (e.g., g3d). When true, the render session
-	// uses LoadOp::Load instead of LoadOp::Clear to preserve existing content.
+	// PreserveContent signals that the surface view already has content from an
+	// external renderer (e.g., g3d). When true, that content becomes the
+	// compositor base: the render session uses LoadOp::Load and ignores a queued
+	// DrawGPUTextureBase layer. Regular texture overlays still render normally.
 	// Set by gogpu after MarkExternalContent(). ADR-059.
 	PreserveContent bool
 
