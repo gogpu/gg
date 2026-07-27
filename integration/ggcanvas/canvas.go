@@ -661,7 +661,8 @@ type RenderTarget interface {
 
 // ContentPreserver is an optional RenderTarget capability that reports whether
 // the surface already contains content from an earlier render pass. When true,
-// ggcanvas loads that content before drawing instead of clearing the surface.
+// ggcanvas uses that content as the compositor base instead of clearing or
+// covering it with the canvas base layer.
 type ContentPreserver interface {
 	PreserveContent() bool
 }

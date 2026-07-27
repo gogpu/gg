@@ -192,6 +192,26 @@ func TestQueueBaseLayer_FullScreen(t *testing.T) {
 	assertFloat(t, bl.DstH, 400, "base DstH")
 }
 
+func TestSelectBaseLayer_PreserveContentUsesSurfaceAsBase(t *testing.T) {
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))
+	draws := []drawCommand{{
+		kind: drawCmdBaseLayer,
+		gpuTexCmd: GPUTextureDrawCommand{
+			View: view, DstW: 600, DstH: 400, Opacity: 1,
+		},
+	}}
+
+	if got := selectBaseLayer(draws, false); got == nil {
+		t.Fatal("selectBaseLayer without preservation discarded the queued base layer")
+	}
+	if got := selectBaseLayer(draws, true); got != nil {
+		t.Fatal("selectBaseLayer with preservation must use existing surface content as the base")
+	}
+	if got := selectBaseLayer(nil, false); got != nil {
+		t.Fatal("selectBaseLayer without a queued base layer returned one")
+	}
+}
+
 // collectGPUTextureDraws extracts GPUTextureDrawCommand entries from pendingDraws.
 func collectGPUTextureDraws(rc *GPURenderContext) []GPUTextureDrawCommand {
 	var out []GPUTextureDrawCommand
