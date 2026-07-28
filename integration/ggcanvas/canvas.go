@@ -606,6 +606,30 @@ func (c *Canvas) renderDirect(surfaceView gpucontext.TextureView, width, height 
 	return err
 }
 
+// renderDirectToTarget borrows the target's encoder when available. The target
+// keeps ownership of finishing and submission; gg only records its pass.
+func (c *Canvas) renderDirectToTarget(
+	dc RenderTarget,
+	surfaceView gpucontext.TextureView,
+	width, height uint32,
+	preserveContent bool,
+) error {
+	provider, ok := dc.(CommandEncoderProvider)
+	if !ok {
+		return c.renderDirect(surfaceView, width, height, preserveContent)
+	}
+	encoder := provider.CommandEncoder()
+	if encoder.IsNil() {
+		return c.renderDirect(surfaceView, width, height, preserveContent)
+	}
+
+	c.ctx.SetSharedEncoder(encoder)
+	// The target owns submission. Always clear the borrowed encoder before a
+	// fallback path can flush to a different destination.
+	defer c.ctx.SetSharedEncoder(gpucontext.CommandEncoder{})
+	return c.renderDirect(surfaceView, width, height, preserveContent)
+}
+
 // RenderDirectWithDamage renders canvas content to a surface view with a damage
 // rect hint. Only the damaged region is re-rendered; the rest preserves the
 // previous frame (LoadOpLoad + scissor). This enables per-boundary incremental
@@ -738,23 +762,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		if preserver, ok := dc.(ContentPreserver); ok {
 			preserveContent = preserver.PreserveContent()
 		}
-		encoder := gpucontext.CommandEncoder{}
-		if provider, ok := dc.(CommandEncoderProvider); ok {
-			encoder = provider.CommandEncoder()
-			if !encoder.IsNil() {
-				c.ctx.SetSharedEncoder(encoder)
-			}
-		}
-		err := func() error {
-			if encoder.IsNil() {
-				return c.renderDirect(sv, sw, sh, preserveContent)
-			}
-			// The target owns submission. Always clear the borrowed encoder before
-			// a fallback path can flush to a different destination.
-			defer c.ctx.SetSharedEncoder(gpucontext.CommandEncoder{})
-			return c.renderDirect(sv, sw, sh, preserveContent)
-		}()
-		if err == nil {
+		if err := c.renderDirectToTarget(dc, sv, sw, sh, preserveContent); err == nil {
 			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}
