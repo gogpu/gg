@@ -72,6 +72,17 @@ type renderMockContentPreserver struct {
 
 func (m *renderMockContentPreserver) PreserveContent() bool { return m.preserveContent }
 
+type renderMockCommandEncoderProvider struct {
+	mockRenderTarget
+	encoder      gpucontext.CommandEncoder
+	encoderCalls int
+}
+
+func (m *renderMockCommandEncoderProvider) CommandEncoder() gpucontext.CommandEncoder {
+	m.encoderCalls++
+	return m.encoder
+}
+
 type renderTargetCaptureAccelerator struct {
 	lastTarget gg.GPURenderTarget
 	flushes    int
@@ -197,6 +208,37 @@ func TestRender_PreserveContentForwardedToGPU(t *testing.T) {
 				t.Errorf("GPURenderTarget.PreserveContent = %v, want %v", got, tt.wantPreservation)
 			}
 		})
+	}
+}
+
+func TestRender_BorrowsCommandEncoderFromTarget(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &renderTargetCaptureAccelerator{}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))       //nolint:gosec // non-nil opaque handle for routing test
+	encoder := gpucontext.NewCommandEncoder(unsafe.Pointer(new(int))) //nolint:gosec // non-nil opaque handle for routing test
+	target := &renderMockCommandEncoderProvider{
+		mockRenderTarget: mockRenderTarget{surfaceView: view, surfaceW: 10, surfaceH: 10},
+		encoder:          encoder,
+	}
+	canvas, err := New(newMockProvider(), 10, 10)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer canvas.Close()
+
+	if err := canvas.Render(target); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if target.encoderCalls != 1 {
+		t.Fatalf("CommandEncoder calls = %d, want 1", target.encoderCalls)
+	}
+	if accelerator.flushes != 1 {
+		t.Fatalf("accelerator Flush calls = %d, want 1", accelerator.flushes)
 	}
 }
 

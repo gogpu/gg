@@ -667,6 +667,13 @@ type ContentPreserver interface {
 	PreserveContent() bool
 }
 
+// CommandEncoderProvider is an optional RenderTarget capability for
+// single-command-buffer compositing. The returned encoder is owned and
+// submitted by the target; Canvas only records its render passes into it.
+type CommandEncoderProvider interface {
+	CommandEncoder() gpucontext.CommandEncoder
+}
+
 // DamageRectSetter is an optional interface for RenderTargets that support
 // damage-aware presentation (ADR-021 Level 3-4). gogpu.ContextRenderTarget
 // implements this via Context.SetDamageRects().
@@ -731,7 +738,23 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		if preserver, ok := dc.(ContentPreserver); ok {
 			preserveContent = preserver.PreserveContent()
 		}
-		if err := c.renderDirect(sv, sw, sh, preserveContent); err == nil {
+		encoder := gpucontext.CommandEncoder{}
+		if provider, ok := dc.(CommandEncoderProvider); ok {
+			encoder = provider.CommandEncoder()
+			if !encoder.IsNil() {
+				c.ctx.SetSharedEncoder(encoder)
+			}
+		}
+		err := func() error {
+			if encoder.IsNil() {
+				return c.renderDirect(sv, sw, sh, preserveContent)
+			}
+			// The target owns submission. Always clear the borrowed encoder before
+			// a fallback path can flush to a different destination.
+			defer c.ctx.SetSharedEncoder(gpucontext.CommandEncoder{})
+			return c.renderDirect(sv, sw, sh, preserveContent)
+		}()
+		if err == nil {
 			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}
