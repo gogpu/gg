@@ -83,6 +83,28 @@ func (m *renderMockCommandEncoderProvider) CommandEncoder() gpucontext.CommandEn
 	return m.encoder
 }
 
+// renderMockFrameTarget models a target where borrowing the frame encoder
+// records deferred work and changes whether the next pass must preserve the
+// surface. gogpu.ContextRenderTarget has this behavior when CommandEncoder
+// flushes a deferred clear.
+type renderMockFrameTarget struct {
+	mockRenderTarget
+	encoder         gpucontext.CommandEncoder
+	preserveContent bool
+	calls           []string
+}
+
+func (m *renderMockFrameTarget) CommandEncoder() gpucontext.CommandEncoder {
+	m.calls = append(m.calls, "encoder")
+	m.preserveContent = true
+	return m.encoder
+}
+
+func (m *renderMockFrameTarget) PreserveContent() bool {
+	m.calls = append(m.calls, "preserve")
+	return m.preserveContent
+}
+
 type renderTargetCaptureAccelerator struct {
 	lastTarget gg.GPURenderTarget
 	flushes    int
@@ -239,6 +261,37 @@ func TestRender_BorrowsCommandEncoderFromTarget(t *testing.T) {
 	}
 	if accelerator.flushes != 1 {
 		t.Fatalf("accelerator Flush calls = %d, want 1", accelerator.flushes)
+	}
+}
+
+func TestRender_SamplesContentAfterBorrowingEncoder(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &renderTargetCaptureAccelerator{}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	view := gpucontext.NewTextureView(unsafe.Pointer(new(int)))       //nolint:gosec // non-nil opaque handle for routing test
+	encoder := gpucontext.NewCommandEncoder(unsafe.Pointer(new(int))) //nolint:gosec // non-nil opaque handle for routing test
+	target := &renderMockFrameTarget{
+		mockRenderTarget: mockRenderTarget{surfaceView: view, surfaceW: 10, surfaceH: 10},
+		encoder:          encoder,
+	}
+	canvas, err := New(newMockProvider(), 10, 10)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer canvas.Close()
+
+	if err := canvas.Render(target); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(target.calls) != 2 || target.calls[0] != "encoder" || target.calls[1] != "preserve" {
+		t.Fatalf("capability call order = %v, want [encoder preserve]", target.calls)
+	}
+	if !accelerator.lastTarget.PreserveContent {
+		t.Error("GPURenderTarget.PreserveContent = false after encoder acquisition, want true")
 	}
 }
 

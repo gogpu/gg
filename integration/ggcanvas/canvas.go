@@ -612,13 +612,18 @@ func (c *Canvas) renderDirectToTarget(
 	dc RenderTarget,
 	surfaceView gpucontext.TextureView,
 	width, height uint32,
-	preserveContent bool,
 ) error {
-	provider, ok := dc.(CommandEncoderProvider)
-	if !ok {
-		return c.renderDirect(surfaceView, width, height, preserveContent)
+	var encoder gpucontext.CommandEncoder
+	if provider, ok := dc.(CommandEncoderProvider); ok {
+		// Acquiring the encoder may record deferred target work (for example,
+		// gogpu flushes a pending clear), so sample content state afterwards.
+		encoder = provider.CommandEncoder()
 	}
-	encoder := provider.CommandEncoder()
+
+	preserveContent := false
+	if preserver, ok := dc.(ContentPreserver); ok {
+		preserveContent = preserver.PreserveContent()
+	}
 	if encoder.IsNil() {
 		return c.renderDirect(surfaceView, width, height, preserveContent)
 	}
@@ -686,14 +691,17 @@ type RenderTarget interface {
 // ContentPreserver is an optional RenderTarget capability that reports whether
 // the surface already contains content from an earlier render pass. When true,
 // ggcanvas uses that content as the compositor base instead of clearing or
-// covering it with the canvas base layer.
+// covering it with the canvas base layer. Canvas queries this after borrowing
+// any shared command encoder so the result reflects current frame state.
 type ContentPreserver interface {
 	PreserveContent() bool
 }
 
 // CommandEncoderProvider is an optional RenderTarget capability for
-// single-command-buffer compositing. The returned encoder is owned and
-// submitted by the target; Canvas only records its render passes into it.
+// single-command-buffer compositing. The returned encoder is borrowed for the
+// current Render call and remains owned by the target. Canvas only records its
+// render passes; it never finishes, submits, or discards the encoder. A zero
+// value requests the normal independently submitted fallback path.
 type CommandEncoderProvider interface {
 	CommandEncoder() gpucontext.CommandEncoder
 }
@@ -758,11 +766,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	sv := dc.SurfaceView()
 	if !sv.IsNil() && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
-		preserveContent := false
-		if preserver, ok := dc.(ContentPreserver); ok {
-			preserveContent = preserver.PreserveContent()
-		}
-		if err := c.renderDirectToTarget(dc, sv, sw, sh, preserveContent); err == nil {
+		if err := c.renderDirectToTarget(dc, sv, sw, sh); err == nil {
 			c.forwardDamageRects(dc, damageRects)
 			return nil
 		}
