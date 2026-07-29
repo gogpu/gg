@@ -9,23 +9,26 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
-// textureSet holds a set of MSAA color, depth/stencil, and resolve textures
-// for offscreen rendering. This is shared by GPURenderSession and
-// StencilRenderer to avoid code duplication.
+// textureSet holds a set of MSAA color, depth/stencil, resolve, and composition
+// textures. This is shared by GPURenderSession and StencilRenderer to avoid
+// code duplication.
 //
 // The texture set supports stencil-then-cover and SDF rendering:
 //   - MSAA color: 4x samples, BGRA8Unorm, RenderAttachment
 //   - Depth/stencil: 4x samples, Depth24PlusStencil8, RenderAttachment
 //   - Resolve: 1x sample, BGRA8Unorm, RenderAttachment | CopySrc
+//   - Composition: 1x sample, BGRA8Unorm, RenderAttachment | TextureBinding
 type textureSet struct {
-	msaaTex     *wgpu.Texture
-	msaaView    *wgpu.TextureView
-	stencilTex  *wgpu.Texture
-	stencilView *wgpu.TextureView
-	resolveTex  *wgpu.Texture
-	resolveView *wgpu.TextureView
-	width       uint32
-	height      uint32
+	msaaTex       *wgpu.Texture
+	msaaView      *wgpu.TextureView
+	stencilTex    *wgpu.Texture
+	stencilView   *wgpu.TextureView
+	resolveTex    *wgpu.Texture
+	resolveView   *wgpu.TextureView
+	compositeTex  *wgpu.Texture
+	compositeView *wgpu.TextureView
+	width         uint32
+	height        uint32
 }
 
 // ensureTextures creates or recreates textures if the requested dimensions
@@ -232,8 +235,66 @@ func (ts *textureSet) ensureSurfaceTextures(device *wgpu.Device, w, h uint32, la
 	return nil
 }
 
+// ensureCompositeTexture lazily creates the single-sample texture used to
+// composite an MSAA-rendered transparent overlay onto an existing surface.
+// The surface textures must already be sized for w x h.
+func (ts *textureSet) ensureCompositeTexture(device *wgpu.Device, w, h uint32, labelPrefix string) error {
+	if ts.compositeTex != nil && ts.compositeView != nil && ts.width == w && ts.height == h {
+		return nil
+	}
+	if ts.msaaTex == nil || ts.width != w || ts.height != h {
+		return fmt.Errorf("composite texture requires matching surface textures")
+	}
+
+	if ts.compositeView != nil {
+		ts.compositeView.Release()
+		ts.compositeView = nil
+	}
+	if ts.compositeTex != nil {
+		ts.compositeTex.Release()
+		ts.compositeTex = nil
+	}
+
+	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         labelPrefix + "_composite_resolve",
+		Size:          wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Usage:         gputypes.TextureUsageRenderAttachment | gputypes.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		return fmt.Errorf("create composition resolve texture: %w", err)
+	}
+	ts.compositeTex = tex
+
+	view, err := device.CreateTextureView(tex, &wgpu.TextureViewDescriptor{
+		Label:         labelPrefix + "_composite_resolve_view",
+		Format:        gputypes.TextureFormatBGRA8Unorm,
+		Dimension:     gputypes.TextureViewDimension2D,
+		Aspect:        gputypes.TextureAspectAll,
+		MipLevelCount: 1,
+	})
+	if err != nil {
+		ts.compositeTex.Release()
+		ts.compositeTex = nil
+		return fmt.Errorf("create composition resolve view: %w", err)
+	}
+	ts.compositeView = view
+	return nil
+}
+
 // destroyTextures releases all texture resources and resets dimensions.
 func (ts *textureSet) destroyTextures() {
+	if ts.compositeView != nil {
+		ts.compositeView.Release()
+		ts.compositeView = nil
+	}
+	if ts.compositeTex != nil {
+		ts.compositeTex.Release()
+		ts.compositeTex = nil
+	}
 	if ts.resolveView != nil {
 		ts.resolveView.Release()
 		ts.resolveView = nil

@@ -130,6 +130,180 @@ func TestRenderSessionTexturesResize(t *testing.T) {
 	}
 }
 
+func TestRenderSessionMSAASurfacePreservationRoute(t *testing.T) {
+	tests := []struct {
+		name            string
+		sampleCount     uint32
+		preserveContent bool
+		previouslyDrawn bool
+		wantComposition bool
+	}{
+		{
+			name:            "external content with MSAA",
+			sampleCount:     4,
+			preserveContent: true,
+			wantComposition: true,
+		},
+		{
+			name:            "earlier gg flush with MSAA",
+			sampleCount:     4,
+			previouslyDrawn: true,
+			wantComposition: true,
+		},
+		{
+			name:        "fresh MSAA surface",
+			sampleCount: 4,
+		},
+		{
+			name:            "external content without MSAA",
+			sampleCount:     1,
+			preserveContent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device, queue, cleanup := createNoopDevice(t)
+			defer cleanup()
+
+			const width, height = uint32(96), uint32(64)
+			tex, view := createMockSurfaceView(t, device, width, height)
+			defer tex.Release()
+			defer view.Release()
+
+			s := NewGPURenderSession(device, queue, tt.sampleCount)
+			defer s.Destroy()
+			if tt.previouslyDrawn {
+				s.SetFrameState(true, view)
+			}
+
+			encoder, err := device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{
+				Label: "preservation_route_encoder",
+			})
+			if err != nil {
+				t.Fatalf("create encoder: %v", err)
+			}
+			groups := []ScissorGroup{{SDFShapes: []SDFRenderShape{{
+				Kind: 0, CenterX: 24, CenterY: 24, Param1: 12, Param2: 12,
+				ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1,
+			}}}}
+			target := gg.GPURenderTarget{
+				View:            gpucontext.NewTextureView(unsafe.Pointer(view)),
+				ViewWidth:       width,
+				ViewHeight:      height,
+				PreserveContent: tt.preserveContent,
+			}
+			if err := s.RenderFrameGrouped(target, groups, nil, encoder); err != nil {
+				encoder.DiscardEncoding()
+				t.Fatalf("RenderFrameGrouped: %v", err)
+			}
+
+			gotComposition := s.textures.compositeTex != nil && s.textures.compositeView != nil
+			if gotComposition != tt.wantComposition {
+				t.Fatalf("composition route = %v, want %v", gotComposition, tt.wantComposition)
+			}
+			if tt.wantComposition && (s.surfaceCompositeVertBuf == nil ||
+				s.surfaceCompositeUniformBuf == nil || s.surfaceCompositeBindGroup == nil) {
+				t.Fatal("composition route did not prepare its dedicated draw resources")
+			}
+			frameRendered, lastView := s.FrameState()
+			if !frameRendered || lastView != view {
+				t.Fatalf("frame state = (%v, %p), want (true, %p)", frameRendered, lastView, view)
+			}
+
+			cmdBuf, err := encoder.Finish()
+			if err != nil {
+				t.Fatalf("finish encoder: %v", err)
+			}
+			if _, err := queue.Submit(cmdBuf); err != nil {
+				device.FreeCommandBuffer(cmdBuf)
+				t.Fatalf("submit: %v", err)
+			}
+			if err := device.WaitIdle(); err != nil {
+				t.Fatalf("wait idle: %v", err)
+			}
+			device.FreeCommandBuffer(cmdBuf)
+		})
+	}
+}
+
+func TestRenderSessionMSAASurfacePreservationNonGrouped(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	const width, height = uint32(96), uint32(64)
+	tex, view := createMockSurfaceView(t, device, width, height)
+	defer tex.Release()
+	defer view.Release()
+
+	s := NewGPURenderSession(device, queue, 4)
+	defer s.Destroy()
+	target := gg.GPURenderTarget{
+		View:            gpucontext.NewTextureView(unsafe.Pointer(view)),
+		ViewWidth:       width,
+		ViewHeight:      height,
+		PreserveContent: true,
+	}
+	shapes := []SDFRenderShape{{
+		Kind: 0, CenterX: 24, CenterY: 24, Param1: 12, Param2: 12,
+		ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1,
+	}}
+	if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+		t.Fatalf("RenderFrame: %v", err)
+	}
+	if s.textures.compositeTex == nil || s.textures.compositeView == nil {
+		t.Fatal("non-grouped preservation did not use the MSAA composition route")
+	}
+	firstCompositeView := s.textures.compositeView
+	firstBindGroup := s.surfaceCompositeBindGroup
+
+	const resizedWidth, resizedHeight = uint32(128), uint32(80)
+	resizedTex, resizedView := createMockSurfaceView(t, device, resizedWidth, resizedHeight)
+	defer resizedTex.Release()
+	defer resizedView.Release()
+	target.View = gpucontext.NewTextureView(unsafe.Pointer(resizedView))
+	target.ViewWidth = resizedWidth
+	target.ViewHeight = resizedHeight
+	if err := s.RenderFrame(target, shapes, nil, nil, nil); err != nil {
+		t.Fatalf("RenderFrame after resize: %v", err)
+	}
+	if s.textures.compositeView == firstCompositeView {
+		t.Fatal("surface resize did not recreate the composition resolve view")
+	}
+	if s.surfaceCompositeBindGroup == firstBindGroup {
+		t.Fatal("surface resize did not recreate the composition bind group")
+	}
+	if s.surfaceCompositeBoundView != s.textures.compositeView {
+		t.Fatal("composition bind group does not reference the resized resolve view")
+	}
+}
+
+func TestRenderSessionMSAAAttachmentDiscardsResolvedStorage(t *testing.T) {
+	msaaView := &wgpu.TextureView{}
+	targetView := &wgpu.TextureView{}
+	s := &GPURenderSession{
+		sampleCount: 4,
+		textures:    textureSet{msaaView: msaaView},
+	}
+
+	attachment := s.colorAttachment(targetView, gputypes.LoadOpClear)
+	if attachment.View != msaaView || attachment.ResolveTarget != targetView {
+		t.Fatal("MSAA attachment must render to the transient view and resolve to the target")
+	}
+	if attachment.StoreOp != gputypes.StoreOpDiscard {
+		t.Fatalf("MSAA StoreOp = %v, want Discard", attachment.StoreOp)
+	}
+
+	s.sampleCount = 1
+	attachment = s.colorAttachment(targetView, gputypes.LoadOpLoad)
+	if attachment.View != targetView || attachment.ResolveTarget != nil {
+		t.Fatal("single-sample attachment must render directly to the target")
+	}
+	if attachment.StoreOp != gputypes.StoreOpStore {
+		t.Fatalf("single-sample StoreOp = %v, want Store", attachment.StoreOp)
+	}
+}
+
 func TestRenderSessionDestroyAndRecreate(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()

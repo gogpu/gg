@@ -59,7 +59,7 @@ const (
 // The Data slice (when used) must be in premultiplied RGBA format, 4 bytes
 // per pixel, laid out row by row with the given Stride.
 type GPURenderTarget struct {
-	// GPU-direct path: resolve directly to this view.
+	// GPU-direct path: render to this view without CPU readback.
 	// When non-nil, Data/Stride are ignored -- no CPU readback.
 	// Type-assert to *wgpu.TextureView in internal/gpu consumers.
 	View       gpucontext.TextureView
@@ -68,8 +68,9 @@ type GPURenderTarget struct {
 
 	// PreserveContent signals that the surface view already has content from an
 	// external renderer (e.g., g3d). When true, that content becomes the
-	// compositor base: the render session uses LoadOp::Load and ignores a queued
-	// DrawGPUTextureBase layer. Regular texture overlays still render normally.
+	// compositor base and a queued DrawGPUTextureBase layer is ignored. A
+	// single-sample pass loads the surface directly; an MSAA pass renders a
+	// transparent overlay and alpha-composites its resolve onto the surface.
 	// Set by gogpu after MarkExternalContent(). ADR-059.
 	PreserveContent bool
 
@@ -163,8 +164,8 @@ type GPURenderContextProvider interface {
 
 // FrameAware is an optional interface for accelerators that need per-frame
 // lifecycle management. BeginFrame resets per-frame state so that the first
-// render pass of each frame clears the surface (LoadOpClear), while
-// subsequent mid-frame flushes preserve content (LoadOpLoad).
+// render pass of each frame replaces the surface, while subsequent mid-frame
+// flushes preserve its content.
 //
 // Without calling BeginFrame, the surface is only cleared on the very first
 // frame and all subsequent frames composite on top of previous content,

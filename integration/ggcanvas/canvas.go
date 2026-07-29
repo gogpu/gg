@@ -416,9 +416,9 @@ func (c *Canvas) MarkDirtyRegion(r image.Rectangle) {
 // the dirty flag is set correctly for GPU upload on next Flush/RenderTo.
 //
 // BeginAcceleratorFrame is called before fn to reset per-frame GPU state.
-// This ensures the first render pass clears the surface while mid-frame
-// CPU fallback flushes (bitmap text, gradient fill) use LoadOpLoad to
-// preserve previously drawn content. See RENDER-DIRECT-003.
+// This ensures the first render pass replaces the surface while mid-frame
+// CPU fallback flushes (bitmap text, gradient fill) preserve previously drawn
+// content. See RENDER-DIRECT-003.
 //
 // Per-frame state (matrix, path, clip, mask) is automatically reset via
 // Push/Pop wrapper (Skia SkAutoCanvasRestore pattern, ADR-032). Configuration
