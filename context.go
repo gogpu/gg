@@ -1389,9 +1389,9 @@ func (c *Context) SubmitSharedEncoder(encoder gpucontext.CommandEncoder) error {
 }
 
 // BeginGPUFrame resets per-context GPU frame state so the next render pass
-// uses LoadOpClear. Call this on persistent contexts before re-rendering
-// to the same view — without it, frameRendered=true from the previous frame
-// causes LoadOpLoad, preserving stale content.
+// replaces the surface. Call this on persistent contexts before re-rendering
+// to the same view — without it, the previous frame is treated as content that
+// must be preserved.
 //
 // Not needed for one-shot contexts (NewContext + Close per frame).
 // Not needed when the view changes between frames (auto-reset on view change).

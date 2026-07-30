@@ -213,6 +213,14 @@ type GPURenderSession struct {
 	gpuTexUniformBufs    []*wgpu.Buffer
 	gpuTexBindGroups     []*wgpu.BindGroup
 
+	// Full-surface textured quad used by the MSAA overlay composition path.
+	// These resources are separate from ordinary GPU texture draws so preparing
+	// the final composite cannot overwrite another draw's persistent buffers.
+	surfaceCompositeVertBuf    *wgpu.Buffer
+	surfaceCompositeUniformBuf *wgpu.Buffer
+	surfaceCompositeBindGroup  *wgpu.BindGroup
+	surfaceCompositeBoundView  *wgpu.TextureView
+
 	// Bind groups pending release — deferred until after command buffer submit.
 	// WebGPU requires bind groups to be alive at submit time (wgpu-core track/mod.rs:631).
 	// Skia Graphite pattern: batch-release after GPU completion.
@@ -241,9 +249,9 @@ type GPURenderSession struct {
 
 	// frameRendered tracks whether at least one render pass has been
 	// submitted to the surface in the current frame. When true, subsequent
-	// render passes use LoadOpLoad instead of LoadOpClear to preserve
-	// previously drawn content. This handles mid-frame flushes caused by
-	// CPU fallback operations (e.g., DrawImage between GPU draws).
+	// passes preserve previously drawn content. Single-sample passes use
+	// LoadOpLoad; MSAA passes resolve a transparent overlay and composite it.
+	// This handles mid-frame flushes caused by CPU fallback operations.
 	//
 	// Reset by BeginFrame() at the start of each frame, or when the
 	// active view changes (different Context targets different view).
@@ -251,8 +259,8 @@ type GPURenderSession struct {
 	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
 	frameRendered bool
 
-	// preserveContent signals that the surface has external content (e.g., g3d).
-	// When true, view changes do NOT reset frameRendered → LoadOp::Load. ADR-059.
+	// preserveContent signals that the surface has external content (e.g., g3d)
+	// that must remain underneath this pass. ADR-059.
 	preserveContent bool
 
 	// antiAlias determines SDF coverage computation mode.
@@ -262,8 +270,8 @@ type GPURenderSession struct {
 
 	// lastView tracks the most recent per-pass view used for rendering.
 	// When the view changes between Flush calls (e.g., two gg.Context
-	// instances rendering to different targets), frameRendered is reset
-	// so the new view gets a LoadOpClear on its first render pass.
+	// instances rendering to different targets), prior gg content is not
+	// preserved unless the target explicitly reports external content.
 	lastView *wgpu.TextureView
 
 	// scissorRect holds the current scissor rect in device pixels.
@@ -323,14 +331,15 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 			}
 			s.prevCmdBufs = s.prevCmdBufs[:0]
 		}
+		s.releaseSurfaceCompositeBinding()
 		s.textures.destroyTextures()
 	}
 
 	// Detect new frame: swapchain creates a new TextureView each frame
 	// (gogpu renderer.BeginFrame → CreateTextureView), so a different view
 	// pointer means a new frame has started. Reset per-frame state so the
-	// first render pass clears the surface while subsequent mid-frame
-	// flushes preserve content via LoadOpLoad.
+	// first render pass replaces the surface while subsequent mid-frame
+	// flushes preserve its content.
 	//
 	// When the same view is passed again (e.g., ggcanvas.RenderDirect calls
 	// SetSurfaceTarget a second time within the same frame), this is a no-op
@@ -353,8 +362,8 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 
 // BeginFrame resets per-frame state. Call this at the start of each frame
 // before any drawing operations. In surface mode, this ensures the first
-// render pass clears the surface while subsequent mid-frame flushes
-// preserve previously drawn content (LoadOpLoad instead of LoadOpClear).
+// render pass replaces the surface while subsequent mid-frame flushes
+// preserve previously drawn content.
 //
 // For offscreen mode this is a no-op — offscreen readback composites via
 // Porter-Duff "over", so LoadOpClear is always safe there.
@@ -431,7 +440,7 @@ func (s *GPURenderSession) colorAttachment(targetView *wgpu.TextureView, loadOp 
 			View:          s.textures.msaaView,
 			ResolveTarget: targetView,
 			LoadOp:        loadOp,
-			StoreOp:       gputypes.StoreOpStore,
+			StoreOp:       gputypes.StoreOpDiscard,
 			ClearValue:    gputypes.Color{R: 0, G: 0, B: 0, A: 0},
 		}
 	}
@@ -471,6 +480,8 @@ func (s *GPURenderSession) effectiveDimensions(target gg.GPURenderTarget, active
 // the same frame, we must drain the GPU first — otherwise destroying MSAA
 // textures referenced by in-flight render passes is undefined behavior.
 func (s *GPURenderSession) ensureTexturesForView(activeView *wgpu.TextureView, w, h uint32) error {
+	texturesChanging := s.textures.msaaTex == nil || s.textures.width != w || s.textures.height != h
+
 	// If dimensions are changing and there are in-flight command buffers
 	// from earlier flushes in this frame, drain the GPU before destroying
 	// the old textures. Without this, the earlier flush's render pass
@@ -485,6 +496,9 @@ func (s *GPURenderSession) ensureTexturesForView(activeView *wgpu.TextureView, w
 			}
 			s.prevCmdBufs = s.prevCmdBufs[:0]
 		}
+	}
+	if texturesChanging {
+		s.releaseSurfaceCompositeBinding()
 	}
 
 	if activeView != nil {
@@ -530,6 +544,9 @@ func (s *GPURenderSession) RenderMode() RenderMode {
 // In surface mode, only MSAA and stencil textures are created -- the resolve
 // texture is skipped because the surface view serves as the resolve target.
 func (s *GPURenderSession) EnsureTextures(w, h uint32) error {
+	if s.textures.msaaTex == nil || s.textures.width != w || s.textures.height != h {
+		s.releaseSurfaceCompositeBinding()
+	}
 	if s.surfaceView != nil {
 		return s.textures.ensureSurfaceTextures(s.device, w, h, "session", s.sampleCount)
 	}
@@ -559,6 +576,7 @@ func (s *GPURenderSession) RenderFrame(
 	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 && len(textBatches) == 0 && len(glyphMaskBatches) == 0 {
 		return nil
 	}
+	s.preserveContent = target.PreserveContent
 
 	// Determine render target view: per-pass target.View takes priority
 	// over session-level surfaceView (backward compat).
@@ -672,6 +690,7 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	if totalItems == 0 && baseLayer == nil {
 		return nil
 	}
+	s.preserveContent = target.PreserveContent
 
 	// Determine render target view: per-pass target.View takes priority
 	// over session-level surfaceView (backward compat).
@@ -914,13 +933,12 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 
 	blitOnly := s.isBlitOnly(grpRes, baseLayerRes)
 
-	// ADR-021: DamageRect (LoadOpLoad + scissor) is only supported on the
-	// blit-only compositor path. MSAA render passes cannot use LoadOpLoad
-	// because multisampled content is discarded after resolve (StoreOp=DontCare).
-	// No enterprise framework (Chrome, Flutter, Skia) uses LoadOpLoad on MSAA.
-	// Warn if caller passed damageRect but MSAA path will be used.
+	// ADR-021: DamageRect scissoring is only supported on the blit-only
+	// compositor path. Vector overlays that preserve a surface use a transparent
+	// MSAA intermediate and full-surface alpha composite instead; they must not
+	// load the transient multisample attachment.
 	if !blitOnly && len(target.DamageRects) > 0 {
-		slogger().Warn("damageRects ignored: MSAA render path requires full LoadOpClear; use blit-only compositor for damage-aware rendering (ADR-021)")
+		slogger().Warn("damageRects ignored: vector render path uses full-surface MSAA composition; use blit-only compositor for damage-aware rendering (ADR-021)")
 	}
 
 	// ADR-017: shared encoder → record render pass without submit.
@@ -1107,6 +1125,7 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 		s.gpuTexBaseVertBuf = nil
 		s.gpuTexBaseVertBufCap = 0
 	}
+	s.destroySurfaceCompositeResources()
 	// Tier 4: Text per-batch pools.
 	for i, bg := range s.textBindGroups {
 		if bg != nil {
@@ -1198,6 +1217,29 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	if s.clipBindLayout != nil {
 		s.clipBindLayout.Release()
 		s.clipBindLayout = nil
+	}
+}
+
+// releaseSurfaceCompositeBinding drops the bind group before its sampled
+// overlay resolve texture is destroyed or replaced. The vertex and uniform
+// buffers remain reusable across surface resizes.
+func (s *GPURenderSession) releaseSurfaceCompositeBinding() {
+	if s.surfaceCompositeBindGroup != nil {
+		s.surfaceCompositeBindGroup.Release()
+		s.surfaceCompositeBindGroup = nil
+	}
+	s.surfaceCompositeBoundView = nil
+}
+
+func (s *GPURenderSession) destroySurfaceCompositeResources() {
+	s.releaseSurfaceCompositeBinding()
+	if s.surfaceCompositeUniformBuf != nil {
+		s.surfaceCompositeUniformBuf.Release()
+		s.surfaceCompositeUniformBuf = nil
+	}
+	if s.surfaceCompositeVertBuf != nil {
+		s.surfaceCompositeVertBuf.Release()
+		s.surfaceCompositeVertBuf = nil
 	}
 }
 
@@ -2113,6 +2155,84 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	}, nil
 }
 
+// buildSurfaceCompositeResources prepares a persistent full-surface textured
+// quad that samples the transparent single-sample overlay resolve texture.
+// Dedicated buffers keep this final pass independent from base-layer and
+// ordinary GPU-texture draw resources prepared earlier in the frame.
+func (s *GPURenderSession) buildSurfaceCompositeResources(w, h uint32) (*imageFrameResources, error) {
+	if s.textures.compositeView == nil {
+		return nil, fmt.Errorf("composition resolve view is nil")
+	}
+	if s.imagePipeline == nil {
+		s.imagePipeline = NewTexturedQuadPipeline(s.device, s.queue, s.sampleCount)
+	}
+	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
+		return nil, fmt.Errorf("ensure composition pipeline: %w", err)
+	}
+
+	const vertexBufferSize = 6 * imageVertexStride
+	if s.surfaceCompositeVertBuf == nil {
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: "surface_composite_vert_buf",
+			Size:  vertexBufferSize,
+			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create composition vertex buffer: %w", err)
+		}
+		s.surfaceCompositeVertBuf = buf
+	}
+	vertices := buildImageVertices(&ImageDrawCommand{
+		DstW: float32(w), DstH: float32(h),
+		U0: 0, V0: 0, U1: 1, V1: 1,
+	})
+	if err := s.queue.WriteBuffer(s.surfaceCompositeVertBuf, 0, vertices); err != nil {
+		return nil, fmt.Errorf("upload composition vertices: %w", err)
+	}
+
+	if s.surfaceCompositeUniformBuf == nil {
+		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+			Label: "surface_composite_uniform_buf",
+			Size:  imageUniformSize,
+			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create composition uniform buffer: %w", err)
+		}
+		s.surfaceCompositeUniformBuf = buf
+	}
+	if err := s.queue.WriteBuffer(s.surfaceCompositeUniformBuf, 0, makeImageUniform(w, h, 1)); err != nil {
+		return nil, fmt.Errorf("upload composition uniform: %w", err)
+	}
+
+	if s.surfaceCompositeBindGroup == nil || s.surfaceCompositeBoundView != s.textures.compositeView {
+		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+			Label:  "surface_composite_bind_group",
+			Layout: s.imagePipeline.uniformLayout,
+			Entries: []wgpu.BindGroupEntry{
+				{Binding: 0, Buffer: s.surfaceCompositeUniformBuf, Offset: 0, Size: imageUniformSize},
+				{Binding: 1, TextureView: s.textures.compositeView},
+				{Binding: 2, Sampler: s.imagePipeline.sampler},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create composition bind group: %w", err)
+		}
+		if s.surfaceCompositeBindGroup != nil {
+			s.pendingBindGroupRelease = append(s.pendingBindGroupRelease, s.surfaceCompositeBindGroup)
+		}
+		s.surfaceCompositeBindGroup = bg
+		s.surfaceCompositeBoundView = s.textures.compositeView
+	}
+
+	return &imageFrameResources{
+		vertBuf: s.surfaceCompositeVertBuf,
+		drawCalls: []imageDrawCall{{
+			bindGroup: s.surfaceCompositeBindGroup,
+		}},
+	}, nil
+}
+
 // sliceImageResources creates an imageFrameResources referencing a sub-range of
 // the combined drawCalls. One drawCall per ImageDrawCommand.
 func (s *GPURenderSession) sliceImageResources(
@@ -2626,9 +2746,9 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	return nil
 }
 
-// encodeSubmitSurface encodes the unified render pass with the given view
-// as the resolve target, then submits without readback. The MSAA color
-// attachment resolves directly to the provided texture view.
+// encodeSubmitSurface encodes the unified surface rendering and submits without
+// readback. Ordinary MSAA frames resolve directly to the provided view;
+// preserved content uses a transparent resolve followed by alpha composition.
 //
 // This is the zero-copy path for windowed rendering: no staging buffer, no
 // CopyTextureToBuffer, no ReadBuffer, no fence wait (presentation handles
@@ -2660,51 +2780,21 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		}
 	}()
 
-	// Per-view frame tracking: when the view changes between flushes
-	// (e.g., two gg.Context instances rendering to different targets),
-	// reset frameRendered so the new view gets LoadOpClear on its first
-	// pass. This prevents shapes from one Context leaking into another.
-	//
-	// ADR-059: PreserveContent skips the reset — the view already has
-	// content from an external renderer (e.g., g3d). LoadOp::Load
-	// preserves it. Enterprise pattern: Qt beginExternal/endExternal,
-	// Flutter InlinePassContext pass_count, Unity Camera.DontClear.
-	if view != s.lastView {
-		if !s.preserveContent {
-			s.frameRendered = false
-		} else {
-			s.frameRendered = true
-		}
-		s.lastView = view
+	renderTarget, colorLoadOp, compositeRes, err := s.prepareSurfacePass(view, w, h)
+	if err != nil {
+		return err
 	}
-
-	// Surface render pass LoadOp: first pass clears, subsequent passes
-	// preserve existing content. This handles mid-frame flushes caused by
-	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
-	// Without this, each flush would wipe previously rendered shapes.
-	colorLoadOp := gputypes.LoadOpClear
-	stencilLoadOp := gputypes.LoadOpClear
-	if s.frameRendered {
-		colorLoadOp = gputypes.LoadOpLoad
-		stencilLoadOp = gputypes.LoadOpLoad
-	}
-	// Depth is ALWAYS cleared — never loaded. DepthStoreOp=Discard means
-	// depth content is undefined after each render pass, so LoadOpLoad would
-	// read garbage on subsequent passes. The depth clip pipeline (GPU-CLIP-003a)
-	// writes Z=0.0 inside clip regions fresh each pass, so clearing to 1.0 is
-	// always the correct initial state.
-	depthLoadOp := gputypes.LoadOpClear
 
 	rpDesc := &wgpu.RenderPassDescriptor{
 		Label:            "session_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(renderTarget, colorLoadOp)},
 		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
 			View:              s.textures.stencilView,
-			DepthLoadOp:       depthLoadOp,
+			DepthLoadOp:       gputypes.LoadOpClear,
 			DepthStoreOp:      gputypes.StoreOpDiscard,
 			DepthClearValue:   1.0,
-			StencilLoadOp:     stencilLoadOp,
-			StencilStoreOp:    gputypes.StoreOpStore,
+			StencilLoadOp:     gputypes.LoadOpClear,
+			StencilStoreOp:    gputypes.StoreOpDiscard,
 			StencilClearValue: 0,
 		},
 	}
@@ -2746,7 +2836,12 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	}
 
 	if endErr := rp.End(); endErr != nil {
-		slogger().Warn("render pass End failed", "err", endErr)
+		return fmt.Errorf("end render pass: %w", endErr)
+	}
+	if compositeRes != nil {
+		if err := s.encodeSurfaceCompositePass(encoder, view, w, h, compositeRes); err != nil {
+			return err
+		}
 	}
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
@@ -2774,8 +2869,9 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
 
 	// Mark that at least one render pass has been submitted this frame.
-	// Subsequent mid-frame flushes will use LoadOpLoad to preserve content.
+	// Subsequent mid-frame MSAA flushes use the composition path to preserve it.
 	s.frameRendered = true
+	s.lastView = view
 
 	return nil
 }
@@ -3108,7 +3204,7 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 
 	loadOp := gputypes.LoadOpClear
 	hasDamage := len(damageRects) > 0
-	if hasDamage {
+	if hasDamage || s.shouldPreserveSurface(view) {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -3175,9 +3271,128 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	return nil
 }
 
-// encodeSubmitSurfaceGrouped encodes a single render pass with per-group
-// scissor state changes, resolving directly to the given view. No readback
-// occurs. This is the grouped version of encodeSubmitSurface.
+// shouldPreserveSurface reports whether this pass must retain the current
+// single-sample surface contents. PreserveContent covers external producers;
+// frameRendered covers earlier gg flushes to the same view.
+func (s *GPURenderSession) shouldPreserveSurface(view *wgpu.TextureView) bool {
+	return s.preserveContent || (s.frameRendered && view == s.lastView)
+}
+
+// prepareSurfacePass selects the correct target for a vector surface pass.
+// Single-sample rendering can preserve the surface with LoadOpLoad. An MSAA
+// pass cannot load single-sample surface content into its transient attachment,
+// so it resolves a transparent overlay for a subsequent alpha-composite pass.
+func (s *GPURenderSession) prepareSurfacePass(
+	view *wgpu.TextureView,
+	w, h uint32,
+) (*wgpu.TextureView, gputypes.LoadOp, *imageFrameResources, error) {
+	if !s.shouldPreserveSurface(view) {
+		return view, gputypes.LoadOpClear, nil, nil
+	}
+	if s.sampleCount <= 1 {
+		return view, gputypes.LoadOpLoad, nil, nil
+	}
+	if err := s.textures.ensureCompositeTexture(s.device, w, h, "session"); err != nil {
+		return nil, 0, nil, fmt.Errorf("ensure composition texture: %w", err)
+	}
+	res, err := s.buildSurfaceCompositeResources(w, h)
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("build composition resources: %w", err)
+	}
+	return s.textures.compositeView, gputypes.LoadOpClear, res, nil
+}
+
+// encodeGroupedSurfacePass records the grouped vector pass. When existing
+// surface content must be preserved under MSAA, the overlay is first rendered
+// and resolved into a transparent single-sample texture, then alpha-composited
+// onto the surface. Loading the transient MSAA attachment would be incorrect:
+// it never contains content produced directly in the swapchain view.
+func (s *GPURenderSession) encodeGroupedSurfacePass(
+	encoder *wgpu.CommandEncoder,
+	label string,
+	view *wgpu.TextureView,
+	w, h uint32,
+	grpRes []groupResources,
+	baseLayerRes *imageFrameResources,
+) error {
+	renderTarget, colorLoadOp, compositeRes, err := s.prepareSurfacePass(view, w, h)
+	if err != nil {
+		return err
+	}
+
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label:            label,
+		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(renderTarget, colorLoadOp)},
+		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
+			View:              s.textures.stencilView,
+			DepthLoadOp:       gputypes.LoadOpClear,
+			DepthStoreOp:      gputypes.StoreOpDiscard,
+			DepthClearValue:   1.0,
+			StencilLoadOp:     gputypes.LoadOpClear,
+			StencilStoreOp:    gputypes.StoreOpDiscard,
+			StencilClearValue: 0,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("begin grouped surface pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+
+	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
+		rp.SetScissorRect(0, 0, w, h)
+		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
+	}
+	for i := range grpRes {
+		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
+		s.recordGroupDraws(rp, &grpRes[i])
+	}
+	if endErr := rp.End(); endErr != nil {
+		return fmt.Errorf("end grouped surface pass: %w", endErr)
+	}
+
+	if compositeRes != nil {
+		if err := s.encodeSurfaceCompositePass(encoder, view, w, h, compositeRes); err != nil {
+			return err
+		}
+	}
+
+	s.frameRendered = true
+	s.lastView = view
+	return nil
+}
+
+// encodeSurfaceCompositePass alpha-blends the transparent overlay resolve onto
+// the existing single-sample surface with the image pipeline's 1x blit variant.
+func (s *GPURenderSession) encodeSurfaceCompositePass(
+	encoder *wgpu.CommandEncoder,
+	view *wgpu.TextureView,
+	w, h uint32,
+	res *imageFrameResources,
+) error {
+	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
+		Label: "session_surface_composite_pass",
+		ColorAttachments: []wgpu.RenderPassColorAttachment{{
+			View:       view,
+			LoadOp:     gputypes.LoadOpLoad,
+			StoreOp:    gputypes.StoreOpStore,
+			ClearValue: gputypes.Color{R: 0, G: 0, B: 0, A: 0},
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("begin surface composite pass: %w", err)
+	}
+	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetScissorRect(0, 0, w, h)
+	s.imagePipeline.RecordBlitDraws(rp, res)
+	if endErr := rp.End(); endErr != nil {
+		return fmt.Errorf("end surface composite pass: %w", endErr)
+	}
+	return nil
+}
+
+// encodeSubmitSurfaceGrouped encodes grouped surface rendering and submits it
+// without readback. Preserved MSAA overlays require a resolve pass followed by
+// a surface composite pass; ordinary frames retain the direct resolve path.
 func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	view *wgpu.TextureView,
 	w, h uint32,
@@ -3200,62 +3415,8 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 		}
 	}()
 
-	// Per-view frame tracking (same as encodeSubmitSurface).
-	if view != s.lastView {
-		s.frameRendered = false
-		s.lastView = view
-	}
-
-	// Surface render pass LoadOp: first pass clears, subsequent passes
-	// preserve existing content. This handles mid-frame flushes caused by
-	// CPU fallback operations (e.g., DrawImage between GPU draw calls).
-	colorLoadOp := gputypes.LoadOpClear
-	stencilLoadOp := gputypes.LoadOpClear
-	if s.frameRendered {
-		colorLoadOp = gputypes.LoadOpLoad
-		stencilLoadOp = gputypes.LoadOpLoad
-	}
-	// Depth is ALWAYS cleared — never loaded. DepthStoreOp=Discard means
-	// depth content is undefined after each render pass, so LoadOpLoad would
-	// read garbage on subsequent passes. The depth clip pipeline (GPU-CLIP-003a)
-	// writes Z=0.0 inside clip regions fresh each pass, so clearing to 1.0 is
-	// always the correct initial state.
-	depthLoadOp := gputypes.LoadOpClear
-
-	rpDesc := &wgpu.RenderPassDescriptor{
-		Label:            "session_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
-		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
-			View:              s.textures.stencilView,
-			DepthLoadOp:       depthLoadOp,
-			DepthStoreOp:      gputypes.StoreOpDiscard,
-			DepthClearValue:   1.0,
-			StencilLoadOp:     stencilLoadOp,
-			StencilStoreOp:    gputypes.StoreOpStore,
-			StencilClearValue: 0,
-		},
-	}
-
-	rp, rpErr := encoder.BeginRenderPass(rpDesc)
-	if rpErr != nil {
-		return fmt.Errorf("begin render pass: %w", rpErr)
-	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
-
-	// Base layer: pixmap textured quad drawn FIRST, before all tiers (ADR-015).
-	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
-		rp.SetScissorRect(0, 0, w, h)
-		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
-	}
-
-	// Render each group with its scissor rect applied.
-	for i := range grpRes {
-		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
-		s.recordGroupDraws(rp, &grpRes[i])
-	}
-
-	if endErr := rp.End(); endErr != nil {
-		slogger().Warn("render pass End failed", "err", endErr)
+	if err := s.encodeGroupedSurfacePass(encoder, "session_surface_pass", view, w, h, grpRes, baseLayerRes); err != nil {
+		return err
 	}
 
 	// No CopyTextureToBuffer -- the surface is the resolve target.
@@ -3276,9 +3437,6 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	// Keep reference so next frame can free it after GPU is done.
 	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
 
-	// Mark that at least one render pass has been submitted this frame.
-	s.frameRendered = true
-
 	return nil
 }
 
@@ -3293,54 +3451,7 @@ func (s *GPURenderSession) encodeToEncoder(
 	grpRes []groupResources,
 	baseLayerRes *imageFrameResources,
 ) error {
-	if view != s.lastView {
-		s.frameRendered = false
-		s.lastView = view
-	}
-
-	colorLoadOp := gputypes.LoadOpClear
-	stencilLoadOp := gputypes.LoadOpClear
-	if s.frameRendered {
-		colorLoadOp = gputypes.LoadOpLoad
-		stencilLoadOp = gputypes.LoadOpLoad
-	}
-	// Depth always cleared (see encodeSubmitSurfaceGrouped comment).
-	depthLoadOp := gputypes.LoadOpClear
-
-	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
-		Label:            "session_shared_surface_pass",
-		ColorAttachments: []wgpu.RenderPassColorAttachment{s.colorAttachment(view, colorLoadOp)},
-		DepthStencilAttachment: &wgpu.RenderPassDepthStencilAttachment{
-			View:              s.textures.stencilView,
-			DepthLoadOp:       depthLoadOp,
-			DepthStoreOp:      gputypes.StoreOpDiscard,
-			DepthClearValue:   1.0,
-			StencilLoadOp:     stencilLoadOp,
-			StencilStoreOp:    gputypes.StoreOpStore,
-			StencilClearValue: 0,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("begin shared render pass: %w", err)
-	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
-
-	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
-		rp.SetScissorRect(0, 0, w, h)
-		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
-	}
-
-	for i := range grpRes {
-		s.applyGroupScissor(rp, grpRes[i].scissorRect, w, h)
-		s.recordGroupDraws(rp, &grpRes[i])
-	}
-
-	if endErr := rp.End(); endErr != nil {
-		slogger().Warn("shared render pass End failed", "err", endErr)
-	}
-
-	s.frameRendered = true
-	return nil
+	return s.encodeGroupedSurfacePass(encoder, "session_shared_surface_pass", view, w, h, grpRes, baseLayerRes)
 }
 
 // encodeBlitToEncoder records a non-MSAA blit pass into an external encoder.
@@ -3359,7 +3470,7 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 
 	hasDamage := len(damageRects) > 0
 	loadOp := gputypes.LoadOpClear
-	if hasDamage {
+	if hasDamage || s.shouldPreserveSurface(view) {
 		loadOp = gputypes.LoadOpLoad
 	}
 
@@ -3406,6 +3517,7 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	}
 
 	s.frameRendered = true
+	s.lastView = view
 	return nil
 }
 

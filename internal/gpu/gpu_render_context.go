@@ -145,9 +145,9 @@ type GPURenderContext struct {
 	clipRRect *ClipParams
 	clipPath  *gg.Path // arbitrary clip path for depth clipping (GPU-CLIP-003a)
 
-	// Per-context frame tracking (fixes LoadOp corruption).
-	// When frameRendered is true, subsequent render passes use LoadOpLoad.
-	// Reset by BeginFrame() at the start of each frame.
+	// Per-context frame tracking (fixes surface preservation corruption).
+	// When frameRendered is true, subsequent render passes preserve the current
+	// view. Reset by BeginFrame() at the start of each frame.
 	frameRendered bool
 	lastView      *wgpu.TextureView
 
@@ -922,7 +922,6 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 
 	// Transfer per-context frame tracking to session before rendering.
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)
-	rc.session.preserveContent = target.PreserveContent // ADR-059
 
 	// The queued base layer renders before every other tier. PreserveContent
 	// makes the existing surface content the base instead, so selecting the
