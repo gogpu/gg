@@ -3,7 +3,7 @@ module github.com/gogpu/gg/examples/gogpu_integration
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.50.9
+	github.com/gogpu/gg v0.50.10
 	github.com/gogpu/gogpu v0.47.1
 	github.com/gogpu/gpucontext v0.23.0
 )
