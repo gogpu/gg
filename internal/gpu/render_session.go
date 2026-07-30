@@ -226,6 +226,10 @@ type GPURenderSession struct {
 	// Skia Graphite pattern: batch-release after GPU completion.
 	pendingBindGroupRelease []*wgpu.BindGroup
 
+	// ADR-056: depth clip resources deferred from shared-encoder frames.
+	// Released at BeginFrame() together with pendingBindGroupRelease.
+	pendingDepthClipRelease []*DepthClipResources
+
 	// Depth clip pipeline (GPU-CLIP-003a): fan-tessellated clip path rendered
 	// to depth buffer before content draws. Lazily created on first use.
 	depthClipPipeline *DepthClipPipeline
@@ -382,6 +386,15 @@ func (s *GPURenderSession) BeginFrame() {
 		}
 	}
 	s.prevCmdBufs = s.prevCmdBufs[:0]
+
+	// ADR-056: release resources deferred from shared-encoder frames.
+	// By frame boundary, gogpu has submitted the shared encoder and VSync
+	// guarantees GPU completion. Safe to release now.
+	s.releasePendingBindGroups()
+	for _, dcr := range s.pendingDepthClipRelease {
+		dcr.Release()
+	}
+	s.pendingDepthClipRelease = s.pendingDepthClipRelease[:0]
 
 	s.frameRendered = false
 	s.lastView = nil
@@ -921,8 +934,20 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	}
 
 	// GPU-CLIP-003a: release per-group depth clip buffers after frame encoding.
-	defer s.releaseDepthClipResources(grpRes)
-	defer s.releasePendingBindGroups()
+	// ADR-056: with a shared encoder, submit happens AFTER this function returns.
+	// Releasing bind groups here would destroy them before the GPU uses them.
+	// Defer to BeginFrame() where VSync guarantees GPU completion.
+	if sharedEncoder == nil {
+		defer s.releaseDepthClipResources(grpRes)
+		defer s.releasePendingBindGroups()
+	} else {
+		for i := range grpRes {
+			if grpRes[i].depthClipRes != nil {
+				s.pendingDepthClipRelease = append(s.pendingDepthClipRelease, grpRes[i].depthClipRes)
+				grpRes[i].depthClipRes = nil
+			}
+		}
+	}
 
 	if activeView == nil {
 		if earlyBlitOnly {
@@ -1109,6 +1134,10 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	s.gpuTexBindGroups = nil
 	s.releasePendingBindGroups()
 	s.pendingBindGroupRelease = nil
+	for _, dcr := range s.pendingDepthClipRelease {
+		dcr.Release()
+	}
+	s.pendingDepthClipRelease = nil
 	for _, buf := range s.gpuTexUniformBufs {
 		if buf != nil {
 			buf.Release()
