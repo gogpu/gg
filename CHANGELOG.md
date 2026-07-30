@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `gogpu/gpucontext` v0.21.1 → v0.22.0 (FontSmoothing type, coordinate docs).
-- Updated `gogpu/wgpu` v0.30.23 → v0.30.25 (Surface browser/rust stubs, Metal checkptr fix, gpucontext v0.22.0).
+- Updated `gogpu/gpucontext` v0.22.0 → v0.23.0 (InputEvent sealed interface).
+- Updated `gogpu/wgpu` v0.30.25 → v0.30.27 (GLES depth/stencil fix, MSAA external content preservation).
 
 ## [0.50.8] - 2026-07-27
 
