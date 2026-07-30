@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.50.9] - 2026-07-30
+
+### Fixed
+
+- **External content preservation with MSAA** ([#455](https://github.com/gogpu/gg/issues/455),
+  [#457](https://github.com/gogpu/gg/pull/457) by [@besmpl](https://github.com/besmpl)) —
+  when gg renders an overlay on top of external 3D content (e.g. g3d scene),
+  MSAA vector/mixed frames now use a transparent resolve + alpha-composite path
+  that preserves the underlying content without duplicating pipeline variants or
+  reducing antialiasing quality. Ordinary frames have zero overhead.
+- **External content overwritten by compositor base** ([#452](https://github.com/gogpu/gg/issues/452),
+  [#453](https://github.com/gogpu/gg/pull/453)) — `DrawGPUTextureBase` no longer covers
+  preserved g3d output with an opaque textured quad when `PreserveContent` is active.
+- **`FlushGPUWithView` ignored external content** ([#449](https://github.com/gogpu/gg/issues/449),
+  [#450](https://github.com/gogpu/gg/pull/450)) — added `PreserveContent` flag to
+  `GPURenderTarget`; render session uses `LoadOp::Load` instead of `Clear` when set.
+- **ggcanvas did not forward content preservation** ([#451](https://github.com/gogpu/gg/pull/451)) —
+  `Canvas.Render` now detects `ContentPreserver` capability and forwards the state
+  to the GPU render target.
+- **ggcanvas did not use shared command encoder** ([#454](https://github.com/gogpu/gg/pull/454)) —
+  `Canvas.Render` now detects `CommandEncoderProvider` on the render target and records
+  into the borrowed frame encoder for single-submit compositing with gogpu.
 
 ### Changed
 
