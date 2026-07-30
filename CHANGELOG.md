@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.10] - 2026-07-30
+
+### Fixed
+
+- **Bind group use-after-free with shared command encoder** ([wgpu#287](https://github.com/gogpu/wgpu/issues/287)) —
+  `RenderFrameGrouped()` released bind groups via `defer` before gogpu submitted
+  the shared encoder, causing HAL descriptor corruption. Fix: defer release to
+  `BeginFrame()` for shared-encoder frames where VSync guarantees GPU completion.
+  Own-encoder path unchanged. Matches Skia Graphite frame-scoped resource lifecycle.
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.27 → v0.30.29 (ADR-056 unified resource lifecycle,
+  `Release()` via `ResourceRef.Drop()`, atomic `LastSubmissionIndex`).
+- Updated example dependencies to gg v0.50.9, gogpu v0.47.1, gpucontext v0.23.0,
+  wgpu v0.30.29. Removed stale `replace` directives from cjk_text and multi_damage_demo.
+
 ## [0.50.9] - 2026-07-30
 
 ### Fixed
