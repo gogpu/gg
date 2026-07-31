@@ -124,7 +124,7 @@ func (s *ImageSurface) Fill(path *Path, style FillStyle) {
 
 	// Build edges from path
 	s.edgeBuilder.Reset()
-	s.edgeBuilder.SetFlattenCurves(true) // Use line approximation for reliability
+	s.edgeBuilder.SetFlattenCurves(false)
 	s.edgeBuilder.BuildFromPath(path, raster.IdentityTransform{})
 
 	if s.edgeBuilder.IsEmpty() {
@@ -158,7 +158,7 @@ func (s *ImageSurface) Stroke(path *Path, style StrokeStyle) {
 
 	// Build edges from expanded stroke path
 	s.edgeBuilder.Reset()
-	s.edgeBuilder.SetFlattenCurves(true)
+	s.edgeBuilder.SetFlattenCurves(false)
 	s.edgeBuilder.BuildFromPath(strokePath, raster.IdentityTransform{})
 
 	if s.edgeBuilder.IsEmpty() {
