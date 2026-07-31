@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.11] - 2026-07-31
+
+### Added
+
+- **SVG vector icon rendering** ([#463](https://github.com/gogpu/gg/issues/463),
+  [#464](https://github.com/gogpu/gg/issues/464)) — `RenderToScene` produces
+  resolution-independent vector icons via the scene graph. Stroke hinting snaps
+  thin strokes to the pixel grid for crisp icon rendering at any size. Scene
+  renderer with stroke support. Golden tests for folder icon stroke quality.
+
+- **Skia `cubicStroke` direct offset algorithm** — ported Skia's two-phase recursive
+  cubic offset algorithm (+1077 LOC). Produces higher-quality stroked curves by
+  working directly on cubic control points rather than flattening to polylines.
+
+- **Hairline rasterizer for thin strokes** (Skia/tiny-skia pattern) —
+  `treatAsHairline()` for device-pixel width ≤ 1.0, `strokeHairlineSDF` for
+  circle/ellipse shape detection, 0.5px SDF calibration. TDD test suite.
+
+- **Skia AAA forward-diff pipeline** (ADR-063) — ported `updateQuadratic`,
+  `updateCubic`, `updateLine` from Skia for native curve edge stepping in the
+  analytic filler. Includes SnapY snapped coordinates, monotonic pin, and
+  `keepContinuous` coefficient continuity. FDot6-delta zero-height check
+  (64x finer than integer comparison).
+
+- **Deviation-based curve subdivision** (ADR-063) — De Casteljau split when
+  control point deviation exceeds 0.1px. Eliminates 3px chord shift on
+  stroked circles (R=120) on CPU without MSAA. Large curves get geometric
+  quality; small curves remain unaffected.
+
+- **Forward-diff curve edges as default** (ADR-063) — `SetFlattenCurves(false)`
+  is now the default for SoftwareRenderer, render.SoftwareRenderer, and
+  ImageSurface. Forward-diff with deviation subdivision produces visually
+  smooth curves at all sizes with 30% faster performance on small paths.
+
+- **Enterprise golden test suite** — 6 multi-contour golden tests (diff==0 with
+  per-pixel Skia cross-reference), circle render comparison (fill + stroke),
+  cubic waviness diagnostics (6 tests), deviation subdivision test.
+
+### Fixed
+
+- **GPU text grayscale default** (BUG-TEXT-001) — glyph mask rendering now
+  defaults to grayscale (ADR-060) instead of LCD subpixel. Fixes double alpha
+  application in mask compositing. MSDF-to-mask threshold raised from 48px to
+  64px for sharper small text. Updated `glyph_mask.wgsl` shader for grayscale path.
+
+- **Bilinear image sampling in scene renderer** (BUG-ICON-001) — `blitImageToTile`
+  upgraded from nearest-neighbor to bilinear interpolation. Eliminates pixelated
+  edges on scaled/rotated images in the retained-mode scene graph. Also fixes
+  double premultiplication in image compositing.
+
+- **Mask gamma correction for light-on-dark text** — ported Skia `SkMaskGamma`
+  for consistent text rendering on dark backgrounds. Go mirror of shader gamma
+  LUT with 20 subtests.
+
+- **Miter join sign error** — signed cross product now correctly determines miter
+  join direction. Fixes incorrectly oriented miter vertices on complex path
+  geometries.
+
+- **`sharpAngle` detection** — uses `largerLen`, `f32` math, and `dot >= 0` for
+  perpendicular detection. Ported `currIsLine`/`prevIsLine` from tiny-skia.
+  Added `setLastPoint` for join vertex reduction (Skia pattern).
+
+- **Value-type QuadraticEdge/CubicEdge** — curve edges are now value types instead
+  of heap-allocated pointers. Eliminates per-edge heap allocations (7.6x fewer
+  allocs in production steady-state, +1 alloc vs flatten mode).
+
+### Performance
+
+- **Forward-diff curve edges** — 30% faster on small paths compared to geometric
+  flatten. Native forward differencing with O(1) per-step cost avoids
+  flatten-to-polyline overhead. Deviation subdivision applied only to large curves
+  where control point deviation exceeds 0.1px.
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.29 → v0.30.30, `gogpu/gogpu` v0.47.1 → v0.47.2.
+- Updated example dependencies.
+
 ## [0.50.10] - 2026-07-30
 
 ### Fixed
