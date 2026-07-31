@@ -335,14 +335,14 @@ func TestQuadraticEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := raster.NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
+			edge, ok := raster.NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
 
-			if (edge == nil) != tt.wantNil {
-				t.Errorf("raster.NewQuadraticEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+			if ok == tt.wantNil {
+				t.Errorf("raster.NewQuadraticEdge() ok = %v, want ok = %v", ok, !tt.wantNil)
 				return
 			}
 
-			if edge == nil {
+			if !ok {
 				return
 			}
 
@@ -372,8 +372,8 @@ func TestQuadraticEdgeForwardDifferencing(t *testing.T) {
 	p1 := raster.CurvePoint{X: 50, Y: 50}
 	p2 := raster.CurvePoint{X: 100, Y: 100}
 
-	edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
-	if edge == nil {
+	edge, ok := raster.NewQuadraticEdge(p0, p1, p2, 0)
+	if !ok {
 		t.Fatal("expected non-nil edge")
 	}
 
@@ -453,14 +453,14 @@ func TestCubicEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := raster.NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
+			edge, ok := raster.NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
 
-			if (edge == nil) != tt.wantNil {
-				t.Errorf("raster.NewCubicEdge() nil = %v, want nil = %v", edge == nil, tt.wantNil)
+			if ok == tt.wantNil {
+				t.Errorf("raster.NewCubicEdge() ok = %v, want ok = %v", ok, !tt.wantNil)
 				return
 			}
 
-			if edge == nil {
+			if !ok {
 				return
 			}
 
@@ -491,8 +491,8 @@ func TestCubicEdgeForwardDifferencing(t *testing.T) {
 	p2 := raster.CurvePoint{X: 75, Y: 50}
 	p3 := raster.CurvePoint{X: 100, Y: 100}
 
-	edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
-	if edge == nil {
+	edge, ok := raster.NewCubicEdge(p0, p1, p2, p3, 0)
+	if !ok {
 		t.Fatal("expected non-nil edge")
 	}
 
@@ -590,7 +590,7 @@ func BenchmarkQuadraticEdgeCreate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = raster.NewQuadraticEdge(p0, p1, p2, 0)
+		_, _ = raster.NewQuadraticEdge(p0, p1, p2, 0)
 	}
 }
 
@@ -602,8 +602,8 @@ func BenchmarkQuadraticEdgeUpdate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
-		if edge != nil {
+		edge, ok := raster.NewQuadraticEdge(p0, p1, p2, 0)
+		if ok {
 			for edge.Update() {
 				// O(1) per step - forward differencing
 			}
@@ -620,7 +620,7 @@ func BenchmarkCubicEdgeCreate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = raster.NewCubicEdge(p0, p1, p2, p3, 0)
+		_, _ = raster.NewCubicEdge(p0, p1, p2, p3, 0)
 	}
 }
 
@@ -633,8 +633,8 @@ func BenchmarkCubicEdgeUpdate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
-		if edge != nil {
+		edge, ok := raster.NewCubicEdge(p0, p1, p2, p3, 0)
+		if ok {
 			for edge.Update() {
 				// O(1) per step - forward differencing
 			}

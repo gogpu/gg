@@ -518,8 +518,8 @@ func BenchmarkForwardDiffQuadratic(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := raster.NewQuadraticEdge(p0, p1, p2, 0)
-		if edge != nil {
+		edge, ok := raster.NewQuadraticEdge(p0, p1, p2, 0)
+		if ok {
 			for edge.Update() {
 				// O(1) per step
 			}
@@ -536,8 +536,8 @@ func BenchmarkForwardDiffCubic(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		edge := raster.NewCubicEdge(p0, p1, p2, p3, 0)
-		if edge != nil {
+		edge, ok := raster.NewCubicEdge(p0, p1, p2, p3, 0)
+		if ok {
 			for edge.Update() {
 				// O(1) per step
 			}
