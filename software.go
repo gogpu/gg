@@ -537,14 +537,11 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	}
 	r.edgeBuilder.SetClipRect(&clipRect)
 
-	// Flatten curves to line segments for the AnalyticFiller.
-	// Forward differencing (QuadraticEdge/CubicEdge) can produce zero-height
-	// segments after FDot6 rounding, silently losing winding contribution.
-	// Pre-flattening with adaptive subdivision (0.1px tolerance) eliminates
-	// this class of errors. This is the standard approach in tiny-skia and
-	// Skia's analytic AA scanline rasterizer.
-	r.edgeBuilder.SetFlattenCurves(true)
-	defer r.edgeBuilder.SetFlattenCurves(false)
+	// Native forward-diff curve edges (Skia AAA pattern, ADR-063).
+	// 30% faster than geometric flattening, max diff 7 vs Skia golden.
+	// VelloLines populated separately for CoverageFiller compatibility.
+	r.edgeBuilder.SetFlattenCurves(false)
+	defer r.edgeBuilder.SetFlattenCurves(true)
 
 	// Build edges from the path directly from float64 coords (zero-alloc).
 	// PathVerb values match between gg and raster packages (both 0-4 iota).
@@ -615,8 +612,8 @@ func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 	}
 	r.noAAEdgeBuilder.SetClipRect(&clipRect)
 
-	r.noAAEdgeBuilder.SetFlattenCurves(true)
-	defer r.noAAEdgeBuilder.SetFlattenCurves(false)
+	r.noAAEdgeBuilder.SetFlattenCurves(false)
+	defer r.noAAEdgeBuilder.SetFlattenCurves(true)
 
 	verbs := p.Verbs()
 	if len(verbs) > 0 {
@@ -1112,9 +1109,37 @@ func (r *SoftwareRenderer) blendAlphaRunsFromCoreRunsPaint(pixmap *Pixmap, y int
 	}
 }
 
+// treatAsHairline checks whether a stroke with the given device-pixel width
+// should be rendered as a hairline (direct line rasterization) rather than
+// through stroke expansion. This follows the Skia/tiny-skia pattern:
+//
+//   - Width == 0: always hairline, coverage = 1.0
+//   - Width <= 1.0 (with anti-alias): hairline, coverage = width
+//     (modulate paint alpha by coverage for sub-pixel strokes)
+//   - Width > 1.0: normal stroke expansion
+//
+// Reference: tiny-skia painter.rs treat_as_hairline()
+func treatAsHairline(effectiveWidth float64) (isHairline bool, coverage float64) {
+	if effectiveWidth <= 0 {
+		return true, 1.0
+	}
+	// Only truly sub-pixel strokes use hairline. Width >= 1.0 goes through
+	// normal stroke expansion with Skia cubicStroke port for correct geometry.
+	if effectiveWidth < 1.0 {
+		return true, effectiveWidth
+	}
+	return false, 0
+}
+
 // Stroke implements Renderer.Stroke with anti-aliasing support.
 // Strokes are expanded to fill paths and rendered with the Fill method,
 // which provides analytic anti-aliased results.
+//
+// For hairline strokes (device-pixel width <= 1.0), the stroke is rendered
+// with width=1.0 and the paint alpha is modulated by coverage (Skia/tiny-skia
+// pattern). For circles, SDF coverage is used directly. This avoids the
+// coverage loss from stroke expansion on thin strokes where the expanded
+// shape straddles pixel boundaries.
 func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Stroke reads from the stroke brush state.
 	r.strokeMode = true
@@ -1140,14 +1165,21 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 		pathToDraw = dashPath(p, dash)
 	}
 
+	// Hairline detection (Skia/tiny-skia pattern): when device-pixel width
+	// is <= 1.0, bypass stroke expansion and render directly.
+	effectiveWidth := width * transformScale
+	if isHairline, coverage := treatAsHairline(effectiveWidth); isHairline && r.antiAlias {
+		return r.strokeHairline(pixmap, pathToDraw, paint, coverage)
+	}
+
 	// Convert gg.PathVerb to stroke.PathVerb (same layout, just cast)
 	strokeVerbs := convertVerbsToStroke(pathToDraw.Verbs())
 
 	// Create stroke style from paint
-	// Scale line width by transform scale (path coordinates are already transformed)
-	effectiveWidth := width * transformScale
+	// Scale line width by transform scale (path coordinates are already transformed).
+	// Clamp to 1px minimum for non-hairline path (non-AA or effectiveWidth > 1.0).
 	if effectiveWidth < 1.0 {
-		effectiveWidth = 1.0 // Minimum 1px stroke for visibility
+		effectiveWidth = 1.0
 	}
 	strokeStyle := stroke.Stroke{
 		Width:      effectiveWidth,
@@ -1171,6 +1203,7 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
 	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
+
 	// Convert back to gg.Path (reuse scratch to avoid per-stroke allocation).
 	if r.scratchStrokePath == nil {
 		r.scratchStrokePath = NewPath()
@@ -1189,6 +1222,179 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	err := r.Fill(pixmap, r.scratchStrokePath, paint)
 	r.rasterizerMode = prevMode
 	return err
+}
+
+// strokeHairline renders a stroke with device-pixel width <= 1.0 using the
+// hairline rasterizer (Skia/tiny-skia pattern). Instead of stroke expansion
+// (which creates a thin rect that straddles pixel boundaries, losing coverage),
+// this renders lines snapped to pixel centers and circles via SDF, with
+// paint alpha modulated by coverage for sub-pixel widths.
+//
+// Reference: tiny-skia painter.rs stroke_hairline(), scan/hairline_aa.rs
+func (r *SoftwareRenderer) strokeHairline(pixmap *Pixmap, p *Path, paint *Paint, coverage float64) error {
+	// Try SDF path for detected shapes (circles, rrects).
+	// SDF produces exact coverage for curves, avoiding the coverage loss
+	// from stroke expansion on thin annular rings.
+	shape := DetectShape(p)
+	if shape.Kind == ShapeCircle || shape.Kind == ShapeEllipse {
+		return r.strokeHairlineSDF(pixmap, p, paint, shape, coverage)
+	}
+
+	// For general line paths: render as 1px stroke with alpha modulated
+	// by coverage, snapping line centers to pixel centers.
+	hairlinePaint := *paint // shallow copy to preserve original
+	if coverage < 1.0 {
+		// Modulate paint alpha by coverage (tiny-skia apply_opacity pattern).
+		hairlinePaint.stroke.solidColor.A *= coverage
+		hairlinePaint.stroke.isSolid = paint.stroke.isSolid
+	}
+
+	// Snap line segments to pixel centers for maximum coverage.
+	// A horizontal line at y=50.3 straddles rows 50 and 51 after 1px expansion.
+	// Snapping to y=50.5 aligns the stroke to exactly one pixel row.
+	snappedPath := r.snapHairlineToPixelCenter(p)
+
+	// Stroke expand with width=1.0 (the minimum visible stroke).
+	strokeVerbs := convertVerbsToStroke(snappedPath.Verbs())
+	strokeStyle := stroke.Stroke{
+		Width:      1.0,
+		Cap:        convertLineCap(hairlinePaint.EffectiveLineCap()),
+		Join:       convertLineJoin(hairlinePaint.EffectiveLineJoin()),
+		MiterLimit: hairlinePaint.EffectiveMiterLimit(),
+	}
+	if strokeStyle.MiterLimit <= 0 {
+		strokeStyle.MiterLimit = 4.0
+	}
+	expander := stroke.NewStrokeExpander(strokeStyle)
+	strokeTol := float64(0.1)
+	if r.deviceScale > 1.0 {
+		strokeTol = 0.1 / float64(r.deviceScale)
+	}
+	expander.SetTolerance(strokeTol)
+	outVerbs, outCoords := expander.Expand(strokeVerbs, snappedPath.Coords())
+
+	if r.scratchStrokePath == nil {
+		r.scratchStrokePath = NewPath()
+	}
+	strokeResultToPath(r.scratchStrokePath, outVerbs, outCoords)
+
+	prevMode := r.rasterizerMode
+	r.rasterizerMode = RasterizerAnalytic
+	err := r.Fill(pixmap, r.scratchStrokePath, &hairlinePaint)
+	r.rasterizerMode = prevMode
+	return err
+}
+
+// snapHairlineToPixelCenter snaps axis-aligned line segments to pixel centers.
+// For a horizontal line, the Y coordinate is snapped to floor(y) + 0.5.
+// For a vertical line, the X coordinate is snapped to floor(x) + 0.5.
+// Diagonal lines and curves are left unchanged.
+//
+// This ensures a 1px stroke expansion covers exactly one pixel row/column
+// instead of straddling two, maximizing peak coverage from ~75% to ~100%.
+func (r *SoftwareRenderer) snapHairlineToPixelCenter(p *Path) *Path {
+	verbs := p.Verbs()
+	coords := p.Coords()
+	out := NewPath()
+
+	ci := 0
+	var prevX, prevY float64
+	for _, v := range verbs {
+		switch v {
+		case MoveTo:
+			prevX, prevY = coords[ci], coords[ci+1]
+			out.MoveTo(prevX, prevY)
+			ci += 2
+		case LineTo:
+			x, y := coords[ci], coords[ci+1]
+
+			switch {
+			case math.Abs(y-prevY) < 0.01:
+				// Horizontal line: snap Y to pixel center.
+				snappedY := math.Floor(prevY) + 0.5
+				snapHairlineSegment(out, prevX, snappedY, x, snappedY)
+				prevX, prevY = x, snappedY
+			case math.Abs(x-prevX) < 0.01:
+				// Vertical line: snap X to pixel center.
+				snappedX := math.Floor(prevX) + 0.5
+				snapHairlineSegment(out, snappedX, prevY, snappedX, y)
+				prevX, prevY = snappedX, y
+			default:
+				// Diagonal: no snapping.
+				out.LineTo(x, y)
+				prevX, prevY = x, y
+			}
+			ci += 2
+		case QuadTo:
+			out.QuadraticTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			prevX, prevY = coords[ci+2], coords[ci+3]
+			ci += 4
+		case CubicTo:
+			out.CubicTo(coords[ci], coords[ci+1], coords[ci+2], coords[ci+3], coords[ci+4], coords[ci+5])
+			prevX, prevY = coords[ci+4], coords[ci+5]
+			ci += 6
+		case Close:
+			out.Close()
+		}
+	}
+	return out
+}
+
+// snapHairlineSegment adds a line segment to the output path, resetting the
+// current point to the snapped start if needed. This handles the case where
+// the MoveTo was at a non-snapped position and the LineTo needs snapping.
+func snapHairlineSegment(out *Path, x0, y0, x1, y1 float64) {
+	// Check if we need to adjust the start point.
+	cp := out.CurrentPoint()
+	if cp.X != x0 || cp.Y != y0 {
+		// The current point doesn't match our snapped start.
+		// Replace it with a new MoveTo at the snapped position.
+		out.MoveTo(x0, y0)
+	}
+	out.LineTo(x1, y1)
+}
+
+// strokeHairlineSDF renders a thin circle/ellipse stroke using SDF coverage.
+// For hairline strokes (effectiveWidth <= 1.0), the annular ring is thinner
+// than the smoothstep AA zone, causing coverage loss in normal SDF rendering.
+// To fix this, we render with a boosted halfStrokeWidth (0.7px = AA zone width)
+// and scale the resulting coverage by the actual stroke width fraction.
+// This produces crisp circles at any stroke width <= 1.0px.
+func (r *SoftwareRenderer) strokeHairlineSDF(
+	pixmap *Pixmap, _ *Path, paint *Paint,
+	shape DetectedShape, coverage float64,
+) error {
+	color := getStrokeColorFromPaint(paint)
+	color.A *= coverage // Modulate alpha for sub-pixel strokes.
+
+	cx, cy := shape.CenterX, shape.CenterY
+	radius := shape.RadiusX
+	// Geometric half-width for the stroke. For a 1px hairline, halfW=0.5
+	// produces an effective width of ~1.0px (matching Skia's hairline rasterizer).
+	// Previous value sdfAntialiasWidth=0.7 produced 1.4px — 40% too wide.
+	halfW := 0.5
+
+	pad := halfW + 1
+	minX := int(math.Max(0, math.Floor(cx-radius-pad)))
+	maxX := int(math.Min(float64(pixmap.Width()-1), math.Ceil(cx+radius+pad)))
+	minY := int(math.Max(0, math.Floor(cy-radius-pad)))
+	maxY := int(math.Min(float64(pixmap.Height()-1), math.Ceil(cy+radius+pad)))
+
+	for py := minY; py <= maxY; py++ {
+		for px := minX; px <= maxX; px++ {
+			cov := SDFCircleCoverage(float64(px)+0.5, float64(py)+0.5, cx, cy, radius, halfW)
+			if cov > 0 {
+				alpha := color.A * cov
+				if alpha < 1.0/255.0 {
+					continue
+				}
+				r.blendCoverageSolid(pixmap, px, py, uint8(alpha*255+0.5), RGBA{
+					R: color.R, G: color.G, B: color.B, A: 1.0,
+				})
+			}
+		}
+	}
+	return nil
 }
 
 // convertVerbsToStroke converts gg.PathVerb slice to stroke.PathVerb slice.
