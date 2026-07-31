@@ -200,8 +200,8 @@ func peakDarkness(dc *Context, x0, y0, x1, y1 int) int {
 		for x := x0; x < x1; x++ {
 			c := img.At(x, y)
 			r, _, _, _ := c.RGBA()
-			lum := int(r >> 8)         // 0-255
-			darkness := 255 - lum       // 0 = white, 255 = black
+			lum := int(r >> 8)    // 0-255
+			darkness := 255 - lum // 0 = white, 255 = black
 			if darkness > peak {
 				peak = darkness
 			}

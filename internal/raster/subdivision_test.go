@@ -1,8 +1,8 @@
 package raster
 
 import (
-	"testing"
 	"github.com/gogpu/gg/internal/stroke"
+	"testing"
 )
 
 // TestStrokeCircleCurveMatchesFlatten verifies that stroke-expanded circle

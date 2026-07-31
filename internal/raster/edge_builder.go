@@ -941,7 +941,9 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 	dev1 := d1x*d1x + d1y*d1y
 	dev2 := d2x*d2x + d2y*d2y
 	devSq := dev1
-	if dev2 > devSq { devSq = dev2 }
+	if dev2 > devSq {
+		devSq = dev2
+	}
 	const maxCubicDevSq = 0.1 * 0.1
 	if devSq > maxCubicDevSq {
 		m01x := (x0 + c1x) * 0.5

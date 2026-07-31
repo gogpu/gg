@@ -175,8 +175,8 @@ func TestExpandCubicProducesQuads(t *testing.T) {
 	// Simple cubic: quarter circle from (0,0) to (1,1)
 	verbs := []PathVerb{VerbMoveTo, VerbCubicTo, VerbClose}
 	coords := []float64{
-		0, 0,                         // MoveTo
-		0.552, 0, 1, 0.448, 1, 1,    // CubicTo (standard circle approximation)
+		0, 0, // MoveTo
+		0.552, 0, 1, 0.448, 1, 1, // CubicTo (standard circle approximation)
 	}
 
 	outVerbs, _ := exp.Expand(verbs, coords)
@@ -318,8 +318,10 @@ func TestFolderCubicTangentContinuity(t *testing.T) {
 
 func normalizeVec(v Vec2) Vec2 {
 	l := v.Length()
-	if l < 1e-10 { return Vec2{} }
-	return Vec2{v.X/l, v.Y/l}
+	if l < 1e-10 {
+		return Vec2{}
+	}
+	return Vec2{v.X / l, v.Y / l}
 }
 
 // TestFolderExpandedPathDump dumps the full expanded path for visual inspection.
@@ -369,7 +371,6 @@ func TestFolderExpandedPathDump(t *testing.T) {
 		}
 	}
 }
-
 
 // TestFolderInnerPathMatchesTinySkia verifies our inner path matches tiny-skia's
 // output verb-by-verb. Currently FAILS — inner join pivots add extra lines.
@@ -510,11 +511,14 @@ func dumpPath(t *testing.T, verbs []PathVerb, coords []float64) {
 	for i, v := range verbs {
 		switch v {
 		case VerbMoveTo:
-			t.Logf("  F%02d: M %.4f,%.4f", i, coords[ci], coords[ci+1]); ci += 2
+			t.Logf("  F%02d: M %.4f,%.4f", i, coords[ci], coords[ci+1])
+			ci += 2
 		case VerbLineTo:
-			t.Logf("  F%02d: L %.4f,%.4f", i, coords[ci], coords[ci+1]); ci += 2
+			t.Logf("  F%02d: L %.4f,%.4f", i, coords[ci], coords[ci+1])
+			ci += 2
 		case VerbQuadTo:
-			t.Logf("  F%02d: Q %.4f,%.4f %.4f,%.4f", i, coords[ci], coords[ci+1], coords[ci+2], coords[ci+3]); ci += 4
+			t.Logf("  F%02d: Q %.4f,%.4f %.4f,%.4f", i, coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
+			ci += 4
 		case VerbClose:
 			t.Logf("  F%02d: Z", i)
 		}
@@ -537,8 +541,8 @@ func TestTopLeftInnerQuadSubdivision(t *testing.T) {
 	}
 
 	// Compute what the single quad looks like
-	p0, _ := cubicPerpRay(cubic, 0, radius, -1) // start
-	p2, _ := cubicPerpRay(cubic, 1, radius, -1) // end
+	p0, _ := cubicPerpRay(cubic, 0, radius, -1)        // start
+	p2, _ := cubicPerpRay(cubic, 1, radius, -1)        // end
 	trueMid, _ := cubicPerpRay(cubic, 0.5, radius, -1) // true midpoint
 
 	// Find quad control point by tangent intersection
@@ -589,7 +593,7 @@ func TestTopLeftInnerPhaseTrace(t *testing.T) {
 	var qc quadConstruct
 	qc.init(0, 1)
 	exp.cubicQuadEnds(cubic, radius, side, &qc)
-	
+
 	rt := exp.intersectRay(&qc, false)
 	t.Logf("Phase 1 tangentsMeet [0,1]: result=%v", rt)
 	t.Logf("  quad[0]=(%.4f,%.4f) quad[2]=(%.4f,%.4f)", qc.quad[0].X, qc.quad[0].Y, qc.quad[2].X, qc.quad[2].Y)
@@ -600,21 +604,21 @@ func TestTopLeftInnerPhaseTrace(t *testing.T) {
 		rt2 := exp.compareQuadCubic(cubic, radius, side, &qc)
 		t.Logf("Phase 2 compareQuadCubic [0,1]: result=%v", rt2)
 		t.Logf("  quad ctrl=(%.4f,%.4f)", qc.quad[1].X, qc.quad[1].Y)
-		
+
 		if rt2 == resultQuad {
 			t.Log("ACCEPTED in 1 quad — this is where tiny-skia would SUBDIVIDE")
 			t.Log("Need to find why tiny-skia's Phase 1 or 2 rejects this")
 		}
 	} else {
 		t.Log("Phase 1 REJECTED — will subdivide (matches tiny-skia behavior)")
-		
+
 		// Test halves
 		var qcA quadConstruct
 		qcA.init(0, 0.5)
 		exp.cubicQuadEnds(cubic, radius, side, &qcA)
 		rtA := exp.intersectRay(&qcA, false)
 		t.Logf("Phase 1 [0,0.5]: result=%v", rtA)
-		
+
 		var qcB quadConstruct
 		qcB.init(0.5, 1)
 		exp.cubicQuadEnds(cubic, radius, side, &qcB)
@@ -647,7 +651,10 @@ func TestFloat32PrecisionEffect(t *testing.T) {
 	perpF32 := func(pts [4]P32, t, radius float32, side int) P32 {
 		pos, dxy := evalF32(pts, t)
 		l := float32(math.Sqrt(float64(dxy.X*dxy.X + dxy.Y*dxy.Y)))
-		if l > 0 { dxy.X = dxy.X / l * radius; dxy.Y = dxy.Y / l * radius }
+		if l > 0 {
+			dxy.X = dxy.X / l * radius
+			dxy.Y = dxy.Y / l * radius
+		}
 		s := float32(side)
 		return P32{pos.X + s*dxy.Y, pos.Y - s*dxy.X}
 	}
@@ -702,7 +709,7 @@ func TestTopLeftInnerPhase2Detail(t *testing.T) {
 
 	var qc quadConstruct
 	exp.initQuadConstruct(&qc, side, 0, 1)
-	
+
 	// Phase 2 directly (skip Phase 1)
 	rt := exp.compareQuadCubic(cubic, radius, side, &qc)
 	t.Logf("Phase 2 with foundTangents=true, tol=0.25: result=%v", rt)
@@ -846,8 +853,8 @@ func TestSharpAngleBoundaryPrecision(t *testing.T) {
 	// Now: smaller = (-1, 0), larger = (0, -1.08333)
 	sL := math.Sqrt(smaller.LengthSquared()) // sqrt(1) = 1.0
 	scale := math.Sqrt(lLen2) / sL           // sqrt(1.17360) / 1.0 = 1.08333
-	scaled := smaller.Scale(scale)            // (-1.08333, 0)
-	dot := scaled.Dot(larger)                 // (-1.08333 * 0) + (0 * -1.08333) = 0.0
+	scaled := smaller.Scale(scale)           // (-1.08333, 0)
+	dot := scaled.Dot(larger)                // (-1.08333 * 0) + (0 * -1.08333) = 0.0
 
 	t.Logf("After swap: smaller=(%.6f,%.6f) larger=(%.6f,%.6f)", smaller.X, smaller.Y, larger.X, larger.Y)
 	t.Logf("scale=%.10f scaled=(%.10f,%.10f)", scale, scaled.X, scaled.Y)
@@ -893,7 +900,9 @@ func TestSharpAngleF32SetLength(t *testing.T) {
 	// set_length(lLen) = normalize then scale by lLen
 	// normalize: smaller / |smaller|
 	smallerL := float32(math.Sqrt(float64(smaller[0]*smaller[0] + smaller[1]*smaller[1])))
-	if smallerL < 1e-7 { t.Fatal("zero length") }
+	if smallerL < 1e-7 {
+		t.Fatal("zero length")
+	}
 	nx := smaller[0] / smallerL
 	ny := smaller[1] / smallerL
 	// scale by lLen (squared length of larger, NOT sqrt)
