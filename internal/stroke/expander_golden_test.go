@@ -295,8 +295,12 @@ func extractPoints(verbs []PathVerb, coords []float64) [][2]float64 {
 			pts = append(pts, [2]float64{coords[ci], coords[ci+1]})
 			ci += 2
 		case VerbQuadTo:
+			// Extract endpoint (skip control point)
+			pts = append(pts, [2]float64{coords[ci+2], coords[ci+3]})
 			ci += 4
 		case VerbCubicTo:
+			// Extract endpoint (skip control points)
+			pts = append(pts, [2]float64{coords[ci+4], coords[ci+5]})
 			ci += 6
 		case VerbClose:
 		}
