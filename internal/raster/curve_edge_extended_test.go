@@ -156,15 +156,15 @@ func TestNewQuadraticEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
+			edge, ok := NewQuadraticEdge(tt.p0, tt.p1, tt.p2, tt.shift)
 			if tt.wantNil {
-				if edge != nil {
-					t.Errorf("expected nil edge for %s", tt.name)
+				if ok {
+					t.Errorf("expected ok=false for %s", tt.name)
 				}
 				return
 			}
-			if edge == nil {
-				t.Fatalf("expected non-nil edge for %s", tt.name)
+			if !ok {
+				t.Fatalf("expected ok=true for %s", tt.name)
 			}
 
 			// Verify accessors
@@ -181,13 +181,13 @@ func TestNewQuadraticEdge(t *testing.T) {
 // TestQuadraticEdge_Update tests forward differencing stepping.
 func TestQuadraticEdge_Update(t *testing.T) {
 	// Create a quadratic edge with enough segments to step
-	edge := NewQuadraticEdge(
+	edge, ok := NewQuadraticEdge(
 		CurvePoint{X: 0, Y: 0},
 		CurvePoint{X: 50, Y: 50},
 		CurvePoint{X: 100, Y: 100},
 		0,
 	)
-	if edge == nil {
+	if !ok {
 		t.Skip("NewQuadraticEdge returned nil")
 	}
 
@@ -248,15 +248,15 @@ func TestNewCubicEdge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			edge := NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
+			edge, ok := NewCubicEdge(tt.p0, tt.p1, tt.p2, tt.p3, tt.shift)
 			if tt.wantNil {
-				if edge != nil {
-					t.Errorf("expected nil edge")
+				if ok {
+					t.Errorf("expected ok=false")
 				}
 				return
 			}
-			if edge == nil {
-				t.Fatalf("expected non-nil edge")
+			if !ok {
+				t.Fatalf("expected ok=true")
 			}
 
 			// Verify accessors
@@ -272,14 +272,14 @@ func TestNewCubicEdge(t *testing.T) {
 
 // TestCubicEdge_Update tests cubic forward differencing.
 func TestCubicEdge_Update(t *testing.T) {
-	edge := NewCubicEdge(
+	edge, ok := NewCubicEdge(
 		CurvePoint{X: 0, Y: 0},
 		CurvePoint{X: 30, Y: 60},
 		CurvePoint{X: 70, Y: 40},
 		CurvePoint{X: 100, Y: 100},
 		0,
 	)
-	if edge == nil {
+	if !ok {
 		t.Skip("NewCubicEdge returned nil")
 	}
 

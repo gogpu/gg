@@ -101,6 +101,11 @@ type AnalyticFiller struct {
 	// windingCompat is a float32 buffer for WindingCallback compatibility.
 	windingCompat []float32
 
+	// cachedAAScale stores the AA subdivision factor for the current Fill() call.
+	// Needed by stepEdgeStateToStrip/reinitEdgeState when stepping curve edges
+	// outside of processScanlineAAA (which receives aaScale as a parameter).
+	cachedAAScale int32
+
 	// Clip bounds for scanline skipping (Skia SkRectClipBlitter pattern).
 	// When hasClip is true, scanlines outside [clipTop, clipBottom) are
 	// skipped entirely at zero per-pixel cost. This is Layer A of the
@@ -164,6 +169,7 @@ func (af *AnalyticFiller) Fill(
 	aaShift := eb.AAShift()
 	//nolint:gosec // G115: aaShift is bounded by MaxCoeffShift (6), safe conversion
 	aaScale := int32(1) << uint(aaShift)
+	af.cachedAAScale = aaScale
 
 	yMin := int(math.Floor(float64(bounds.MinY)))
 	yMax := int(math.Ceil(float64(bounds.MaxY)))
@@ -490,6 +496,56 @@ func (af *AnalyticFiller) processSubStripIncremental(
 		return
 	}
 
+	// Before resolving edges, find the earliest curve segment boundary
+	// within this sub-strip. If found, process the strip in two halves
+	// iteratively (not recursively) to avoid spanning a segment transition.
+	// This matches Skia's nextNextY guarantee: no sub-strip spans a curve
+	// segment boundary (SkASSERT currE->fLowerY >= nextY).
+	earliestSplit := stripBotFixed
+	for i := 0; i < len(af.aetToState); i++ {
+		srcIdx := af.aetToState[i]
+		if srcIdx < 0 || srcIdx >= len(af.edgeStates) {
+			continue
+		}
+		st := &af.edgeStates[srcIdx]
+		if !st.valid || st.fUpperY >= stripBotFixed {
+			continue
+		}
+		if st.fLowerY <= stripTopFixed {
+			if af.stepEdgeStateToStrip(srcIdx, stripTopFixed, stripBotFixed) {
+				st = &af.edgeStates[srcIdx]
+			} else {
+				continue
+			}
+		}
+		if st.fLowerY > stripTopFixed && st.fLowerY < earliestSplit {
+			earliestSplit = st.fLowerY
+		}
+	}
+	if earliestSplit < stripBotFixed {
+		// Split: process [stripTop, split) then [split, stripBot).
+		// First half guaranteed to have no curve boundary inside it.
+		af.processSubStripIncrementalNoSplit(stripTopFixed, earliestSplit, fillRule)
+		af.processSubStripIncremental(earliestSplit, stripBotFixed, fillRule)
+		return
+	}
+
+	af.processSubStripIncrementalNoSplit(stripTopFixed, stripBotFixed, fillRule)
+}
+
+// processSubStripIncrementalNoSplit is the inner loop of sub-strip processing.
+// Called after curve segment boundaries have been resolved — no further splitting.
+func (af *AnalyticFiller) processSubStripIncrementalNoSplit(
+	stripTopFixed, stripBotFixed int32,
+	fillRule FillRule,
+) {
+	yDiff := stripBotFixed - stripTopFixed
+	fullAlpha := fixedToAlpha(yDiff)
+	if fullAlpha == 0 {
+		af.advanceEdgeStates(stripTopFixed, stripBotFixed, yDiff)
+		return
+	}
+
 	n := len(af.aetToState)
 	if cap(af.resolvedEdges) < n {
 		af.resolvedEdges = make([]edgeLineState, n)
@@ -507,8 +563,17 @@ func (af *AnalyticFiller) processSubStripIncremental(
 		}
 
 		// Check if edge segment covers this sub-strip.
-		if st.fUpperY >= stripBotFixed || st.fLowerY <= stripTopFixed {
+		// For curve edges, the current segment may have expired (fLowerY <= stripTopFixed)
+		// but the curve may have more segments. Step forward until we find a segment
+		// that covers this sub-strip or the curve is exhausted.
+		if st.fUpperY >= stripBotFixed {
 			continue
+		}
+		if st.fLowerY <= stripTopFixed {
+			if !af.stepEdgeStateToStrip(srcIdx, stripTopFixed, stripBotFixed) {
+				continue
+			}
+			st = &af.edgeStates[srcIdx] // re-read after step
 		}
 
 		// Update nextNextY from edge endpoint (Skia line 1556)
@@ -619,8 +684,15 @@ func (af *AnalyticFiller) advanceEdgeStates(stripTopFixed, stripBotFixed, yDiff 
 			continue
 		}
 		st := &af.edgeStates[srcIdx]
-		if !st.valid || st.fUpperY >= stripBotFixed || st.fLowerY <= stripTopFixed {
+		if !st.valid || st.fUpperY >= stripBotFixed {
 			continue
+		}
+		// Step curve edges whose current segment expired before this sub-strip.
+		if st.fLowerY <= stripTopFixed {
+			if !af.stepEdgeStateToStrip(srcIdx, stripTopFixed, stripBotFixed) {
+				continue
+			}
+			st = &af.edgeStates[srcIdx] // re-read after step
 		}
 		if st.fUpperY <= stripTopFixed && st.fLowerY >= stripBotFixed {
 			// Full span: incremental step.
@@ -634,6 +706,121 @@ func (af *AnalyticFiller) advanceEdgeStates(stripTopFixed, stripBotFixed, yDiff 
 			st.fX = st.fUpperX + skFixedMul(st.fDX, stripBotFixed-st.fUpperY)
 		}
 	}
+}
+
+// stepEdgeStateToStrip steps a curve edge forward until its current segment
+// covers the sub-strip [stripTopFixed, stripBotFixed), or the curve is exhausted.
+//
+// This is the processSubStripIncremental analog of the stepping loop in
+// resolveEdgeLineFixed (line 1017-1023). When a curve edge's current segment
+// expires (fLowerY <= stripTopFixed), the curve may have more segments that
+// cover later Y ranges. We call stepCurveSegment to advance and re-initialize
+// the edgeYState from the updated LineEdge fields.
+//
+// Returns true if the edge now covers the sub-strip, false if exhausted.
+func (af *AnalyticFiller) stepEdgeStateToStrip(srcIdx int, stripTopFixed, stripBotFixed int32) bool {
+	edge := &af.edgeBuf[srcIdx]
+
+	// Line edges have no further segments — they're truly done.
+	if edge.Type == EdgeTypeLine {
+		return false
+	}
+
+	// Step curve segments until we find one covering this sub-strip.
+	for {
+		if !af.stepCurveSegment(edge) {
+			af.edgeStates[srcIdx].valid = false
+			return false
+		}
+
+		// Re-read the updated line fields after stepping.
+		line := edge.AsLine()
+		if line == nil {
+			af.edgeStates[srcIdx].valid = false
+			return false
+		}
+
+		// Determine new segment Y range in pixel-space SkFixed.
+		var segTopFixed, segBotFixed int32
+		hasPrecise := line.UpperY != 0 || line.LowerY != 0
+		if hasPrecise {
+			segTopFixed = line.UpperY
+			segBotFixed = line.LowerY
+		} else {
+			// Derive from sub-pixel fields (same formula as initSingleEdgeState).
+			segTopFixed = int32(int64(line.FirstY) * int64(skFixed1) / int64(af.cachedAAScale))
+			segBotFixed = int32(int64(line.LastY+1) * int64(skFixed1) / int64(af.cachedAAScale))
+		}
+
+		// Segment entirely after this sub-strip — edge won't contribute.
+		if segTopFixed >= stripBotFixed {
+			// Re-init state so it's ready for a future sub-strip at this Y.
+			af.reinitEdgeState(srcIdx, stripTopFixed)
+			return false
+		}
+
+		// Segment still before this sub-strip — keep stepping.
+		if segBotFixed <= stripTopFixed {
+			continue
+		}
+
+		// Segment overlaps — re-initialize edgeState from updated line.
+		af.reinitEdgeState(srcIdx, stripTopFixed)
+		return true
+	}
+}
+
+// reinitEdgeState re-initializes an edgeYState from the current LineEdge fields
+// of a curve edge after stepCurveSegment has advanced it. This is equivalent to
+// initSingleEdgeState but operates on an edge that has already been stepped.
+func (af *AnalyticFiller) reinitEdgeState(srcIdx int, yRowFixed int32) {
+	edge := &af.edgeBuf[srcIdx]
+	line := edge.AsLine()
+	if line == nil {
+		af.edgeStates[srcIdx] = edgeYState{}
+		return
+	}
+
+	hasPrecise := line.UpperY != 0 || line.LowerY != 0
+
+	var st edgeYState
+	st.winding = line.Winding
+
+	if hasPrecise {
+		st.fUpperX = line.UpperX
+		st.fUpperY = line.UpperY
+		st.fLowerY = line.LowerY
+		st.fDX = line.PixelDX
+		if line.PixelDY != 0 {
+			st.fDY = line.PixelDY
+		} else {
+			st.fDY = computeEdgeDY(line.PixelDX)
+		}
+
+		initY := yRowFixed
+		if st.fUpperY > yRowFixed {
+			initY = st.fUpperY
+		}
+		st.fX = line.UpperX + skFixedMul(line.PixelDX, initY-line.UpperY)
+	} else {
+		aaScale := af.cachedAAScale
+		st.fDX = line.DX
+		refXPixel := int32(int64(line.X) / int64(aaScale))
+		refYPixel := int32((int64(line.FirstY)*int64(skFixed1) + int64(skFixedHalf)) / int64(aaScale))
+		st.fUpperX = refXPixel
+		st.fUpperY = refYPixel
+		st.fLowerY = int32(int64(line.LastY+1) * int64(skFixed1) / int64(aaScale))
+		st.fDY = computeEdgeDY(line.DX)
+
+		initY := yRowFixed
+		if st.fUpperY > yRowFixed {
+			initY = st.fUpperY
+		}
+		st.fX = refXPixel + skFixedMul(line.DX, initY-refYPixel)
+	}
+
+	st.valid = true
+	af.edgeStates[srcIdx] = st
 }
 
 // computeYShift determines the yShift for a given sub-strip height,
@@ -737,6 +924,35 @@ func (af *AnalyticFiller) collectStripBoundariesFixed(yTopFixed, yBotFixed, aaSc
 		}
 		if topFixed > yTopFixed {
 			af.stripYBuf = append(af.stripYBuf, topFixed)
+		}
+	}
+
+	// Add curve segment boundaries from persistent edgeStates[].
+	//
+	// For curve edges (quadratic/cubic), fLowerY in edgeStates tracks the current
+	// segment's bottom boundary. When this falls within the pixel row, the sub-strip
+	// must be split at that Y so coverage is computed separately for the current
+	// segment and the next one. Without this, a sub-strip spanning a segment boundary
+	// causes the clamped edge to contribute only partial alpha — losing exactly 1/4
+	// pixel (64/255) at horizontal tangent zones (top/bottom of circles).
+	//
+	// This is O(edges) per pixel row and handles all paired edge combinations
+	// (multi-contour strokes where left+right edges have different fLowerY).
+	for i := 0; i < n; i++ {
+		srcIdx := af.aet.EdgeSrcIdx(i)
+		if srcIdx < 0 || srcIdx >= len(af.edgeStates) {
+			continue
+		}
+		// Only curve edges have multiple segments — line edges span their full Y range.
+		if af.edgeBuf[srcIdx].Type == EdgeTypeLine {
+			continue
+		}
+		st := &af.edgeStates[srcIdx]
+		if !st.valid {
+			continue
+		}
+		if st.fLowerY > yTopFixed && st.fLowerY < yBotFixed {
+			af.stripYBuf = append(af.stripYBuf, st.fLowerY)
 		}
 	}
 
