@@ -988,3 +988,112 @@ func TestEncodingBoundsClipDoesNotExpand(t *testing.T) {
 			boundsBeforeClip, boundsAfterClip)
 	}
 }
+
+// TestSceneTransformDeltaEncoding verifies that the scene emits TagTransform
+// using delta encoding: a transform is emitted only when it differs from the
+// previously encoded transform. Critically, an explicit Identity transform
+// MUST be emitted after a non-Identity transform so the renderer does not
+// apply the stale transform to subsequent draw commands.
+//
+// This prevents a bug where PushTransform/PopTransform (e.g., from SVG scene
+// rendering) leaves a non-Identity TagTransform in the encoding stream, and
+// subsequent Identity-transform fills skip the TagTransform emission, causing
+// shapes to be incorrectly transformed.
+func TestSceneTransformDeltaEncoding(t *testing.T) {
+	s := NewScene()
+	rect := NewRectShape(0, 0, 10, 10)
+	brush := SolidBrush(gg.Red)
+
+	// Step 1: Fill with Identity transform — no TagTransform should be emitted
+	// because lastEncodedTransform starts as Identity.
+	s.Fill(FillNonZero, IdentityAffine(), brush, rect)
+
+	enc := s.currentEncoding()
+	transformCount := 0
+	for _, tag := range enc.Tags() {
+		if tag == TagTransform {
+			transformCount++
+		}
+	}
+	if transformCount != 0 {
+		t.Errorf("after Identity fill: %d TagTransform tags, want 0", transformCount)
+	}
+
+	// Step 2: PushTransform with non-Identity (simulates SVG scene rendering).
+	translate := TranslateAffine(100, 200)
+	s.PushTransform(translate)
+
+	// Fill inside the transform — should emit a TagTransform with the translate.
+	s.Fill(FillNonZero, IdentityAffine(), brush, rect)
+
+	transformCount = 0
+	for _, tag := range enc.Tags() {
+		if tag == TagTransform {
+			transformCount++
+		}
+	}
+	if transformCount != 1 {
+		t.Errorf("after translated fill: %d TagTransform tags, want 1", transformCount)
+	}
+
+	// Step 3: PopTransform restores currentTransform to Identity.
+	s.PopTransform()
+
+	// Step 4: Fill with Identity transform AFTER the pop. A TagTransform(Identity)
+	// MUST be emitted to reset the renderer's state. Without delta encoding,
+	// this was skipped (the old IsIdentity() optimization), leaving the
+	// renderer with the stale translate(100,200).
+	s.Fill(FillNonZero, IdentityAffine(), brush, rect)
+
+	transformCount = 0
+	for _, tag := range enc.Tags() {
+		if tag == TagTransform {
+			transformCount++
+		}
+	}
+	if transformCount != 2 {
+		t.Errorf("after Identity fill post-pop: %d TagTransform tags, want 2 (translate + Identity reset)", transformCount)
+	}
+
+	// Verify the second TagTransform is Identity.
+	transformIdx := 0
+	for _, tag := range enc.Tags() {
+		if tag == TagTransform {
+			if transformIdx == 1 {
+				got := enc.Transforms()[transformIdx]
+				if !got.IsIdentity() {
+					t.Errorf("second TagTransform = %+v, want Identity", got)
+				}
+			}
+			transformIdx++
+		}
+	}
+}
+
+// TestSceneTransformDeltaSkipDuplicates verifies that consecutive fills with
+// the same non-Identity transform do not emit duplicate TagTransform tags.
+func TestSceneTransformDeltaSkipDuplicates(t *testing.T) {
+	s := NewScene()
+	rect := NewRectShape(0, 0, 10, 10)
+	brush := SolidBrush(gg.Red)
+
+	translate := TranslateAffine(50, 50)
+	s.PushTransform(translate)
+
+	// Two fills with the same transform — should emit only ONE TagTransform.
+	s.Fill(FillNonZero, IdentityAffine(), brush, rect)
+	s.Fill(FillNonZero, IdentityAffine(), brush, rect)
+
+	enc := s.currentEncoding()
+	transformCount := 0
+	for _, tag := range enc.Tags() {
+		if tag == TagTransform {
+			transformCount++
+		}
+	}
+	if transformCount != 1 {
+		t.Errorf("two fills with same transform: %d TagTransform tags, want 1 (delta encoding)", transformCount)
+	}
+
+	s.PopTransform()
+}

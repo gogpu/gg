@@ -39,6 +39,14 @@ type Scene struct {
 	// currentTransform is the current combined transform
 	currentTransform Affine
 
+	// lastEncodedTransform tracks the last transform emitted into the encoding
+	// via EncodeTransform. Used for delta encoding: TagTransform is emitted
+	// only when the combined transform differs from lastEncodedTransform.
+	// This ensures that an explicit Identity transform is emitted after
+	// non-Identity transforms (e.g., from SVG scene rendering), preventing
+	// stale transforms from affecting subsequent draw commands.
+	lastEncodedTransform Affine
+
 	// antiAlias controls whether subsequent draws use anti-aliasing.
 	// Default: true. State changes are delta-encoded (TagSetAntiAlias emitted
 	// only when the value differs from lastEncodedAA).
@@ -63,17 +71,18 @@ type Scene struct {
 // NewScene creates a new empty scene.
 func NewScene() *Scene {
 	return &Scene{
-		encoding:         NewEncoding(),
-		layerStack:       NewLayerStack(),
-		transformStack:   make([]Affine, 0, 8),
-		clipStack:        NewClipStack(),
-		version:          0,
-		bounds:           EmptyRect(),
-		currentTransform: IdentityAffine(),
-		antiAlias:        true,
-		lastEncodedAA:    true,
-		imageRegistry:    make([]*Image, 0, 8),
-		fontRegistry:     make(map[uint64]*text.FontSource, 4),
+		encoding:             NewEncoding(),
+		layerStack:           NewLayerStack(),
+		transformStack:       make([]Affine, 0, 8),
+		clipStack:            NewClipStack(),
+		version:              0,
+		bounds:               EmptyRect(),
+		currentTransform:     IdentityAffine(),
+		lastEncodedTransform: IdentityAffine(),
+		antiAlias:            true,
+		lastEncodedAA:        true,
+		imageRegistry:        make([]*Image, 0, 8),
+		fontRegistry:         make(map[uint64]*text.FontSource, 4),
 	}
 }
 
@@ -86,6 +95,7 @@ func (s *Scene) Reset() {
 	s.version++
 	s.bounds = EmptyRect()
 	s.currentTransform = IdentityAffine()
+	s.lastEncodedTransform = IdentityAffine()
 	s.antiAlias = true
 	s.lastEncodedAA = true
 	s.imageRegistry = s.imageRegistry[:0]
@@ -120,6 +130,23 @@ func (s *Scene) emitAntiAliasIfNeeded(enc *Encoding) {
 	}
 }
 
+// emitTransformIfNeeded emits TagTransform into the given encoding when
+// the combined transform differs from the last-encoded transform. This
+// implements delta encoding: TagTransform is emitted on state changes only.
+//
+// Unlike the previous approach which skipped Identity transforms entirely,
+// this correctly emits TagTransform(Identity) after non-Identity transforms.
+// Without this, a non-Identity transform from an earlier draw command (e.g.,
+// SVG scene rendering via PushTransform) would remain "sticky" in the
+// encoding stream, causing subsequent Identity-transform draws to be
+// incorrectly transformed by the stale value.
+func (s *Scene) emitTransformIfNeeded(enc *Encoding, combinedTransform Affine) {
+	if combinedTransform != s.lastEncodedTransform {
+		enc.EncodeTransform(combinedTransform)
+		s.lastEncodedTransform = combinedTransform
+	}
+}
+
 // Fill fills a shape with the given style, transform, and brush.
 func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape) {
 	if shape == nil {
@@ -138,9 +165,7 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 	// Optimization: RoundRectShape uses dedicated SDF encoding
 	// which bypasses path construction entirely.
 	if rr, ok := shape.(*RoundRectShape); ok {
-		if !combinedTransform.IsIdentity() {
-			enc.EncodeTransform(combinedTransform)
-		}
+		s.emitTransformIfNeeded(enc, combinedTransform)
 		enc.EncodeFillRoundRect(brush, style, rr.Rect, rr.RadiusX, rr.RadiusY)
 
 		shapeBounds := rr.Rect
@@ -155,10 +180,8 @@ func (s *Scene) Fill(style FillStyle, transform Affine, brush Brush, shape Shape
 		return
 	}
 
-	// Encode transform if not identity
-	if !combinedTransform.IsIdentity() {
-		enc.EncodeTransform(combinedTransform)
-	}
+	// Encode transform (delta: emitted only when changed from last encoded).
+	s.emitTransformIfNeeded(enc, combinedTransform)
 
 	// Convert shape to path and encode — use pooled path when possible.
 	path := s.shapeToPath(shape)
@@ -204,10 +227,8 @@ func (s *Scene) Stroke(style *StrokeStyle, transform Affine, brush Brush, shape 
 	// Emit AA state change if needed (delta encoding).
 	s.emitAntiAliasIfNeeded(enc)
 
-	// Encode transform if not identity
-	if !combinedTransform.IsIdentity() {
-		enc.EncodeTransform(combinedTransform)
-	}
+	// Encode transform (delta: emitted only when changed from last encoded).
+	s.emitTransformIfNeeded(enc, combinedTransform)
 
 	// Convert shape to path and encode — use pooled path when possible.
 	path := s.shapeToPath(shape)
@@ -371,10 +392,8 @@ func (s *Scene) PushClip(shape Shape) {
 	enc := s.currentEncoding()
 	path := s.shapeToPath(shape)
 	if path != nil && !path.IsEmpty() {
-		// Encode transform if not identity
-		if !s.currentTransform.IsIdentity() {
-			enc.EncodeTransform(s.currentTransform)
-		}
+		// Encode transform (delta: emitted only when changed from last encoded).
+		s.emitTransformIfNeeded(enc, s.currentTransform)
 		s.encodeScenePath(enc, path)
 		s.pathPool.Put(path)
 		enc.EncodeBeginClip()

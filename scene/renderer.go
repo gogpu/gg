@@ -1080,6 +1080,15 @@ func clampByte(v float32) byte {
 // Image.Data is treated as straight-alpha RGBA; the pixmap uses premultiplied
 // alpha. Source pixels are premultiplied during compositing.
 //
+// Bilinear filtering is used for subpixel-positioned images (standard in Skia,
+// Cairo, Qt, and tiny-skia). When source coordinates fall exactly on integer
+// pixel boundaries (identity or integer-translation transforms), the fast path
+// uses direct pixel copy (nearest-neighbor) to avoid the 4-tap cost.
+//
+// Interpolation is performed in premultiplied-alpha space to prevent dark halos
+// at transparent edges (industry standard — Skia SkBitmapProcShader, Cairo
+// _bilinear, tiny-skia sampler_2x2).
+//
 //nolint:gosec // G115: Integer conversions are bounded by image/tile dimensions
 func blitImageToTile(img *Image, transform Affine, tileX, tileY int, pm *gg.Pixmap) {
 	tileW := pm.Width()
@@ -1131,6 +1140,9 @@ func blitImageToTile(img *Image, transform Affine, tileX, tileY int, pm *gg.Pixm
 	endX := min(int(bboxMaxX)-tileX+1, tileW)
 	endY := min(int(bboxMaxY)-tileY+1, tileH)
 
+	maxSrcX := imgW - 1
+	maxSrcY := imgH - 1
+
 	for py := startY; py < endY; py++ {
 		canvasY := float32(py+tileY) + 0.5
 		rowOff := py * stride
@@ -1139,15 +1151,21 @@ func blitImageToTile(img *Image, transform Affine, tileX, tileY int, pm *gg.Pixm
 
 			// Map canvas pixel center back to image space.
 			srcX, srcY := inv.TransformPoint(canvasX, canvasY)
-			ix := int(srcX)
-			iy := int(srcY)
-			if ix < 0 || iy < 0 || ix >= imgW || iy >= imgH {
-				continue
-			}
 
-			srcOff := iy*imgStride + ix*4
-			sa := imgData[srcOff+3]
-			if sa == 0 {
+			// Shift by -0.5 so the integer part is the top-left texel and the
+			// fractional part is the bilinear weight. This aligns pixel centers
+			// at (i+0.5, j+0.5) which is the standard texel model used by
+			// Skia, Cairo, and GPU texture samplers.
+			srcX -= 0.5
+			srcY -= 0.5
+
+			floorX := floor32(srcX)
+			floorY := floor32(srcY)
+			ix0 := int(floorX)
+			iy0 := int(floorY)
+
+			// If the entire 2x2 neighborhood is outside the image, skip.
+			if ix0+1 < 0 || iy0+1 < 0 || ix0 >= imgW || iy0 >= imgH {
 				continue
 			}
 
@@ -1156,29 +1174,135 @@ func blitImageToTile(img *Image, transform Affine, tileX, tileY int, pm *gg.Pixm
 				continue
 			}
 
-			// Source is straight alpha — premultiply for compositing.
-			if sa == 255 {
-				// Fully opaque: overwrite (premultiplied == straight when A=255).
-				pmData[dstOff] = imgData[srcOff]
-				pmData[dstOff+1] = imgData[srcOff+1]
-				pmData[dstOff+2] = imgData[srcOff+2]
-				pmData[dstOff+3] = 255
-			} else {
-				// Premultiply source: pR = R * A / 255
-				srcA := uint32(sa)
-				pR := uint8((uint32(imgData[srcOff])*srcA + 127) / 255)
-				pG := uint8((uint32(imgData[srcOff+1])*srcA + 127) / 255)
-				pB := uint8((uint32(imgData[srcOff+2])*srcA + 127) / 255)
+			fx := srcX - floorX
+			fy := srcY - floorY
 
-				// Source-over: dst' = src + dst * (1 - srcAlpha)
-				invAlpha := 255 - srcA
-				pmData[dstOff] = pR + uint8((uint32(pmData[dstOff])*invAlpha+127)/255)
-				pmData[dstOff+1] = pG + uint8((uint32(pmData[dstOff+1])*invAlpha+127)/255)
-				pmData[dstOff+2] = pB + uint8((uint32(pmData[dstOff+2])*invAlpha+127)/255)
-				pmData[dstOff+3] = sa + uint8((uint32(pmData[dstOff+3])*invAlpha+127)/255)
+			// Fast path: integer-aligned — skip bilinear (no 4-tap cost).
+			if fx == 0 && fy == 0 {
+				if ix0 >= 0 && iy0 >= 0 && ix0 < imgW && iy0 < imgH {
+					blitNearestPixel(imgData, pmData, ix0, iy0, imgStride, dstOff)
+				}
+				continue
 			}
+
+			blitBilinearPixel(imgData, pmData, dstOff, imgStride,
+				ix0, iy0, maxSrcX, maxSrcY, fx, fy)
 		}
 	}
+}
+
+// blitBilinearPixel samples a 2x2 texel neighborhood from the source image
+// using bilinear interpolation and composites the result onto the destination
+// pixmap using source-over blending. Interpolation is performed in premultiplied
+// space to prevent dark halos at transparent edges (Skia, Cairo, tiny-skia).
+//
+// ix0, iy0 are the top-left texel coordinates; fx, fy are the fractional
+// bilinear weights in [0, 1).
+func blitBilinearPixel(imgData, pmData []byte, dstOff, imgStride,
+	ix0, iy0, maxSrcX, maxSrcY int, fx, fy float32) {
+	// Clamp coordinates to image bounds (clamp-to-edge, prevents seams).
+	cx0 := clampMax(ix0, maxSrcX)
+	cx1 := clampMax(ix0+1, maxSrcX)
+	cy0 := clampMax(iy0, maxSrcY)
+	cy1 := clampMax(iy0+1, maxSrcY)
+
+	// Fetch 4 texels and premultiply each independently.
+	p00r, p00g, p00b, p00a := fetchPremul(imgData, cx0, cy0, imgStride)
+	p10r, p10g, p10b, p10a := fetchPremul(imgData, cx1, cy0, imgStride)
+	p01r, p01g, p01b, p01a := fetchPremul(imgData, cx0, cy1, imgStride)
+	p11r, p11g, p11b, p11a := fetchPremul(imgData, cx1, cy1, imgStride)
+
+	// Bilinear blend: lerp horizontally, then vertically.
+	invFx := 1.0 - fx
+	invFy := 1.0 - fy
+	w00 := invFx * invFy
+	w10 := fx * invFy
+	w01 := invFx * fy
+	w11 := fx * fy
+
+	sr := p00r*w00 + p10r*w10 + p01r*w01 + p11r*w11
+	sg := p00g*w00 + p10g*w10 + p01g*w01 + p11g*w11
+	sb := p00b*w00 + p10b*w10 + p01b*w01 + p11b*w11
+	sa := p00a*w00 + p10a*w10 + p01a*w01 + p11a*w11
+
+	if sa < 0.5/255.0 {
+		return // Fully transparent after interpolation
+	}
+
+	// Composite source-over in premultiplied space.
+	alpha := sa / 255.0
+	invAlpha := 1.0 - alpha
+	pmData[dstOff] = clampByte(sr + float32(pmData[dstOff])*invAlpha)
+	pmData[dstOff+1] = clampByte(sg + float32(pmData[dstOff+1])*invAlpha)
+	pmData[dstOff+2] = clampByte(sb + float32(pmData[dstOff+2])*invAlpha)
+	pmData[dstOff+3] = clampByte(sa + float32(pmData[dstOff+3])*invAlpha)
+}
+
+// blitNearestPixel composites a single premultiplied-alpha source pixel onto
+// the destination pixmap (also premultiplied) using source-over blending.
+// This is the fast path for integer-aligned coordinates where bilinear
+// interpolation is unnecessary.
+//
+// Scene images carry premultiplied data from gg.Pixmap.ToImage() — the source
+// bytes are already premultiplied and must NOT be premultiplied again.
+//
+//nolint:gosec // G115: Integer conversions bounded by caller's bounds check
+func blitNearestPixel(imgData []byte, pmData []byte, ix, iy, imgStride, dstOff int) {
+	srcOff := iy*imgStride + ix*4
+	sa := imgData[srcOff+3]
+	if sa == 0 {
+		return
+	}
+
+	if sa == 255 {
+		pmData[dstOff] = imgData[srcOff]
+		pmData[dstOff+1] = imgData[srcOff+1]
+		pmData[dstOff+2] = imgData[srcOff+2]
+		pmData[dstOff+3] = 255
+	} else {
+		// Source is already premultiplied — composite directly.
+		invAlpha := 255 - uint32(sa)
+		pmData[dstOff] = imgData[srcOff] + uint8((uint32(pmData[dstOff])*invAlpha+127)/255)
+		pmData[dstOff+1] = imgData[srcOff+1] + uint8((uint32(pmData[dstOff+1])*invAlpha+127)/255)
+		pmData[dstOff+2] = imgData[srcOff+2] + uint8((uint32(pmData[dstOff+2])*invAlpha+127)/255)
+		pmData[dstOff+3] = sa + uint8((uint32(pmData[dstOff+3])*invAlpha+127)/255)
+	}
+}
+
+// fetchPremul reads a premultiplied-alpha RGBA texel and returns its channel
+// values as float32 in [0,255]. Scene images carry premultiplied data from
+// gg.Pixmap.ToImage() — the bytes are already premultiplied, so this function
+// returns them as-is. Bilinear interpolation in premultiplied space is correct
+// and prevents dark halos at transparent edges.
+func fetchPremul(data []byte, x, y, stride int) (r, g, b, a float32) {
+	off := y*stride + x*4
+	a = float32(data[off+3])
+	if a == 0 {
+		return 0, 0, 0, 0
+	}
+	return float32(data[off]), float32(data[off+1]), float32(data[off+2]), a
+}
+
+// floor32 returns the largest integer value less than or equal to x, as float32.
+// This handles negative values correctly (unlike simple int truncation which
+// rounds toward zero).
+func floor32(x float32) float32 {
+	i := float32(int(x))
+	if x < i {
+		return i - 1
+	}
+	return i
+}
+
+// clampMax clamps v to [0, hi].
+func clampMax(v, hi int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // convertPathInto converts a scene.Path (float32, canvas space) into an existing

@@ -1424,18 +1424,19 @@ func TestRenderer_DrawImage_SemiTransparent(t *testing.T) {
 		NewRectShape(0, 0, float32(size), float32(size)))
 
 	// 50x50 half-transparent red image at (25,25).
-	img := makeTestImage(50, 50, 255, 0, 0, 128)
+	// Scene images are premultiplied: R=128 means 50% opaque red (R=255*128/255).
+	img := makeTestImage(50, 50, 128, 0, 0, 128)
 	s.DrawImage(img, TranslateAffine(25, 25))
 
 	if err := r.Render(target, s); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// Inside the image area (50, 50): should be a blend of red and white.
-	// Source-over with straight alpha 128/255 ~ 0.502:
-	// premul src: R = 255*128/255 ~ 128, A = 128
-	// dst: white (255,255,255,255)
-	// result R = 128 + 255*(127)/255 ~ 128 + 127 = 255 ... hmm, let's be loose.
+	// Inside the image area (50, 50): source-over blend of premul red over white.
+	// premul src: (128, 0, 0, 128), dst: (255,255,255,255)
+	// result.R = 128 + 255*(1-128/255) = 128 + 127 = 255
+	// result.G = 0 + 255*(127/255) = 127
+	// result.A = 128 + 255*(127/255) = 255
 	center := target.GetPixel(50, 50)
 	if center.A < 0.9 {
 		t.Errorf("blended pixel alpha = %.2f, want near 1.0", center.A)
@@ -1567,5 +1568,313 @@ func TestRenderer_DrawImage_MultipleImages(t *testing.T) {
 	gap := target.GetPixel(100, 100)
 	if gap.A > 0.1 {
 		t.Errorf("gap between images (100,100) alpha = %.2f, want transparent", gap.A)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bilinear Image Sampling Tests (BUG-ICON-001)
+// ---------------------------------------------------------------------------
+
+// TestFloor32 verifies the floor32 helper handles positive, negative, and
+// zero values correctly (unlike int truncation which rounds toward zero).
+func TestFloor32(t *testing.T) {
+	tests := []struct {
+		name string
+		in   float32
+		want float32
+	}{
+		{"positive integer", 5.0, 5.0},
+		{"positive fractional", 5.7, 5.0},
+		{"zero", 0.0, 0.0},
+		{"negative integer", -3.0, -3.0},
+		{"negative fractional", -3.2, -4.0},
+		{"small positive", 0.1, 0.0},
+		{"small negative", -0.1, -1.0},
+		{"exactly half", 2.5, 2.0},
+		{"negative half", -2.5, -3.0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := floor32(tt.in)
+			if got != tt.want {
+				t.Errorf("floor32(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestClampMax verifies the clampMax helper clamps correctly to [0, hi].
+func TestClampMax(t *testing.T) {
+	tests := []struct {
+		name string
+		v    int
+		hi   int
+		want int
+	}{
+		{"in range", 5, 10, 5},
+		{"at zero", 0, 10, 0},
+		{"at max", 10, 10, 10},
+		{"below zero", -1, 10, 0},
+		{"above max", 15, 10, 10},
+		{"far below", -100, 10, 0},
+		{"hi is zero", 0, 0, 0},
+		{"negative below zero hi", -5, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampMax(tt.v, tt.hi)
+			if got != tt.want {
+				t.Errorf("clampMax(%d, %d) = %d, want %d", tt.v, tt.hi, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFetchPremul verifies that fetchPremul correctly premultiplies
+// straight-alpha RGBA values.
+func TestFetchPremul(t *testing.T) {
+	// Scene image data is premultiplied (from gg.Pixmap.ToImage()).
+	// fetchPremul returns values as-is (no re-premultiplication).
+
+	// 2x1 image: pixel 0 = premul (100, 50, 25, 128), pixel 1 = transparent
+	data := []byte{
+		100, 50, 25, 128, // pixel (0,0): premultiplied semi-transparent
+		0, 0, 0, 0, // pixel (1,0): fully transparent
+	}
+	stride := 2 * 4
+
+	// Fully transparent pixel
+	r, g, b, a := fetchPremul(data, 1, 0, stride)
+	if r != 0 || g != 0 || b != 0 || a != 0 {
+		t.Errorf("transparent pixel: got (%.1f, %.1f, %.1f, %.1f), want (0,0,0,0)", r, g, b, a)
+	}
+
+	// Premultiplied pixel: values returned as-is (already premultiplied).
+	r, g, b, a = fetchPremul(data, 0, 0, stride)
+	if a != 128 {
+		t.Errorf("semi-transparent alpha = %.1f, want 128", a)
+	}
+	if r != 100 || g != 50 || b != 25 {
+		t.Errorf("premul pixel: got (%.0f, %.0f, %.0f), want (100, 50, 25)", r, g, b)
+	}
+
+	// Fully opaque pixel
+	opaqueData := []byte{100, 200, 50, 255}
+	r, g, b, a = fetchPremul(opaqueData, 0, 0, 4)
+	if r != 100 || g != 200 || b != 50 || a != 255 {
+		t.Errorf("opaque pixel: got (%.0f, %.0f, %.0f, %.0f), want (100,200,50,255)", r, g, b, a)
+	}
+}
+
+// TestBlitImageToTile_IntegerAligned verifies the nearest-neighbor fast path
+// is used for integer-aligned transforms (identity, integer translation).
+func TestBlitImageToTile_IntegerAligned(t *testing.T) {
+	// 4x4 opaque red image.
+	img := makeTestImage(4, 4, 255, 0, 0, 255)
+
+	pm := gg.NewPixmap(8, 8)
+
+	// Identity transform: image at (0,0), integer-aligned.
+	blitImageToTile(img, IdentityAffine(), 0, 0, pm)
+
+	// Pixel (2,2) should be opaque red (inside the 4x4 image).
+	p := pm.GetPixel(2, 2)
+	if p.R < 0.9 || p.A < 0.9 {
+		t.Errorf("integer-aligned (2,2) = %+v, want opaque red", p)
+	}
+
+	// Pixel (5,5) should be transparent (outside the 4x4 image).
+	out := pm.GetPixel(5, 5)
+	if out.A > 0.01 {
+		t.Errorf("integer-aligned outside (5,5) alpha = %.2f, want 0", out.A)
+	}
+}
+
+// TestBlitImageToTile_SubpixelTranslation verifies that bilinear filtering
+// produces smooth interpolation for subpixel-offset images. A 0.5px offset
+// on a checkerboard pattern should produce averaged values.
+func TestBlitImageToTile_SubpixelTranslation(t *testing.T) {
+	// 2x2 checkerboard: (0,0)=white, (1,0)=black, (0,1)=black, (1,1)=white
+	img := NewImage(2, 2)
+	img.Data = []byte{
+		255, 255, 255, 255, // (0,0) white
+		0, 0, 0, 255, // (1,0) black
+		0, 0, 0, 255, // (0,1) black
+		255, 255, 255, 255, // (1,1) white
+	}
+
+	pm := gg.NewPixmap(4, 4)
+
+	// Translate by (0.5, 0.0) — half-pixel horizontal offset.
+	// At destination pixel (1,0), srcX maps to 0.5 in image space.
+	// Bilinear should average white(0,0) and black(1,0) -> gray ~128.
+	transform := TranslateAffine(0.5, 0)
+	blitImageToTile(img, transform, 0, 0, pm)
+
+	// Read a pixel that should show interpolation effect.
+	// At dest (1,0): canvasX=1.5, srcX = 1.5 - 0.5(translate) = 1.0 in image space.
+	// After -0.5 shift: srcX = 0.5, floor=0, fx=0.5.
+	// Samples (0,0)=white and (1,0)=black with 50/50 weight -> gray.
+	p := pm.GetPixel(1, 0)
+	if p.A < 0.9 {
+		t.Fatalf("subpixel pixel (1,0) alpha = %.2f, want opaque", p.A)
+	}
+	// Expect gray (~0.5 +/- tolerance for integer rounding).
+	if p.R < 0.3 || p.R > 0.7 {
+		t.Errorf("subpixel pixel (1,0) R = %.2f, want ~0.5 (bilinear average)", p.R)
+	}
+}
+
+// TestBlitImageToTile_EdgeClamp verifies that edge pixels are properly
+// clamped (clamp-to-edge) rather than producing artifacts or skipping.
+func TestBlitImageToTile_EdgeClamp(t *testing.T) {
+	// 2x2 solid green image.
+	img := makeTestImage(2, 2, 0, 255, 0, 255)
+
+	pm := gg.NewPixmap(8, 8)
+
+	// Translate by (0.3, 0.3) — subpixel offset.
+	// The edge pixels of the image will sample outside the image bounds.
+	// With clamp-to-edge, they should still produce green (clamped to edge texels).
+	transform := TranslateAffine(0.3, 0.3)
+	blitImageToTile(img, transform, 0, 0, pm)
+
+	// Pixel inside the image area should be green.
+	p := pm.GetPixel(1, 1)
+	if p.G < 0.9 || p.A < 0.9 {
+		t.Errorf("edge-clamp inside (1,1) = %+v, want opaque green", p)
+	}
+}
+
+// TestBlitImageToTile_TransparentInterpolation verifies that interpolating
+// between opaque and transparent pixels does not produce dark halos.
+// Dark halos occur when interpolation is done in straight-alpha space.
+func TestBlitImageToTile_TransparentInterpolation(t *testing.T) {
+	// 2x1 image: pixel 0 = opaque white, pixel 1 = fully transparent.
+	img := NewImage(2, 1)
+	img.Data = []byte{
+		255, 255, 255, 255, // (0,0) opaque white
+		0, 0, 0, 0, // (1,0) fully transparent
+	}
+
+	pm := gg.NewPixmap(4, 4)
+	// Fill destination with opaque white so we can detect dark halos.
+	pmData := pm.Data()
+	for i := 0; i < len(pmData); i += 4 {
+		pmData[i] = 255
+		pmData[i+1] = 255
+		pmData[i+2] = 255
+		pmData[i+3] = 255
+	}
+
+	// Translate by (0.5, 0) — half-pixel offset so bilinear kicks in.
+	transform := TranslateAffine(0.5, 0)
+	blitImageToTile(img, transform, 0, 0, pm)
+
+	// At the boundary between opaque white and transparent, the interpolated
+	// pixel should be semi-transparent white, NOT dark (dark = halo bug).
+	// Check pixel (1,0) — should blend white and transparent.
+	p := pm.GetPixel(1, 0)
+	// In premultiplied-space interpolation: (255,255,255,255) * 0.5 + (0,0,0,0) * 0.5
+	// = (127.5, 127.5, 127.5, 127.5) premul. When composited over white bg,
+	// the result should still be white or very near white (no dark halo).
+	// The key test: R, G, B should NOT be darker than the alpha would suggest.
+	if p.A > 0.01 {
+		// If there's any alpha, the straight-alpha color should be white-ish,
+		// not dark. Dark halo = R,G,B significantly less than A.
+		straight := p.R / p.A
+		if straight < 0.8 {
+			t.Errorf("dark halo detected: pixel (1,0) = %+v, straight R/A = %.2f (want >= 0.8)", p, straight)
+		}
+	}
+}
+
+// TestBlitImageToTile_DegenerateTransform verifies that a degenerate
+// (zero determinant) transform is handled gracefully.
+func TestBlitImageToTile_DegenerateTransform(t *testing.T) {
+	img := makeTestImage(4, 4, 255, 0, 0, 255)
+	pm := gg.NewPixmap(8, 8)
+
+	// Degenerate transform: both rows are identical → det = 0.
+	degenerate := Affine{A: 1, B: 1, C: 0, D: 1, E: 1, F: 0}
+	// Should return immediately without panic or modification.
+	blitImageToTile(img, degenerate, 0, 0, pm)
+
+	// All pixels should remain transparent (zero-initialized pixmap).
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			p := pm.GetPixel(x, y)
+			if p.A > 0.01 {
+				t.Errorf("degenerate transform: pixel (%d,%d) alpha = %.2f, want 0", x, y, p.A)
+			}
+		}
+	}
+}
+
+// TestBlitImageToTile_ScaleDown verifies that bilinear filtering produces
+// smooth results when scaling an image down (many source pixels map to one
+// destination pixel). Note: bilinear is a minification filter; proper
+// downscaling would use mipmaps, but bilinear is better than nearest-neighbor.
+func TestBlitImageToTile_ScaleDown(t *testing.T) {
+	// 8x8 image: top half red, bottom half blue.
+	img := NewImage(8, 8)
+	img.Data = make([]byte, 8*8*4)
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			off := (y*8 + x) * 4
+			if y < 4 {
+				img.Data[off] = 255   // R
+				img.Data[off+3] = 255 // A
+			} else {
+				img.Data[off+2] = 255 // B
+				img.Data[off+3] = 255 // A
+			}
+		}
+	}
+
+	pm := gg.NewPixmap(8, 8)
+
+	// Scale down 2x: 8x8 image → 4x4 pixels on screen.
+	transform := ScaleAffine(0.5, 0.5)
+	blitImageToTile(img, transform, 0, 0, pm)
+
+	// Top area (1,1) should be red.
+	top := pm.GetPixel(1, 1)
+	if top.R < 0.8 || top.A < 0.8 {
+		t.Errorf("scaled-down top (1,1) = %+v, want red", top)
+	}
+
+	// Bottom area (1,3) should be blue.
+	bot := pm.GetPixel(1, 3)
+	if bot.B < 0.8 || bot.A < 0.8 {
+		t.Errorf("scaled-down bottom (1,3) = %+v, want blue", bot)
+	}
+}
+
+// BenchmarkBlitImageToTile_IntegerAligned benchmarks the nearest-neighbor
+// fast path (integer-aligned transform).
+func BenchmarkBlitImageToTile_IntegerAligned(b *testing.B) {
+	img := makeTestImage(64, 64, 255, 128, 0, 255)
+	pm := gg.NewPixmap(64, 64)
+	transform := IdentityAffine()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pm.Clear(gg.Transparent)
+		blitImageToTile(img, transform, 0, 0, pm)
+	}
+}
+
+// BenchmarkBlitImageToTile_Bilinear benchmarks the bilinear interpolation
+// path (subpixel-offset transform).
+func BenchmarkBlitImageToTile_Bilinear(b *testing.B) {
+	img := makeTestImage(64, 64, 255, 128, 0, 255)
+	pm := gg.NewPixmap(64, 64)
+	transform := TranslateAffine(0.3, 0.7) // subpixel offset forces bilinear
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		pm.Clear(gg.Transparent)
+		blitImageToTile(img, transform, 0, 0, pm)
 	}
 }
