@@ -4,10 +4,28 @@
 // stores R8 (single-channel) coverage data produced by AnalyticFiller.
 //
 // The fragment shader outputs premultiplied alpha.
-// Color is passed via uniform buffer (per-batch).
+// Color is passed via uniform buffer (per-batch) in STRAIGHT alpha:
+//   color.rgb = original RGB (not pre-multiplied)
+//   color.a   = alpha
+// The shader computes: out.rgb = color.rgb * (coverage * color.a)
+//                      out.a   = coverage * color.a
+// This produces correct premultiplied output.
+//
+// Mask gamma correction (Skia SkMaskGamma pattern):
+//   Light text on dark backgrounds appears perceptually thinner because
+//   linear blending underestimates coverage on low-luminance destinations.
+//   The fragment shader applies a luminance-dependent contrast boost to
+//   alpha values before compositing:
+//     contrast = luminance * 0.5  (0.5 = Skia SK_GAMMA_CONTRAST default)
+//     boosted  = alpha + (1 - alpha) * contrast * alpha
+//   Light text gets boosted (stems appear more solid on dark bg).
+//   Dark text is unchanged (no perceptual thinning on light bg).
 //
 // References:
 // - Skia GrAtlasTextOp (R8 atlas compositing)
+// - Skia SkMaskGamma.cpp:74 (apply_contrast formula)
+// - Skia SkTypes.h:89 (SK_GAMMA_CONTRAST = 0.5)
+// - Skia DistanceFieldAdjustTable.cpp:26-59 (GPU-side gamma rationale)
 // - Chrome cc::GlyphAtlas (alpha mask cache + GPU upload)
 
 struct GlyphMaskUniforms {
@@ -74,11 +92,34 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     return out;
 }
 
+// Mask gamma contrast boost (Skia SkMaskGamma apply_contrast pattern).
+// Boosts edge coverage for light-on-dark text to compensate perceptual
+// thinning from linear alpha blending on low-luminance destinations.
+//
+// The contrast is modulated by text color luminance:
+//   - Light text (high lum) -> high contrast -> stems appear more solid
+//   - Dark text (low lum)   -> low contrast  -> no change needed
+//   - Black text (lum = 0)  -> zero contrast -> identity (no boost)
+//
+// Formula: boosted = alpha + (1 - alpha) * contrast * alpha
+// Fixed points: alpha=0 -> 0, alpha=1 -> 1 (endpoints unchanged).
+const MASK_GAMMA_MAX_CONTRAST: f32 = 0.5;  // Skia SK_GAMMA_CONTRAST default
+
+fn apply_mask_gamma(alpha: f32, text_color: vec3<f32>) -> f32 {
+    let luminance = dot(text_color, vec3<f32>(0.299, 0.587, 0.114));
+    let contrast = luminance * MASK_GAMMA_MAX_CONTRAST;
+    return alpha + (1.0 - alpha) * contrast * alpha;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let alpha = textureSample(atlas_texture, atlas_sampler, in.tex_coord).r;
+    let raw_alpha = textureSample(atlas_texture, atlas_sampler, in.tex_coord).r;
     let clip_cov = rrect_clip_coverage(in.position.xy);
     let color = uniforms.color;
+
+    // Apply mask gamma correction: boost coverage for light text on dark bg.
+    let alpha = apply_mask_gamma(raw_alpha, color.rgb);
+
     let a = alpha * color.a * clip_cov;
     return vec4<f32>(color.rgb * a, a);
 }

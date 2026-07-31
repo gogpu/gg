@@ -603,7 +603,8 @@ type GlyphMaskBatch struct {
 	// Transform is the 2D affine transform for this batch.
 	Transform gg.Matrix
 
-	// Color is the text color (RGBA, premultiplied alpha) for this batch.
+	// Color is the text color (RGBA, straight alpha) for this batch.
+	// The fragment shader performs premultiplication: out.rgb = color.rgb * (cov * color.a).
 	// All glyphs in a batch share the same color (set per DrawString call).
 	Color [4]float32
 
@@ -701,7 +702,7 @@ func makeGlyphMaskUniform(transform gg.Matrix, color [4]float32) []byte {
 		off += 4
 	}
 
-	// Color (vec4<f32>): premultiplied RGBA.
+	// Color (vec4<f32>): straight-alpha RGBA. Shader premultiplies.
 	for i := range 4 {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4
@@ -730,7 +731,7 @@ func makeGlyphMaskLCDUniform(transform gg.Matrix, color [4]float32, atlasW, atla
 		off += 4
 	}
 
-	// Color (vec4<f32>): premultiplied RGBA.
+	// Color (vec4<f32>): straight-alpha RGBA. Shader premultiplies.
 	for i := range 4 {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4

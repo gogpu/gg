@@ -1,5 +1,11 @@
 // glyph_mask_lcd.wgsl - LCD Subpixel (ClearType) Text Rendering Shader
 //
+// NOTE: This shader is currently unused for the GPU pipeline (BUG-TEXT-001,
+// ADR-060). The GPU always uses grayscale (glyph_mask.wgsl) because standard
+// SrcOver blend cannot perform correct per-channel alpha compositing.
+// This shader is retained for the CPU text path and for future dual-source
+// blending support.
+//
 // Renders CPU-rasterized LCD glyph masks as textured quads with per-channel
 // alpha compositing. The R8 atlas stores 3 texels per logical pixel
 // (R coverage, G coverage, B coverage), arranged horizontally.
@@ -8,8 +14,17 @@
 // coverage, then composites each color channel independently for ClearType
 // subpixel rendering with 3x effective horizontal resolution.
 //
+// Color is passed via uniform buffer in STRAIGHT alpha (same as glyph_mask.wgsl).
+//
+// TODO: When this shader is re-enabled (FEAT-TEXT-002 dual-source blending),
+// apply mask gamma correction per-channel as in glyph_mask.wgsl. The same
+// apply_mask_gamma() function should be applied to each of cov_r, cov_g, cov_b
+// individually before compositing. See Skia SkMaskGamma PreBlend which uses
+// separate LUTs per channel keyed by the text color's R/G/B luminance.
+//
 // References:
 // - Skia GrAtlasTextOp (separate LCD pipeline, per-channel alpha)
+// - Skia SkMaskGamma.cpp:74 (apply_contrast, per-channel PreBlend)
 // - FreeType LCD rendering (3x oversampling + FIR filter)
 // - DirectWrite ClearType (subpixel positioning + gamma correction)
 

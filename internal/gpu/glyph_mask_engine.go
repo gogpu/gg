@@ -134,10 +134,13 @@ func (e *GlyphMaskEngine) LayoutText(
 	lcdLayout := e.lcdLayout
 	lcdFilter := e.lcdFilter
 
-	premul := color.Premultiply()
+	// Pass straight-alpha color to the shader. The fragment shader performs
+	// premultiplication: output.rgb = color.rgb * (coverage * color.a).
+	// Passing premultiplied color here would cause double-application of alpha
+	// (color.rgb already has A baked in, then shader multiplies by color.a again).
 	batchColor := [4]float32{
-		float32(premul.R), float32(premul.G),
-		float32(premul.B), float32(premul.A),
+		float32(color.R), float32(color.G),
+		float32(color.B), float32(color.A),
 	}
 
 	var shaped []text.ShapedGlyph
@@ -190,10 +193,10 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 	// is incompatible with 3x horizontal oversampling.
 	useLCD := false
 
-	premul := color.Premultiply()
+	// Pass straight-alpha color to the shader (same as LayoutText).
 	batchColor := [4]float32{
-		float32(premul.R), float32(premul.G),
-		float32(premul.B), float32(premul.A),
+		float32(color.R), float32(color.G),
+		float32(color.B), float32(color.A),
 	}
 
 	var shaped []text.ShapedGlyph
@@ -236,10 +239,10 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
 	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
 
-	premul := color.Premultiply()
+	// Pass straight-alpha color to the shader (same as LayoutText).
 	batchColor := [4]float32{
-		float32(premul.R), float32(premul.G),
-		float32(premul.B), float32(premul.A),
+		float32(color.R), float32(color.G),
+		float32(color.B), float32(color.A),
 	}
 
 	lcdFilter := e.lcdFilter
@@ -653,27 +656,28 @@ func selectGlyphMaskHinting(fontSize float64, matrix gg.Matrix, isCJK bool, devi
 	return text.HintingFull
 }
 
-// glyphMaskLCDMaxSize is the maximum font size in device pixels for which
-// LCD subpixel rendering is auto-enabled. Above this size, individual subpixels
-// are large enough that per-channel alpha provides no visual benefit and the
-// color fringing becomes more noticeable.
-const glyphMaskLCDMaxSize = 48.0
-
-// selectGlyphMaskLCD returns true if LCD subpixel rendering should be used.
-// LCD rendering requires an axis-aligned matrix (no rotation/skew) and small
-// font size (same conditions as hinting, since ClearType depends on the
-// subpixel grid being axis-aligned).
-func selectGlyphMaskLCD(fontSize float64, matrix gg.Matrix) bool {
-	// Dev override: force grayscale (disable LCD subpixel) for A/B testing.
-	if os.Getenv("GOGPU_TEXT_NO_LCD") != "" {
-		return false
+// selectGlyphMaskLCD returns true if LCD subpixel rendering should be used
+// for the GPU glyph mask pipeline.
+//
+// LCD subpixel rendering is DISABLED for the GPU pipeline (BUG-TEXT-001,
+// ADR-060) because the standard SrcOver blend state cannot perform correct
+// per-channel alpha compositing. Per-channel LCD blending requires either
+// dual-source blending (not available in WebGPU 1.0) or a two-pass approach.
+// Without it, the scalar alpha approximation (max(r,g,b)) produces visible
+// color fringing on light backgrounds.
+//
+// Industry precedent: Vello and Figma never implemented LCD. Chrome deprecated
+// LCD text in 2023 (crbug.com/1164275). macOS dropped subpixel AA in Mojave
+// (2018). The CPU text path (text.Draw/text.DrawLCD) still handles LCD
+// correctly via direct pixel-level per-channel blending.
+func selectGlyphMaskLCD(_ float64, _ gg.Matrix) bool {
+	// Dev override: force LCD ON for debugging/comparison despite known issues.
+	if os.Getenv("GOGPU_TEXT_FORCE_LCD") != "" {
+		return true
 	}
-	// Rotated/skewed text: subpixel grid is not axis-aligned.
-	if matrix.B != 0 || matrix.D != 0 {
-		return false
-	}
-	// Large text: subpixels are big enough that per-channel alpha isn't needed.
-	return fontSize <= glyphMaskLCDMaxSize
+	// GPU pipeline: always grayscale. LCD requires per-channel blend which
+	// standard SrcOver cannot provide. See BUG-TEXT-001 research.
+	return false
 }
 
 // computeGlyphMaskFontID generates a stable hash identifier for a font source.
