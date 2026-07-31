@@ -8,6 +8,11 @@ import (
 	"github.com/gogpu/gg"
 )
 
+const toolTerminalSVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3 5L7 8L3 11" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M9 11H13" stroke="#6C707E" stroke-linecap="round"/>
+</svg>`
+
 // --- snapViewBoxCoord unit tests ---
 
 func TestSnapViewBoxCoord(t *testing.T) {
