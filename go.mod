@@ -3,11 +3,11 @@ module github.com/gogpu/gg
 go 1.25.0
 
 require (
-	github.com/gogpu/gogpu v0.47.3
-	github.com/gogpu/gpucontext v0.23.0
+	github.com/gogpu/gogpu v0.48.0
+	github.com/gogpu/gpucontext v0.24.0
 	github.com/gogpu/gputypes v0.5.1
 	github.com/gogpu/naga v0.17.16
-	github.com/gogpu/wgpu v0.30.31
+	github.com/gogpu/wgpu v0.30.32
 	golang.org/x/image v0.44.0
 	golang.org/x/text v0.40.0
 )
