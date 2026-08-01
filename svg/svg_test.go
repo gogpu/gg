@@ -763,6 +763,12 @@ func TestFillNoneStrokeOnlyNoBlackPixels(t *testing.T) {
 			if a == 0 {
 				continue
 			}
+			// Skip color check for alpha < 2 (8-bit): at coverage=1/255,
+			// premultiplied channel values for any source color are <1.0
+			// and quantize to 0, making un-premultiplied color meaningless.
+			if a>>8 < 2 {
+				continue
+			}
 			// Un-premultiply to get the actual color.
 			straight := float64(r) / float64(a)
 			// Stroke is #CE (~0.808). Black fill would give values near 0.
@@ -857,7 +863,10 @@ func TestFolderIconPixelDiagnostic(t *testing.T) {
 			coverage := float64(alpha8) / 255.0
 
 			// Flag pixels with wrong color (not #CED0D6 ± tolerance).
-			colorOK := ur > 180 && ur < 230 && ug > 180 && ug < 230 && ub > 185 && ub < 240
+			// Skip color check for alpha < 2: at coverage=1/255, premultiplied
+			// channel values are <1.0 and quantize to 0 or 1 regardless of source
+			// color, making un-premultiplied color measurement meaningless.
+			colorOK := alpha8 < 2 || (ur > 180 && ur < 230 && ug > 180 && ug < 230 && ub > 185 && ub < 240)
 			marker := ""
 			if !colorOK {
 				marker = " ← WRONG COLOR"

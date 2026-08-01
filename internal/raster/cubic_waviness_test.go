@@ -82,8 +82,8 @@ func diagnoseCubicArc(t *testing.T, name string, p0, p1, p2, p3 CurvePoint, shif
 	t.Helper()
 
 	// Create the cubic edge WITHOUT calling Update() so we can inspect initial state.
-	// We use newCubicEdgeSetup with sortY=true, then manually call Update() in a loop.
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	// We use newCubicEdgeSetup, then manually call Update() in a loop.
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatalf("newCubicEdgeSetup returned false for arc %s", name)
 	}
@@ -256,7 +256,7 @@ func TestCubicCoefficientPrecision(t *testing.T) {
 	p2 := CurvePoint{X: cx + r*kappa, Y: cy + r}
 	p3 := CurvePoint{X: cx, Y: cy + r}
 
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatal("newCubicEdgeSetup returned false")
 	}
@@ -464,7 +464,7 @@ func TestCubicVsSkiaCoefficients(t *testing.T) {
 		fCx, FDot16ToFloat64(fCx), fCDx, fCDDx, fCDDDx)
 
 	// Step 6: Compare with what newCubicEdgeSetup actually produces
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatal("newCubicEdgeSetup returned false")
 	}
@@ -515,7 +515,7 @@ func TestCubicCircleRadiusDeviation(t *testing.T) {
 	var allMaxArc string
 
 	for _, arc := range arcs {
-		cubic, cubicOK := newCubicEdgeSetup(arc.p0, arc.p1, arc.p2, arc.p3, shift, true)
+		cubic, cubicOK := newCubicEdgeSetup(arc.p0, arc.p1, arc.p2, arc.p3, shift)
 		if !cubicOK {
 			t.Logf("  %s: degenerate (zero height)", arc.name)
 			continue
@@ -584,7 +584,7 @@ func TestCubicForwardDiffAccumulation(t *testing.T) {
 	p2 := CurvePoint{X: cx + r*kappa, Y: cy + r}
 	p3 := CurvePoint{X: cx, Y: cy + r}
 
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatal("newCubicEdgeSetup returned false")
 	}
@@ -661,7 +661,7 @@ func TestCubicWavinessComparison(t *testing.T) {
 	p3 := CurvePoint{X: cx, Y: cy + r}
 
 	// Forward-diff points
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatal("newCubicEdgeSetup returned false")
 	}
@@ -674,7 +674,7 @@ func TestCubicWavinessComparison(t *testing.T) {
 	}
 
 	// Float64 forward-diff points (no truncation)
-	cubic2, _ := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic2, _ := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	fx := float64(cubic2.cx)
 	fy := float64(cubic2.cy)
 	fdx := float64(cubic2.cdx)

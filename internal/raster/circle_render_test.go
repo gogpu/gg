@@ -424,7 +424,7 @@ func traceArcSegments(t *testing.T, _ string, p0, p1, p2, p3 CurvePoint, shift i
 	numChops := ChopCubicAtYExtrema(src, &dst)
 	t.Logf("Y extrema chops: %d (y0=%.1f, y3=%.1f)", numChops, p0.Y, p3.Y)
 
-	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	cubic, cubicOK := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !cubicOK {
 		t.Fatal("newCubicEdgeSetup returned false")
 	}

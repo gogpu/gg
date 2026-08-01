@@ -250,44 +250,6 @@ func (e *LineEdge) IsVertical() bool {
 	return e.DX == 0
 }
 
-// update updates the line edge for a new line segment.
-// Called by CubicEdge during stepping (legacy path without snapping).
-// Returns true if a valid segment was produced.
-//
-// Note: UpperY/LowerY are NOT set here because the y0/y1 values from curve
-// forward differencing are in the FDot6-scaled coordinate system (not pixel-
-// space FDot16). Only NewLineEdge and updateLine set precise pixel-space fields.
-// Curve segments are already subdivided finely, so FDot6-rounded Y is adequate.
-func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
-	// Convert from FDot16 to FDot6 (shift right by 10)
-	y0 >>= (FDot16Shift - FDot6Shift)
-	y1 >>= (FDot16Shift - FDot6Shift)
-
-	top := FDot6Round(y0)
-	bottom := FDot6Round(y1)
-
-	// Zero-height line?
-	if top == bottom {
-		return false
-	}
-
-	x0 >>= (FDot16Shift - FDot6Shift)
-	x1 >>= (FDot16Shift - FDot6Shift)
-
-	slope := FDot6Div(x1-x0, y1-y0)
-	dy := computeDY(top, y0)
-
-	e.X = FDot6ToFDot16(x0 + FDot16Mul(slope, dy))
-	e.DX = slope
-	e.FirstY = top
-	e.LastY = bottom - 1
-	// Clear precise Y — curve segments use FDot6 system, not pixel-space FDot16.
-	e.UpperY = 0
-	e.LowerY = 0
-
-	return true
-}
-
 // updateLine updates the line edge for a curve sub-segment with pre-computed slope.
 // Port of Skia's SkAnalyticEdge::updateLine (SkAnalyticEdge.cpp:215-257).
 //
@@ -766,7 +728,7 @@ type CubicEdge struct {
 //
 //nolint:gosec // G115: shift values bounded by MaxCoeffShift (6), all conversions safe
 func NewCubicEdge(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
-	edge, ok := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
+	edge, ok := newCubicEdgeSetup(p0, p1, p2, p3, shift)
 	if !ok {
 		return CubicEdge{}, false
 	}
@@ -780,7 +742,7 @@ func NewCubicEdge(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
 // Returns (edge, true) on success, or (zero, false) if degenerate.
 //
 //nolint:gosec // G115: shift values bounded by MaxCoeffShift (6), all conversions safe
-func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) (CubicEdge, bool) {
+func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
 	// Convert to FDot6 with AA scaling.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
 	x0 := int32(p0.X * scale)
@@ -793,7 +755,7 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) (CubicE
 	y3 := int32(p3.Y * scale)
 
 	winding := int8(1)
-	if sortY && y0 > y3 {
+	if y0 > y3 {
 		// Swap to ensure y0 <= y3 (monotonic in Y)
 		x0, x3 = x3, x0
 		x1, x2 = x2, x1
@@ -806,7 +768,7 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) (CubicE
 	bot := FDot6Round(y3)
 
 	// Zero-height curve?
-	if sortY && top == bot {
+	if top == bot {
 		return CubicEdge{}, false
 	}
 
