@@ -877,6 +877,8 @@ func (eb *EdgeBuilder) flattenQuadToLines(x0, y0, cx, cy, x1, y1 float32) {
 }
 
 // flattenQuadRecursive recursively subdivides a quadratic curve until flat enough.
+//
+//nolint:dupl // outputs LineEdges (vs VelloLines in flattenQuadToVelloLinesRecursive)
 func (eb *EdgeBuilder) flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance float32, depth int) {
 	// Max recursion depth to prevent stack overflow
 	if depth > 10 {

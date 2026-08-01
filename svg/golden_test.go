@@ -432,7 +432,11 @@ func TestTinySkiaPathVsResvgGolden(t *testing.T) {
 	dc.Fill()
 	got := dc.Image().(*image.RGBA)
 
-	// Compare with RESVG golden (same tiny-skia path, but 4x supersample rasterizer)
+	// Compare with RESVG golden (same tiny-skia path, but 4x supersample rasterizer).
+	// Skip if resvg golden not available (requires `resvg` CLI tool, not in CI).
+	if _, err := os.Stat("../tmp/folder_resvg_20.png"); err != nil {
+		t.Skip("resvg golden not available (requires local resvg CLI)")
+	}
 	resvg := loadGoldenPNG(t, "../tmp/folder_resvg_20.png")
 	result := compareRGBA(imageToRGBA(resvg), got)
 
