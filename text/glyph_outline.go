@@ -3,6 +3,7 @@ package text
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sort"
 )
@@ -386,6 +387,12 @@ func (e *OutlineExtractor) ExtractOutlineHintedVar(
 	if !ok {
 		return nil, ErrUnsupportedFontType
 	}
+	// CFF1 has no gvar outline variation data. Keep the static CFF path (and
+	// its normal hinting fallback) authoritative when variation coordinates
+	// are supplied to the unified API.
+	if _, hasGlyf := ownFont.tables["glyf"]; !hasGlyf {
+		return e.ExtractOutlineHinted(parsedFont, gid, size, hinting)
+	}
 
 	// Extract the gvar-varied outline AND the varied contour points.
 	// Both are needed: the outline for the final result, and the contours
@@ -637,6 +644,19 @@ func (e *OutlineExtractor) extractFromOwn(f *ownParsedFont, gid GlyphID, size fl
 	// Get advance width.
 	advance := f.GlyphAdvance(uint16(gid), size)
 
+	// TrueType glyf stays the first-choice path for fonts that contain it.
+	// Only dispatch to CFF when glyf is absent.
+	if _, hasGlyf := f.tables["glyf"]; !hasGlyf {
+		if _, hasCFF2 := f.tables["CFF2"]; hasCFF2 {
+			return nil, &FontError{Reason: "own parser: CFF2 outlines are unsupported"}
+		}
+		if _, hasCFF := f.tables["CFF "]; hasCFF {
+			return e.extractCFF(f, gid, size, advance)
+		}
+		// Fonts without either supported outline table have no outline.
+		return nil, nil //nolint:nilnil // A missing optional outline is the existing empty-glyph contract.
+	}
+
 	// Parse raw contour points from glyf table.
 	contours, err := ParseGlyfContours(rawData, gid)
 	if err != nil {
@@ -686,6 +706,62 @@ func (e *OutlineExtractor) extractFromOwn(f *ownParsedFont, gid GlyphID, size fl
 	outline.Bounds = Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
 
 	return outline, nil
+}
+
+func (e *OutlineExtractor) extractCFF(f *ownParsedFont, gid GlyphID, size, advance float64) (*GlyphOutline, error) {
+	cff, err := f.loadCFF()
+	if err != nil {
+		return nil, &FontError{Reason: fmt.Sprintf("own parser: CFF1 parse failed: %v", err)}
+	}
+	if cff == nil {
+		return nil, nil //nolint:nilnil // Lazy absence is represented as no drawable outline.
+	}
+	charstring, global, private, err := cff.glyph(uint16(gid))
+	if err != nil {
+		return nil, &FontError{Reason: fmt.Sprintf("own parser: CFF1 glyph %d: %v", gid, err)}
+	}
+	decoded, err := decodeType2(charstring, private.localSubrs, global, private.nominalWidth)
+	if err != nil {
+		return nil, &FontError{Reason: fmt.Sprintf("own parser: CFF1 glyph %d: %v", gid, err)}
+	}
+	scale := size / float64(f.upem)
+	segments := scaleCFFSegments(decoded.segments, scale)
+	out := &GlyphOutline{Segments: segments, GID: gid, Type: GlyphTypeOutline, Advance: float32(advance)}
+	f.ensureHmtx()
+	if f.hmtxParsed && int(gid) < len(f.hmtxLSB) {
+		out.LSB = float32(float64(f.hmtxLSB[gid]) * scale)
+	}
+	if len(segments) != 0 {
+		out.Bounds = outlineSegmentBounds(segments)
+	}
+	return out, nil
+}
+
+// scaleCFFSegments converts Type 2's Y-up font-unit coordinates to the
+// existing outline contract: ppem-scaled X and Y-down coordinates.
+func scaleCFFSegments(in []OutlineSegment, scale float64) []OutlineSegment {
+	out := make([]OutlineSegment, len(in))
+	for i, seg := range in {
+		out[i].Op = seg.Op
+		for j := range segPointCount(seg.Op) {
+			out[i].Points[j] = OutlinePoint{X: float32(float64(seg.Points[j].X) * scale), Y: float32(-float64(seg.Points[j].Y) * scale)}
+		}
+	}
+	return out
+}
+
+func outlineSegmentBounds(segments []OutlineSegment) Rect {
+	minX, minY := float64(1e10), float64(1e10)
+	maxX, maxY := float64(-1e10), float64(-1e10)
+	for _, seg := range segments {
+		for j := range segPointCount(seg.Op) {
+			updateBounds(seg.Points[j], &minX, &minY, &maxX, &maxY)
+		}
+	}
+	if len(segments) == 0 {
+		return Rect{}
+	}
+	return Rect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
 }
 
 // extractFromOwnVariableWithContours extracts a glyph outline with font

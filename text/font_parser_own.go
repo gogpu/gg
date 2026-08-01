@@ -116,6 +116,13 @@ type ownParsedFont struct {
 	gvar     *gvarTable // nil if gvar not present or failed to parse
 	avarOnce sync.Once
 	avar     *avarTable // nil if avar not present
+
+	// CFF1 outlines — parsed on first outline or bounds request. cffErr is
+	// retained with the result so malformed-font failures are deterministic
+	// across callers and safe under concurrent extraction.
+	cffOnce sync.Once
+	cff     *cffFont
+	cffErr  error
 }
 
 // --- ParsedFont interface ---
@@ -162,11 +169,14 @@ func (f *ownParsedFont) GlyphAdvance(glyphIndex uint16, ppem float64) float64 {
 // GlyphBounds implements ParsedFont.GlyphBounds.
 // Returns the glyph bounding box scaled from font units to pixels.
 //
-// Uses the glyf table for TrueType outlines. CFF fonts are not yet
-// supported by the own parser (returns zero rect).
+// Uses the glyf table for TrueType outlines and lazily executes CFF1 Type 2
+// charstrings when glyf is absent.
 func (f *ownParsedFont) GlyphBounds(glyphIndex uint16, ppem float64) Rect {
 	glyfData, ok := f.tables["glyf"]
-	if !ok || f.upem == 0 {
+	if !ok {
+		return f.cffGlyphBounds(glyphIndex, ppem)
+	}
+	if f.upem == 0 {
 		return Rect{}
 	}
 
@@ -216,6 +226,42 @@ func (f *ownParsedFont) GlyphBounds(glyphIndex uint16, ppem float64) Rect {
 		MaxX: float64(xMax) * scale,
 		MaxY: float64(-yMin) * scale, // Y-UP → Y-DOWN: negate and swap
 	}
+}
+
+func (f *ownParsedFont) cffGlyphBounds(glyphIndex uint16, ppem float64) Rect {
+	if f.upem == 0 || f.tables["CFF "] == nil {
+		return Rect{}
+	}
+	cff, err := f.loadCFF()
+	if err != nil || cff == nil {
+		return Rect{}
+	}
+	charstring, global, private, err := cff.glyph(glyphIndex)
+	if err != nil {
+		return Rect{}
+	}
+	decoded, err := decodeType2(charstring, private.localSubrs, global, private.nominalWidth)
+	if err != nil || len(decoded.segments) == 0 {
+		return Rect{}
+	}
+	segments := scaleCFFSegments(decoded.segments, ppem/float64(f.upem))
+	return outlineSegmentBounds(segments)
+}
+
+func (f *ownParsedFont) loadCFF() (*cffFont, error) {
+	f.cffOnce.Do(func() {
+		data, ok := f.tables["CFF "]
+		if !ok {
+			return
+		}
+		f.cff, f.cffErr = parseCFF1(data)
+		if f.cffErr == nil && len(f.cff.charStrings) != f.numGlyphs {
+			charStringCount := len(f.cff.charStrings)
+			f.cff = nil
+			f.cffErr = fmt.Errorf("text: CFF1: CharStrings count %d does not match maxp glyph count %d", charStringCount, f.numGlyphs)
+		}
+	})
+	return f.cff, f.cffErr
 }
 
 // Metrics implements ParsedFont.Metrics.
