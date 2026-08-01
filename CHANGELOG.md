@@ -80,7 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `gogpu/wgpu` v0.30.29 → v0.30.30, `gogpu/gogpu` v0.47.1 → v0.47.2.
+- Updated `gogpu/wgpu` v0.30.29 → v0.30.31, `gogpu/gogpu` v0.47.1 → v0.47.3.
 - Updated example dependencies.
 
 ## [0.50.10] - 2026-07-30
