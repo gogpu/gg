@@ -2,94 +2,13 @@ package svg
 
 import (
 	"image"
-	"math"
 	"testing"
-
-	"github.com/gogpu/gg"
 )
 
 const toolTerminalSVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path d="M3 5L7 8L3 11" stroke="#6C707E" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M9 11H13" stroke="#6C707E" stroke-linecap="round"/>
 </svg>`
-
-// --- snapViewBoxCoord unit tests ---
-
-func TestSnapViewBoxCoord(t *testing.T) {
-	tests := []struct {
-		name  string
-		v     float64
-		scale float64
-		want  float64
-	}{
-		// Scale 1:1 (16x16 viewBox → 16x16 canvas).
-		// device = v * 1.0, snapped = floor(v) + 0.5
-		{"integer at 1:1", 6.0, 1.0, 6.5},
-		{"half at 1:1", 6.5, 1.0, 6.5},      // already at pixel center
-		{"frac at 1:1", 6.3, 1.0, 6.5},      // rounds to pixel center
-		{"frac high at 1:1", 6.8, 1.0, 6.5}, // floor(6.8)+0.5 = 6.5
-		{"zero at 1:1", 0.0, 1.0, 0.5},
-
-		// Scale 2:1 (16x16 viewBox → 32x32 canvas).
-		// device = v * 2.0, snapped = floor(v*2) + 0.5
-		// viewBox result = snapped / 2.0
-		{"integer at 2:1", 6.0, 2.0, 6.25}, // device=12 → 12.5 → vb=6.25
-		{"half at 2:1", 6.5, 2.0, 6.75},    // device=13 → 13.5 → vb=6.75
-		{"frac at 2:1", 6.3, 2.0, 6.25},    // device=12.6 → 12.5 → vb=6.25
-		{"3 at 2:1", 3.0, 2.0, 3.25},       // device=6 → 6.5 → vb=3.25
-
-		// Scale 0.5:1 (32x32 viewBox → 16x16 canvas).
-		{"integer at 0.5:1", 6.0, 0.5, 7.0}, // device=3 → 3.5 → vb=7.0
-		{"frac at 0.5:1", 5.0, 0.5, 5.0},    // device=2.5 → 2.5 → vb=5.0
-
-		// Zero scale edge case.
-		{"zero scale", 6.3, 0.0, 6.3}, // unchanged
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := snapViewBoxCoord(tt.v, tt.scale)
-			if math.Abs(got-tt.want) > 1e-9 {
-				t.Errorf("snapViewBoxCoord(%v, %v) = %v, want %v", tt.v, tt.scale, got, tt.want)
-			}
-		})
-	}
-}
-
-// --- shouldHintStroke unit tests ---
-
-func TestShouldHintStroke(t *testing.T) {
-	tests := []struct {
-		name        string
-		hinting     bool
-		strokeWidth float64
-		scaleX      float64
-		scaleY      float64
-		want        bool
-	}{
-		{"hinting disabled", false, 1.0, 1.0, 1.0, false},
-		{"thin stroke 1:1", true, 1.0, 1.0, 1.0, true},
-		{"thin stroke 2:1", true, 0.5, 2.0, 2.0, true},   // device width = 1.0
-		{"thick stroke 1:1", true, 2.0, 1.0, 1.0, false}, // device width = 2.0 > 1.5
-		{"thick stroke 2:1", true, 1.0, 2.0, 2.0, false}, // device width = 2.0 > 1.5
-		{"at threshold", true, 1.5, 1.0, 1.0, true},      // device width = 1.5 <= 1.5
-		{"just over", true, 1.6, 1.0, 1.0, false},        // device width = 1.6 > 1.5
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			state := &renderState{
-				strokeHinting: tt.hinting,
-				scaleX:        tt.scaleX,
-				scaleY:        tt.scaleY,
-			}
-			a := &Attrs{StrokeWidth: tt.strokeWidth}
-			got := shouldHintStroke(a, state)
-			if got != tt.want {
-				t.Errorf("shouldHintStroke(width=%v, scale=%v/%v, hinting=%v) = %v, want %v",
-					tt.strokeWidth, tt.scaleX, tt.scaleY, tt.hinting, got, tt.want)
-			}
-		})
-	}
-}
 
 // --- Rendering quality tests ---
 
@@ -170,7 +89,7 @@ func TestStrokeHintFewerPartialPixels(t *testing.T) {
 }
 
 // TestStrokeHintLargeCanvasNoEffect verifies that hinting is NOT applied
-// at large canvas sizes (> strokeHintMaxCanvasSize).
+// at large canvas sizes (above the 32-physical-pixel policy limit).
 func TestStrokeHintLargeCanvasNoEffect(t *testing.T) {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <path d="M3 8 H13" stroke="black" fill="none"/>
@@ -195,7 +114,7 @@ func TestStrokeHintLargeCanvasNoEffect(t *testing.T) {
 }
 
 // TestStrokeHintThickStrokeNoEffect verifies that hinting is NOT applied
-// to thick strokes (device width > strokeHintMaxWidth).
+// to thick strokes (device width > 1.5 pixels).
 func TestStrokeHintThickStrokeNoEffect(t *testing.T) {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <path d="M3 8 H13" stroke="black" stroke-width="3" fill="none"/>
@@ -356,54 +275,7 @@ func TestStrokeHintTerminalIcon(t *testing.T) {
 	}
 }
 
-// TestHintSVGPath tests the path hinting function directly.
-func TestHintSVGPath(t *testing.T) {
-	// Build a simple path: M3,8 L13,8 (horizontal line at y=8 in viewBox).
-	// With 1:1 scale, device coords = viewBox coords.
-	// Hinting: M3.5,8.5 L13.5,8.5.
-	src, err := parseTestPath("M3 8 L13 8")
-	if err != nil {
-		t.Fatalf("parse path: %v", err)
-	}
-
-	hinted := hintSVGPath(src, 1.0, 1.0)
-
-	// Verify hinted coords.
-	coords := hinted.Coords()
-	wantCoords := []float64{3.5, 8.5, 13.5, 8.5}
-	if len(coords) != len(wantCoords) {
-		t.Fatalf("hinted coords len = %d, want %d", len(coords), len(wantCoords))
-	}
-	for i, want := range wantCoords {
-		if math.Abs(coords[i]-want) > 1e-9 {
-			t.Errorf("coords[%d] = %v, want %v", i, coords[i], want)
-		}
-	}
-}
-
-// TestHintPoints tests the coordinate pair hinting helper.
-func TestHintPoints(t *testing.T) {
-	pts := []float64{3.0, 8.0, 13.0, 8.0, 8.0, 3.0}
-	hinted := hintPoints(pts, 1.0, 1.0)
-
-	want := []float64{3.5, 8.5, 13.5, 8.5, 8.5, 3.5}
-	for i := range want {
-		if math.Abs(hinted[i]-want[i]) > 1e-9 {
-			t.Errorf("hintPoints[%d] = %v, want %v", i, hinted[i], want[i])
-		}
-	}
-
-	// Verify original is not modified.
-	if pts[0] != 3.0 {
-		t.Error("hintPoints modified original slice")
-	}
-}
-
 // --- Test helpers ---
-
-func parseTestPath(d string) (*gg.Path, error) {
-	return gg.ParseSVGPath(d)
-}
 
 // peakAlpha returns the highest alpha value in the image (0-255).
 func peakAlpha(img *image.RGBA) uint8 {

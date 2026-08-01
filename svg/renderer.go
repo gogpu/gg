@@ -1,18 +1,8 @@
 package svg
 
 import (
-	"image/color"
-	"math"
-	"os"
-
 	"github.com/gogpu/gg"
-)
-
-const (
-	// strokeHintMaxCanvasSize limits automatic hinting to icon-sized targets.
-	strokeHintMaxCanvasSize = 48
-	// strokeHintMaxWidth limits hinting to thin strokes in device pixels.
-	strokeHintMaxWidth = 1.5
+	"image/color"
 )
 
 // renderState is shared by immediate and retained traversal. Matrix is the
@@ -23,9 +13,10 @@ type renderState struct {
 	parentStroke  string
 	opacity       float64
 	matrix        gg.Matrix
-	strokeHinting bool
-	scaleX        float64
-	scaleY        float64
+	targetWidth   float64
+	targetHeight  float64
+	deviceScale   float64
+	outerMatrix   gg.Matrix
 }
 
 type resolvedFill struct {
@@ -104,6 +95,7 @@ func renderElement(dc *gg.Context, elem Element, state *renderState) {
 
 func renderGeometry(dc *gg.Context, path *gg.Path, attrs *Attrs, state *renderState, allowFill bool) {
 	local := elementTransformMatrix(attrs)
+	complete := state.matrix.Multiply(local)
 	style := resolveStyle(attrs, state)
 	if !allowFill {
 		style.fill.present = false
@@ -121,10 +113,8 @@ func renderGeometry(dc *gg.Context, path *gg.Path, attrs *Attrs, state *renderSt
 		_ = dc.Fill()
 	}
 	if style.stroke.present {
-		strokePath := path
-		if shouldHintStroke(attrs, state) {
-			strokePath = hintSVGPath(path, state.scaleX, state.scaleY)
-		}
+		policy := newStrokeHintPolicy(state.targetWidth, state.targetHeight, state.deviceScale, complete)
+		strokePath := hintStrokePath(path, policy, style.stroke.width)
 		dc.SetLineWidth(style.stroke.width)
 		dc.SetLineCap(style.stroke.cap)
 		dc.SetLineJoin(style.stroke.join)
@@ -133,109 +123,6 @@ func renderGeometry(dc *gg.Context, path *gg.Path, attrs *Attrs, state *renderSt
 		_ = dc.Stroke()
 	}
 	dc.Pop()
-}
-
-// shouldHintStroke reports whether stroke hinting should be applied to this
-// element's stroke. Checks stroke width in device pixels against the threshold.
-func shouldHintStroke(a *Attrs, state *renderState) bool {
-	if !state.strokeHinting {
-		return false
-	}
-	// Compute device-pixel stroke width. Use the average scale when sx != sy
-	// (non-uniform scaling). For typical icon rendering sx == sy.
-	avgScale := (state.scaleX + state.scaleY) / 2.0
-	deviceWidth := a.StrokeWidth * avgScale
-	return deviceWidth <= strokeHintMaxWidth
-}
-
-// hintSVGPath creates a copy of an SVG path with line endpoints snapped to
-// pixel centers in device space. The path coordinates are in viewBox space;
-// we compute device positions via the scale factors, snap to pixel centers,
-// and convert back.
-//
-// Curve verbs (QuadTo, CubicTo) are passed through unchanged — curves don't
-// align to the pixel grid, and snapping control points would distort the shape.
-//
-// This is modeled after Java2D's VALUE_STROKE_NORMALIZE which snaps stroke
-// edges to pixel boundaries for crisp 1px lines in small icons.
-func hintSVGPath(src *gg.Path, sx, sy float64) *gg.Path {
-	if src == nil || src.NumVerbs() == 0 {
-		return src
-	}
-
-	// Don't hint paths that contain curves — snapping line endpoints while
-	// leaving curve endpoints unsnapped creates misaligned joints and
-	// garbage pixels at corners. Only hint pure line/polyline paths.
-	hasCurves := false
-	src.Iterate(func(verb gg.PathVerb, _ []float64) {
-		if verb == gg.QuadTo || verb == gg.CubicTo {
-			hasCurves = true
-		}
-	})
-	if hasCurves {
-		return src
-	}
-
-	result := gg.NewPath()
-	src.Iterate(func(verb gg.PathVerb, coords []float64) {
-		switch verb {
-		case gg.MoveTo:
-			result.MoveTo(
-				snapViewBoxCoord(coords[0], sx),
-				snapViewBoxCoord(coords[1], sy),
-			)
-		case gg.LineTo:
-			result.LineTo(
-				snapViewBoxCoord(coords[0], sx),
-				snapViewBoxCoord(coords[1], sy),
-			)
-		case gg.QuadTo:
-			// Don't snap curve control points — would distort curve shape.
-			result.QuadraticTo(coords[0], coords[1], coords[2], coords[3])
-		case gg.CubicTo:
-			result.CubicTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5])
-		case gg.Close:
-			result.Close()
-		}
-	})
-	return result
-}
-
-// snapViewBoxCoord converts a viewBox coordinate to device space, snaps it
-// to the nearest pixel center, and converts back to viewBox space.
-//
-// For a viewBox coordinate v with scale s:
-//
-//	device = v * s
-//	snapped_device = floor(device) + 0.5
-//	snapped_viewbox = snapped_device / s
-//
-// This ensures a 1px stroke centered at the snapped position covers exactly
-// one full pixel after stroke expansion by ±0.5.
-func snapViewBoxCoord(v, scale float64) float64 {
-	if scale == 0 {
-		return v
-	}
-	device := v * scale
-	snapped := math.Floor(device) + 0.5
-	return snapped / scale
-}
-
-// hintPoints snaps alternating x,y coordinate pairs to pixel centers.
-// Returns a new slice; the original is not modified.
-func hintPoints(pts []float64, sx, sy float64) []float64 {
-	out := make([]float64, len(pts))
-	for i := 0; i+1 < len(pts); i += 2 {
-		out[i] = snapViewBoxCoord(pts[i], sx)
-		out[i+1] = snapViewBoxCoord(pts[i+1], sy)
-	}
-	return out
-}
-
-// strokeHintingDisabled reports whether the GOGPU_SVG_NO_HINT environment
-// variable is set to disable stroke hinting.
-func strokeHintingDisabled() bool {
-	return os.Getenv("GOGPU_SVG_NO_HINT") != ""
 }
 
 func renderGroup(dc *gg.Context, group *GroupElement, state *renderState) {

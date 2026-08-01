@@ -81,24 +81,14 @@ func (d *Document) renderInternal(dc *gg.Context, x, y, width, height float64, o
 		dc.Translate(-d.ViewBox.MinX, -d.ViewBox.MinY)
 	}
 
-	// Enable stroke hinting for small canvases (icon-sized SVGs).
-	// At small sizes, thin strokes land at fractional pixel positions and get
-	// anti-aliased across 2-3 pixels instead of rendering as crisp 1px lines.
-	// Hinting snaps stroke endpoints to pixel centers (Java2D STROKE_NORMALIZE pattern).
-	maxDim := width
-	if height > maxDim {
-		maxDim = height
-	}
-	hinting := maxDim <= strokeHintMaxCanvasSize && !strokeHintingDisabled()
-
 	state := &renderState{
 		overrideColor: overrideColor,
 		parentFill:    d.RootFill,
-		strokeHinting: hinting,
-		scaleX:        sx,
-		scaleY:        sy,
 		opacity:       1,
 		matrix:        dc.GetTransform(),
+		targetWidth:   width,
+		targetHeight:  height,
+		deviceScale:   dc.DeviceScale(),
 	}
 
 	renderElements(dc, d.Elements, state)

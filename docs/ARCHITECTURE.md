@@ -437,6 +437,7 @@ gg/
 │   ├── parser.go           # SVG XML parser → Document tree
 │   ├── renderer.go         # Shared geometry/transform/style resolution
 │   ├── scene_renderer.go   # Document.RenderToScene retained Fill/Stroke lowering
+│   ├── hinting.go          # Conservative small-stroke device-grid snapping
 │   ├── colors.go           # SVG color parsing (#hex, rgb(), named)
 │   ├── transform.go        # SVG transform parsing (translate, rotate, scale)
 │   └── document.go         # Document, Element types
