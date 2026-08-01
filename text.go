@@ -277,7 +277,13 @@ func (c *Context) tryGPUText(s string, x, y float64) bool {
 // glyphMaskMaxSize is the maximum font size (in device pixels) for which
 // the glyph mask pipeline is preferred over MSDF in TextModeAuto.
 // Above this threshold, MSDF provides better quality per atlas byte.
-const glyphMaskMaxSize = 48.0
+//
+// Set to 64px (BUG-TEXT-001, ADR-060) to avoid unstable GlyphMask/MSDF
+// switching at HiDPI. At 2x deviceScale, 24px logical = 48px device was
+// exactly at the old boundary, causing headings (20-28px) to flip
+// unpredictably between hinted bitmap and unhinted MSDF. 64px gives a
+// comfortable margin: 32px logical at 2x stays firmly in GlyphMask territory.
+const glyphMaskMaxSize = 64.0
 
 // glyphMaskMaxSizeCJK is the extended threshold for CJK text (ADR-027).
 // CJK glyphs use bitmap (Tier 6) up to 64px because MSDF at 64px reference

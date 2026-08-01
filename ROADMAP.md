@@ -19,9 +19,16 @@
 
 ---
 
-## Current State: v0.50.4
+## Current State: v0.50.11
 
 ✅ **Production-ready** with GPU-accelerated rendering:
+- **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs). 30% faster on small paths
+- **SVG vector icon rendering** — RenderToScene with stroke hinting for crisp icons at any size
+- **Skia cubicStroke** — direct cubic offset algorithm for higher-quality stroked curves
+- **Hairline rasterizer** — Skia/tiny-skia pattern for thin strokes (device-pixel width ≤ 1.0)
+- **GPU text grayscale default** (BUG-TEXT-001) — MSDF-to-mask threshold raised from 48px to 64px
+- **Mask gamma correction** — Skia SkMaskGamma for consistent light-on-dark text
+- **Bilinear image sampling** — scene renderer upgraded from nearest-neighbor (BUG-ICON-001)
 - **Text stroke/outline** (ADR-033) — StrokeString + TextPath, Skia/Cairo/HTML5 pattern
 - **Aliased text** (ADR-034) — TextModeAliased on GPU (Tier 6 NoAAFiller) AND CPU (per-glyph binary rasterization), Skia kAlias parity
 - **Per-glyph text rendering** (ADR-039) — fractional glyph advances (Skia linearMetrics), hinted outlines + fractional positioning
@@ -29,7 +36,6 @@
 - **SparseStripsFiller winding** — Vello backdrop.wgsl prefix-sum, windingDelta propagation
 - **SDF thin stroke fallback** (ADR-040) — lineWidth < 2.0 → geometric expansion
 - **NaN safety** (ADR-035) — depth guards on all 12 recursive flatten functions
-- **Damage union** — forwardDamageRects unions explicit + frame damage
 - **CJK text rendering** (ADR-027) — script-aware hinting, exact-size rasterization, dual MSDF atlas 64/128px
 - **Damage-aware compositing** (ADR-026) — LoadOpLoad + scissor, TrackDamageRect, debug overlay dedup
 - **Scene text TagText** (ADR-022) — glyph references, shape-once, DrawShapedGlyphs (Skia drawTextBlob)
@@ -104,14 +110,30 @@
 
 ## Current Release
 
-### v0.50.4 — Current
-- [x] **Composite glyph DoS hardening** (#418) — fan-out budget, cycle detection, gvar guard
-- [x] **Software adapter hang fix** (#421) — SDF pipeline on software adapters
-- [x] **Tiered GPU rendering strategy** — gpuRenderStrategy enum (Full/NoMSAA/RasterAtlas)
-- [x] **CI GPU golden tests** — Mesa lavapipe, GPU/CPU dual-render comparison
-- [x] **Dependencies** — x/image v0.44.0, x/text v0.40.0
+### v0.50.11 — Current
+- [x] **Skia AAA forward-diff pipeline** (ADR-063) — updateQuadratic/updateCubic/updateLine ported from Skia, deviation-based curve subdivision
+- [x] **Forward-diff curve edges as default** — 30% faster on small paths, value-type QuadraticEdge/CubicEdge (zero per-edge heap allocs)
+- [x] **SVG vector icon rendering** (#463, #464) — RenderToScene, stroke hinting, scene renderer stroke support
+- [x] **Skia cubicStroke** — two-phase recursive cubic offset algorithm (+1077 LOC)
+- [x] **Hairline rasterizer** — Skia/tiny-skia pattern, treatAsHairline for ≤1.0 device-pixel width
+- [x] **GPU text grayscale default** (BUG-TEXT-001) — MSDF-to-mask threshold 48px → 64px
+- [x] **Mask gamma correction** — Skia SkMaskGamma for light-on-dark text
+- [x] **Bilinear image sampling** (BUG-ICON-001) — scene renderer, double premultiplication fix
+- [x] **Miter join + sharpAngle fixes** — signed cross product, tiny-skia currIsLine/prevIsLine
+- [x] **Dependencies** — wgpu v0.30.30, gogpu v0.47.2
 
-### v0.50.0–v0.50.3 ✅ Released
+### v0.50.5–v0.50.10 ✅ Released
+- [x] **Backend-agnostic draw queue** (ADR-051) — Skia Graphite DrawList pattern
+- [x] **Three-tier clip architecture** (ADR-052) — rect bounds + ClipMask snapshot
+- [x] **SurfacePixelWriter zero-copy** — coordinated 3-repo fix (gg + wgpu + gogpu)
+- [x] **Software backend GPU textures** — 5 latent bugs fixed for DrawGPUTexture overlays
+- [x] **All 29 W3C blend modes** — Porter-Duff + Advanced Separable + HSL for Fill/Stroke
+- [x] **Separate fill/stroke brushes** (ADR-055) — independent SetFillBrush/SetStrokeBrush
+- [x] **MSAA external content preservation** (#455, #457) — transparent resolve + alpha-composite
+- [x] **Variable font outlines under transforms** (#405) — gvar deltas + cache variation hash
+- [x] **Bind group lifecycle fix** (wgpu#287) — frame-scoped release for shared encoder
+
+### v0.50.0–v0.50.4 ✅ Released
 - [x] **HVAR variable font advance parser** (ADR-050, #405) — Pure Go, ItemVariationStore, diff=0 vs skrifa
 - [x] **TT GETINFO ClearType fix** — selector bits off-by-one vs skrifa/FreeType
 - [x] **Composite glyph tests** — portable tests for i, j, accented characters
@@ -294,8 +316,9 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.50.4** | 2026-07 | Composite DoS hardening (#418), software hang fix (#421), tiered GPU, CI golden tests |
-| v0.50.0–3 | 2026-07 | HVAR advance parser (ADR-050), TT GETINFO fix, composite glyph tests |
+| **v0.50.11** | 2026-07 | Forward-diff curve edges (ADR-063), SVG vector icons (#463), cubicStroke, hairline rasterizer, GPU text grayscale, mask gamma, bilinear scene sampling |
+| v0.50.5–10 | 2026-07 | Draw queue (ADR-051), three-tier clip (ADR-052), 29 blend modes, separate brushes (ADR-055), external content preservation, variable font transforms |
+| v0.50.0–4 | 2026-07 | HVAR advance parser (ADR-050), composite DoS hardening, tiered GPU, CI golden tests |
 | v0.49.0–6 | 2026-06 | Variable font support (#385, ADR-044), MSAA fallback, auto-hinter skrifa parity |
 | v0.48.7–17 | 2026-05–06 | HiDPI (#361), AMD stencil (#374), Metal stencil (#390), glyph-mask hinting (#393) |
 | v0.48.0–6 | 2026-05 | Text stroke (ADR-033), aliased text (ADR-034), stroke inner join, SDF thin stroke |

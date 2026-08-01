@@ -124,11 +124,15 @@ dc.RotateAbout(0.5, 200, 200)   // rotate 0.5 rad around (200,200)
 
 ### Software Rendering (Default)
 
-The CPU rasterizer automatically selects the optimal algorithm per-path:
+The CPU rasterizer automatically selects the optimal algorithm per-path.
+Curve edges use forward differencing with deviation-based subdivision by default
+(ADR-063) -- native O(1)/step curve stepping with De Casteljau split for large
+curves (deviation > 0.1px). Value-type `QuadraticEdge`/`CubicEdge` with zero
+per-edge heap allocations.
 
 | Algorithm | Tiles | Best For |
 |-----------|-------|----------|
-| **AnalyticFiller** (Skia AAA) | — | Simple paths, small shapes (< 32px). Pixel-perfect with Skia Chrome/Android. |
+| **AnalyticFiller** (Skia AAA) | — | Simple paths, small shapes (< 32px). Forward-diff curve edges (Skia `updateQuadratic`/`updateCubic`). Pixel-perfect with Chrome/Android. |
 | **AnalyticFiller Convex** | — | Convex shapes (rect, circle, triangle). 1.6x faster, kSnapDigit X snapping. |
 | **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads |
 | **TileCompute** | 16×16 | Extreme complexity (10K+ segments) |
@@ -203,11 +207,11 @@ a seven-tier rendering pipeline:
 | **3. Textured Quad** | GPU image sampling | DrawImage, DrawGPUTexture (zero-readback compositing) |
 | **4. MSDF Text** | Multi-channel Signed Distance Field | Dynamic/animated text, resolution-independent |
 | **5. Compute** | 9-stage Vello compute pipeline | Full scenes with many paths (GPU parallel rasterization) |
-| **6. Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤48px, pixel-perfect quality |
+| **6. Glyph Mask** | CPU-rasterized R8 alpha atlas | Static UI text ≤64px, pixel-perfect quality |
 
 Tiers 1–4, 6 use a render-pass pipeline; Tier 5 uses compute shaders dispatched
 via `PipelineMode` (Auto/RenderPass/Compute). Text auto-selection routes horizontal
-text ≤48px to Glyph Mask (Skia/Chrome pattern), else MSDF.
+text ≤64px to Glyph Mask (Skia/Chrome pattern), else MSDF.
 
 When no GPU is registered, rendering uses the high-quality CPU rasterizer (default).
 
@@ -279,7 +283,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 
 | Component | Location | Description |
 |-----------|----------|-------------|
-| **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. |
+| **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. Forward-diff curve edges with deviation-based subdivision (ADR-063), value-type `QuadraticEdge`/`CubicEdge` (zero per-edge heap allocs). |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
 | **GPU Accelerator** | `internal/gpu` | Seven-tier GPU pipeline (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask) |
 | **Scene Text** | `scene/` | TagText glyph references (ADR-022): shape once at recording, resolve at render via DrawShapedGlyphs → Tier 6/4. Atlas zoom resilience (Skia size buckets). |

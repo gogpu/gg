@@ -10,6 +10,9 @@ import (
 )
 
 func TestSelectGlyphMaskLCD(t *testing.T) {
+	// ADR-060 / BUG-TEXT-001: selectGlyphMaskLCD always returns false for
+	// the GPU pipeline because standard SrcOver blend cannot do per-channel
+	// alpha compositing. LCD disabled until dual-source blending (FEAT-TEXT-002).
 	tests := []struct {
 		name     string
 		fontSize float64
@@ -20,19 +23,19 @@ func TestSelectGlyphMaskLCD(t *testing.T) {
 			name:     "small_identity",
 			fontSize: 12,
 			matrix:   gg.Identity(),
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "small_translation",
 			fontSize: 16,
 			matrix:   gg.Matrix{A: 1, B: 0, C: 50, D: 0, E: 1, F: 30},
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "threshold_48px",
 			fontSize: 48,
 			matrix:   gg.Identity(),
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "above_threshold",
@@ -62,7 +65,7 @@ func TestSelectGlyphMaskLCD(t *testing.T) {
 			name:     "uniform_scale_small",
 			fontSize: 12,
 			matrix:   gg.Matrix{A: 2, B: 0, C: 0, D: 0, E: 2, F: 0},
-			want:     true,
+			want:     false,
 		},
 	}
 

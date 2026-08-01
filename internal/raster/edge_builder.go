@@ -108,8 +108,8 @@ func (r Rect) IsEmpty() bool {
 type EdgeBuilder struct {
 	// Separate storage for different edge types
 	lineEdges      []LineEdge
-	quadraticEdges []*QuadraticEdge
-	cubicEdges     []*CubicEdge
+	quadraticEdges []QuadraticEdge
+	cubicEdges     []CubicEdge
 	velloLines     []VelloLine
 
 	// aaShift controls AA quality (0=none, 2=4x equivalent)
@@ -195,8 +195,8 @@ func (b *edgeBounds) unionPoint(x, y float32) {
 func NewEdgeBuilder(aaShift int) *EdgeBuilder {
 	return &EdgeBuilder{
 		lineEdges:      make([]LineEdge, 0, 64),
-		quadraticEdges: make([]*QuadraticEdge, 0, 16),
-		cubicEdges:     make([]*CubicEdge, 0, 16),
+		quadraticEdges: make([]QuadraticEdge, 0, 16),
+		cubicEdges:     make([]CubicEdge, 0, 16),
 		velloLines:     make([]VelloLine, 0, 64),
 		aaShift:        aaShift,
 		bounds:         newEmptyBounds(),
@@ -635,8 +635,29 @@ func (eb *EdgeBuilder) curveBBoxInsideClip(coords ...float32) bool {
 }
 
 // SetFlattenCurves enables or disables curve flattening mode.
-// When enabled, all curves are converted to line segments at build time.
-// This is simpler and more reliable for AnalyticFiller.
+//
+// When true (default): curves are converted to line segments via recursive
+// De Casteljau subdivision (0.1px tolerance). Required for CoverageFiller
+// (SparseStrips/TileCompute) which depends on VelloLines populated only
+// in this mode. Also populates VelloLines for the Vello compute pipeline.
+//
+// When false: curves kept as native QuadraticEdge with FDot6 forward-
+// differencing (Skia AAA pattern, O(1) per step). Works with AnalyticFiller
+// only. CubicEdge forward-diff NOT yet fixed (use true for cubic paths).
+//
+// Performance (benchmarked 2026-07-31, Intel i7-1255U, 20×20 icon):
+//
+//	Flatten=true:  ~29µs, 17.9KB, 36 allocs
+//	Flatten=false: ~21µs, 14.6KB, 45 allocs (30% faster, 19% less memory)
+//
+// Skia AAA parity (forward-diff mode):
+//
+//	vs Skia golden: max diff 7 (6 pixels) — same algorithm family
+//	vs flatten mode: max diff 25 (20 pixels) — different curve eval
+//
+// Production uses flatten=true because CoverageFiller path requires
+// VelloLines. Forward-diff is available for AnalyticFiller-only paths.
+// See ADR-063 for architecture and GG-AA-018 for roadmap.
 func (eb *EdgeBuilder) SetFlattenCurves(flatten bool) {
 	eb.flattenCurves = flatten
 }
@@ -704,7 +725,8 @@ func (eb *EdgeBuilder) ClipRect() *Rect {
 }
 
 // VelloLines returns the stored float-coordinate lines.
-// Only populated when flattenCurves is true.
+// Populated in both flatten modes: from flattened lines (true) or
+// from separate curve flattening for VelloLine storage only (false).
 func (eb *EdgeBuilder) VelloLines() []VelloLine {
 	return eb.velloLines
 }
@@ -715,6 +737,43 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 	// Line clipping (clipAndAddLine) handles overflow prevention.
 	if eb.flattenCurves {
 		eb.flattenQuadToLines(x0, y0, cx, cy, x1, y1)
+		return
+	}
+
+	// When using native curve edges, still populate VelloLines for
+	// CoverageFiller (SparseStrips/TileCompute) compatibility.
+	eb.flattenQuadToVelloLines(x0, y0, cx, cy, x1, y1)
+
+	// Deviation-based subdivision for CPU rendering without MSAA.
+	//
+	// Forward-diff with diffToShift(shiftAA=2) produces chord segments
+	// with up to 3px deviation from the true curve at R=120. On filled
+	// shapes this is invisible (area coverage identical). On thin strokes
+	// (1.5px) the 3px chord shift makes the stroke visibly faceted.
+	//
+	// Skia uses the same diffToShift — their chords also deviate 3px.
+	// GPU MSAA hides this; CPU has no MSAA. Enterprise CPU rasterizers
+	// (tiny-skia, Cairo, FreeType, Blend2D) all flatten curves to lines,
+	// avoiding chord deviation entirely.
+	//
+	// Our approach: De Casteljau subdivision of large-deviation quads
+	// into smaller quads. Each subdivision halves the deviation (quadratic
+	// property). Threshold 0.5px ensures chord shift < 1 sub-pixel.
+	// This preserves forward-diff performance for small quads while
+	// matching geometric flatten quality for large ones.
+	devX := cx - (x0+x1)*0.5
+	devY := cy - (y0+y1)*0.5
+	devSq := devX*devX + devY*devY
+	const maxDevSq = 0.1 * 0.1 // 0.1px — matches geometric flatten tolerance
+	if devSq > maxDevSq {
+		mx01 := (x0 + cx) * 0.5
+		my01 := (y0 + cy) * 0.5
+		mx12 := (cx + x1) * 0.5
+		my12 := (cy + y1) * 0.5
+		mx := (mx01 + mx12) * 0.5
+		my := (my01 + my12) * 0.5
+		eb.addQuad(x0, y0, mx01, my01, mx, my)
+		eb.addQuad(mx, my, mx12, my12, x1, y1)
 		return
 	}
 
@@ -751,11 +810,58 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 		p1 := CurvePoint{X: dst[i*2+1].X, Y: dst[i*2+1].Y}
 		p2 := CurvePoint{X: dst[i*2+2].X, Y: dst[i*2+2].Y}
 
-		edge := NewQuadraticEdge(p0, p1, p2, eb.aaShift)
-		if edge != nil {
+		edge, ok := NewQuadraticEdge(p0, p1, p2, eb.aaShift)
+		if ok {
 			eb.quadraticEdges = append(eb.quadraticEdges, edge)
 		}
 	}
+}
+
+// flattenQuadToVelloLines flattens a quad to VelloLines only (no LineEdges).
+// Used when flattenCurves=false to populate VelloLines for CoverageFiller
+// compatibility while keeping native QuadraticEdge for AnalyticFiller.
+func (eb *EdgeBuilder) flattenQuadToVelloLines(x0, y0, cx, cy, x1, y1 float32) {
+	tolerance := eb.effectiveFlattenTolerance()
+	eb.flattenQuadToVelloLinesRecursive(x0, y0, cx, cy, x1, y1, tolerance, 0)
+}
+
+//nolint:dupl // intentional: separate output path (VelloLines vs LineEdges)
+func (eb *EdgeBuilder) flattenQuadToVelloLinesRecursive(x0, y0, cx, cy, x1, y1, tolerance float32, depth int) {
+	if depth > 10 {
+		eb.addVelloLine(x0, y0, x1, y1)
+		return
+	}
+	dx := x1 - x0
+	dy := y1 - y0
+	dcx := cx - x0
+	dcy := cy - y0
+	cross := dcx*dy - dcy*dx
+	lenSq := dx*dx + dy*dy
+	if lenSq < 1e-6 || cross*cross/lenSq < tolerance*tolerance {
+		eb.addVelloLine(x0, y0, x1, y1)
+		return
+	}
+	q0x := (x0 + cx) * 0.5
+	q0y := (y0 + cy) * 0.5
+	q1x := (cx + x1) * 0.5
+	q1y := (cy + y1) * 0.5
+	r0x := (q0x + q1x) * 0.5
+	r0y := (q0y + q1y) * 0.5
+	eb.flattenQuadToVelloLinesRecursive(x0, y0, q0x, q0y, r0x, r0y, tolerance, depth+1)
+	eb.flattenQuadToVelloLinesRecursive(r0x, r0y, q1x, q1y, x1, y1, tolerance, depth+1)
+}
+
+func (eb *EdgeBuilder) addVelloLine(x0, y0, x1, y1 float32) {
+	if y0 == y1 {
+		return
+	}
+	isDown := y0 < y1
+	p0 := [2]float32{x0, y0}
+	p1 := [2]float32{x1, y1}
+	if !isDown {
+		p0, p1 = p1, p0
+	}
+	eb.velloLines = append(eb.velloLines, VelloLine{P0: p0, P1: p1, IsDown: isDown})
 }
 
 // flattenQuadToLines converts a quadratic bezier to line segments.
@@ -771,6 +877,8 @@ func (eb *EdgeBuilder) flattenQuadToLines(x0, y0, cx, cy, x1, y1 float32) {
 }
 
 // flattenQuadRecursive recursively subdivides a quadratic curve until flat enough.
+//
+//nolint:dupl // outputs LineEdges (vs VelloLines in flattenQuadToVelloLinesRecursive)
 func (eb *EdgeBuilder) flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance float32, depth int) {
 	// Max recursion depth to prevent stack overflow
 	if depth > 10 {
@@ -823,6 +931,41 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 		return
 	}
 
+	// Populate VelloLines for CoverageFiller compatibility (VelloLines only, no LineEdges).
+	eb.flattenCubicToVelloLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
+
+	// Deviation-based subdivision for cubics (same as quad — see comment above).
+	// For cubic, max deviation is at t=1/3 and t=2/3 from the chord.
+	// Approximate: max deviation ≈ max(|P1 - lerp(P0,P3,1/3)|, |P2 - lerp(P0,P3,2/3)|)
+	d1x := c1x - (x0*2+x1)/3
+	d1y := c1y - (y0*2+y1)/3
+	d2x := c2x - (x0+x1*2)/3
+	d2y := c2y - (y0+y1*2)/3
+	dev1 := d1x*d1x + d1y*d1y
+	dev2 := d2x*d2x + d2y*d2y
+	devSq := dev1
+	if dev2 > devSq {
+		devSq = dev2
+	}
+	const maxCubicDevSq = 0.1 * 0.1
+	if devSq > maxCubicDevSq {
+		m01x := (x0 + c1x) * 0.5
+		m01y := (y0 + c1y) * 0.5
+		m12x := (c1x + c2x) * 0.5
+		m12y := (c1y + c2y) * 0.5
+		m23x := (c2x + x1) * 0.5
+		m23y := (c2y + y1) * 0.5
+		m012x := (m01x + m12x) * 0.5
+		m012y := (m01y + m12y) * 0.5
+		m123x := (m12x + m23x) * 0.5
+		m123y := (m12y + m23y) * 0.5
+		mx := (m012x + m123x) * 0.5
+		my := (m012y + m123y) * 0.5
+		eb.addCubic(x0, y0, m01x, m01y, m012x, m012y, mx, my)
+		eb.addCubic(mx, my, m123x, m123y, m23x, m23y, x1, y1)
+		return
+	}
+
 	// Safety guard: when clip rect is set and not flattening, force-flatten
 	// curves that extend beyond clip bounds to ensure line clipping catches them.
 	// This prevents FDot6→FDot16 overflow in NewCubicEdge. (RAST-010)
@@ -861,8 +1004,8 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 		p2 := CurvePoint{X: dst[i*3+2].X, Y: dst[i*3+2].Y}
 		p3 := CurvePoint{X: dst[i*3+3].X, Y: dst[i*3+3].Y}
 
-		edge := NewCubicEdge(p0, p1, p2, p3, eb.aaShift)
-		if edge != nil {
+		edge, ok := NewCubicEdge(p0, p1, p2, p3, eb.aaShift)
+		if ok {
 			eb.cubicEdges = append(eb.cubicEdges, edge)
 		}
 	}
@@ -870,6 +1013,57 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 
 // flattenCubicToLines converts a cubic bezier to line segments.
 // Uses adaptive subdivision based on flatness tolerance.
+// flattenCubicToVelloLines flattens a cubic to VelloLines only (no LineEdges).
+func (eb *EdgeBuilder) flattenCubicToVelloLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
+	tolerance := eb.effectiveFlattenTolerance()
+	eb.flattenCubicToVelloLinesRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance, 0)
+}
+
+func (eb *EdgeBuilder) flattenCubicToVelloLinesRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, tolerance float32, depth int) {
+	if depth > 10 {
+		eb.addVelloLine(x0, y0, x1, y1)
+		return
+	}
+	dx := x1 - x0
+	dy := y1 - y0
+	lenSq := dx*dx + dy*dy
+	if lenSq < 1e-6 {
+		eb.addVelloLine(x0, y0, x1, y1)
+		return
+	}
+	dc1x := c1x - x0
+	dc1y := c1y - y0
+	cross1 := dc1x*dy - dc1y*dx
+	dc2x := c2x - x0
+	dc2y := c2y - y0
+	cross2 := dc2x*dy - dc2y*dx
+	maxCross := cross1
+	if cross2 > maxCross || (cross2 < 0 && -cross2 > maxCross && maxCross >= 0) {
+		maxCross = cross2
+	}
+	if maxCross < 0 {
+		maxCross = -maxCross
+	}
+	if maxCross*maxCross/lenSq < tolerance*tolerance {
+		eb.addVelloLine(x0, y0, x1, y1)
+		return
+	}
+	m01x := (x0 + c1x) * 0.5
+	m01y := (y0 + c1y) * 0.5
+	m12x := (c1x + c2x) * 0.5
+	m12y := (c1y + c2y) * 0.5
+	m23x := (c2x + x1) * 0.5
+	m23y := (c2y + y1) * 0.5
+	m012x := (m01x + m12x) * 0.5
+	m012y := (m01y + m12y) * 0.5
+	m123x := (m12x + m23x) * 0.5
+	m123y := (m12y + m23y) * 0.5
+	mx := (m012x + m123x) * 0.5
+	my := (m012y + m123y) * 0.5
+	eb.flattenCubicToVelloLinesRecursive(x0, y0, m01x, m01y, m012x, m012y, mx, my, tolerance, depth+1)
+	eb.flattenCubicToVelloLinesRecursive(mx, my, m123x, m123y, m23x, m23y, x1, y1, tolerance, depth+1)
+}
+
 func (eb *EdgeBuilder) flattenCubicToLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 	// Flatness tolerance: max deviation from straight line.
 	// Default 0.1 px produces smooth curves even at small radii.
@@ -1102,24 +1296,27 @@ func (eb *EdgeBuilder) sortedEdgesSlice() []sortableEdge {
 		})
 	}
 
-	// Add quadratic edges (use TopY for sorting, not current segment's FirstY)
-	for _, quad := range eb.quadraticEdges {
+	// Add quadratic edges (use TopY for sorting, not current segment's FirstY).
+	// Taking &eb.quadraticEdges[i] is safe here because sortedEdgesSlice is
+	// only called after BuildFromPath completes — the slice won't grow further.
+	for i := range eb.quadraticEdges {
 		eb.sortBuf = append(eb.sortBuf, sortableEdge{
-			topY: quad.TopY,
+			topY: eb.quadraticEdges[i].TopY,
 			variant: CurveEdgeVariant{
 				Type:      EdgeTypeQuadratic,
-				Quadratic: quad,
+				Quadratic: &eb.quadraticEdges[i],
 			},
 		})
 	}
 
-	// Add cubic edges (use TopY for sorting, not current segment's FirstY)
-	for _, cubic := range eb.cubicEdges {
+	// Add cubic edges (use TopY for sorting, not current segment's FirstY).
+	// Same safety reasoning as quadratic edges above.
+	for i := range eb.cubicEdges {
 		eb.sortBuf = append(eb.sortBuf, sortableEdge{
-			topY: cubic.TopY,
+			topY: eb.cubicEdges[i].TopY,
 			variant: CurveEdgeVariant{
 				Type:  EdgeTypeCubic,
-				Cubic: cubic,
+				Cubic: &eb.cubicEdges[i],
 			},
 		})
 	}
@@ -1161,10 +1358,11 @@ func (eb *EdgeBuilder) LineEdges() iter.Seq[*LineEdge] {
 }
 
 // QuadraticEdges returns an iterator over quadratic edges only.
+// Yields pointers into the internal value slice; valid until Reset() or next BuildFromPath().
 func (eb *EdgeBuilder) QuadraticEdges() iter.Seq[*QuadraticEdge] {
 	return func(yield func(*QuadraticEdge) bool) {
-		for _, edge := range eb.quadraticEdges {
-			if !yield(edge) {
+		for i := range eb.quadraticEdges {
+			if !yield(&eb.quadraticEdges[i]) {
 				return
 			}
 		}
@@ -1172,10 +1370,11 @@ func (eb *EdgeBuilder) QuadraticEdges() iter.Seq[*QuadraticEdge] {
 }
 
 // CubicEdges returns an iterator over cubic edges only.
+// Yields pointers into the internal value slice; valid until Reset() or next BuildFromPath().
 func (eb *EdgeBuilder) CubicEdges() iter.Seq[*CubicEdge] {
 	return func(yield func(*CubicEdge) bool) {
-		for _, edge := range eb.cubicEdges {
-			if !yield(edge) {
+		for i := range eb.cubicEdges {
+			if !yield(&eb.cubicEdges[i]) {
 				return
 			}
 		}

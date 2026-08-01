@@ -231,45 +231,96 @@ func snapY(y FDot16) FDot16 {
 	return (y + half) & mask
 }
 
+// skFixedRoundToFixed rounds an FDot16 to the nearest integer, keeping it in FDot16.
+// Equivalent to Skia's SkFixedRoundToFixed: (v + 0x8000) & ~0xFFFF.
+func skFixedRoundToFixed(v FDot16) FDot16 {
+	return (v + 0x8000) & ^FDot16(0xFFFF)
+}
+
+// minFixed returns the smaller of two FDot16 values.
+func minFixed(a, b FDot16) FDot16 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // IsVertical returns true if the edge has zero slope.
 func (e *LineEdge) IsVertical() bool {
 	return e.DX == 0
 }
 
-// update updates the line edge for a new line segment.
-// Called by QuadraticEdge and CubicEdge during stepping.
-// Returns true if a valid segment was produced.
+// updateLine updates the line edge for a curve sub-segment with pre-computed slope.
+// Port of Skia's SkAnalyticEdge::updateLine (SkAnalyticEdge.cpp:215-257).
 //
-// Note: UpperY/LowerY are NOT set here because the y0/y1 values from curve
-// forward differencing are in the FDot6-scaled coordinate system (not pixel-
-// space FDot16). Only NewLineEdge sets precise pixel-space UpperY/LowerY.
-// Curve segments are already subdivided finely, so FDot6-rounded Y is adequate.
-func (e *LineEdge) update(x0, y0, x1, y1 FDot16) bool {
-	// Convert from FDot16 to FDot6 (shift right by 10)
-	y0 >>= (FDot16Shift - FDot6Shift)
-	y1 >>= (FDot16Shift - FDot6Shift)
+// All parameters are in pixel-space FDot16 (SkFixed). The slope is pre-computed
+// by QuadraticEdge.Update() from snapped coordinates to avoid redundant division.
+// This method sets the precise pixel-space fields (UpperY, LowerY, UpperX,
+// PixelDX, PixelDY) so the AnalyticFiller uses the high-precision path.
+//
+// Unlike update(), this does NOT swap y0>y1 because QuadraticEdge.Update()
+// already ensures monotonic Y via snapping. For cubics (which don't chop at
+// Y extrema), the caller must handle winding reversal — but cubics don't
+// use this method.
+func (e *LineEdge) updateLine(x0, y0, x1, y1, slope FDot16) bool {
+	// Handle non-monotonic Y (cubics may produce y0 > y1).
+	// QuadraticEdge guarantees monotonic after snapping, but be defensive.
+	if y0 > y1 {
+		x0, x1 = x1, x0
+		y0, y1 = y1, y0
+		e.Winding = -e.Winding
+	}
 
-	top := FDot6Round(y0)
-	bottom := FDot6Round(y1)
-
-	// Zero-height line?
-	if top == bottom {
+	// Check for zero-height segment in FDot6 precision.
+	// Skia: SkFixedToFDot6(y1 - y0) == 0 means < 1/64 pixel height.
+	// This is much less aggressive than the old update() which compared
+	// FDot6Round(y0) == FDot6Round(y1), discarding segments < 1 whole pixel.
+	dy := (y1 - y0) >> (FDot16Shift - FDot6Shift) // SkFixedToFDot6
+	if dy == 0 {
 		return false
 	}
 
-	x0 >>= (FDot16Shift - FDot6Shift)
-	x1 >>= (FDot16Shift - FDot6Shift)
+	dx := (x1 - x0) >> (FDot16Shift - FDot6Shift) // SkFixedToFDot6
 
-	slope := FDot6Div(x1-x0, y1-y0)
-	dy := computeDY(top, y0)
-
-	e.X = FDot6ToFDot16(x0 + FDot16Mul(slope, dy))
+	// Set pixel-space fields (Skia's fX, fDX, fUpperX, fUpperY, fLowerY, fDY).
+	e.X = x0
 	e.DX = slope
+	e.UpperX = x0
+	e.UpperY = y0
+	e.LowerY = y1
+
+	// Compute fDY = abs(1/slope) for partialTriangleToAlpha.
+	// Matches Skia's updateLine (SkAnalyticEdge.cpp:250-254).
+	absSlopeFDot6 := absInt32(slope >> (FDot16Shift - FDot6Shift))
+	switch {
+	case dx == 0 || slope == 0:
+		e.PixelDY = 0x7FFFFFFF
+	case absSlopeFDot6 > 0:
+		// Use FDot6Div(dy, dx) for abs(1/slope), matching Skia's quick_div path.
+		absDx := absInt32(dx)
+		absDy := absInt32(dy)
+		e.PixelDY = FDot6Div(absDy, absDx)
+		if e.PixelDY < 0 {
+			e.PixelDY = 0x7FFFFFFF
+		}
+	default:
+		e.PixelDY = 0x7FFFFFFF
+	}
+
+	e.PixelDX = slope
+
+	// Set sub-pixel fields for AET ordering.
+	// FirstY/LastY are integer scanline indices derived from pixel-space Y.
+	top := FDot16RoundToInt(y0)
+	bottom := FDot16RoundToInt(y1)
+	if top == bottom {
+		// Even though FDot6 dy != 0, the pixel-rounded top/bottom may match.
+		// This can happen for very short segments. Set FirstY=LastY so the
+		// edge is valid in the AET but covers a single scanline.
+		bottom = top + 1
+	}
 	e.FirstY = top
 	e.LastY = bottom - 1
-	// Clear precise Y — curve segments use FDot6 system, not pixel-space FDot16.
-	e.UpperY = 0
-	e.LowerY = 0
 
 	return true
 }
@@ -305,7 +356,7 @@ type QuadraticEdge struct {
 	// Applied to all dx/ddx/ddy calculations.
 	curveShift uint8
 
-	// Forward difference coefficients in FDot16.
+	// Forward difference coefficients in FDot16 (pixel-space after >>= kDefaultAccuracy).
 	// qx, qy: current position
 	// qdx, qdy: first derivative (changes each step)
 	// qddx, qddy: second derivative (constant for quadratic)
@@ -313,29 +364,30 @@ type QuadraticEdge struct {
 	qdx, qdy   FDot16
 	qddx, qddy FDot16
 
-	// Exact endpoint for the final segment.
+	// Exact endpoint for the final segment (pixel-space after >>= kDefaultAccuracy).
 	// Using exact endpoint avoids cumulative rounding errors.
 	qLastX, qLastY FDot16
+
+	// snappedX, snappedY track the snapped coordinates between Update() calls.
+	// Slope is computed from snapped→snapped coordinates, matching Skia's
+	// SkAnalyticQuadraticEdge::fSnappedX/fSnappedY (SkAnalyticEdge.h:113).
+	// This eliminates forward-diff accumulation errors from the slope computation.
+	snappedX, snappedY FDot16
 }
 
 // NewQuadraticEdge creates a quadratic edge from control points.
-// Returns nil if the curve has no vertical extent.
+// Returns (edge, true) on success, or (zero, false) if the curve has no
+// vertical extent or is degenerate. Returns by value to avoid heap allocation.
 //
 // Parameters:
 //   - p0: start point
 //   - p1: control point
 //   - p2: end point
 //   - shift: AA shift (0 for no AA, 2 for 4x AA quality)
-func NewQuadraticEdge(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
-	// newQuadraticEdgeSetup already calls Update() to initialize the first segment
-	return newQuadraticEdgeSetup(p0, p1, p2, shift)
-}
-
-// newQuadraticEdgeSetup performs the setup for a quadratic edge.
-// Separated from NewQuadraticEdge to match tiny-skia's new/new2 pattern.
 //
 //nolint:gosec // G115: shift values bounded by MaxCoeffShift (6), all conversions safe
-func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
+func NewQuadraticEdge(p0, p1, p2 CurvePoint, shift int) (QuadraticEdge, bool) {
+	// --- Phase 1: setQuadraticWithoutUpdate(pts, shift=kDefaultAccuracy=2) ---
 	// Convert to FDot6 with AA scaling.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
 	x0 := int32(p0.X * scale)
@@ -358,7 +410,7 @@ func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
 
 	// Zero-height curve?
 	if top == bottom {
-		return nil
+		return QuadraticEdge{}, false
 	}
 
 	// Compute number of subdivisions needed (1 << shift).
@@ -429,7 +481,25 @@ func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
 		storedShift = 0
 	}
 
-	edge := &QuadraticEdge{
+	// --- Phase 2: setQuadratic() coefficient >>= kDefaultAccuracy (Skia lines 429-436) ---
+	// Convert from AA-scaled space to pixel-space by dividing by 4 (1 << accuracy).
+	// This is the key step that was missing (Bug 2): without it, forward-diff
+	// steps are 4× too large, producing only ~2 segments instead of ~8.
+	const accuracy = 2 // kDefaultAccuracy
+	qx >>= accuracy
+	qy >>= accuracy
+	qdx >>= accuracy
+	qdy >>= accuracy
+	qddx >>= accuracy
+	qddy >>= accuracy
+	qLastX >>= accuracy
+	qLastY >>= accuracy
+
+	// --- Phase 3: SnapY endpoints (Skia lines 437-438) ---
+	qy = snapY(qy)
+	qLastY = snapY(qLastY)
+
+	edge := QuadraticEdge{
 		TopY:    top,    // Curve's overall top Y (for AET insertion)
 		BottomY: bottom, // Curve's overall bottom Y
 		line: LineEdge{
@@ -451,24 +521,30 @@ func newQuadraticEdgeSetup(p0, p1, p2 CurvePoint, shift int) *QuadraticEdge {
 		qddy:       qddy,
 		qLastX:     qLastX,
 		qLastY:     qLastY,
+		// Phase 4: Initialize snapped coordinates (Skia lines 442-443)
+		snappedX: qx,
+		snappedY: qy,
 	}
 
 	// Initialize the first line segment by calling Update()
-	// This sets up X, DX, FirstY, LastY for the first curve segment
+	// This sets up X, DX, FirstY, LastY, UpperY, LowerY for the first curve segment.
 	if !edge.Update() {
-		return nil // Degenerate curve
+		return QuadraticEdge{}, false // Degenerate curve
 	}
 
-	return edge
+	return edge, true
 }
 
 // Update advances the quadratic curve to the next line segment.
 // Returns true if a valid segment was produced.
 //
-// This is the core of the forward differencing algorithm:
+// Port of Skia's SkAnalyticQuadraticEdge::updateQuadratic (SkAnalyticEdge.cpp:448-510).
 //
-//	newx = oldx + (dx >> shift)
-//	dx += ddx  // Second derivative is constant!
+// Key differences from the old implementation:
+//   - Uses SnapY and snapped coordinates for slope computation (Bug 3 fix)
+//   - Computes slope from snapped→snapped coordinates, not raw forward-diff output
+//   - Calls updateLine() which sets pixel-space fields (UpperY, LowerY, PixelDX, etc.)
+//   - Has separate path for "large dy" vs "small dy" snapping (Skia lines 467-480)
 func (q *QuadraticEdge) Update() bool {
 	count := q.curveCount
 	if count <= 0 {
@@ -482,23 +558,70 @@ func (q *QuadraticEdge) Update() bool {
 	shift := q.curveShift
 
 	var newx, newy FDot16
+	var newSnappedX, newSnappedY FDot16
 	var success bool
 
 	for {
+		var slope FDot16
 		count--
+
 		if count > 0 {
 			// Forward difference step: O(1)!
 			newx = oldx + (dx >> shift)
-			dx += q.qddx
 			newy = oldy + (dy >> shift)
+
+			// Skia's two-branch snapping strategy (SkAnalyticEdge.cpp:467-480):
+			// When dy is large enough AND dx/dy isn't too extreme, snap more
+			// aggressively using SkFixedRoundToFixed. Otherwise use SnapY.
+			absDyShifted := absInt32(dy >> shift)
+			if absDyShifted >= FDot16One*2 &&
+				(int64(absInt32(dy))<<6) > int64(absInt32(dx)) {
+				// Large-dy path
+				diffY := (newy - q.snappedY) >> (FDot16Shift - FDot6Shift)
+				if diffY != 0 {
+					diffX := (newx - q.snappedX) >> (FDot16Shift - FDot6Shift)
+					slope = FDot6Div(diffX, diffY)
+				} else {
+					slope = 0x7FFFFFFF
+				}
+				newSnappedY = minFixed(q.qLastY, skFixedRoundToFixed(newy))
+				newSnappedX = newx - skFixedMul(slope, newy-newSnappedY)
+			} else {
+				// Small-dy path
+				newSnappedY = minFixed(q.qLastY, snapY(newy))
+				newSnappedX = newx
+				diffY := (newSnappedY - q.snappedY) >> (FDot16Shift - FDot6Shift)
+				if diffY != 0 {
+					diffX := (newx - q.snappedX) >> (FDot16Shift - FDot6Shift)
+					slope = FDot6Div(diffX, diffY)
+				} else {
+					slope = 0x7FFFFFFF
+				}
+			}
+
+			dx += q.qddx
 			dy += q.qddy
 		} else {
-			// Last segment: use exact endpoint to avoid accumulation errors
+			// Last segment: use exact endpoint to avoid accumulation errors.
 			newx = q.qLastX
 			newy = q.qLastY
+			newSnappedX = newx
+			newSnappedY = newy
+			diffY := (newy - q.snappedY) >> (FDot16Shift - FDot6Shift)
+			if diffY != 0 {
+				diffX := (newx - q.snappedX) >> (FDot16Shift - FDot6Shift)
+				slope = FDot6Div(diffX, diffY)
+			} else {
+				slope = 0x7FFFFFFF
+			}
 		}
 
-		success = q.line.update(oldx, oldy, newx, newy)
+		if slope < 0x7FFFFFFF {
+			success = q.line.updateLine(q.snappedX, q.snappedY, newSnappedX, newSnappedY, slope)
+		}
+
+		q.snappedX = newSnappedX
+		q.snappedY = newSnappedY
 		oldx = newx
 		oldy = newy
 
@@ -582,12 +705,19 @@ type CubicEdge struct {
 	cddx, cddy   FDot16
 	cdddx, cdddy FDot16
 
-	// Exact endpoint for the final segment.
+	// Exact endpoint for the final segment (pixel-space after >>= kDefaultAccuracy).
 	cLastX, cLastY FDot16
+
+	// snappedY tracks the snapped Y coordinate between Update() calls.
+	// Slope is computed from snapped Y coordinates, matching Skia's
+	// SkAnalyticCubicEdge::fSnappedY (SkAnalyticEdge.h:134).
+	// Cubics don't track snappedX (unlike quads) — slope uses raw oldx.
+	snappedY FDot16
 }
 
 // NewCubicEdge creates a cubic edge from control points.
-// Returns nil if the curve has no vertical extent.
+// Returns (edge, true) on success, or (zero, false) if the curve has no
+// vertical extent or is degenerate. Returns by value to avoid heap allocation.
 //
 // Parameters:
 //   - p0: start point
@@ -595,21 +725,24 @@ type CubicEdge struct {
 //   - p2: second control point
 //   - p3: end point
 //   - shift: AA shift (0 for no AA, 2 for 4x AA quality)
-func NewCubicEdge(p0, p1, p2, p3 CurvePoint, shift int) *CubicEdge {
-	cubic := newCubicEdgeSetup(p0, p1, p2, p3, shift, true)
-	if cubic == nil {
-		return nil
+//
+//nolint:gosec // G115: shift values bounded by MaxCoeffShift (6), all conversions safe
+func NewCubicEdge(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
+	edge, ok := newCubicEdgeSetup(p0, p1, p2, p3, shift)
+	if !ok {
+		return CubicEdge{}, false
 	}
-	if cubic.Update() {
-		return cubic
+	if edge.Update() {
+		return edge, true
 	}
-	return nil
+	return CubicEdge{}, false
 }
 
 // newCubicEdgeSetup performs the setup for a cubic edge.
+// Returns (edge, true) on success, or (zero, false) if degenerate.
 //
 //nolint:gosec // G115: shift values bounded by MaxCoeffShift (6), all conversions safe
-func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicEdge {
+func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
 	// Convert to FDot6 with AA scaling.
 	scale := float32(int32(1) << uint(shift+FDot6Shift))
 	x0 := int32(p0.X * scale)
@@ -622,7 +755,7 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicE
 	y3 := int32(p3.Y * scale)
 
 	winding := int8(1)
-	if sortY && y0 > y3 {
+	if y0 > y3 {
 		// Swap to ensure y0 <= y3 (monotonic in Y)
 		x0, x3 = x3, x0
 		x1, x2 = x2, x1
@@ -635,8 +768,8 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicE
 	bot := FDot6Round(y3)
 
 	// Zero-height curve?
-	if sortY && top == bot {
-		return nil
+	if top == bot {
+		return CubicEdge{}, false
 	}
 
 	// Compute number of subdivisions needed.
@@ -697,7 +830,26 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicE
 	cLastX := FDot6ToFDot16(x3)
 	cLastY := FDot6ToFDot16(y3)
 
-	return &CubicEdge{
+	// --- Phase 2: setCubic() coefficient >>= kDefaultAccuracy (Skia lines 521-528) ---
+	// Convert from AA-scaled space to pixel-space by dividing by 4 (1 << accuracy).
+	// Same pattern as QuadraticEdge: without this, forward-diff steps are 4x too large.
+	const accuracy = 2 // kDefaultAccuracy
+	cx >>= accuracy
+	cy >>= accuracy
+	cdx >>= accuracy
+	cdy >>= accuracy
+	cddx >>= accuracy
+	cddy >>= accuracy
+	cdddx >>= accuracy
+	cdddy >>= accuracy
+	cLastX >>= accuracy
+	cLastY >>= accuracy
+
+	// --- Phase 3: SnapY endpoints (Skia lines 529-532) ---
+	cy = snapY(cy)
+	cLastY = snapY(cLastY)
+
+	edge := CubicEdge{
 		TopY:    top, // Curve's overall top Y (for AET insertion)
 		BottomY: bot, // Curve's overall bottom Y
 		line: LineEdge{
@@ -722,11 +874,23 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int, sortY bool) *CubicE
 		cdddy:      cdddy,
 		cLastX:     cLastX,
 		cLastY:     cLastY,
+		// Phase 4: Initialize snapped coordinate (Skia line 531)
+		snappedY: cy,
 	}
+	return edge, true
 }
 
 // Update advances the cubic curve to the next line segment.
 // Returns true if a valid segment was produced.
+//
+// Port of Skia's SkAnalyticCubicEdge::updateCubic (SkAnalyticEdge.cpp:659-715).
+//
+// Key differences from the old implementation:
+//   - Uses SnapY and snappedY for slope computation (same fix pattern as QuadraticEdge)
+//   - Calls updateLine() which sets pixel-space fields (UpperY, LowerY, PixelDX, etc.)
+//   - Monotonic pin: newy pinned to oldy to prevent going backwards
+//   - Slope computed from (newx - oldx) and (newSnappedY - snappedY) in FDot6
+//   - Cubics don't use snappedX (unlike quads) — slope uses raw oldx
 //
 // Forward differencing for cubic:
 //
@@ -765,12 +929,39 @@ func (c *CubicEdge) Update() bool {
 			newy = c.cLastY
 		}
 
-		// Pin newy to prevent going backwards (numerical precision issue)
+		// Pin newy to prevent going backwards (monotonic, Skia line 688)
 		if newy < oldy {
 			newy = oldy
 		}
 
-		success = c.line.update(oldx, oldy, newx, newy)
+		// Snap newy to 1/4 pixel grid (Skia line 690)
+		newSnappedY := snapY(newy)
+
+		// Pin snapped Y to endpoint (Skia lines 691-694):
+		// If the snapped Y overshoots the final Y, clamp it and force last segment.
+		if c.cLastY < newSnappedY {
+			newSnappedY = c.cLastY
+			count = 0
+		}
+
+		// Compute slope from raw X delta and snapped Y delta (Skia lines 696-699).
+		// Cubics use oldx (not snappedX) for X — only Y is snapped.
+		var slope FDot16
+		dyFDot6 := (newSnappedY - c.snappedY) >> (FDot16Shift - FDot6Shift)
+		if dyFDot6 == 0 {
+			slope = 0x7FFFFFFF
+		} else {
+			dxFDot6 := (newx - oldx) >> (FDot16Shift - FDot6Shift)
+			slope = FDot6Div(dxFDot6, dyFDot6)
+		}
+
+		// Call updateLine with snapped coordinates and pre-computed slope.
+		// This sets pixel-space fields (UpperY, LowerY, PixelDX, PixelDY).
+		if slope < 0x7FFFFFFF {
+			success = c.line.updateLine(oldx, c.snappedY, newx, newSnappedY, slope)
+		}
+
+		c.snappedY = newSnappedY
 		oldx = newx
 		oldy = newy
 
@@ -979,24 +1170,24 @@ func NewLineEdgeVariant(p0, p1 CurvePoint, shift int) *CurveEdgeVariant {
 
 // NewQuadraticEdgeVariant creates a CurveEdgeVariant for a quadratic.
 func NewQuadraticEdgeVariant(p0, p1, p2 CurvePoint, shift int) *CurveEdgeVariant {
-	quad := NewQuadraticEdge(p0, p1, p2, shift)
-	if quad == nil {
+	quad, ok := NewQuadraticEdge(p0, p1, p2, shift)
+	if !ok {
 		return nil
 	}
 	return &CurveEdgeVariant{
 		Type:      EdgeTypeQuadratic,
-		Quadratic: quad,
+		Quadratic: &quad,
 	}
 }
 
 // NewCubicEdgeVariant creates a CurveEdgeVariant for a cubic.
 func NewCubicEdgeVariant(p0, p1, p2, p3 CurvePoint, shift int) *CurveEdgeVariant {
-	cubic := NewCubicEdge(p0, p1, p2, p3, shift)
-	if cubic == nil {
+	cubic, ok := NewCubicEdge(p0, p1, p2, p3, shift)
+	if !ok {
 		return nil
 	}
 	return &CurveEdgeVariant{
 		Type:  EdgeTypeCubic,
-		Cubic: cubic,
+		Cubic: &cubic,
 	}
 }

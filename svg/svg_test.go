@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"testing"
@@ -701,6 +702,190 @@ func assertNonEmpty(t *testing.T, img interface {
 		}
 	}
 	t.Errorf("%s: image is entirely transparent (no visible content rendered)", label)
+}
+
+// TestFillNoneInheritance verifies that fill="none" on the root <svg> element
+// is correctly inherited by child elements that don't specify their own fill.
+// Bug: fillAndStroke() applied a default black fill even when parentFill="none",
+// causing dark artifacts inside stroke-only shapes (especially visible at corners
+// of the JetBrains folder icon).
+func TestFillNoneInheritance(t *testing.T) {
+	// Folder icon from JetBrains New UI: stroke-only path, fill="none" on root.
+	const folderSVG = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.5199 5.57617L10.7285 5.75H11H17C17.6904 5.75 18.25 6.30964 18.25 7V15.1667C18.25 16.0671 17.553 16.75 16.75 16.75H3.25C2.44705 16.75 1.75 16.0671 1.75 15.1667V4.83333C1.75 3.93294 2.44705 3.25 3.25 3.25H7.63795C7.69643 3.25 7.75307 3.2705 7.798 3.30794L10.5199 5.57617Z" stroke="#CED0D6" stroke-width="1"/></svg>`
+
+	img, err := Render([]byte(folderSVG), 20, 20)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// The interior of the folder (e.g., center pixel at 10,10) must be fully
+	// transparent — fill="none" means stroke only. If a spurious black fill
+	// is applied, these pixels will have non-zero alpha.
+	interiorPoints := [][2]int{
+		{10, 10}, // dead center
+		{5, 10},  // left interior
+		{15, 10}, // right interior
+		{10, 8},  // upper interior
+		{10, 14}, // lower interior
+	}
+
+	for _, pt := range interiorPoints {
+		x, y := pt[0], pt[1]
+		_, _, _, a := img.At(x, y).RGBA()
+		if a != 0 {
+			t.Errorf("Interior pixel (%d,%d) alpha = %d, want 0 (fill=none should produce no fill)",
+				x, y, a>>8)
+		}
+	}
+}
+
+// TestFillNoneStrokeOnlyNoBlackPixels verifies that a stroke-only SVG with
+// fill="none" produces no black pixels when composited on a dark background.
+// This catches the "dark halo" artifact where a spurious black fill bleeds
+// through anti-aliased stroke edges.
+func TestFillNoneStrokeOnlyNoBlackPixels(t *testing.T) {
+	const folderSVG = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.5199 5.57617L10.7285 5.75H11H17C17.6904 5.75 18.25 6.30964 18.25 7V15.1667C18.25 16.0671 17.553 16.75 16.75 16.75H3.25C2.44705 16.75 1.75 16.0671 1.75 15.1667V4.83333C1.75 3.93294 2.44705 3.25 3.25 3.25H7.63795C7.69643 3.25 7.75307 3.2705 7.798 3.30794L10.5199 5.57617Z" stroke="#CED0D6" stroke-width="1"/></svg>`
+
+	img, err := Render([]byte(folderSVG), 20, 20)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Every non-transparent pixel should have the stroke color (#CED0D6),
+	// not black. With premultiplied alpha, a pixel at coverage c should have:
+	//   R ≈ 0xCE * c, not R ≈ 0 (which would indicate black fill).
+	blackPixels := 0
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			r, _, _, a := img.At(x, y).RGBA()
+			if a == 0 {
+				continue
+			}
+			// Skip color check for alpha < 2 (8-bit): at coverage=1/255,
+			// premultiplied channel values for any source color are <1.0
+			// and quantize to 0, making un-premultiplied color meaningless.
+			if a>>8 < 2 {
+				continue
+			}
+			// Un-premultiply to get the actual color.
+			straight := float64(r) / float64(a)
+			// Stroke is #CE (~0.808). Black fill would give values near 0.
+			// Accept anything above 0.5 — well above black (0) and
+			// well below the stroke color (0.808).
+			if straight < 0.5 {
+				blackPixels++
+			}
+		}
+	}
+	if blackPixels > 0 {
+		t.Errorf("Found %d pixels with color darker than expected — "+
+			"spurious black fill may be applied under stroke (fill=none not inherited)",
+			blackPixels)
+	}
+}
+
+// TestFolderIconMultiSize renders the folder icon at multiple sizes and checks
+// for dark artifacts. The stroke color is #CED0D6 — all visible pixels should
+// have this color (un-premultiplied). Dark pixels indicate rendering bugs.
+func TestFolderIconMultiSize(t *testing.T) {
+	const folderSVG = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.5199 5.57617L10.7285 5.75H11H17C17.6904 5.75 18.25 6.30964 18.25 7V15.1667C18.25 16.0671 17.553 16.75 16.75 16.75H3.25C2.44705 16.75 1.75 16.0671 1.75 15.1667V4.83333C1.75 3.93294 2.44705 3.25 3.25 3.25H7.63795C7.69643 3.25 7.75307 3.2705 7.798 3.30794L10.5199 5.57617Z" stroke="#CED0D6" stroke-width="1"/></svg>`
+
+	for _, size := range []int{16, 20, 32, 40} {
+		t.Run(fmt.Sprintf("%dx%d", size, size), func(t *testing.T) {
+			img, err := Render([]byte(folderSVG), size, size)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+
+			blackPixels := 0
+			totalVisible := 0
+			for y := 0; y < size; y++ {
+				for x := 0; x < size; x++ {
+					r, _, _, a := img.At(x, y).RGBA()
+					if a == 0 {
+						continue
+					}
+					totalVisible++
+					straight := float64(r) / float64(a)
+					if straight < 0.5 && a > 0x500 {
+						blackPixels++
+						t.Logf("  DARK (%2d,%2d): premul_R=%3d A=%3d straight_R=%.2f",
+							x, y, r>>8, a>>8, straight)
+					}
+				}
+			}
+			t.Logf("Size %dx%d: %d visible, %d dark", size, size, totalVisible, blackPixels)
+			if blackPixels > 0 {
+				t.Errorf("Found %d dark pixels (possible fill leak or stroke overlap)", blackPixels)
+			}
+		})
+	}
+}
+
+// TestFolderIconPixelDiagnostic dumps precise RGBA values for the folder icon
+// to identify the root cause of rendering artifacts. Every non-transparent pixel
+// is printed with its un-premultiplied color so we can see if there are unexpected
+// colors (black fill leak, double stroke, self-intersecting inner offset, etc.).
+func TestFolderIconPixelDiagnostic(t *testing.T) {
+	const folderSVG = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.5199 5.57617L10.7285 5.75H11H17C17.6904 5.75 18.25 6.30964 18.25 7V15.1667C18.25 16.0671 17.553 16.75 16.75 16.75H3.25C2.44705 16.75 1.75 16.0671 1.75 15.1667V4.83333C1.75 3.93294 2.44705 3.25 3.25 3.25H7.63795C7.69643 3.25 7.75307 3.2705 7.798 3.30794L10.5199 5.57617Z" stroke="#CED0D6" stroke-width="1"/></svg>`
+
+	img, err := Render([]byte(folderSVG), 20, 20)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// Dump every non-transparent pixel with un-premultiplied color.
+	t.Log("=== Folder icon 20x20 pixel dump (un-premultiplied RGBA) ===")
+	t.Log("Expected stroke color: #CED0D6 (R=206 G=208 B=214)")
+
+	totalVisible := 0
+	wrongColor := 0
+	overCoverage := 0
+
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 20; x++ {
+			r, g, b, a := img.At(x, y).RGBA()
+			if a == 0 {
+				continue
+			}
+			totalVisible++
+
+			// Un-premultiply.
+			fa := float64(a)
+			ur := float64(r) / fa * 255
+			ug := float64(g) / fa * 255
+			ub := float64(b) / fa * 255
+			alpha8 := a >> 8
+			coverage := float64(alpha8) / 255.0
+
+			// Flag pixels with wrong color (not #CED0D6 ± tolerance).
+			// Skip color check for alpha < 2: at coverage=1/255, premultiplied
+			// channel values are <1.0 and quantize to 0 or 1 regardless of source
+			// color, making un-premultiplied color measurement meaningless.
+			colorOK := alpha8 < 2 || (ur > 180 && ur < 230 && ug > 180 && ug < 230 && ub > 185 && ub < 240)
+			marker := ""
+			if !colorOK {
+				marker = " ← WRONG COLOR"
+				wrongColor++
+			}
+			if alpha8 > 255 {
+				marker += " ← OVER-COVERAGE"
+				overCoverage++
+			}
+
+			t.Logf("  (%2d,%2d): premul=(%3d,%3d,%3d) A=%3d cov=%.0f%% straight=(%.0f,%.0f,%.0f)%s",
+				x, y, r>>8, g>>8, b>>8, alpha8, coverage*100, ur, ug, ub, marker)
+		}
+	}
+
+	t.Logf("Total visible: %d, wrong color: %d, over-coverage: %d", totalVisible, wrongColor, overCoverage)
+	if wrongColor > 0 {
+		t.Errorf("%d pixels have unexpected color (not stroke #CED0D6)", wrongColor)
+	}
 }
 
 // alphaOf extracts the 8-bit alpha value from a color.

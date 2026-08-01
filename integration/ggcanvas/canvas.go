@@ -737,6 +737,14 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
+
+	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
+	if wp, ok := c.provider.(gpucontext.WindowProvider); ok {
+		if newScale := wp.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
+			c.SetDeviceScale(newScale)
+		}
+	}
+
 	if !c.dirty {
 		return nil
 	}

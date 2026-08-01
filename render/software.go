@@ -165,7 +165,7 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 
 	// Build edges from path
 	r.edgeBuilder.Reset()
-	r.edgeBuilder.SetFlattenCurves(true) // Use line segments for reliable rendering
+	r.edgeBuilder.SetFlattenCurves(false)
 	r.edgeBuilder.BuildFromPath(path, raster.IdentityTransform{})
 
 	if r.edgeBuilder.IsEmpty() {

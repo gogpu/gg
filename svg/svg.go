@@ -6,6 +6,7 @@ import (
 	"image/color"
 
 	"github.com/gogpu/gg"
+	"github.com/gogpu/gg/scene"
 )
 
 // Render parses SVG XML data and renders it to an RGBA image at the specified size.
@@ -80,14 +81,45 @@ func (d *Document) renderInternal(dc *gg.Context, x, y, width, height float64, o
 		dc.Translate(-d.ViewBox.MinX, -d.ViewBox.MinY)
 	}
 
+	// Enable stroke hinting for small canvases (icon-sized SVGs).
+	// At small sizes, thin strokes land at fractional pixel positions and get
+	// anti-aliased across 2-3 pixels instead of rendering as crisp 1px lines.
+	// Hinting snaps stroke endpoints to pixel centers (Java2D STROKE_NORMALIZE pattern).
+	maxDim := width
+	if height > maxDim {
+		maxDim = height
+	}
+	hinting := maxDim <= strokeHintMaxCanvasSize && !strokeHintingDisabled()
+
 	state := &renderState{
 		overrideColor: overrideColor,
 		parentFill:    d.RootFill,
+		strokeHinting: hinting,
+		scaleX:        sx,
+		scaleY:        sy,
 	}
 
 	renderElements(dc, d.Elements, state)
 
 	dc.Pop()
+}
+
+// RenderToScene renders the document into a [scene.Scene] as vector geometry.
+// Unlike [RenderTo] which rasterizes to pixels, this encodes SVG elements as
+// scene Fill/Stroke commands using native shapes (CircleShape, RectShape, etc.),
+// preserving vector data for GPU rendering or scene composition.
+//
+// The SVG viewBox is scaled to fit (x, y, width, height) via scene transforms.
+func (d *Document) RenderToScene(s *scene.Scene, x, y, width, height float32) {
+	d.renderToSceneInternal(s, x, y, width, height, nil)
+}
+
+// RenderToSceneWithColor renders the document into a [scene.Scene] with all
+// non-"none" colors replaced by the given override color. This is the scene
+// equivalent of [RenderToWithColor], useful for theming icon SVGs in a vector
+// pipeline without bitmap rasterization.
+func (d *Document) RenderToSceneWithColor(s *scene.Scene, x, y, width, height float32, c gg.RGBA) {
+	d.renderToSceneInternal(s, x, y, width, height, &c)
 }
 
 // String returns a short description of the document for debugging.
