@@ -505,7 +505,6 @@ func TestFolderForwardBackwardDump(t *testing.T) {
 	}
 }
 
-
 // TestTopLeftInnerQuadSubdivision traces why inner top-left converges
 // in 1 quad instead of 2. Target: 2 quads matching tiny-skia.
 func TestTopLeftInnerQuadSubdivision(t *testing.T) {
