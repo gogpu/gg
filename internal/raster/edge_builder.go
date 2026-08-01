@@ -825,6 +825,7 @@ func (eb *EdgeBuilder) flattenQuadToVelloLines(x0, y0, cx, cy, x1, y1 float32) {
 	eb.flattenQuadToVelloLinesRecursive(x0, y0, cx, cy, x1, y1, tolerance, 0)
 }
 
+//nolint:dupl // intentional: separate output path (VelloLines vs LineEdges)
 func (eb *EdgeBuilder) flattenQuadToVelloLinesRecursive(x0, y0, cx, cy, x1, y1, tolerance float32, depth int) {
 	if depth > 10 {
 		eb.addVelloLine(x0, y0, x1, y1)

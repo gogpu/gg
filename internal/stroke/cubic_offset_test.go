@@ -453,22 +453,24 @@ func TestFolderInnerPathMatchesTinySkia(t *testing.T) {
 		ci += verbCoordCount(outVerbs[i])
 	}
 	for i := innerStart; i < len(outVerbs)-2; i++ {
-		if outVerbs[i] == VerbLineTo {
-			x := outCoords[ci]
-			if math.Abs(x-11.0) < 0.01 && math.Abs(outCoords[ci+1]-6.25) < 0.01 {
-				// Found L 11.0000,6.2500 — next verb should go to ~10.5475
-				nextCI := ci + 2
-				if outVerbs[i+1] == VerbLineTo {
-					nextX := outCoords[nextCI]
-					t.Logf("After L(11,6.25): next L x=%.4f (want ~10.5475, got %.4f)", nextX, nextX)
-					if math.Abs(nextX-10.5475) > 0.1 {
-						t.Errorf("Inner tab join: next x=%.4f, want ~10.5475 (inner join pivot creating extra geometry)", nextX)
-					}
-				}
-				break
+		if outVerbs[i] != VerbLineTo {
+			ci += verbCoordCount(outVerbs[i])
+			continue
+		}
+		x := outCoords[ci]
+		if math.Abs(x-11.0) >= 0.01 || math.Abs(outCoords[ci+1]-6.25) >= 0.01 {
+			ci += verbCoordCount(outVerbs[i])
+			continue
+		}
+		// Found L 11.0000,6.2500 — next verb should go to ~10.5475
+		if outVerbs[i+1] == VerbLineTo {
+			nextX := outCoords[ci+2]
+			t.Logf("After L(11,6.25): next L x=%.4f (want ~10.5475, got %.4f)", nextX, nextX)
+			if math.Abs(nextX-10.5475) > 0.1 {
+				t.Errorf("Inner tab join: next x=%.4f, want ~10.5475", nextX)
 			}
 		}
-		ci += verbCoordCount(outVerbs[i])
+		break
 	}
 }
 

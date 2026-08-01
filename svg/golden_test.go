@@ -164,13 +164,6 @@ func maxOf(a, b, c int) int {
 	return m
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // TestDirectExpandFill isolates whether the Skia golden diff comes from:
 // (a) the expanded stroke path geometry (rasterized as fill), or
 // (b) the SVG rendering pipeline (transforms, hinting, dc.Stroke routing).
@@ -262,7 +255,7 @@ func TestDirectExpandFill(t *testing.T) {
 	t.Logf("Pixels differ: %d / %d", directVsSvg.diffCount, directVsSvg.total)
 	t.Logf("Max channel diff: %d", directVsSvg.maxDiff)
 
-	if directVsSvg.maxDiff == 0 {
+	if directVsSvg.maxDiff == 0 { //nolint:nestif // diagnostic test with structured output
 		t.Logf("CONCLUSION: Direct and SVG produce IDENTICAL output.")
 		t.Logf("  → Problem is in StrokeExpander or AnalyticFiller, NOT the SVG pipeline.")
 	} else {
@@ -370,12 +363,13 @@ func TestTinySkiaExpandedPathThroughOurRasterizer(t *testing.T) {
 	t.Logf("  Pixels differ: %d / %d", result.diffCount, result.total)
 	t.Logf("  Max channel diff: %d", result.maxDiff)
 
-	if result.maxDiff <= 3 {
+	switch {
+	case result.maxDiff <= 3:
 		t.Logf("MATCH (diff <= 3 = tiny-skia vs Skia level)")
 		t.Logf("→ Our EXPANDER is wrong, rasterizer is correct")
-	} else if result.maxDiff <= 10 {
+	case result.maxDiff <= 10:
 		t.Logf("CLOSE but not matching")
-	} else {
+	default:
 		t.Logf("LARGE diff → Our RASTERIZER handles this path differently than Skia")
 		for i, p := range result.worst {
 			if i >= 5 {
