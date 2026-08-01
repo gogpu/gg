@@ -330,6 +330,14 @@ dc.DrawString(s, x, y)
 | `text/glyph_outline.go` | `OutlineExtractor`, `GlyphOutline`, `OutlineSegment` |
 | `text/face.go` | `Face.Glyphs()`, `Face.Source()`, `Face.Size()` |
 
+OpenType outline extraction remains centralized in `text`. `ownParsedFont`
+lazily parses bounded CFF1 structures, including CID `FDArray`/`FDSelect` data
+and per-FD subroutines, behind `sync.Once`; `OutlineExtractor` keeps `glyf` as
+its first choice and otherwise executes bounded Type 2 charstrings into the
+existing cubic `GlyphOutline` representation before shared scaling and
+rasterization. Type 2 hint operators are consumed structurally but not
+executed; CFF2 outlines are explicitly unsupported.
+
 ## HiDPI/Retina Device Scale
 
 gg uses the Cairo-pattern `device_scale` for DPI-transparent drawing. User code
