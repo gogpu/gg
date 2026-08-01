@@ -1203,7 +1203,6 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Expand stroke to fill path (SOA: verb+coords in, verb+coords out)
 	outVerbs, outCoords := expander.Expand(strokeVerbs, pathToDraw.Coords())
 
-
 	// Convert back to gg.Path (reuse scratch to avoid per-stroke allocation).
 	if r.scratchStrokePath == nil {
 		r.scratchStrokePath = NewPath()

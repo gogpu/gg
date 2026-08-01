@@ -78,11 +78,11 @@ func loadGoldenImage(t *testing.T, name string) *image.RGBA {
 }
 
 type pixelDiff struct {
-	x, y             int
-	gr, gg, gb       int // golden
-	or, og, ob       int // ours
-	maxD             int
-	direction        string
+	x, y       int
+	gr, gg, gb int // golden
+	or, og, ob int // ours
+	maxD       int
+	direction  string
 }
 
 type compareResult struct {
@@ -373,7 +373,9 @@ func TestTinySkiaExpandedPathThroughOurRasterizer(t *testing.T) {
 	} else {
 		t.Logf("LARGE diff → Our RASTERIZER handles this path differently than Skia")
 		for i, p := range result.worst {
-			if i >= 5 { break }
+			if i >= 5 {
+				break
+			}
 			t.Logf("  (%d,%d): golden=(%d,%d,%d) got=(%d,%d,%d) diff=%d %s",
 				p.x, p.y, p.gr, p.gg, p.gb, p.or, p.og, p.ob, p.maxD, p.direction)
 		}
@@ -392,24 +394,40 @@ func TestTinySkiaPathVsResvgGolden(t *testing.T) {
 	dc.SetHexColor("#CED0D6")
 
 	// OUTER contour
-	dc.MoveTo(10.8400, 5.1921); dc.LineTo(11.0486, 5.3659); dc.LineTo(10.7285, 5.7500)
-	dc.LineTo(10.7285, 5.2500); dc.LineTo(11.0000, 5.2500); dc.LineTo(17.0000, 5.2500)
-	dc.QuadraticTo(18.7500, 5.2500, 18.7500, 7.0000); dc.LineTo(18.7500, 15.1667)
-	dc.QuadraticTo(18.7500, 17.2500, 16.7500, 17.2500); dc.LineTo(3.2500, 17.2500)
-	dc.QuadraticTo(1.2500, 17.2500, 1.2500, 15.1667); dc.LineTo(1.2500, 4.8333)
-	dc.QuadraticTo(1.2500, 2.7500, 3.2500, 2.7500); dc.LineTo(7.6379, 2.7500)
-	dc.QuadraticTo(7.9095, 2.7500, 8.1181, 2.9238); dc.LineTo(10.8400, 5.1921)
+	dc.MoveTo(10.8400, 5.1921)
+	dc.LineTo(11.0486, 5.3659)
+	dc.LineTo(10.7285, 5.7500)
+	dc.LineTo(10.7285, 5.2500)
+	dc.LineTo(11.0000, 5.2500)
+	dc.LineTo(17.0000, 5.2500)
+	dc.QuadraticTo(18.7500, 5.2500, 18.7500, 7.0000)
+	dc.LineTo(18.7500, 15.1667)
+	dc.QuadraticTo(18.7500, 17.2500, 16.7500, 17.2500)
+	dc.LineTo(3.2500, 17.2500)
+	dc.QuadraticTo(1.2500, 17.2500, 1.2500, 15.1667)
+	dc.LineTo(1.2500, 4.8333)
+	dc.QuadraticTo(1.2500, 2.7500, 3.2500, 2.7500)
+	dc.LineTo(7.6379, 2.7500)
+	dc.QuadraticTo(7.9095, 2.7500, 8.1181, 2.9238)
+	dc.LineTo(10.8400, 5.1921)
 	dc.ClosePath()
 
 	// INNER contour
-	dc.MoveTo(10.1998, 5.9603); dc.LineTo(7.4779, 3.6921)
-	dc.QuadraticTo(7.5475, 3.7500, 7.6379, 3.7500); dc.LineTo(3.2500, 3.7500)
+	dc.MoveTo(10.1998, 5.9603)
+	dc.LineTo(7.4779, 3.6921)
+	dc.QuadraticTo(7.5475, 3.7500, 7.6379, 3.7500)
+	dc.LineTo(3.2500, 3.7500)
 	dc.QuadraticTo(2.8507, 3.7500, 2.5579, 4.0520)
-	dc.QuadraticTo(2.2500, 4.3696, 2.2500, 4.8333); dc.LineTo(2.2500, 15.1667)
-	dc.QuadraticTo(2.2500, 16.2500, 3.2500, 16.2500); dc.LineTo(16.7500, 16.2500)
-	dc.QuadraticTo(17.7500, 16.2500, 17.7500, 15.1667); dc.LineTo(17.7500, 7.0000)
-	dc.QuadraticTo(17.7500, 6.2500, 17.0000, 6.2500); dc.LineTo(11.0000, 6.2500)
-	dc.LineTo(10.5475, 6.2500); dc.LineTo(10.1998, 5.9603)
+	dc.QuadraticTo(2.2500, 4.3696, 2.2500, 4.8333)
+	dc.LineTo(2.2500, 15.1667)
+	dc.QuadraticTo(2.2500, 16.2500, 3.2500, 16.2500)
+	dc.LineTo(16.7500, 16.2500)
+	dc.QuadraticTo(17.7500, 16.2500, 17.7500, 15.1667)
+	dc.LineTo(17.7500, 7.0000)
+	dc.QuadraticTo(17.7500, 6.2500, 17.0000, 6.2500)
+	dc.LineTo(11.0000, 6.2500)
+	dc.LineTo(10.5475, 6.2500)
+	dc.LineTo(10.1998, 5.9603)
 	dc.ClosePath()
 
 	dc.Fill()
@@ -432,7 +450,9 @@ func TestTinySkiaPathVsResvgGolden(t *testing.T) {
 		t.Logf("SIGNIFICANT DIFF")
 		t.Logf("→ Our AAA rasterizer differs from tiny-skia's 4x supersample for this path")
 		for i, p := range result.worst {
-			if i >= 5 { break }
+			if i >= 5 {
+				break
+			}
 			t.Logf("  (%d,%d): resvg=(%d,%d,%d) ours=(%d,%d,%d) diff=%d %s",
 				p.x, p.y, p.gr, p.gg, p.gb, p.or, p.og, p.ob, p.maxD, p.direction)
 		}
@@ -442,10 +462,14 @@ func TestTinySkiaPathVsResvgGolden(t *testing.T) {
 func loadGoldenPNG(t *testing.T, path string) image.Image {
 	t.Helper()
 	f, err := os.Open(path)
-	if err != nil { t.Fatalf("Cannot open %s: %v", path, err) }
+	if err != nil {
+		t.Fatalf("Cannot open %s: %v", path, err)
+	}
 	defer f.Close()
 	img, err := png.Decode(f)
-	if err != nil { t.Fatalf("Cannot decode %s: %v", path, err) }
+	if err != nil {
+		t.Fatalf("Cannot decode %s: %v", path, err)
+	}
 	return img
 }
 

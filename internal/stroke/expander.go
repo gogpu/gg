@@ -315,7 +315,6 @@ func (e *StrokeExpander) Expand(verbs []PathVerb, coords []float64) ([]PathVerb,
 	return e.output.verbs, e.output.coords
 }
 
-
 // HadInnerJoin reports whether handleInnerJoin was called during the last Expand.
 // When false, all joins were skipped (smooth path) and the expansion produces
 // no inner-pivot V-shapes, making it safe to use NonZero fill rule.
