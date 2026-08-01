@@ -505,25 +505,6 @@ func TestFolderForwardBackwardDump(t *testing.T) {
 	}
 }
 
-func dumpPath(t *testing.T, verbs []PathVerb, coords []float64) {
-	t.Helper()
-	ci := 0
-	for i, v := range verbs {
-		switch v {
-		case VerbMoveTo:
-			t.Logf("  F%02d: M %.4f,%.4f", i, coords[ci], coords[ci+1])
-			ci += 2
-		case VerbLineTo:
-			t.Logf("  F%02d: L %.4f,%.4f", i, coords[ci], coords[ci+1])
-			ci += 2
-		case VerbQuadTo:
-			t.Logf("  F%02d: Q %.4f,%.4f %.4f,%.4f", i, coords[ci], coords[ci+1], coords[ci+2], coords[ci+3])
-			ci += 4
-		case VerbClose:
-			t.Logf("  F%02d: Z", i)
-		}
-	}
-}
 
 // TestTopLeftInnerQuadSubdivision traces why inner top-left converges
 // in 1 quad instead of 2. Target: 2 quads matching tiny-skia.
@@ -751,8 +732,8 @@ func TestInnerConvergenceF32vsF64(t *testing.T) {
 
 	denom := aLen.Cross(bLen)
 	ab0 := start.Sub(end)
-	numerA := Vec2(bLen).Cross(ab0)
-	numerB := Vec2(aLen).Cross(ab0)
+	numerA := bLen.Cross(ab0)
+	numerB := aLen.Cross(ab0)
 	t.Logf("intersectRay: denom=%.10f numerA=%.10f numerB=%.10f", denom, numerA, numerB)
 	t.Logf("  (numerA>=0)==(numerB>=0): %v (same sign = control outside = SPLIT)", (numerA >= 0) == (numerB >= 0))
 
