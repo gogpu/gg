@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"testing"
+
+	"github.com/gogpu/gg"
 )
 
 // Real JetBrains SVG icons (Apache 2.0 license) for testing.
@@ -293,6 +296,26 @@ func TestParseTransformArgs(t *testing.T) {
 				t.Errorf("len(args) = %d, want %d", len(args), tt.want)
 			}
 		})
+	}
+}
+
+func TestTransformMatrixCompositionAndBestEffort(t *testing.T) {
+	m, err := transformMatrix("translate(10 20) scale(2) rotate(90 1 1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.TransformPoint(gg.Pt(1, 1))
+	if math.Abs(p.X-12) > 1e-9 || math.Abs(p.Y-22) > 1e-9 {
+		t.Fatalf("composed point=%+v, want (12,22)", p)
+	}
+
+	partial, err := transformMatrix("translate(3 4) unsupported(1) scale(9)")
+	if err == nil {
+		t.Fatal("unsupported transform returned nil error")
+	}
+	p = partial.TransformPoint(gg.Pt(1, 2))
+	if p != (gg.Point{X: 4, Y: 6}) {
+		t.Fatalf("best-effort point=%+v, want (4,6)", p)
 	}
 }
 

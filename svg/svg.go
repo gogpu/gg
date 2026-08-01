@@ -60,7 +60,7 @@ func (d *Document) RenderToWithColor(dc *gg.Context, x, y, width, height float64
 
 // renderInternal is the shared rendering implementation.
 func (d *Document) renderInternal(dc *gg.Context, x, y, width, height float64, overrideColor color.Color) {
-	if d.ViewBox.Width <= 0 || d.ViewBox.Height <= 0 {
+	if d == nil || dc == nil || d.ViewBox.Width <= 0 || d.ViewBox.Height <= 0 || width <= 0 || height <= 0 {
 		return
 	}
 
@@ -97,6 +97,8 @@ func (d *Document) renderInternal(dc *gg.Context, x, y, width, height float64, o
 		strokeHinting: hinting,
 		scaleX:        sx,
 		scaleY:        sy,
+		opacity:       1,
+		matrix:        dc.GetTransform(),
 	}
 
 	renderElements(dc, d.Elements, state)

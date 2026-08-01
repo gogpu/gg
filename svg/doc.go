@@ -35,4 +35,11 @@
 //	img1 := doc.Render(16, 16)
 //	img2 := doc.Render(32, 32)
 //	img3 := doc.RenderWithColor(24, 24, themeColor)
+//
+//	// Retain ordinary vector fill/stroke commands in a Scene:
+//	s := scene.NewScene()
+//	doc.RenderToScene(s, 0, 0, 24, 24)
+//
+// RenderToScene keeps geometry vector-based so the Scene renderer resolves it
+// at the final display resolution.
 package svg

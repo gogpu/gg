@@ -8,252 +8,131 @@ import (
 	"github.com/gogpu/gg"
 )
 
-// strokeHintMaxCanvasSize is the maximum canvas dimension (in pixels) at which
-// stroke hinting is applied. Above this size, strokes are thick enough that
-// sub-pixel positioning produces acceptable results without hinting.
-const strokeHintMaxCanvasSize = 48
+const (
+	// strokeHintMaxCanvasSize limits automatic hinting to icon-sized targets.
+	strokeHintMaxCanvasSize = 48
+	// strokeHintMaxWidth limits hinting to thin strokes in device pixels.
+	strokeHintMaxWidth = 1.5
+)
 
-// strokeHintMaxWidth is the maximum stroke width (in device pixels, after
-// viewBox scaling) that qualifies for hinting. Thin strokes suffer most from
-// sub-pixel positioning; thicker strokes already span multiple pixels.
-const strokeHintMaxWidth = 1.5
-
-// renderState holds the rendering state during SVG traversal.
+// renderState is shared by immediate and retained traversal. Matrix is the
+// complete logical transform at the current nesting level.
 type renderState struct {
-	overrideColor color.Color // non-nil → replace all non-colorNone colors
-	parentFill    string      // inherited fill from parent <g>
-	parentStroke  string      // inherited stroke from parent <g>
-	strokeHinting bool        // true → snap thin stroke coords to pixel centers
-	scaleX        float64     // viewBox → device X scale (for device-px stroke width)
-	scaleY        float64     // viewBox → device Y scale
+	overrideColor color.Color
+	parentFill    string
+	parentStroke  string
+	opacity       float64
+	matrix        gg.Matrix
+	strokeHinting bool
+	scaleX        float64
+	scaleY        float64
 }
 
-// renderElements renders a list of elements into the given gg.Context.
+type resolvedFill struct {
+	present bool
+	rule    gg.FillRule
+	color   gg.RGBA
+}
+
+type resolvedStroke struct {
+	present bool
+	width   float64
+	cap     gg.LineCap
+	join    gg.LineJoin
+	color   gg.RGBA
+}
+
+type resolvedStyle struct {
+	fill   resolvedFill
+	stroke resolvedStroke
+}
+
 func renderElements(dc *gg.Context, elements []Element, state *renderState) {
 	for _, elem := range elements {
 		renderElement(dc, elem, state)
 	}
 }
 
-// renderElement dispatches rendering to the appropriate element-specific function.
 func renderElement(dc *gg.Context, elem Element, state *renderState) {
 	switch e := elem.(type) {
 	case *PathElement:
-		renderPath(dc, e, state)
+		if e.D == "" {
+			return
+		}
+		path, err := gg.ParseSVGPath(e.D)
+		if err != nil {
+			return
+		}
+		renderGeometry(dc, path, &e.Attrs, state, true)
 	case *CircleElement:
-		renderCircle(dc, e, state)
+		path := gg.NewPath()
+		path.Circle(e.CX, e.CY, e.R)
+		renderGeometry(dc, path, &e.Attrs, state, true)
 	case *RectElement:
-		renderRect(dc, e, state)
+		path := gg.NewPath()
+		if e.RX > 0 || e.RY > 0 {
+			r := e.RX
+			if e.RY > r {
+				r = e.RY
+			}
+			path.RoundedRectangle(e.X, e.Y, e.W, e.H, r)
+		} else {
+			path.Rectangle(e.X, e.Y, e.W, e.H)
+		}
+		renderGeometry(dc, path, &e.Attrs, state, true)
 	case *EllipseElement:
-		renderEllipse(dc, e, state)
+		path := gg.NewPath()
+		path.Ellipse(e.CX, e.CY, e.RX, e.RY)
+		renderGeometry(dc, path, &e.Attrs, state, true)
 	case *LineElement:
-		renderLine(dc, e, state)
+		path := gg.NewPath()
+		path.MoveTo(e.X1, e.Y1)
+		path.LineTo(e.X2, e.Y2)
+		renderGeometry(dc, path, &e.Attrs, state, false)
 	case *PolygonElement:
-		renderPolygon(dc, e, state)
+		if path := pointsPath(e.Points, true); path != nil {
+			renderGeometry(dc, path, &e.Attrs, state, true)
+		}
 	case *PolylineElement:
-		renderPolyline(dc, e, state)
+		if path := pointsPath(e.Points, false); path != nil {
+			renderGeometry(dc, path, &e.Attrs, state, true)
+		}
 	case *GroupElement:
 		renderGroup(dc, e, state)
 	}
 }
 
-// renderPath renders an SVG <path> element.
-func renderPath(dc *gg.Context, e *PathElement, state *renderState) {
-	if e.D == "" {
-		return
+func renderGeometry(dc *gg.Context, path *gg.Path, attrs *Attrs, state *renderState, allowFill bool) {
+	local := elementTransformMatrix(attrs)
+	style := resolveStyle(attrs, state)
+	if !allowFill {
+		style.fill.present = false
 	}
-	path, err := gg.ParseSVGPath(e.D)
-	if err != nil {
-		return // skip invalid paths silently
+	if !style.fill.present && !style.stroke.present {
+		return
 	}
 
 	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	// Apply stroke hinting: snap path line endpoints to pixel centers.
-	// The original path is used for fill (hinting would displace filled shapes).
-	// A separate hinted path is used for stroke when conditions are met.
-	strokePath := path
-	if shouldStroke(&e.Attrs, state) && shouldHintStroke(&e.Attrs, state) {
-		strokePath = hintSVGPath(path, state.scaleX, state.scaleY)
-	}
-
-	fillAndStroke(dc, &e.Attrs, state, func() {
+	dc.Transform(local)
+	if style.fill.present {
+		dc.SetFillRule(style.fill.rule)
+		setResolvedColor(dc, style.fill.color)
 		dc.DrawPath(path)
-	}, func() {
-		dc.DrawPath(strokePath)
-	})
-
-	dc.Pop()
-}
-
-// renderCircle renders an SVG <circle> element.
-func renderCircle(dc *gg.Context, e *CircleElement, state *renderState) {
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	draw := func() { dc.DrawCircle(e.CX, e.CY, e.R) }
-	fillAndStroke(dc, &e.Attrs, state, draw, draw)
-
-	dc.Pop()
-}
-
-// renderRect renders an SVG <rect> element.
-func renderRect(dc *gg.Context, e *RectElement, state *renderState) {
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	draw := func() {
-		if e.RX > 0 || e.RY > 0 {
-			// Use the larger of rx/ry for the rounded rectangle radius.
-			r := e.RX
-			if e.RY > r {
-				r = e.RY
-			}
-			dc.DrawRoundedRectangle(e.X, e.Y, e.W, e.H, r)
-		} else {
-			dc.DrawRectangle(e.X, e.Y, e.W, e.H)
-		}
-	}
-	fillAndStroke(dc, &e.Attrs, state, draw, draw)
-
-	dc.Pop()
-}
-
-// renderEllipse renders an SVG <ellipse> element.
-func renderEllipse(dc *gg.Context, e *EllipseElement, state *renderState) {
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	draw := func() { dc.DrawEllipse(e.CX, e.CY, e.RX, e.RY) }
-	fillAndStroke(dc, &e.Attrs, state, draw, draw)
-
-	dc.Pop()
-}
-
-// renderLine renders an SVG <line> element.
-func renderLine(dc *gg.Context, e *LineElement, state *renderState) {
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	// Lines are stroke-only by default.
-	applyStrokeAttrs(dc, &e.Attrs, state)
-	x1, y1, x2, y2 := e.X1, e.Y1, e.X2, e.Y2
-	if shouldHintStroke(&e.Attrs, state) {
-		x1, y1 = hintLineCoords(x1, y1, state.scaleX, state.scaleY)
-		x2, y2 = hintLineCoords(x2, y2, state.scaleX, state.scaleY)
-	}
-	dc.DrawLine(x1, y1, x2, y2)
-	_ = dc.Stroke()
-
-	dc.Pop()
-}
-
-// renderPolygon renders an SVG <polygon> element.
-func renderPolygon(dc *gg.Context, e *PolygonElement, state *renderState) {
-	if len(e.Points) < 4 {
-		return // need at least 2 points
-	}
-
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	drawFill := func() {
-		dc.ClearPath()
-		drawPointsPath(dc, e.Points, true)
-	}
-	drawStroke := drawFill
-	if shouldStroke(&e.Attrs, state) && shouldHintStroke(&e.Attrs, state) {
-		hintedPts := hintPoints(e.Points, state.scaleX, state.scaleY)
-		drawStroke = func() {
-			dc.ClearPath()
-			drawPointsPath(dc, hintedPts, true)
-		}
-	}
-	fillAndStroke(dc, &e.Attrs, state, drawFill, drawStroke)
-
-	dc.Pop()
-}
-
-// renderPolyline renders an SVG <polyline> element.
-func renderPolyline(dc *gg.Context, e *PolylineElement, state *renderState) {
-	if len(e.Points) < 4 {
-		return
-	}
-
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	drawFill := func() {
-		dc.ClearPath()
-		drawPointsPath(dc, e.Points, false)
-	}
-	drawStroke := drawFill
-	if shouldStroke(&e.Attrs, state) && shouldHintStroke(&e.Attrs, state) {
-		hintedPts := hintPoints(e.Points, state.scaleX, state.scaleY)
-		drawStroke = func() {
-			dc.ClearPath()
-			drawPointsPath(dc, hintedPts, false)
-		}
-	}
-	fillAndStroke(dc, &e.Attrs, state, drawFill, drawStroke)
-
-	dc.Pop()
-}
-
-// renderGroup renders an SVG <g> element and its children.
-func renderGroup(dc *gg.Context, e *GroupElement, state *renderState) {
-	dc.Push()
-	applyElementTransform(dc, &e.Attrs)
-
-	// Create child state with inherited attrs.
-	childState := &renderState{
-		overrideColor: state.overrideColor,
-		parentFill:    state.parentFill,
-		parentStroke:  state.parentStroke,
-		strokeHinting: state.strokeHinting,
-		scaleX:        state.scaleX,
-		scaleY:        state.scaleY,
-	}
-	if e.Attrs.Fill != "" {
-		childState.parentFill = e.Attrs.Fill
-	}
-	if e.Attrs.Stroke != "" {
-		childState.parentStroke = e.Attrs.Stroke
-	}
-
-	renderElements(dc, e.Children, childState)
-
-	dc.Pop()
-}
-
-// fillAndStroke applies fill and/or stroke to the current path.
-//
-// drawFill sets up the path for filling (original coordinates).
-// drawStroke sets up the path for stroking (may have hinted coordinates
-// when stroke hinting is active for crisp thin lines in small icons).
-func fillAndStroke(dc *gg.Context, a *Attrs, state *renderState, drawFill, drawStroke func()) {
-	hasFill := shouldFill(a, state)
-	hasStroke := shouldStroke(a, state)
-
-	if !hasFill && !hasStroke {
-		// Default SVG behavior: fill with black if no fill/stroke specified.
-		if a.Fill == "" && a.Stroke == "" {
-			hasFill = true
-		}
-	}
-
-	if hasFill {
-		applyFillAttrs(dc, a, state)
-		drawFill()
 		_ = dc.Fill()
 	}
-
-	if hasStroke {
-		applyStrokeAttrs(dc, a, state)
-		drawStroke()
+	if style.stroke.present {
+		strokePath := path
+		if shouldHintStroke(attrs, state) {
+			strokePath = hintSVGPath(path, state.scaleX, state.scaleY)
+		}
+		dc.SetLineWidth(style.stroke.width)
+		dc.SetLineCap(style.stroke.cap)
+		dc.SetLineJoin(style.stroke.join)
+		setResolvedColor(dc, style.stroke.color)
+		dc.DrawPath(strokePath)
 		_ = dc.Stroke()
 	}
+	dc.Pop()
 }
 
 // shouldHintStroke reports whether stroke hinting should be applied to this
@@ -322,12 +201,6 @@ func hintSVGPath(src *gg.Path, sx, sy float64) *gg.Path {
 	return result
 }
 
-// hintLineCoords snaps line endpoint coordinates (in viewBox space) to pixel
-// centers in device space, returning the snapped viewBox coordinates.
-func hintLineCoords(x, y, sx, sy float64) (float64, float64) {
-	return snapViewBoxCoord(x, sx), snapViewBoxCoord(y, sy)
-}
-
 // snapViewBoxCoord converts a viewBox coordinate to device space, snaps it
 // to the nearest pixel center, and converts back to viewBox space.
 //
@@ -365,148 +238,152 @@ func strokeHintingDisabled() bool {
 	return os.Getenv("GOGPU_SVG_NO_HINT") != ""
 }
 
-// shouldFill returns true if the element should be filled.
-func shouldFill(a *Attrs, state *renderState) bool {
-	fill := resolveFill(a, state)
-	return fill != colorNone
+func renderGroup(dc *gg.Context, group *GroupElement, state *renderState) {
+	local := elementTransformMatrix(&group.Attrs)
+	child := *state
+	child.matrix = state.matrix.Multiply(local)
+	child.opacity *= group.Attrs.Opacity
+	if group.Attrs.Fill != "" {
+		child.parentFill = group.Attrs.Fill
+	}
+	if group.Attrs.Stroke != "" {
+		child.parentStroke = group.Attrs.Stroke
+	}
+
+	dc.Push()
+	dc.Transform(local)
+	renderElements(dc, group.Children, &child)
+	dc.Pop()
 }
 
-// shouldStroke returns true if the element should be stroked.
-func shouldStroke(a *Attrs, state *renderState) bool {
-	stroke := resolveStroke(a, state)
-	return stroke != "" && stroke != colorNone
+func resolveStyle(attrs *Attrs, state *renderState) resolvedStyle {
+	fillString := resolveFill(attrs, state)
+	strokeString := resolveStroke(attrs, state)
+
+	fillRule := gg.FillRuleNonZero
+	rule := attrs.FillRule
+	if rule == "" {
+		rule = attrs.ClipRule
+	}
+	if rule == "evenodd" {
+		fillRule = gg.FillRuleEvenOdd
+	}
+
+	style := resolvedStyle{
+		fill: resolvedFill{
+			present: fillString != colorNone,
+			rule:    fillRule,
+		},
+		stroke: resolvedStroke{
+			present: strokeString != "" && strokeString != colorNone,
+			width:   attrs.StrokeWidth,
+			cap:     resolveLineCap(attrs.StrokeCap),
+			join:    resolveLineJoin(attrs.StrokeJoin),
+		},
+	}
+
+	fillColor, fillOK := resolvePaintColor(fillString, color.Black, state.overrideColor,
+		attrs.FillOpacity*attrs.Opacity*state.opacity)
+	style.fill.color = fillColor
+	style.fill.present = style.fill.present && fillOK
+
+	strokeColor, strokeOK := resolvePaintColor(strokeString, nil, state.overrideColor,
+		attrs.StrokeOpacity*attrs.Opacity*state.opacity)
+	style.stroke.color = strokeColor
+	style.stroke.present = style.stroke.present && strokeOK
+	return style
 }
 
-// resolveFill returns the effective fill color string, considering inheritance.
-func resolveFill(a *Attrs, state *renderState) string {
-	if a.Fill != "" {
-		return a.Fill
+func resolveFill(attrs *Attrs, state *renderState) string {
+	if attrs.Fill != "" {
+		return attrs.Fill
 	}
 	if state.parentFill != "" {
 		return state.parentFill
 	}
-	return "" // will be treated as "black" by SVG spec default
+	return "" // SVG's default fill is black.
 }
 
-// resolveStroke returns the effective stroke color string, considering inheritance.
-func resolveStroke(a *Attrs, state *renderState) string {
-	if a.Stroke != "" {
-		return a.Stroke
+func resolveStroke(attrs *Attrs, state *renderState) string {
+	if attrs.Stroke != "" {
+		return attrs.Stroke
 	}
 	return state.parentStroke
 }
 
-// applyFillAttrs sets the fill color and fill rule on the context.
-func applyFillAttrs(dc *gg.Context, a *Attrs, state *renderState) {
-	fillStr := resolveFill(a, state)
-
-	// Set fill rule.
-	fillRule := a.FillRule
-	if fillRule == "" {
-		fillRule = a.ClipRule
+func resolvePaintColor(value string, fallback color.Color, override color.Color, opacity float64) (gg.RGBA, bool) {
+	var c color.Color
+	if override != nil && value != colorNone {
+		c = override
+	} else {
+		parsed, err := parseColor(value)
+		if err != nil || parsed == nil {
+			c = fallback
+		} else {
+			c = parsed
+		}
 	}
-	switch fillRule {
-	case "evenodd":
-		dc.SetFillRule(gg.FillRuleEvenOdd)
-	default:
-		dc.SetFillRule(gg.FillRuleNonZero)
+	if c == nil {
+		return gg.RGBA{}, false
 	}
-
-	// Set fill color.
-	if state.overrideColor != nil && fillStr != colorNone {
-		setColorWithOpacity(dc, state.overrideColor, a.FillOpacity*a.Opacity)
-		return
+	if opacity < 0 {
+		opacity = 0
+	} else if opacity > 1 {
+		opacity = 1
 	}
-
-	c, err := parseColor(fillStr)
-	if err != nil || c == nil {
-		// Default fill is black per SVG spec.
-		setColorWithOpacity(dc, color.Black, a.FillOpacity*a.Opacity)
-		return
-	}
-	setColorWithOpacity(dc, c, a.FillOpacity*a.Opacity)
+	result := gg.FromColor(c)
+	result.A *= opacity
+	return result, true
 }
 
-// applyStrokeAttrs sets stroke color, width, cap, and join on the context.
-func applyStrokeAttrs(dc *gg.Context, a *Attrs, state *renderState) {
-	strokeStr := resolveStroke(a, state)
-
-	dc.SetLineWidth(a.StrokeWidth)
-
-	// Stroke cap
-	switch a.StrokeCap {
+func resolveLineCap(value string) gg.LineCap {
+	switch value {
 	case "round":
-		dc.SetLineCap(gg.LineCapRound)
+		return gg.LineCapRound
 	case "square":
-		dc.SetLineCap(gg.LineCapSquare)
+		return gg.LineCapSquare
 	default:
-		dc.SetLineCap(gg.LineCapButt)
+		return gg.LineCapButt
 	}
+}
 
-	// Stroke join
-	switch a.StrokeJoin {
+func resolveLineJoin(value string) gg.LineJoin {
+	switch value {
 	case "round":
-		dc.SetLineJoin(gg.LineJoinRound)
+		return gg.LineJoinRound
 	case "bevel":
-		dc.SetLineJoin(gg.LineJoinBevel)
+		return gg.LineJoinBevel
 	default:
-		dc.SetLineJoin(gg.LineJoinMiter)
-	}
-
-	// Stroke color
-	if state.overrideColor != nil && strokeStr != colorNone {
-		setColorWithOpacity(dc, state.overrideColor, a.StrokeOpacity*a.Opacity)
-		return
-	}
-
-	c, err := parseColor(strokeStr)
-	if err != nil || c == nil {
-		return
-	}
-	setColorWithOpacity(dc, c, a.StrokeOpacity*a.Opacity)
-}
-
-// setColorWithOpacity sets the drawing color on the context, applying
-// an additional opacity multiplier.
-func setColorWithOpacity(dc *gg.Context, c color.Color, opacity float64) {
-	if opacity >= 1.0 {
-		dc.SetColor(c)
-		return
-	}
-	r, g, b, a := c.RGBA()
-	// Un-premultiply, apply opacity, set as straight alpha RGBA.
-	if a == 0 {
-		dc.SetRGBA(0, 0, 0, 0)
-		return
-	}
-	fa := float64(a) / 65535.0
-	dc.SetRGBA(
-		float64(r)/65535.0/fa,
-		float64(g)/65535.0/fa,
-		float64(b)/65535.0/fa,
-		fa*opacity,
-	)
-}
-
-// applyElementTransform applies the element's transform attribute to the context.
-func applyElementTransform(dc *gg.Context, a *Attrs) {
-	if a.Transform != "" {
-		// Errors in transforms are silently ignored (best effort).
-		_ = applyTransform(dc, a.Transform)
+		return gg.LineJoinMiter
 	}
 }
 
-// drawPointsPath draws a path from alternating x,y point values.
-// If closed is true, the path is closed (polygon). Otherwise it's open (polyline).
-func drawPointsPath(dc *gg.Context, points []float64, closed bool) {
+func setResolvedColor(dc *gg.Context, c gg.RGBA) {
+	dc.SetRGBA(c.R, c.G, c.B, c.A)
+}
+
+func elementTransformMatrix(attrs *Attrs) gg.Matrix {
+	if attrs == nil || attrs.Transform == "" {
+		return gg.Identity()
+	}
+	matrix, _ := transformMatrix(attrs.Transform)
+	return matrix
+}
+
+func pointsPath(points []float64, closed bool) *gg.Path {
+	if len(points) < 4 {
+		return nil
+	}
+	path := gg.NewPath()
 	for i := 0; i+1 < len(points); i += 2 {
 		if i == 0 {
-			dc.MoveTo(points[i], points[i+1])
+			path.MoveTo(points[i], points[i+1])
 		} else {
-			dc.LineTo(points[i], points[i+1])
+			path.LineTo(points[i], points[i+1])
 		}
 	}
 	if closed {
-		dc.ClosePath()
+		path.Close()
 	}
+	return path
 }
