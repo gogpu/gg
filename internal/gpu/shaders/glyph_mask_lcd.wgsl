@@ -1,4 +1,4 @@
-// glyph_mask_lcd.wgsl - LCD Subpixel (ClearType) Text Rendering Shader
+// glyph_mask_lcd.wgsl - Dormant LCD Subpixel Text Rendering Shader
 //
 // NOTE: This shader is currently unused for the GPU pipeline (BUG-TEXT-001,
 // ADR-060). The GPU always uses grayscale (glyph_mask.wgsl) because standard
@@ -10,11 +10,12 @@
 // alpha compositing. The R8 atlas stores 3 texels per logical pixel
 // (R coverage, G coverage, B coverage), arranged horizontally.
 //
-// The fragment shader samples 3 adjacent horizontal texels to get per-channel
-// coverage, then composites each color channel independently for ClearType
-// subpixel rendering with 3x effective horizontal resolution.
+// IMPORTANT: this shader must remain disabled. WebGPU's scalar blend means
+// scalar destination alpha is inexact for LCD coverage; source-over would need
+// a distinct destination attenuation factor for each RGB channel. It is retained
+// only for deferred ABI compatibility until an exact backend capability exists.
 //
-// Color is passed via uniform buffer in STRAIGHT alpha (same as glyph_mask.wgsl).
+// Color is passed via the uniform buffer premultiplied (same as glyph_mask.wgsl).
 //
 // TODO: When this shader is re-enabled (FEAT-TEXT-002 dual-source blending),
 // apply mask gamma correction per-channel as in glyph_mask.wgsl. The same
@@ -101,15 +102,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let clip_cov = rrect_clip_coverage(in.position.xy);
     let color = uniforms.color;
 
-    // Per-channel premultiplied alpha compositing:
-    //   output.r = color.r * cov_r * color.a * clip_cov
-    //   output.g = color.g * cov_g * color.a * clip_cov
-    //   output.b = color.b * cov_b * color.a * clip_cov
-    //   output.a = max(cov_r, cov_g, cov_b) * color.a * clip_cov
-    let a_r = cov_r * color.a * clip_cov;
-    let a_g = cov_g * color.a * clip_cov;
-    let a_b = cov_b * color.a * clip_cov;
-    let a_max = max(a_r, max(a_g, a_b));
+    // color is already premultiplied by the CPU. Per-channel coverage scales
+    // premultiplied RGB once; color.a is used only for the scalar source alpha.
+    // This keeps the dormant source convention correct even though scalar
+    // destination blending cannot composite these channels exactly.
+    let covered_r = cov_r * clip_cov;
+    let covered_g = cov_g * clip_cov;
+    let covered_b = cov_b * clip_cov;
+    let covered_max = max(covered_r, max(covered_g, covered_b));
 
-    return vec4<f32>(color.r * a_r, color.g * a_g, color.b * a_b, a_max);
+    return vec4<f32>(color.r * covered_r, color.g * covered_g, color.b * covered_b, color.a * covered_max);
 }

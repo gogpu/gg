@@ -337,7 +337,7 @@ func (c *Context) tryGPUGlyphMaskTextAliased(s string, x, y float64) bool {
 //
 // When TextModeAuto, the strategy is selected based on the current
 // transformation matrix and font size:
-//   - Horizontal text (no rotation/skew) at size < 48px: GlyphMask (Tier 6)
+//   - Horizontal text (no rotation/skew) at size <= 64px: GlyphMask (Tier 6)
 //     if a GPUGlyphMaskAccelerator is registered.
 //   - Everything else: falls through to TextModeAuto (MSDF -> CPU).
 //
@@ -392,6 +392,9 @@ func (c *Context) isCJKText(s string) bool {
 // glyphMaskDeviceSize returns the effective font size in device pixels,
 // accounting for deviceScale and the Y scale component of the matrix.
 func (c *Context) glyphMaskDeviceSize() float64 {
+	if c.face == nil {
+		return 0
+	}
 	deviceSize := c.face.Size() * c.deviceScale
 	absScale := c.matrix.E
 	if absScale < 0 {

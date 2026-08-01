@@ -82,11 +82,19 @@ dispatches shapes and text to six rendering tiers:
 | **3** | Textured Quad | DrawImage, GPU textures | GPU textured quad pipeline |
 | **4** | MSDF Text | Text glyphs (dynamic/animated) | Multi-channel SDF with median+smoothstep shader |
 | **5** | Compute | Full scenes (many paths) | Vello-style 9-stage compute pipeline (GPU or CPU fallback) |
-| **6** | Glyph Mask | Text glyphs (static/UI, ≤48px) | CPU-rasterized R8 alpha atlas, GPU textured quads, ClearType LCD subpixel, font hinting |
+| **6** | Glyph Mask | Text glyphs (static/UI, ≤64 physical px) | CPU-rasterized R8 grayscale atlas, GPU textured quads, font hinting |
 
 Tiers 1–4, 6 use a render-pass pipeline (one render pass, multiple pipeline switches).
 Tier 5 uses a compute-only pipeline (9 dispatch stages, no render pass).
-Auto-selection routes horizontal text ≤48px to Tier 6 (pixel-perfect with font hinting and optional ClearType LCD subpixel rendering), else Tier 4 (scalable MSDF).
+Auto-selection routes axis-aligned text up to 64 effective device pixels to Tier 6
+(pixel-perfect grayscale masks with font hinting), else Tier 4 (scalable MSDF).
+`SetLCDLayout` retains the requested None/RGB/BGR preference, but current WebGPU
+backends conservatively downgrade all layouts to grayscale: scalar blend factors
+cannot attenuate destination RGB independently for per-channel coverage. The
+grayscale shader receives one CPU-premultiplied color and computes
+`(premul.rgb * mask * clip, alpha * mask * clip)` before premultiplied
+source-over blending. The dormant LCD shader and uniform ABI are not routed
+until a backend can provide exact per-channel compositing.
 
 This mirrors enterprise engines (Skia Ganesh/Graphite, Flutter Impeller, Gio).
 
@@ -277,12 +285,13 @@ dc.SetRasterizerMode(gg.RasterizerAuto)          // restore auto-selection
 | `RasterizerTileCompute` | Force 16×16 tiles via `ForceableFiller` |
 | `RasterizerSDF` | Force SDF for shapes, bypass min-size check |
 
-## Text Rendering Pipeline (v0.29.0+, CPU Transform v0.32.1, Hinting+ClearType v0.36.0)
+## Text Rendering Pipeline (v0.29.0+, CPU Transform v0.32.1, Hinting v0.36.0)
 
 Text rendering uses a multi-tier strategy. GPU MSDF handles text when available;
 the CPU pipeline uses a hybrid decision tree for transform-aware rendering.
-Glyph Mask (Tier 6) provides pixel-perfect rendering with auto-hinting and
-optional ClearType LCD subpixel rendering for small axis-aligned text.
+Glyph Mask (Tier 6) provides pixel-perfect grayscale rendering with auto-hinting
+for small axis-aligned text. Auto mode uses an inclusive 64 physical-pixel
+threshold after device and CTM scaling; explicit text modes remain independent.
 
 ### Pipeline Flow
 
@@ -413,7 +422,7 @@ gg/
 ├── path.go                 # Vector path operations (SetPath, DrawPath, FillPath)
 ├── path_svg.go             # SVG path data parser (ParseSVGPath)
 ├── paint.go                # Fill and stroke styles
-├── lcd_layout.go           # LCD ClearType layout types (LCDLayoutRGB/BGR/None)
+├── lcd_layout.go           # Requested LCD layout preference (current GPU output is grayscale)
 ├── pixmap.go               # Pixel buffer operations
 ├── text.go                 # Text rendering
 │
@@ -533,7 +542,7 @@ gg/
 │   │       ├── strip.wgsl         # Strip rendering
 │   │       ├── msdf_text.wgsl     # MSDF text rendering (Tier 4)
 │   │       ├── glyph_mask.wgsl    # Glyph mask rendering (Tier 6)
-│   │       └── glyph_mask_lcd.wgsl # LCD ClearType subpixel (Tier 6)
+│   │       └── glyph_mask_lcd.wgsl # Dormant LCD ABI (not routed by current engines)
 │   │
 │   ├── cache/              # LRU caching infrastructure
 │   │   ├── cache.go        # Generic cache
@@ -757,7 +766,7 @@ The `integration/ggcanvas/` package bridges gg with gogpu for windowed rendering
 import "github.com/gogpu/gg/integration/ggcanvas"
 
 canvas := ggcanvas.New(provider, width, height)
-// Auto-configures: device scale, LCD ClearType (ADR-024), resource tracking
+// Auto-configures: device scale, requested LCD layout, resource tracking
 
 // Draw() marks canvas dirty atomically — recommended pattern:
 canvas.Draw(func(dc *gg.Context) {
@@ -910,7 +919,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Atlas Compact** | Skia GrDrawOpAtlas | Frame-based page eviction (32-frame stale threshold) |
 | **Pressure Hysteresis** | Skia/Chrome | Enter bucketed mode at 50%, exit at 25% — prevents oscillation |
 | **Font Hinting** | FreeType auto-hinter | Grid-fit outline Y/X coordinates for crisp stems at small sizes |
-| **ClearType LCD** | FreeType/Microsoft | 3× horizontal oversampling + 5-tap FIR filter for per-channel RGB alpha |
+| **Deferred LCD ABI** | FreeType/Microsoft | Retains 3× mask/filter machinery, but current GPU routing downgrades to grayscale until exact per-channel destination blending exists |
 | **Command Pattern** | Cairo/Skia | Recording system for vector export |
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |

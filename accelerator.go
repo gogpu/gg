@@ -521,16 +521,15 @@ type PathClipAware interface {
 	ClearClipPath()
 }
 
-// LCDLayoutAware is an optional interface for accelerators that support
-// LCD subpixel (ClearType) text rendering. When the Context calls
-// SetLCDLayout, it propagates the layout to the accelerator so the
-// glyph mask engine can rasterize glyphs with 3x horizontal oversampling
-// and the GPU pipeline selects the LCD fragment shader.
+// LCDLayoutAware is an optional interface for accelerators that accept a
+// requested physical subpixel layout. Accepting the preference does not imply
+// exact LCD output: a backend may conservatively render grayscale masks when
+// it cannot composite per-channel coverage correctly.
 //
 // Use LCDLayoutRGB for most monitors, LCDLayoutBGR for rare BGR panels,
-// or LCDLayoutNone to disable subpixel rendering (grayscale, the default).
+// or LCDLayoutNone to request grayscale (the default).
 type LCDLayoutAware interface {
-	// SetLCDLayout sets the LCD subpixel layout for ClearType rendering.
+	// SetLCDLayout records the requested LCD subpixel layout.
 	SetLCDLayout(layout LCDLayout)
 }
 
