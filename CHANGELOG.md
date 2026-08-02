@@ -43,7 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-pixel Skia cross-reference), circle render comparison (fill + stroke),
   cubic waviness diagnostics (6 tests), deviation subdivision test.
 
+- **SVG retained scene lowering** ([#466](https://github.com/gogpu/gg/pull/466),
+  @besmpl) — `Document.RenderToScene` converts SVG paths into resolution-independent
+  `scene.Fill`/`scene.Stroke` commands. Shared geometry/transform/style core between
+  immediate and retained renderers. Boundary tests for transforms and renderer.
+
+- **CFF1 outline support** ([#469](https://github.com/gogpu/gg/pull/469),
+  @besmpl) — bounded Type 2 charstring interpreter with CFF INDEX/DICT parsers.
+  Subroutine depth limit (10), operand stack limit (48), pathological input
+  hardening. 650+ lines of tests with boundary coverage.
+
 ### Fixed
+
+- **Portable GPU glyph-mask compositing** ([#468](https://github.com/gogpu/gg/pull/468),
+  @besmpl, ADR-060) — LCD subpixel requests downgraded to grayscale masks for
+  portable rendering across all backends. Fixes premultiplied alpha compositing
+  in grayscale shader path. `SetLCDLayout`/`LCDLayout` retained as preference
+  for future exact backends. Strategy routing tests.
 
 - **GPU text grayscale default** (BUG-TEXT-001) — glyph mask rendering now
   defaults to grayscale (ADR-060) instead of LCD subpixel. Fixes double alpha
@@ -80,8 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `gogpu/wgpu` v0.30.29 → v0.30.31, `gogpu/gogpu` v0.47.1 → v0.47.3.
-- Updated example dependencies.
+- Updated `gogpu/gogpu` v0.48.0 → v0.48.2, `gogpu/naga` v0.17.16 → v0.18.0,
+  `gogpu/wgpu` v0.30.32 → v0.30.34, `gogpu/gpucontext` v0.24.0.
 
 ## [0.50.10] - 2026-07-30
 
