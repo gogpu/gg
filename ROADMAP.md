@@ -120,7 +120,11 @@
 - [x] **Mask gamma correction** — Skia SkMaskGamma for light-on-dark text
 - [x] **Bilinear image sampling** (BUG-ICON-001) — scene renderer, double premultiplication fix
 - [x] **Miter join + sharpAngle fixes** — signed cross product, tiny-skia currIsLine/prevIsLine
-- [x] **Dependencies** — wgpu v0.30.30, gogpu v0.47.2
+- [x] **SVG retained scene lowering** (#466, @besmpl) — Document.RenderToScene vector icons
+- [x] **SVG thin stroke hinting** (#467, @besmpl) — pixel-grid snapping for crisp small icons
+- [x] **Portable GPU glyph-mask compositing** (#468, @besmpl) — grayscale default, ADR-060
+- [x] **CFF1 outline support** (#469, @besmpl) — bounded Type 2 charstring interpreter
+- [x] **Dependencies** — gogpu v0.48.3, naga v0.18.0, wgpu v0.30.34
 
 ### v0.50.5–v0.50.10 ✅ Released
 - [x] **Backend-agnostic draw queue** (ADR-051) — Skia Graphite DrawList pattern
@@ -316,7 +320,7 @@
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **v0.50.11** | 2026-07 | Forward-diff curve edges (ADR-063), SVG vector icons (#463), cubicStroke, hairline rasterizer, GPU text grayscale, mask gamma, bilinear scene sampling |
+| **v0.50.11** | 2026-08 | Forward-diff curve edges (ADR-063), SVG vector icons (#463), cubicStroke, hairline rasterizer, CFF1 outlines, portable glyph-mask, thin stroke hinting (@besmpl ×4) |
 | v0.50.5–10 | 2026-07 | Draw queue (ADR-051), three-tier clip (ADR-052), 29 blend modes, separate brushes (ADR-055), external content preservation, variable font transforms |
 | v0.50.0–4 | 2026-07 | HVAR advance parser (ADR-050), composite DoS hardening, tiered GPU, CI golden tests |
 | v0.49.0–6 | 2026-06 | Variable font support (#385, ADR-044), MSAA fallback, auto-hinter skrifa parity |
