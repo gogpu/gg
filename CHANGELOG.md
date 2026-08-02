@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.50.11] - 2026-07-31
+## [0.50.11] - 2026-08-02
 
 ### Added
 
@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Subroutine depth limit (10), operand stack limit (48), pathological input
   hardening. 650+ lines of tests with boundary coverage.
 
+- **SVG thin stroke hinting** ([#467](https://github.com/gogpu/gg/pull/467),
+  [#463](https://github.com/gogpu/gg/issues/463), @besmpl) — conservative
+  pixel-grid snapping for thin horizontal/vertical strokes at small sizes (≤32px).
+  Independent stroke-path copy (fill geometry never mutated). Covers both
+  immediate `gg.Context` and retained `RenderToScene` paths. Eligibility:
+  uniform axis scale, stroke width ≤1.5 physical px.
+
 ### Fixed
 
 - **Portable GPU glyph-mask compositing** ([#468](https://github.com/gogpu/gg/pull/468),
@@ -96,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `gogpu/gogpu` v0.48.0 → v0.48.2, `gogpu/naga` v0.17.16 → v0.18.0,
+- Updated `gogpu/gogpu` v0.48.0 → v0.48.3, `gogpu/naga` v0.17.16 → v0.18.0,
   `gogpu/wgpu` v0.30.32 → v0.30.34, `gogpu/gpucontext` v0.24.0.
 
 ## [0.50.10] - 2026-07-30
