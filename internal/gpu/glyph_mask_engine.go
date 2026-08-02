@@ -54,9 +54,9 @@ func NewGlyphMaskEngine() *GlyphMaskEngine {
 	}
 }
 
-// SetLCDLayout sets the LCD subpixel layout for ClearType rendering.
-// Use LCDLayoutRGB for most monitors, LCDLayoutBGR for rare BGR panels,
-// or LCDLayoutNone to disable subpixel rendering (grayscale).
+// SetLCDLayout records the requested LCD subpixel layout. Production GPU
+// routing currently downgrades it to grayscale because WebGPU lacks exact
+// per-channel destination blending.
 func (e *GlyphMaskEngine) SetLCDLayout(layout text.LCDLayout) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -71,7 +71,13 @@ func (e *GlyphMaskEngine) SetLCDLayout(layout text.LCDLayout) {
 func (e *GlyphMaskEngine) SetLCDFilter(filter text.LCDFilter) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.lcdFilter == filter {
+		return
+	}
 	e.lcdFilter = filter
+	// Filter weights affect rasterized LCD masks. The force-LCD debug path can
+	// populate these entries even while production routing stays grayscale.
+	e.atlas.Clear()
 }
 
 // LCDLayout returns the current LCD subpixel layout.
@@ -134,13 +140,10 @@ func (e *GlyphMaskEngine) LayoutText(
 	lcdLayout := e.lcdLayout
 	lcdFilter := e.lcdFilter
 
-	// Pass straight-alpha color to the shader. The fragment shader performs
-	// premultiplication: output.rgb = color.rgb * (coverage * color.a).
-	// Passing premultiplied color here would cause double-application of alpha
-	// (color.rgb already has A baked in, then shader multiplies by color.a again).
+	premul := color.Premultiply()
 	batchColor := [4]float32{
-		float32(color.R), float32(color.G),
-		float32(color.B), float32(color.A),
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
 	}
 
 	var shaped []text.ShapedGlyph
@@ -193,10 +196,10 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 	// is incompatible with 3x horizontal oversampling.
 	useLCD := false
 
-	// Pass straight-alpha color to the shader (same as LayoutText).
+	premul := color.Premultiply()
 	batchColor := [4]float32{
-		float32(color.R), float32(color.G),
-		float32(color.B), float32(color.A),
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
 	}
 
 	var shaped []text.ShapedGlyph
@@ -239,10 +242,10 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
 	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
 
-	// Pass straight-alpha color to the shader (same as LayoutText).
+	premul := color.Premultiply()
 	batchColor := [4]float32{
-		float32(color.R), float32(color.G),
-		float32(color.B), float32(color.A),
+		float32(premul.R), float32(premul.G),
+		float32(premul.B), float32(premul.A),
 	}
 
 	lcdFilter := e.lcdFilter

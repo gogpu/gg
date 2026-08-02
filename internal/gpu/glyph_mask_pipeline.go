@@ -92,9 +92,9 @@ type GlyphMaskPipeline struct {
 	// alpha interpolation at subpixel positions).
 	sampler *wgpu.Sampler
 
-	// LCD pipeline: separate shader + pipeline for ClearType rendering.
-	// Uses a different uniform struct (96 bytes with atlas_size) and a
-	// different fragment shader (per-channel alpha compositing).
+	// Dormant LCD pipeline: retained for deferred ABI compatibility, but routing
+	// stays disabled until exact per-channel destination blending is available.
+	// Uses a different uniform struct (96 bytes with atlas_size) and shader.
 	// This avoids the Intel Vulkan null pipeline handle bug caused by
 	// adding is_lcd to the grayscale uniform struct.
 	lcdShader              *wgpu.ShaderModule
@@ -346,15 +346,24 @@ func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *g
 		return
 	}
 
-	useDepthClip := len(depthClipped) > 0 && depthClipped[0] && p.pipelineWithDepthClip != nil
+	depthClipRequested := len(depthClipped) > 0 && depthClipped[0]
+	useDepthClip := depthClipRequested && p.pipelineWithDepthClip != nil
 
-	// Select pipeline: depth-clipped variant takes priority, then LCD, then grayscale.
+	// Never reinterpret a 3x-wide LCD atlas resource as a grayscale mask. There
+	// is no LCD depth-clip variant either, so that combination must also remain
+	// undrawn rather than binding the incompatible grayscale pipeline.
+	if resources.isLCD && (p.lcdPipelineWithStencil == nil || depthClipRequested) {
+		return
+	}
+
+	// Select the pipeline only after validating that the resource format has an
+	// exact matching pipeline.
 	selectedPipeline := p.pipelineWithStencil
 	switch {
+	case resources.isLCD:
+		selectedPipeline = p.lcdPipelineWithStencil
 	case useDepthClip:
 		selectedPipeline = p.pipelineWithDepthClip
-	case resources.isLCD && p.lcdPipelineWithStencil != nil:
-		selectedPipeline = p.lcdPipelineWithStencil
 	}
 
 	rp.SetPipeline(selectedPipeline)
@@ -372,9 +381,10 @@ func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *g
 	}
 }
 
-// ensureLCDPipelineWithStencil creates the LCD pipeline variant for ClearType
-// rendering. Uses a separate shader (glyph_mask_lcd.wgsl) with a different
-// uniform struct (96 bytes: includes atlas_size for texel stepping).
+// ensureLCDPipelineWithStencil creates the dormant LCD pipeline variant. It is
+// retained for ABI compatibility but must not be routed to until the backend
+// has exact per-channel destination blending. It uses a separate shader
+// (glyph_mask_lcd.wgsl) with a 96-byte uniform including atlas_size.
 //
 // This is a separate pipeline from the grayscale one (Skia pattern) to avoid
 // the Intel Vulkan null pipeline handle bug that occurs when adding fields to
@@ -603,13 +613,12 @@ type GlyphMaskBatch struct {
 	// Transform is the 2D affine transform for this batch.
 	Transform gg.Matrix
 
-	// Color is the text color (RGBA, straight alpha) for this batch.
-	// The fragment shader performs premultiplication: out.rgb = color.rgb * (cov * color.a).
+	// Color is the text color (RGBA, premultiplied alpha) for this batch.
 	// All glyphs in a batch share the same color (set per DrawString call).
 	Color [4]float32
 
-	// IsLCD indicates this batch uses LCD subpixel rendering.
-	// When true, the LCD pipeline is used with per-channel alpha compositing.
+	// IsLCD indicates this batch contains deferred LCD subpixel resources.
+	// Current engines downgrade before rasterization, so normal output is false.
 	// The atlas region contains 3 R8 texels per logical pixel (R, G, B coverage).
 	IsLCD bool
 
@@ -702,7 +711,7 @@ func makeGlyphMaskUniform(transform gg.Matrix, color [4]float32) []byte {
 		off += 4
 	}
 
-	// Color (vec4<f32>): straight-alpha RGBA. Shader premultiplies.
+	// Color (vec4<f32>): premultiplied RGBA.
 	for i := range 4 {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4
@@ -731,7 +740,7 @@ func makeGlyphMaskLCDUniform(transform gg.Matrix, color [4]float32, atlasW, atla
 		off += 4
 	}
 
-	// Color (vec4<f32>): straight-alpha RGBA. Shader premultiplies.
+	// Color (vec4<f32>): premultiplied RGBA.
 	for i := range 4 {
 		binary.LittleEndian.PutUint32(buf[off:], math.Float32bits(color[i]))
 		off += 4

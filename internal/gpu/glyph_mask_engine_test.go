@@ -110,9 +110,31 @@ func TestGlyphMaskEngine_SetLCDLayout(t *testing.T) {
 func TestGlyphMaskEngine_SetLCDFilter(t *testing.T) {
 	engine := NewGlyphMaskEngine()
 
-	// Custom filter should not panic.
+	key := text.MakeGlyphMaskKey(1, 1, 12, 0, 0)
+	if _, err := engine.Atlas().Put(key, []byte{255}, 1, 1, 0, 0); err != nil {
+		t.Fatalf("populate atlas: %v", err)
+	}
+
+	// Reapplying the same filter preserves compatible cached masks.
+	engine.SetLCDFilter(text.DefaultLCDFilter())
+	if entries := glyphMaskAtlasEntryCount(engine); entries != 1 {
+		t.Fatalf("same filter cleared atlas: entries = %d, want 1", entries)
+	}
+
+	// A changed filter invalidates masks that may have used its weights.
 	custom := text.LCDFilter{Weights: [5]float32{0.1, 0.2, 0.4, 0.2, 0.1}}
 	engine.SetLCDFilter(custom)
+	if entries := glyphMaskAtlasEntryCount(engine); entries != 0 {
+		t.Fatalf("changed filter retained atlas: entries = %d, want 0", entries)
+	}
+}
+
+func glyphMaskAtlasEntryCount(engine *GlyphMaskEngine) int {
+	hits, misses, entries, pages := engine.Atlas().Stats()
+	_ = hits
+	_ = misses
+	_ = pages
+	return entries
 }
 
 func TestSelectGlyphMaskHinting(t *testing.T) {

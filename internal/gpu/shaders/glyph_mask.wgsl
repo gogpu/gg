@@ -3,13 +3,10 @@
 // Renders CPU-rasterized glyph alpha masks as textured quads. The atlas
 // stores R8 (single-channel) coverage data produced by AnalyticFiller.
 //
-// The fragment shader outputs premultiplied alpha.
-// Color is passed via uniform buffer (per-batch) in STRAIGHT alpha:
-//   color.rgb = original RGB (not pre-multiplied)
-//   color.a   = alpha
-// The shader computes: out.rgb = color.rgb * (coverage * color.a)
-//                      out.a   = coverage * color.a
-// This produces correct premultiplied output.
+// The fragment shader outputs premultiplied alpha. Color is passed via the
+// uniform buffer already premultiplied by the CPU. The shader temporarily
+// recovers straight RGB for alpha-independent mask-gamma luminance, then
+// scales the premultiplied color by coverage exactly once.
 //
 // Mask gamma correction (Skia SkMaskGamma pattern):
 //   Light text on dark backgrounds appears perceptually thinner because
@@ -116,10 +113,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let raw_alpha = textureSample(atlas_texture, atlas_sampler, in.tex_coord).r;
     let clip_cov = rrect_clip_coverage(in.position.xy);
     let color = uniforms.color;
-
-    // Apply mask gamma correction: boost coverage for light text on dark bg.
-    let alpha = apply_mask_gamma(raw_alpha, color.rgb);
-
-    let a = alpha * color.a * clip_cov;
-    return vec4<f32>(color.rgb * a, a);
+    // Mask gamma depends on the source hue/luminance, not its opacity. Recover
+    // straight RGB safely so translucent light text is not treated as dark.
+    var straight_rgb = vec3<f32>(0.0);
+    if color.a > 0.0 {
+        straight_rgb = color.rgb / color.a;
+    }
+    let alpha = apply_mask_gamma(raw_alpha, straight_rgb);
+    // The CPU supplied color is already premultiplied. Coverage scales its
+    // premultiplied RGB and alpha once; multiplying RGB by color.a here would
+    // introduce alpha-squared darkening.
+    let coverage = alpha * clip_cov;
+    return vec4<f32>(color.rgb * coverage, color.a * coverage);
 }
