@@ -103,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `gogpu/gogpu` v0.48.0 → v0.48.3, `gogpu/naga` v0.17.16 → v0.18.0,
+- Updated `gogpu/gogpu` v0.48.0 → v0.48.4, `gogpu/naga` v0.17.16 → v0.18.0,
   `gogpu/wgpu` v0.30.32 → v0.30.34, `gogpu/gpucontext` v0.24.0.
 
 ## [0.50.10] - 2026-07-30
