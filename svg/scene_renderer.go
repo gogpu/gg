@@ -24,6 +24,8 @@ func (d *Document) renderToSceneInternal(
 	root := gg.Translate(float64(x), float64(y)).
 		Multiply(gg.Scale(float64(width)/d.ViewBox.Width, float64(height)/d.ViewBox.Height)).
 		Multiply(gg.Translate(-d.ViewBox.MinX, -d.ViewBox.MinY))
+	outer := matrixFromSceneAffine(target.Transform())
+	outerScale := uniformAxisScale(outer)
 	var override color.Color
 	if overrideColor == nil {
 		override = nil
@@ -35,10 +37,10 @@ func (d *Document) renderToSceneInternal(
 		parentFill:    d.RootFill,
 		opacity:       1,
 		matrix:        root,
-		strokeHinting: math.Max(float64(width), float64(height)) <= strokeHintMaxCanvasSize &&
-			!strokeHintingDisabled(),
-		scaleX: float64(width) / d.ViewBox.Width,
-		scaleY: float64(height) / d.ViewBox.Height,
+		targetWidth:   float64(width) * outerScale,
+		targetHeight:  float64(height) * outerScale,
+		deviceScale:   1,
+		outerMatrix:   outer,
 	}
 	renderSceneElements(target, d.Elements, state)
 }
@@ -138,6 +140,7 @@ func renderSceneGeometry(
 	allowFill bool,
 ) {
 	complete := state.matrix.Multiply(elementTransformMatrix(attrs))
+	hintComplete := state.outerMatrix.Multiply(complete)
 	style := resolveStyle(attrs, state)
 	if !allowFill {
 		style.fill.present = false
@@ -155,10 +158,8 @@ func renderSceneGeometry(
 		target.Fill(fillRule, transform, scene.SolidBrush(style.fill.color), fillShape)
 	}
 	if style.stroke.present {
-		strokePath := path
-		if shouldHintStroke(attrs, state) {
-			strokePath = hintSVGPath(path, state.scaleX, state.scaleY)
-		}
+		policy := newStrokeHintPolicy(state.targetWidth, state.targetHeight, state.deviceScale, hintComplete)
+		strokePath := hintStrokePath(path, policy, style.stroke.width)
 		strokeShape := native
 		if strokeShape == nil || strokePath != path {
 			strokeShape = scene.NewGGPathShape(strokePath)
@@ -200,4 +201,19 @@ func sceneLineJoin(join gg.LineJoin) scene.LineJoin {
 func parseSVGTransformAffine(value string) (scene.Affine, error) {
 	matrix, err := transformMatrix(value)
 	return scene.AffineFromMatrix(matrix), err
+}
+
+func matrixFromSceneAffine(a scene.Affine) gg.Matrix {
+	return gg.Matrix{
+		A: float64(a.A), B: float64(a.B), C: float64(a.C),
+		D: float64(a.D), E: float64(a.E), F: float64(a.F),
+	}
+}
+
+func uniformAxisScale(matrix gg.Matrix) float64 {
+	sx, sy := math.Abs(matrix.A), math.Abs(matrix.E)
+	if matrix.B == 0 && matrix.D == 0 && sx > 0 && sx == sy {
+		return sx
+	}
+	return 1
 }

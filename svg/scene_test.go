@@ -154,6 +154,62 @@ func TestRenderToSceneDeterministic(t *testing.T) {
 	}
 }
 
+func TestRenderToSceneHintUsesIndependentStrokePath(t *testing.T) {
+	doc, err := Parse([]byte(`<svg viewBox="0 0 16 16"><path d="M2 4 L14 4" fill="red" stroke="black" stroke-width="1"/></svg>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := scene.NewScene()
+	doc.RenderToScene(s, 0, 0, 16, 16)
+
+	var lineYs []float32
+	dec := scene.NewDecoder(s.Encoding())
+	for dec.Next() {
+		switch dec.Tag() {
+		case scene.TagMoveTo:
+			_, _ = dec.MoveTo()
+		case scene.TagLineTo:
+			_, y := dec.LineTo()
+			lineYs = append(lineYs, y)
+		case scene.TagFill:
+			_, _ = dec.Fill()
+		case scene.TagStroke:
+			_, _ = dec.Stroke()
+		}
+	}
+	if !reflect.DeepEqual(lineYs, []float32{4, 4.5}) {
+		t.Fatalf("fill/stroke line centers=%v, want original 4 then hinted 4.5", lineYs)
+	}
+}
+
+func TestRenderToSceneHintIncludesExistingSceneTransform(t *testing.T) {
+	doc, err := Parse([]byte(`<svg viewBox="0 0 16 16"><path d="M2 4 L14 4" fill="none" stroke="black"/></svg>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := scene.NewScene()
+	s.SetTransform(scene.RotateAffine(.2))
+	doc.RenderToScene(s, 0, 0, 16, 16)
+
+	dec := scene.NewDecoder(s.Encoding())
+	var lineY float32
+	for dec.Next() {
+		switch dec.Tag() {
+		case scene.TagTransform:
+			_ = dec.Transform()
+		case scene.TagMoveTo:
+			_, _ = dec.MoveTo()
+		case scene.TagLineTo:
+			_, lineY = dec.LineTo()
+		case scene.TagStroke:
+			_, _ = dec.Stroke()
+		}
+	}
+	if lineY != 4 {
+		t.Fatalf("rotated Scene stroke was hinted to y=%g, want unchanged 4", lineY)
+	}
+}
+
 func TestRenderToSceneImmediateParity(t *testing.T) {
 	doc, err := Parse([]byte(`<svg viewBox="0 0 16 16"><path fill="#3979c3" fill-opacity=".7" d="M2 2h12v5H9v7H2z"/></svg>`))
 	if err != nil {

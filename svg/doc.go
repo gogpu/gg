@@ -40,6 +40,7 @@
 //	s := scene.NewScene()
 //	doc.RenderToScene(s, 0, 0, 24, 24)
 //
-// RenderToScene keeps geometry vector-based so the Scene renderer resolves it
-// at the final display resolution.
+// RenderToScene keeps geometry vector-based. For targets no larger than 32
+// physical pixels it conservatively aligns thin horizontal and vertical stroke
+// centers when the complete transform is translation plus uniform axis scale.
 package svg
