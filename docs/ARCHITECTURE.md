@@ -423,10 +423,11 @@ gg/
 ├── raster/                 # PUBLIC opt-in: tile rasterizer only (no GPU)
 │   └── raster.go           # init() registers AdaptiveFiller (CPU-only)
 │
-├── svg/                    # SVG renderer (Parse + Render SVG XML → image.RGBA)
+├── svg/                    # SVG renderer (immediate Context or retained Scene vectors)
 │   ├── svg.go              # Public API: Parse, Render, RenderWithColor
 │   ├── parser.go           # SVG XML parser → Document tree
-│   ├── renderer.go         # Element rendering via gg.Context
+│   ├── renderer.go         # Shared geometry/transform/style resolution
+│   ├── scene_renderer.go   # Document.RenderToScene retained Fill/Stroke lowering
 │   ├── colors.go           # SVG color parsing (#hex, rgb(), named)
 │   ├── transform.go        # SVG transform parsing (translate, rotate, scale)
 │   └── document.go         # Document, Element types
