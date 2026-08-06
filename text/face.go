@@ -84,36 +84,77 @@ func (f *sourceFace) Metrics() Metrics {
 	}
 }
 
-// Advance implements Face.Advance.
-func (f *sourceFace) Advance(text string) float64 {
-	parsed := f.source.Parsed()
-	totalAdvance := 0.0
+// advanceResolver is the single source of truth for glyph advances.
+//
+// All Face methods (Advance, Glyphs, AppendGlyphs) use this to ensure
+// measurement matches rendering. Priority: TT hinted > HVAR > raw hmtx.
+// This matches drawGlyphs' hintedOrRawAdvance() and Skia's SkFont pattern
+// where a single hinting flag controls all metric sources (#479).
+type advanceResolver struct {
+	parsed     ParsedFont
+	varProv    VariableAdvanceProvider
+	ttCache    *ttHintCache
+	variations []FontVariation
+	size       float64
+}
 
-	// Check for variable advance provider (HVAR) when variations are set.
-	var varProvider VariableAdvanceProvider
+func newAdvanceResolver(f *sourceFace) advanceResolver {
+	parsed := f.source.Parsed()
+
+	var varProv VariableAdvanceProvider
 	if len(f.config.variations) > 0 {
-		varProvider, _ = parsed.(VariableAdvanceProvider)
+		varProv, _ = parsed.(VariableAdvanceProvider)
 	}
 
+	var ttCache *ttHintCache
+	if f.config.hinting != HintingNone {
+		if ownFont, ok := parsed.(*ownParsedFont); ok {
+			ttCache = ownFont.loadTTHintCache()
+		}
+	}
+
+	return advanceResolver{
+		parsed:     parsed,
+		varProv:    varProv,
+		ttCache:    ttCache,
+		variations: f.config.variations,
+		size:       f.size,
+	}
+}
+
+// advance returns the advance for gid from the single source of truth.
+func (ar *advanceResolver) advance(gid uint16) float64 {
+	if ar.ttCache != nil {
+		if adv, ok := ar.ttCache.hintedAdvanceWidth(gid, int32(ar.size)); ok {
+			return adv
+		}
+	}
+	if ar.varProv != nil {
+		return ar.varProv.GlyphAdvanceVar(gid, ar.size, ar.variations)
+	}
+	return ar.parsed.GlyphAdvance(gid, ar.size)
+}
+
+// Advance implements Face.Advance.
+//
+// Uses the single source of truth for advances: TT hinted when bytecode
+// hinting is active, HVAR when variable, raw hmtx otherwise.
+// Matches drawGlyphs positioning to prevent cursor drift (#479).
+func (f *sourceFace) Advance(text string) float64 {
+	ar := newAdvanceResolver(f)
+	total := 0.0
 	for _, r := range text {
 		if r < 0x20 && r != '\t' {
 			continue
 		}
-		var advance float64
 		if r == '\t' {
-			_, advance = tabAdvance(parsed, f.size)
+			_, adv := tabAdvance(ar.parsed, f.size)
+			total += adv
 		} else {
-			gid := parsed.GlyphIndex(r)
-			if varProvider != nil {
-				advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
-			} else {
-				advance = parsed.GlyphAdvance(gid, f.size)
-			}
+			total += ar.advance(ar.parsed.GlyphIndex(r))
 		}
-		totalAdvance += advance
 	}
-
-	return totalAdvance
+	return total
 }
 
 // HasGlyph implements Face.HasGlyph.
@@ -124,41 +165,32 @@ func (f *sourceFace) HasGlyph(r rune) bool {
 }
 
 // Glyphs implements Face.Glyphs.
+//
+// Advances come from the single source of truth (advanceResolver):
+// TT hinted when hinting active, HVAR when variable, raw otherwise.
+// Matches Advance() and drawGlyphs positioning (#479, Skia pattern).
 func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 	return func(yield func(Glyph) bool) {
-		parsed := f.source.Parsed()
+		ar := newAdvanceResolver(f)
 		x := 0.0
 		byteIndex := 0
 
-		// Check for variable advance provider (HVAR) when variations are set.
-		var varProvider VariableAdvanceProvider
-		if len(f.config.variations) > 0 {
-			varProvider, _ = parsed.(VariableAdvanceProvider)
-		}
-
 		for i, r := range text {
-			// Skip non-tab control characters.
 			if r < 0x20 && r != '\t' {
 				byteIndex += utf8.RuneLen(r)
 				continue
 			}
 
 			var gid uint16
-			var advance float64
+			var adv float64
 			var bounds Rect
 
 			if r == '\t' {
-				// Tab: use space GID (empty outline) with tab-stop advance.
-				gid, advance = tabAdvance(parsed, f.size)
-				// Space bounds are empty — no visual rendering.
+				gid, adv = tabAdvance(ar.parsed, f.size)
 			} else {
-				gid = parsed.GlyphIndex(r)
-				if varProvider != nil {
-					advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
-				} else {
-					advance = parsed.GlyphAdvance(gid, f.size)
-				}
-				bounds = parsed.GlyphBounds(gid, f.size)
+				gid = ar.parsed.GlyphIndex(r)
+				adv = ar.advance(gid)
+				bounds = ar.parsed.GlyphBounds(gid, f.size)
 			}
 
 			glyph := Glyph{
@@ -168,7 +200,7 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 				Y:       0,
 				OriginX: x,
 				OriginY: 0,
-				Advance: advance,
+				Advance: adv,
 				Bounds:  bounds,
 				Index:   byteIndex,
 				Cluster: i,
@@ -178,7 +210,7 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 				return
 			}
 
-			x += advance
+			x += adv
 			byteIndex += utf8.RuneLen(r)
 		}
 	}
@@ -186,37 +218,26 @@ func (f *sourceFace) Glyphs(text string) iter.Seq[Glyph] {
 
 // AppendGlyphs implements Face.AppendGlyphs.
 func (f *sourceFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
-	parsed := f.source.Parsed()
+	ar := newAdvanceResolver(f)
 	x := 0.0
 	byteIndex := 0
 
-	// Check for variable advance provider (HVAR) when variations are set.
-	var varProvider VariableAdvanceProvider
-	if len(f.config.variations) > 0 {
-		varProvider, _ = parsed.(VariableAdvanceProvider)
-	}
-
 	for i, r := range text {
-		// Skip non-tab control characters.
 		if r < 0x20 && r != '\t' {
 			byteIndex += utf8.RuneLen(r)
 			continue
 		}
 
 		var gid uint16
-		var advance float64
+		var adv float64
 		var bounds Rect
 
 		if r == '\t' {
-			gid, advance = tabAdvance(parsed, f.size)
+			gid, adv = tabAdvance(ar.parsed, f.size)
 		} else {
-			gid = parsed.GlyphIndex(r)
-			if varProvider != nil {
-				advance = varProvider.GlyphAdvanceVar(gid, f.size, f.config.variations)
-			} else {
-				advance = parsed.GlyphAdvance(gid, f.size)
-			}
-			bounds = parsed.GlyphBounds(gid, f.size)
+			gid = ar.parsed.GlyphIndex(r)
+			adv = ar.advance(gid)
+			bounds = ar.parsed.GlyphBounds(gid, f.size)
 		}
 
 		glyph := Glyph{
@@ -226,14 +247,14 @@ func (f *sourceFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
 			Y:       0,
 			OriginX: x,
 			OriginY: 0,
-			Advance: advance,
+			Advance: adv,
 			Bounds:  bounds,
 			Index:   byteIndex,
 			Cluster: i,
 		}
 
 		dst = append(dst, glyph)
-		x += advance
+		x += adv
 		byteIndex += utf8.RuneLen(r)
 	}
 
