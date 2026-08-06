@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.12] - 2026-08-06
+
+### Fixed
+
+- **MSDF `GetBatch` lock contention** ([#431](https://github.com/gogpu/gg/issues/431)) —
+  `AtlasManager.GetBatch` held write lock during entire MSDF generation phase
+  (440ms for 95 glyphs). Now matches `Get()`'s lock discipline: generate MSDFs
+  outside any lock, acquire write lock only for fast atlas insertion. ~7× faster
+  for cache-miss workloads.
+
+- **Variable font shear test AA sensitivity** — `TestADR054_ShearVariableFont_BoldVsRegular`
+  failed locally with GPU CoverageFiller (SparseStrips) at 40px because AA fringe
+  dominated pixel count. Increased to 80px where glyph body dominates.
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.34 → v0.30.36 (Vulkan multi-submit present semaphore
+  fix, ADR-058).
+- Updated `gogpu/gogpu` v0.48.4 → v0.50.0 (outgoing drag-and-drop, Win32 OLE).
+- Removed `scripts/` directory (pre-release-check.sh replaced by standard
+  `go test` + `golangci-lint`).
+
 ## [0.50.11] - 2026-08-02
 
 ### Added
