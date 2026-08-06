@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.13] - 2026-08-06
+
+### Fixed
+
+- **MeasureString/DrawString advance mismatch** ([#479](https://github.com/gogpu/gg/issues/479)) —
+  `Face.Advance()` returned raw unhinted advances while `drawGlyphs` used TT-hinted
+  advances, causing cursor drift on wide Cyrillic glyphs (ш, щ, ж). Introduced
+  `advanceResolver` as single source of truth: `Advance()`, `Glyphs()`, and
+  `AppendGlyphs()` now all use the same advance (hinted when TT bytecode active,
+  HVAR when variable, raw otherwise). Matches Skia/Chrome enterprise pattern.
+
 ## [0.50.12] - 2026-08-06
 
 ### Fixed

@@ -100,12 +100,12 @@ func TestRegression_VariableFontShear_LettersOverlap(t *testing.T) {
 }
 
 // TestVariableFont_ShaperAdvance_MatchesHVAR verifies that shaped glyph
-// advances match HVAR-adjusted Face.Advance for variable fonts.
-// This is the core invariant: shaper advances == Face advances.
+// advances match HVAR-adjusted Face.Advance for variable fonts when hinting
+// is disabled. HarfBuzz/go-text shapers operate in design space (unhinted),
+// so the comparison is valid only with HintingNone.
 //
-// ROOT CAUSE of tsl0922 regression: OwnShaper uses hmtx-only advances,
-// Face.Advance uses HVAR. At wght=700 the difference is ~1-2px per glyph,
-// causing letters to overlap under shear (vector outline path).
+// With hinting active, Face.Advance returns TT-hinted advances (matching
+// drawGlyphs CPU bitmap path), which intentionally differ from shaper output.
 func TestVariableFont_ShaperAdvance_MatchesHVAR(t *testing.T) {
 	// Use NotoSansSC if available (known HVAR font with weight-dependent advances)
 	fontPath := "tmp/tsl0922_fonts/NotoSansSC-VariableFont_wght.ttf"
@@ -126,11 +126,13 @@ func TestVariableFont_ShaperAdvance_MatchesHVAR(t *testing.T) {
 		t.Skip("Font is not variable")
 	}
 
+	// HintingNone: Face.Advance returns HVAR advances (design space),
+	// matching what HarfBuzz/go-text shapers produce.
 	boldFace := source.Face(36, text.WithVariations(
 		text.NewFontVariation("wght", 700),
-	))
+	), text.WithHinting(text.HintingNone))
 
-	// Face.Advance uses HVAR — correct bold advances.
+	// Face.Advance with HintingNone uses HVAR — matches shaper.
 	faceAdvR := boldFace.Advance("r")
 	faceAdvL := boldFace.Advance("l")
 
