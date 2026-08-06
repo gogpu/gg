@@ -14,7 +14,7 @@ Thank you for your interest in contributing to **gg** — the enterprise-grade 2
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/gg`
 3. Create a branch: `git checkout -b feat/your-feature`
 4. Make your changes
-5. Run pre-release check: `bash scripts/pre-release-check.sh`
+5. Run checks: `go test ./... && golangci-lint run --timeout=5m`
 6. Commit: `git commit -m "feat(component): add your feature"`
 7. Push: `git push origin feat/your-feature`
 8. Open a Pull Request
@@ -40,9 +40,6 @@ golangci-lint run --timeout=5m
 
 # Format code
 go fmt ./...
-
-# Run pre-release validation (recommended before PR)
-bash scripts/pre-release-check.sh
 
 # Run examples
 go run ./examples/basic/
@@ -135,9 +132,8 @@ test(path): add iterator edge case tests
 
 ### Before Opening a PR
 
-1. **Run pre-release check:** `bash scripts/pre-release-check.sh`
-2. **Ensure all tests pass:** `go test -race ./...`
-3. **Check linter:** `golangci-lint run --timeout=5m`
+1. **Ensure all tests pass:** `go test -race ./...`
+2. **Check linter:** `golangci-lint run --timeout=5m`
 4. **Format code:** `go fmt ./...`
 5. **Update documentation** if adding/changing public APIs
 
