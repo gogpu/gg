@@ -375,55 +375,59 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 		return results, nil
 	}
 
-	// Second pass: generate missing entries (write lock)
+	// Second pass: generate MSDFs OUTSIDE the lock (expensive, parallelizable).
+	// This matches Get()'s lock discipline — generate without holding any lock,
+	// then acquire write lock only for the fast atlas insertion step.
+	type generatedMSDF struct {
+		idx  int
+		msdf *MSDF
+	}
+	generated := make([]generatedMSDF, 0, len(missing))
+
+	for _, idx := range missing {
+		m.misses.Add(1)
+		msdf, err := m.generator.Generate(outlines[idx])
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate MSDF for key %v: %w", keys[idx], err)
+		}
+		msdf = MedianFilter(msdf)
+		ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
+		generated = append(generated, generatedMSDF{idx: idx, msdf: msdf})
+	}
+
+	// Third pass: insert into atlas under write lock (fast — no generation).
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for _, idx := range missing {
-		key := keys[idx]
+	for _, g := range generated {
+		key := keys[g.idx]
 
-		// Double-check after acquiring write lock
+		// Double-check: another goroutine may have generated the same glyph
+		// while we were generating ours (same pattern as Get()).
 		if region, ok := m.lookup[key]; ok {
-			results[idx] = region
+			results[g.idx] = region
 			continue
 		}
 
-		m.misses.Add(1)
-
-		// Generate MSDF
-		msdf, err := m.generator.Generate(outlines[idx])
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate MSDF for key %v: %w", key, err)
-		}
-
-		// Apply median filter + error correction (see single-glyph Get for rationale).
-		msdf = MedianFilter(msdf)
-		ErrorCorrection(msdf, msdfErrorCorrectionThreshold)
-
-		// Find or create atlas with space
 		atlas, err := m.findOrCreateAtlas()
 		if err != nil {
 			return nil, err
 		}
 
-		// Allocate cell in atlas
 		x, y, ok := atlas.allocator.Allocate()
 		if !ok {
 			return nil, ErrAllocationFailed
 		}
 
-		// Copy MSDF data to atlas
-		atlas.copyMSDF(msdf, x, y)
+		atlas.copyMSDF(g.msdf, x, y)
 
-		// Compute planeBounds: cell extent in outline reference coordinates.
-		planeMinX, planeMinY := msdf.PixelToOutline(0, 0)
-		planeMaxX, planeMaxY := msdf.PixelToOutline(float64(msdf.Width), float64(msdf.Height))
+		planeMinX, planeMinY := g.msdf.PixelToOutline(0, 0)
+		planeMaxX, planeMaxY := g.msdf.PixelToOutline(float64(g.msdf.Width), float64(g.msdf.Height))
 
-		// Half-pixel UV inset + corresponding planeBounds inset.
 		glyphSize := m.config.GlyphSize
 		atlasSize := float32(m.config.Size)
 		halfTexel := float32(0.5) / atlasSize
-		halfPixelInOutline := 0.5 / msdf.Scale
+		halfPixelInOutline := 0.5 / g.msdf.Scale
 
 		region := Region{
 			AtlasIndex: atlas.index,
@@ -441,10 +445,9 @@ func (m *AtlasManager) GetBatch(keys []GlyphKey, outlines []*text.GlyphOutline) 
 			PlaneMaxY:  float32(planeMaxY - halfPixelInOutline),
 		}
 
-		// Store in lookup
 		m.lookup[key] = region
 		atlas.regions[key] = region
-		results[idx] = region
+		results[g.idx] = region
 	}
 
 	return results, nil
