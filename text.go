@@ -449,26 +449,6 @@ func (c *Context) MeasureString(s string) (w, h float64) {
 	return text.Measure(s, c.face)
 }
 
-// LoadFontFace loads a font from a file and sets it as the current font.
-// The size is specified in points. This is a convenience method equivalent to:
-//
-//	source, err := text.NewFontSourceFromFile(path)
-//	if err != nil {
-//	    return err
-//	}
-//	dc.SetFont(source.Face(points))
-//
-// For advanced usage (variable fonts, OpenType features, font reuse across
-// contexts), use [text.NewFontSourceFromFile] and [Context.SetFont] directly.
-func (c *Context) LoadFontFace(path string, points float64) error {
-	source, err := text.NewFontSourceFromFile(path)
-	if err != nil {
-		return err
-	}
-	c.face = source.Face(points)
-	return nil
-}
-
 // WordWrap wraps text to fit within the given width using word boundaries.
 // Returns a slice of strings, one per wrapped line.
 // If no font face is set, returns the input string as a single-element slice.

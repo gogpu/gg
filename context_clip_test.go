@@ -2,6 +2,8 @@ package gg
 
 import (
 	"testing"
+
+	"github.com/gogpu/gg/text"
 )
 
 func TestClip(t *testing.T) {
@@ -441,9 +443,11 @@ func TestClipRectTextNoRegression(t *testing.T) {
 	dc := NewContext(200, 50)
 	dc.ClearWithColor(White)
 
-	if err := dc.LoadFontFace(fontPath, 16.0); err != nil {
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
+	dc.SetFont(fontSrc.Face(16.0))
 
 	dc.SetRGB(0, 0, 0)
 	dc.DrawString("Hello", 10, 30)
