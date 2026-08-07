@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.14] - 2026-08-07
+
+### Changed
+
+- Updated `gogpu/wgpu` v0.30.36 → v0.30.37, `gogpu/gogpu` v0.50.0 → v0.50.2.
+- Removed deprecated `Context.LoadFontFace()`. Use `text.NewFontSourceFromFile()`
+  + `dc.SetFont(source.Face(size))` instead.
+
 ## [0.50.13] - 2026-08-06
 
 ### Fixed

@@ -40,7 +40,11 @@ func TestTextIntegration(t *testing.T) {
 	dc.Clear()
 
 	// Load font
-	err := dc.LoadFontFace(fontPath, 24.0)
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	dc.SetFont(fontSrc.Face(24.0))
 	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
