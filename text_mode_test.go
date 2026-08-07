@@ -3,6 +3,8 @@ package gg
 import (
 	"os"
 	"testing"
+
+	"github.com/gogpu/gg/text"
 )
 
 func TestTextModeDefault(t *testing.T) {
@@ -103,9 +105,11 @@ func TestTextModeBitmapSkipsGPU(t *testing.T) {
 	dc.SetRGB(1, 1, 1)
 	dc.Clear()
 
-	if err := dc.LoadFontFace(fontPath, 16.0); err != nil {
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
+	dc.SetFont(fontSrc.Face(16.0))
 
 	dc.SetRGB(0, 0, 0)
 	dc.SetTextMode(TextModeBitmap)
@@ -142,9 +146,11 @@ func TestTextModeMSDFTriesGPU(t *testing.T) {
 	dc.SetRGB(1, 1, 1)
 	dc.Clear()
 
-	if err := dc.LoadFontFace(fontPath, 16.0); err != nil {
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
+	dc.SetFont(fontSrc.Face(16.0))
 
 	dc.SetRGB(0, 0, 0)
 	dc.SetTextMode(TextModeMSDF)
@@ -183,9 +189,11 @@ func TestTextModeVectorUsesOutlines(t *testing.T) {
 	dc.SetRGB(1, 1, 1)
 	dc.Clear()
 
-	if err := dc.LoadFontFace(fontPath, 16.0); err != nil {
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
+	dc.SetFont(fontSrc.Face(16.0))
 
 	dc.SetRGB(0, 0, 0)
 	dc.SetTextMode(TextModeVector)
@@ -224,9 +232,11 @@ func TestTextModeAutoPreservesBehavior(t *testing.T) {
 	dc.SetRGB(1, 1, 1)
 	dc.Clear()
 
-	if err := dc.LoadFontFace(fontPath, 16.0); err != nil {
+	fontSrc, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
 		t.Fatalf("Failed to load font: %v", err)
 	}
+	dc.SetFont(fontSrc.Face(16.0))
 
 	dc.SetRGB(0, 0, 0)
 	// TextModeAuto is the default, no SetTextMode needed.
