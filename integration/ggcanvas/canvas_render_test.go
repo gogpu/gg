@@ -25,8 +25,7 @@ type renderMockPixelWriter struct {
 	writtenH       uint32
 	writeCallCount int
 	writeErr       error
-	damageRects    []image.Rectangle
-	damageSetCount int
+	reporter       *mockDamageReporter
 }
 
 func (m *renderMockPixelWriter) SurfaceView() gpucontext.TextureView { return gpucontext.TextureView{} }
@@ -44,9 +43,11 @@ func (m *renderMockPixelWriter) WriteSurfacePixels(data []byte, width, height ui
 	m.writeCallCount++
 	return m.writeErr
 }
-func (m *renderMockPixelWriter) SetDamageRects(rects []image.Rectangle) {
-	m.damageRects = rects
-	m.damageSetCount++
+
+// RegisterDamageSource satisfies the damageSourceRegistrar interface.
+func (m *renderMockPixelWriter) RegisterDamageSource(_ string) gpucontext.DamageReporter {
+	m.reporter = &mockDamageReporter{}
+	return m.reporter
 }
 
 // TextureCreator returns a mock renderer so promoteIfPending can create a real texture.
@@ -377,7 +378,7 @@ func TestRender_UniversalPath(t *testing.T) {
 }
 
 // TestRender_DamageRectsForwardedOnPixelUpload verifies that damage rects ARE
-// forwarded to the render target before WriteSurfacePixels for partial blit
+// forwarded to the damage reporter before WriteSurfacePixels for partial blit
 // optimization. WritePixels writes full pixmap to DIB, blitDamageRectsToWindow
 // BitBlts only changed areas.
 func TestRender_DamageRectsForwardedOnPixelUpload(t *testing.T) {
@@ -400,8 +401,11 @@ func TestRender_DamageRectsForwardedOnPixelUpload(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 
-	// Damage rects forwarded for partial blit optimization.
-	if dc.damageSetCount == 0 {
-		t.Error("SetDamageRects not called — damage rects should be forwarded for partial blit")
+	// Render registers damage source on first call, then reports damage.
+	if dc.reporter == nil {
+		t.Fatal("RegisterDamageSource should have been called")
+	}
+	if dc.reporter.reportCount == 0 {
+		t.Error("ReportDamage not called — damage rects should be forwarded for partial blit")
 	}
 }
