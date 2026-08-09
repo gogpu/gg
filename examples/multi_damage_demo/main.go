@@ -6,7 +6,7 @@
 //
 // Run with debug overlay to see damage rects:
 //
-//	GOGPU_DEBUG_DAMAGE=1 go run ./examples/multi_damage_demo
+//	GOGPU_DEBUG_DAMAGE=overlay go run ./examples/multi_damage_demo
 //
 // Expected: two green flash regions at opposite corners, NOT a diagonal stripe.
 package main
@@ -147,7 +147,7 @@ func drawBackground(cc *gg.Context, w, h int) {
 	cc.SetRGBA(1, 1, 1, 0.3)
 	cc.DrawStringAnchored("Multi-Rect Damage Demo (ADR-028)", float64(w)/2, float64(h)/2-20, 0.5, 0.5)
 	cc.DrawStringAnchored("Two animated regions at opposite corners", float64(w)/2, float64(h)/2+5, 0.5, 0.5)
-	cc.DrawStringAnchored("With GOGPU_DEBUG_DAMAGE=1: only two green squares, not diagonal", float64(w)/2, float64(h)/2+25, 0.5, 0.5)
+	cc.DrawStringAnchored("With GOGPU_DEBUG_DAMAGE=overlay: only two green squares, not diagonal", float64(w)/2, float64(h)/2+25, 0.5, 0.5)
 }
 
 func drawTopLeftSpinner(cc *gg.Context, t float64) {

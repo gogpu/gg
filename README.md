@@ -46,7 +46,7 @@
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, **retained scene lowering** (`RenderToScene` — resolution-independent vector icons via scene graph), **thin stroke hinting** (pixel-grid snapping for crisp small icons), SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
 | **Vector Export** | Recording system with PDF and SVG backends |
 | **Rasterizer** | Smart per-path algorithm selection (scanline, 4×4 tiles, 16×16 tiles, SDF, compute), text-aware area-based routing |
-| **Performance** | Tile-based parallel rendering, LRU caching, four-level damage pipeline (ADR-021: object diff → tile dirty → GPU scissor → OS present), **text batch coalescing** (ADR-031: same-style DrawString calls merge into 1 GPU draw call, Skia TextBlob pattern), **zero-copy buffer reuse** (NewPixmapFromBuffer + ImageView for hot rendering loops), incremental Path.Bounds (Skia pattern), `GOGPU_DEBUG_DAMAGE=1` overlay |
+| **Performance** | Tile-based parallel rendering, LRU caching, four-level damage pipeline (ADR-021: object diff → tile dirty → GPU scissor → OS present), **text batch coalescing** (ADR-031: same-style DrawString calls merge into 1 GPU draw call, Skia TextBlob pattern), **zero-copy buffer reuse** (NewPixmapFromBuffer + ImageView for hot rendering loops), incremental Path.Bounds (Skia pattern), `GOGPU_DEBUG_DAMAGE=overlay` overlay |
 
 ---
 
@@ -589,7 +589,7 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 Visualize which regions are repainted each frame:
 
 ```bash
-GOGPU_DEBUG_DAMAGE=1 go run ./examples/gogpu_integration
+GOGPU_DEBUG_DAMAGE=overlay go run ./examples/gogpu_integration
 ```
 
 Green flash-and-fade overlay shows damaged (repainted) regions. Useful for verifying that damage tracking works correctly and only dirty areas are repainted.
