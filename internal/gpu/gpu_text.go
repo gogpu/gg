@@ -119,6 +119,9 @@ func (e *GPUTextEngine) LayoutText(
 		logicalSize = 16 // fallback: never zero
 	}
 	fontSource := face.Source()
+	if fontSource == nil {
+		return TextBatch{}, fmt.Errorf("MSDF text: face has no FontSource (MultiFace requires ADR-065)")
+	}
 	fontID := computeFontID(fontSource)
 
 	// ADR-054: pass variations for variable font gvar deltas.
