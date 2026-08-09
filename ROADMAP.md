@@ -171,7 +171,7 @@
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
 - [x] Rect clips → hardware scissor in GPUSceneRenderer
 - [x] SetDamageTracking API (ADR-021)
-- [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=1)
+- [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=overlay)
 - [x] Scene Append layer-aware encoding
 - [x] TagStroke LineCap/LineJoin/MiterLimit fix
 - [x] Software backend softwareMode flag (lazy GPU init)
