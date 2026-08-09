@@ -123,14 +123,22 @@ func newAdvanceResolver(f *sourceFace) advanceResolver {
 }
 
 // advance returns the advance for gid from the single source of truth.
+// advance returns the advance for gid from the single source of truth.
+//
+// Priority matches FreeType ttgload.c:964-977:
+//   - Variable fonts: HVAR > raw (TT hint cache has no gvar deltas)
+//   - Static fonts: TT hinted > raw
 func (ar *advanceResolver) advance(gid uint16) float64 {
+	if ar.varProv != nil {
+		// Variable font: HVAR takes priority. TT hint cache uses default-weight
+		// phantom points (no gvar deltas) — wrong for non-default instances.
+		return ar.varProv.GlyphAdvanceVar(gid, ar.size, ar.variations)
+	}
 	if ar.ttCache != nil {
+		// Static font: TT-hinted advance matches drawGlyphs positioning.
 		if adv, ok := ar.ttCache.hintedAdvanceWidth(gid, int32(ar.size)); ok {
 			return adv
 		}
-	}
-	if ar.varProv != nil {
-		return ar.varProv.GlyphAdvanceVar(gid, ar.size, ar.variations)
 	}
 	return ar.parsed.GlyphAdvance(gid, ar.size)
 }
