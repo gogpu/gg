@@ -124,6 +124,12 @@ func (e *GlyphMaskEngine) LayoutText(
 		fontSize = face.Size()
 	}
 	fontSource := face.Source()
+	if fontSource == nil {
+		// MultiFace or other composite face — no single FontSource.
+		// Full per-font-run support: ADR-065. For now, signal caller to
+		// fall back to CPU path which handles MultiFace correctly.
+		return GlyphMaskBatch{}, fmt.Errorf("glyph mask: face has no FontSource (MultiFace requires ADR-065)")
+	}
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 
@@ -182,6 +188,9 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 		fontSize = face.Size()
 	}
 	fontSource := face.Source()
+	if fontSource == nil {
+		return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: face has no FontSource (MultiFace requires ADR-065)")
+	}
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 
@@ -237,6 +246,9 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 		fontSize = face.Size()
 	}
 	fontSource := face.Source()
+	if fontSource == nil {
+		return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: face has no FontSource (MultiFace requires ADR-065)")
+	}
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)

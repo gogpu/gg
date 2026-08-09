@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.15] - 2026-08-09
+
+### Fixed
+
+- **Variable font advance priority — HVAR before TT hints** ([#405](https://github.com/gogpu/gg/issues/405)) —
+  v0.50.14 regression: `advanceResolver` prioritized TT-hinted advances over HVAR for
+  variable fonts. TT hint cache uses default-weight phantom points (no gvar deltas),
+  producing wrong advances at non-default instances (e.g. wght=700 → letters overlap
+  under shear). Fixed priority matches FreeType `ttgload.c:964-977`: variable fonts
+  use HVAR, static fonts use TT hinted.
+
+- **MultiFace nil panic in GPU text paths** ([#485](https://github.com/gogpu/gg/issues/485)) —
+  `MultiFace.Source()` returns nil → panic in 4 GPU text locations (GlyphMask ×3,
+  MSDF ×1). Added nil guards with graceful CPU fallback. Full per-font-run GPU
+  support planned in ADR-065.
+
 ## [0.50.14] - 2026-08-07
 
 ### Changed

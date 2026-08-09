@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -126,13 +127,13 @@ func TestVariableFont_ShaperAdvance_MatchesHVAR(t *testing.T) {
 		t.Skip("Font is not variable")
 	}
 
-	// HintingNone: Face.Advance returns HVAR advances (design space),
-	// matching what HarfBuzz/go-text shapers produce.
+	// Variable fonts use HVAR advances regardless of hinting level
+	// (FreeType ttgload.c:964-977 pattern). TT hint cache has no gvar deltas.
 	boldFace := source.Face(36, text.WithVariations(
 		text.NewFontVariation("wght", 700),
-	), text.WithHinting(text.HintingNone))
+	))
 
-	// Face.Advance with HintingNone uses HVAR — matches shaper.
+	// Face.Advance uses HVAR for variable fonts — matches shaper.
 	faceAdvR := boldFace.Advance("r")
 	faceAdvL := boldFace.Advance("l")
 
@@ -269,5 +270,61 @@ func TestVariableFont_Shear_NoOverlap_TslReproduction(t *testing.T) {
 
 	if inkRuns < 5 {
 		t.Errorf("Only %d ink runs — letters are merging (expected >=5 for 'hello world')", inkRuns)
+	}
+}
+
+// TestVariableFont_AdvanceMatchesRendering verifies that Face.Advance()
+// returns the same total width as the rendering path uses for positioning.
+// This is the enterprise invariant: measurement == rendering.
+// Catches regressions like v0.50.14 (#405) where advanceResolver and
+// drawGlyphsVariable used different advance sources.
+func TestVariableFont_AdvanceMatchesRendering(t *testing.T) {
+	fontPath := findVariableFont(t)
+	if fontPath == "" {
+		t.Skip("No variable font available")
+	}
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+	if !source.IsVariable() {
+		t.Skip("Font is not variable")
+	}
+
+	for _, weight := range []float32{400, 700} {
+		t.Run(fmt.Sprintf("wght=%.0f", weight), func(t *testing.T) {
+			face := source.Face(36, text.WithVariations(
+				text.NewFontVariation("wght", weight),
+			))
+
+			testStr := "rl test hello"
+			totalAdvance := face.Advance(testStr)
+
+			// Sum individual glyph advances from Glyphs() iterator
+			glyphSum := 0.0
+			for g := range face.Glyphs(testStr) {
+				glyphSum += g.Advance
+			}
+
+			// Advance() must match Glyphs() sum exactly
+			diff := totalAdvance - glyphSum
+			if diff < -0.01 || diff > 0.01 {
+				t.Errorf("Advance(%q)=%.4f but Glyphs sum=%.4f (diff=%.4f) — measurement/rendering mismatch",
+					testStr, totalAdvance, glyphSum, diff)
+			}
+
+			// Individual char advances must be > 0 (no zero-width from wrong TT cache)
+			for _, r := range "rl" {
+				adv := face.Advance(string(r))
+				if adv <= 0 {
+					t.Errorf("Advance(%q) = %.4f — zero or negative advance", string(r), adv)
+				}
+				// Variable bold should have reasonable advance (not default weight)
+				if weight == 700 && adv < 5.0 {
+					t.Errorf("Advance(%q) at wght=700 = %.4f — suspiciously small (default weight leak?)", string(r), adv)
+				}
+			}
+		})
 	}
 }
