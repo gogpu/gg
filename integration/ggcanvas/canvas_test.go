@@ -1066,14 +1066,39 @@ func TestPixmapTextureView_PromotedTexture(t *testing.T) {
 	}
 }
 
-// mockRenderTarget implements RenderTarget + DamageRectSetter for testing damage forwarding.
+// mockDamageReporter implements gpucontext.DamageReporter for testing damage forwarding.
+type mockDamageReporter struct {
+	rects       []image.Rectangle
+	reportCount int
+	fullDamage  bool
+}
+
+func (m *mockDamageReporter) ReportDamage(rects ...image.Rectangle) {
+	m.reportCount++
+	if len(rects) == 0 {
+		m.fullDamage = true
+	} else {
+		m.rects = append(m.rects, rects...)
+	}
+}
+
+func (m *mockDamageReporter) ReportDamageWithReason(_ gpucontext.DamageReason, rects ...image.Rectangle) {
+	m.ReportDamage(rects...)
+}
+
+func (m *mockDamageReporter) reset() {
+	m.rects = m.rects[:0]
+	m.reportCount = 0
+	m.fullDamage = false
+}
+
+// mockRenderTarget implements RenderTarget + damage source registration for testing.
 type mockRenderTarget struct {
-	surfaceView    gpucontext.TextureView
-	surfaceW       uint32
-	surfaceH       uint32
-	presentedTex   any
-	damageRects    []image.Rectangle
-	damageSetCount int
+	surfaceView  gpucontext.TextureView
+	surfaceW     uint32
+	surfaceH     uint32
+	presentedTex any
+	reporter     *mockDamageReporter // last registered reporter
 }
 
 func (m *mockRenderTarget) SurfaceView() gpucontext.TextureView { return m.surfaceView }
@@ -1082,12 +1107,14 @@ func (m *mockRenderTarget) PresentTexture(tex any) error {
 	m.presentedTex = tex
 	return nil
 }
-func (m *mockRenderTarget) SetDamageRects(rects []image.Rectangle) {
-	m.damageRects = rects
-	m.damageSetCount++
+
+// RegisterDamageSource satisfies the damageSourceRegistrar interface for ggcanvas.
+func (m *mockRenderTarget) RegisterDamageSource(_ string) gpucontext.DamageReporter {
+	m.reporter = &mockDamageReporter{}
+	return m.reporter
 }
 
-// mockRenderTargetNoDamage implements RenderTarget WITHOUT DamageRectSetter.
+// mockRenderTargetNoDamage implements RenderTarget WITHOUT damage source registration.
 type mockRenderTargetNoDamage struct {
 	surfaceView  gpucontext.TextureView
 	surfaceW     uint32
@@ -1110,9 +1137,12 @@ func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Warm up past first-frame full-window damage.
-	dc0 := &mockRenderTarget{}
-	c.forwardDamageRects(dc0, nil)
+	reporter := &mockDamageReporter{}
+	c.damageSource = reporter
+
+	// Warm up past first-frame full-surface damage.
+	c.forwardDamageRects(nil)
+	reporter.reset()
 
 	rects := []image.Rectangle{
 		image.Rect(10, 10, 30, 30),
@@ -1120,17 +1150,16 @@ func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
 	}
 	c.SetPresentDamage(rects)
 
-	dc := &mockRenderTarget{}
-	c.forwardDamageRects(dc, nil)
+	c.forwardDamageRects(nil)
 
-	if dc.damageSetCount != 1 {
-		t.Errorf("SetDamageRects called %d times, want 1", dc.damageSetCount)
+	if reporter.reportCount != 1 {
+		t.Errorf("ReportDamage called %d times, want 1", reporter.reportCount)
 	}
-	if len(dc.damageRects) != 2 {
-		t.Fatalf("damageRects len = %d, want 2", len(dc.damageRects))
+	if len(reporter.rects) != 2 {
+		t.Fatalf("damageRects len = %d, want 2", len(reporter.rects))
 	}
-	if dc.damageRects[0] != rects[0] || dc.damageRects[1] != rects[1] {
-		t.Errorf("damageRects = %v, want %v", dc.damageRects, rects)
+	if reporter.rects[0] != rects[0] || reporter.rects[1] != rects[1] {
+		t.Errorf("damageRects = %v, want %v", reporter.rects, rects)
 	}
 
 	// After forward, presentDamageRects must be cleared.
@@ -1147,19 +1176,21 @@ func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Warm up past first-frame full-window damage.
-	dc := &mockRenderTarget{}
-	c.forwardDamageRects(dc, nil)
+	reporter := &mockDamageReporter{}
+	c.damageSource = reporter
+
+	// Warm up past first-frame full-surface damage.
+	c.forwardDamageRects(nil)
+	reporter.reset()
 
 	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
-	dc2 := &mockRenderTarget{}
-	c.forwardDamageRects(dc2, frameDamage)
+	c.forwardDamageRects(frameDamage)
 
-	if dc2.damageSetCount != 1 {
-		t.Errorf("SetDamageRects called %d times, want 1", dc2.damageSetCount)
+	if reporter.reportCount != 1 {
+		t.Errorf("ReportDamage called %d times, want 1", reporter.reportCount)
 	}
-	if len(dc2.damageRects) != 1 || dc2.damageRects[0] != frameDamage[0] {
-		t.Errorf("damageRects = %v, want %v", dc2.damageRects, frameDamage)
+	if len(reporter.rects) != 1 || reporter.rects[0] != frameDamage[0] {
+		t.Errorf("damageRects = %v, want %v", reporter.rects, frameDamage)
 	}
 }
 
@@ -1171,25 +1202,27 @@ func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
 	}
 	defer c.Close()
 
-	// Warm up past first-frame full-window damage.
-	dc0 := &mockRenderTarget{}
-	c.forwardDamageRects(dc0, nil)
+	reporter := &mockDamageReporter{}
+	c.damageSource = reporter
+
+	// Warm up past first-frame full-surface damage.
+	c.forwardDamageRects(nil)
+	reporter.reset()
 
 	explicit := []image.Rectangle{image.Rect(20, 20, 40, 40)}
 	frameDamage := []image.Rectangle{image.Rect(5, 5, 15, 15)}
 
 	c.SetPresentDamage(explicit)
-	dc := &mockRenderTarget{}
-	c.forwardDamageRects(dc, frameDamage)
+	c.forwardDamageRects(frameDamage)
 
-	if len(dc.damageRects) != 2 {
-		t.Fatalf("damageRects count = %d, want 2 (union of explicit + frame)", len(dc.damageRects))
+	if len(reporter.rects) != 2 {
+		t.Fatalf("damageRects count = %d, want 2 (union of explicit + frame)", len(reporter.rects))
 	}
-	if dc.damageRects[0] != explicit[0] {
-		t.Errorf("damageRects[0] = %v, want explicit %v", dc.damageRects[0], explicit[0])
+	if reporter.rects[0] != explicit[0] {
+		t.Errorf("damageRects[0] = %v, want explicit %v", reporter.rects[0], explicit[0])
 	}
-	if dc.damageRects[1] != frameDamage[0] {
-		t.Errorf("damageRects[1] = %v, want frameDamage %v", dc.damageRects[1], frameDamage[0])
+	if reporter.rects[1] != frameDamage[0] {
+		t.Errorf("damageRects[1] = %v, want frameDamage %v", reporter.rects[1], frameDamage[0])
 	}
 }
 
@@ -1201,22 +1234,26 @@ func TestSetPresentDamage_FirstFrameFullWindow(t *testing.T) {
 	}
 	defer c.Close()
 
-	dc := &mockRenderTarget{}
-	c.forwardDamageRects(dc, nil)
+	reporter := &mockDamageReporter{}
+	c.damageSource = reporter
 
-	// First frame: full-window damage regardless of frameDamage content.
-	if dc.damageSetCount != 1 {
-		t.Errorf("first frame: SetDamageRects called %d times, want 1 (full-window)", dc.damageSetCount)
+	c.forwardDamageRects(nil)
+
+	// First frame: full-surface damage regardless of frameDamage content.
+	if reporter.reportCount != 1 {
+		t.Errorf("first frame: ReportDamage called %d times, want 1 (full-surface)", reporter.reportCount)
 	}
 
-	// Second frame with nil frameDamage: no damage → no call.
-	c.forwardDamageRects(dc, nil)
-	if dc.damageSetCount != 1 {
-		t.Errorf("second frame nil: SetDamageRects called %d times, want still 1", dc.damageSetCount)
+	reporter.reset()
+
+	// Second frame with nil frameDamage: no damage -> no call.
+	c.forwardDamageRects(nil)
+	if reporter.reportCount != 0 {
+		t.Errorf("second frame nil: ReportDamage called %d times, want 0", reporter.reportCount)
 	}
 }
 
-func TestSetPresentDamage_NoDamageSetterInterface(t *testing.T) {
+func TestSetPresentDamage_NoDamageSource(t *testing.T) {
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1224,15 +1261,15 @@ func TestSetPresentDamage_NoDamageSetterInterface(t *testing.T) {
 	}
 	defer c.Close()
 
+	// damageSource is nil (no registration).
 	explicit := []image.Rectangle{image.Rect(10, 10, 30, 30)}
 	c.SetPresentDamage(explicit)
 
-	dc := &mockRenderTargetNoDamage{}
-	c.forwardDamageRects(dc, nil)
+	c.forwardDamageRects(nil)
 
-	// No panic, presentDamageRects cleared even without setter.
+	// No panic, presentDamageRects cleared even without damageSource.
 	if c.presentDamageRects != nil {
-		t.Error("presentDamageRects not cleared when setter unavailable")
+		t.Error("presentDamageRects not cleared when damageSource unavailable")
 	}
 }
 
@@ -1244,19 +1281,98 @@ func TestSetPresentDamage_ClearedAfterForward(t *testing.T) {
 	}
 	defer c.Close()
 
+	reporter := &mockDamageReporter{}
+	c.damageSource = reporter
+
 	c.SetPresentDamage([]image.Rectangle{image.Rect(0, 0, 50, 50)})
-	dc := &mockRenderTarget{}
 
-	c.forwardDamageRects(dc, nil)
-	if dc.damageSetCount != 1 {
-		t.Fatalf("first forward: want 1 call, got %d", dc.damageSetCount)
+	c.forwardDamageRects(nil)
+	if reporter.reportCount != 1 {
+		t.Fatalf("first forward: want 1 call, got %d", reporter.reportCount)
 	}
 
-	// Second forward: no rects → no SetDamageRects call.
-	c.forwardDamageRects(dc, nil)
-	if dc.damageSetCount != 1 {
-		t.Errorf("second forward: want still 1 call, got %d", dc.damageSetCount)
+	reporter.reset()
+
+	// Second forward: no rects -> no ReportDamage call.
+	c.forwardDamageRects(nil)
+	if reporter.reportCount != 0 {
+		t.Errorf("second forward: want 0 calls, got %d", reporter.reportCount)
 	}
+}
+
+// mockRenderTargetWithCreator adds TextureCreator to mockRenderTarget so the
+// universal path (Flush -> promoteIfPending -> PresentTexture) works.
+type mockRenderTargetWithCreator struct {
+	mockRenderTarget
+	renderer *mockRenderer
+}
+
+func (m *mockRenderTargetWithCreator) TextureCreator() gpucontext.TextureCreator {
+	return m.renderer
+}
+
+// TestRender_RegistersDamageSource verifies that Render() auto-registers "gg"
+// as a damage source when the RenderTarget supports RegisterDamageSource.
+func TestRender_RegistersDamageSource(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	dc := &mockRenderTargetWithCreator{renderer: &mockRenderer{}}
+	if c.damageSource != nil {
+		t.Fatal("damageSource should be nil before first Render")
+	}
+
+	// Render triggers registration.
+	c.dirty = true
+	if err := c.Render(dc); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	if c.damageSource == nil {
+		t.Error("damageSource should be set after first Render with registrar target")
+	}
+	if dc.reporter == nil {
+		t.Error("RegisterDamageSource should have been called on the target")
+	}
+}
+
+// TestRender_NoDamageRegistration verifies that Render() works correctly when
+// the RenderTarget does not support damage source registration.
+func TestRender_NoDamageRegistration(t *testing.T) {
+	provider := newMockProvider()
+	c, err := New(provider, 50, 50)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer c.Close()
+
+	// mockRenderTargetNoDamage does not implement RegisterDamageSource.
+	// Use a wrapper with TextureCreator so Render can complete.
+	dc := &renderMockNoDamageWithCreator{renderer: &mockRenderer{}}
+	c.dirty = true
+
+	// Should not panic; damageSource stays nil.
+	if err := c.Render(dc); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	if c.damageSource != nil {
+		t.Error("damageSource should remain nil when target doesn't support registration")
+	}
+}
+
+// renderMockNoDamageWithCreator wraps mockRenderTargetNoDamage with TextureCreator.
+type renderMockNoDamageWithCreator struct {
+	mockRenderTargetNoDamage
+	renderer *mockRenderer
+}
+
+func (m *renderMockNoDamageWithCreator) TextureCreator() gpucontext.TextureCreator {
+	return m.renderer
 }
 
 // TestPixmapTextureView_ClosedCanvas returns nil on closed canvas.
