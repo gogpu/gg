@@ -170,31 +170,13 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 		return
 	}
 
-	col := FromColor(c.currentColor())
-	target := c.gpuRenderTarget()
 	if mode == TextModeAliased {
-		if rc := c.gpuCtxOps(); rc != nil {
-			if ata, ok := rc.(GPUShapedAliasedTextAccelerator); ok {
-				if ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
-					return
-				}
-			}
-		}
-
-		if a := Accelerator(); a != nil {
-			if ata, ok := a.(GPUShapedAliasedTextAccelerator); ok {
-				if ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
-					return
-				}
-			}
-		}
-
-		// Do not silently substitute the regular anti-aliased shaped pipeline:
-		// FontSmoothingNone and TextModeAliased explicitly request binary edging.
-		c.drawShapedGlyphsCPUAliased(glyphs, face, x, y)
+		c.drawShapedGlyphsAliased(glyphs, face, x, y)
 		return
 	}
 
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
 	if rc := c.gpuCtxOps(); rc != nil {
 		if sta, ok := rc.(GPUShapedTextAccelerator); ok {
 			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
@@ -215,6 +197,22 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 	// Fallback: reconstruct string is not possible from glyphs,
 	// so render each glyph outline through the fill pipeline.
 	c.drawShapedGlyphsAsOutlines(glyphs, face, x, y)
+}
+
+// drawShapedGlyphsAliased preserves the per-context, global accelerator, then
+// CPU fallback order without substituting the regular anti-aliased pipeline.
+func (c *Context) drawShapedGlyphsAliased(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
+	col := FromColor(c.currentColor())
+	target := c.gpuRenderTarget()
+	if ata, ok := c.gpuCtxOps().(GPUShapedAliasedTextAccelerator); ok &&
+		ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+		return
+	}
+	if ata, ok := Accelerator().(GPUShapedAliasedTextAccelerator); ok &&
+		ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+		return
+	}
+	c.drawShapedGlyphsCPUAliased(glyphs, face, x, y)
 }
 
 // drawShapedGlyphsAsOutlines renders pre-shaped glyphs as vector outlines.
