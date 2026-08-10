@@ -2,10 +2,10 @@ module cjk_text
 
 go 1.25.5
 
-require github.com/gogpu/gg v0.51.0
+require github.com/gogpu/gg v0.52.0
 
 require (
-	github.com/gogpu/gpucontext v0.26.0 // indirect
+	github.com/gogpu/gpucontext v0.27.0 // indirect
 	github.com/gogpu/gputypes v0.5.1 // indirect
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
