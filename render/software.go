@@ -152,7 +152,8 @@ func (r *SoftwareRenderer) renderClear(pixels []byte, width, height, stride int,
 
 // renderFill fills a path with a solid color.
 func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, path *pathBuilder, c color.Color, fillRule raster.FillRule) {
-	// Convert color to RGBA (mask ensures value fits in uint8)
+	// Convert color's premultiplied channels to target RGBA bytes (mask
+	// ensures each value fits in uint8).
 	cr, cg, cb, ca := c.RGBA()
 	//nolint:gosec // G115: mask ensures no overflow
 	pr := uint8((cr >> 8) & 0xFF)
@@ -197,10 +198,13 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 
 				offset := rowOffset + x*4
 
-				// Source-over alpha blending
-				// out = src * srcAlpha + dst * (1 - srcAlpha)
-				alpha := uint16(run.Alpha) * uint16(pa)
-				alpha = (alpha + 255) >> 8 // Normalize to 0-255
+				// Source-over alpha blending. PixmapTarget wraps image.RGBA,
+				// whose pixel buffer stores premultiplied RGBA bytes. RGBA()
+				// already returns premultiplied color channels, so coverage is
+				// applied to the channels and alpha independently. Multiplying
+				// the channels by alpha here would premultiply them twice.
+				coverage := uint16(run.Alpha)
+				alpha := mul255(coverage, uint16(pa))
 
 				if alpha == 0 {
 					continue
@@ -214,17 +218,22 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 					pixels[offset+3] = pa
 				} else {
 					// Alpha blend
-					invAlpha := 255 - alpha
+					invAlpha := uint16(255) - alpha
 
 					dstR := uint16(pixels[offset])
 					dstG := uint16(pixels[offset+1])
 					dstB := uint16(pixels[offset+2])
 					dstA := uint16(pixels[offset+3])
 
-					outR := (uint16(pr)*alpha + dstR*invAlpha + 127) / 255
-					outG := (uint16(pg)*alpha + dstG*invAlpha + 127) / 255
-					outB := (uint16(pb)*alpha + dstB*invAlpha + 127) / 255
-					outA := (uint16(pa)*alpha + dstA*invAlpha + 127) / 255
+					// The source channels are already premultiplied by pa;
+					// only coverage needs to be applied before source-over.
+					srcR := mul255(coverage, uint16(pr))
+					srcG := mul255(coverage, uint16(pg))
+					srcB := mul255(coverage, uint16(pb))
+					outR := srcR + mul255(dstR, invAlpha)
+					outG := srcG + mul255(dstG, invAlpha)
+					outB := srcB + mul255(dstB, invAlpha)
+					outA := alpha + mul255(dstA, invAlpha)
 
 					//nolint:gosec // G115: mask ensures no overflow
 					pixels[offset] = uint8(outR & 0xFF)
@@ -238,6 +247,12 @@ func (r *SoftwareRenderer) renderFill(pixels []byte, width, height, stride int, 
 			}
 		}
 	})
+}
+
+// mul255 multiplies two 8-bit values and rounds the result back to 8-bit.
+// It is used for coverage and premultiplied source-over arithmetic.
+func mul255(a, b uint16) uint16 {
+	return (a*b + 127) / 255
 }
 
 // renderStroke strokes a path with a solid color.

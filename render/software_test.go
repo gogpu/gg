@@ -191,8 +191,10 @@ func TestSoftwareRendererAlphaBlend(t *testing.T) {
 	// Fill with opaque red
 	scene.Clear(color.RGBA{255, 0, 0, 255})
 
-	// Overlay with semi-transparent blue
-	scene.SetFillColor(color.RGBA{0, 0, 255, 128})
+	// Overlay with semi-transparent blue. NRGBA is used here because RGBA
+	// stores premultiplied channels and {0, 0, 255, 128} is not a valid
+	// premultiplied color.
+	scene.SetFillColor(color.NRGBA{0, 0, 255, 128})
 	scene.Rectangle(0, 0, 100, 100)
 	scene.Fill()
 
@@ -212,6 +214,78 @@ func TestSoftwareRendererAlphaBlend(t *testing.T) {
 	}
 	if pixel.B < 50 || pixel.B > 180 {
 		t.Errorf("Blended B = %d, expected some blue", pixel.B)
+	}
+}
+
+func TestSoftwareRendererFillPremultipliedColorModels(t *testing.T) {
+	// color.Color.RGBA returns premultiplied channels. The software target
+	// (image.RGBA) stores those channels directly, so a half-alpha red fill
+	// must retain a premultiplied red value of 128 rather than multiplying it
+	// by alpha for a second time.
+	colors := []struct {
+		name  string
+		color color.Color
+	}{
+		{name: "RGBA", color: color.RGBA{R: 128, G: 0, B: 0, A: 128}},
+		{name: "NRGBA", color: color.NRGBA{R: 255, G: 0, B: 0, A: 128}},
+		{name: "RGBA64", color: color.RGBA64{R: 0x8000, G: 0, B: 0, A: 0x8000}},
+		{name: "NRGBA64", color: color.NRGBA64{R: 0xffff, G: 0, B: 0, A: 0x8000}},
+	}
+
+	destinations := []struct {
+		name string
+		color.Color
+		want color.RGBA
+	}{
+		{name: "transparent", want: color.RGBA{R: 128, G: 0, B: 0, A: 128}},
+		{name: "opaque", Color: color.RGBA{R: 0, G: 0, B: 255, A: 255}, want: color.RGBA{R: 128, G: 0, B: 127, A: 255}},
+		{name: "semi-transparent", Color: color.RGBA{R: 0, G: 0, B: 128, A: 128}, want: color.RGBA{R: 128, G: 0, B: 64, A: 192}},
+	}
+
+	for _, source := range colors {
+		for _, destination := range destinations {
+			t.Run(source.name+"/"+destination.name, func(t *testing.T) {
+				target := NewPixmapTarget(1, 1)
+				if destination.Color != nil {
+					target.SetPixel(0, 0, destination.Color)
+				}
+
+				scene := NewScene()
+				scene.SetFillColor(source.color)
+				scene.Rectangle(0, 0, 1, 1)
+				scene.Fill()
+				if err := NewSoftwareRenderer().Render(target, scene); err != nil {
+					t.Fatalf("Render() error = %v", err)
+				}
+
+				got := target.GetPixel(0, 0).(color.RGBA)
+				if got != destination.want {
+					t.Errorf("pixel = %v, want %v", got, destination.want)
+				}
+			})
+		}
+	}
+}
+
+func TestSoftwareRendererFillPremultipliedCoverage(t *testing.T) {
+	target := NewPixmapTarget(2, 1)
+	scene := NewScene()
+	scene.SetFillColor(color.NRGBA{R: 255, G: 0, B: 0, A: 128})
+	// This rectangle covers half of each pixel, exercising the AA coverage
+	// multiplier independently from the paint opacity multiplier.
+	scene.Rectangle(0.5, 0, 1, 1)
+	scene.Fill()
+
+	if err := NewSoftwareRenderer().Render(target, scene); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	for x := 0; x < 2; x++ {
+		got := target.GetPixel(x, 0).(color.RGBA)
+		want := color.RGBA{R: 64, G: 0, B: 0, A: 64}
+		if got != want {
+			t.Errorf("pixel (%d, 0) = %v, want %v", x, got, want)
+		}
 	}
 }
 
