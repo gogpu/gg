@@ -3,9 +3,9 @@ module github.com/gogpu/gg/examples/software_overlay
 go 1.25.0
 
 require (
-	github.com/gogpu/gg v0.50.15
-	github.com/gogpu/gogpu v0.50.2
-	github.com/gogpu/gpucontext v0.24.0
+	github.com/gogpu/gg v0.51.0
+	github.com/gogpu/gogpu v0.51.0
+	github.com/gogpu/gpucontext v0.26.0
 )
 
 require (
@@ -13,7 +13,7 @@ require (
 	github.com/go-webgpu/webgpu v0.5.5 // indirect
 	github.com/gogpu/gputypes v0.5.1 // indirect
 	github.com/gogpu/naga v0.18.0 // indirect
-	github.com/gogpu/wgpu v0.30.37 // indirect
+	github.com/gogpu/wgpu v0.31.0 // indirect
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
