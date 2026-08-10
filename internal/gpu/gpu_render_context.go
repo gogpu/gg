@@ -273,6 +273,24 @@ func (rc *GPURenderContext) BeginFrame() {
 	rc.lastView = nil
 }
 
+// MarkFrameRendered signals that external content has already been rendered
+// to the surface view in this frame. Subsequent render passes will use
+// LoadOp::Load to preserve that content instead of clearing. This replaces
+// the PreserveContent flag on GPURenderTarget — the compositor (gogpu) now
+// controls content preservation, and gg just respects the frame state.
+func (rc *GPURenderContext) MarkFrameRendered() {
+	rc.frameRendered = true
+}
+
+// SetSurfaceCompositor is deprecated — compositor now flows per-frame via
+// GPURenderTarget.Compositor (ADR-067). Kept for backward compatibility.
+func (rc *GPURenderContext) SetSurfaceCompositor(comp gpucontext.SurfaceCompositor) {
+	if rc == nil || rc.session == nil {
+		return
+	}
+	rc.session.SetSurfaceCompositor(comp)
+}
+
 // SetSharedEncoder sets a shared command encoder for single-command-buffer
 // frames (ADR-017). When set, Flush() records render passes into this encoder
 // instead of creating its own and submitting. The caller is responsible for
@@ -847,11 +865,11 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 }
 
 // selectBaseLayer returns the queued compositor base unless the destination
-// surface already supplies it. With PreserveContent, external rendering is the
-// base layer; drawing the full-surface pixmap base would hide that content.
+// surface already supplies it. When frameRendered is true, external content is
+// already on the surface; drawing the full-surface pixmap base would hide it.
 // Callers that need another texture above external content use DrawGPUTexture.
-func selectBaseLayer(draws []drawCommand, preserveContent bool) *GPUTextureDrawCommand {
-	if preserveContent {
+func selectBaseLayer(draws []drawCommand, frameRendered bool) *GPUTextureDrawCommand {
+	if frameRendered {
 		return nil
 	}
 	for i := range draws {
@@ -923,9 +941,12 @@ func (rc *GPURenderContext) Flush(target gg.GPURenderTarget) error { //nolint:cy
 	// Transfer per-context frame tracking to session before rendering.
 	rc.session.SetFrameState(rc.frameRendered, rc.lastView)
 
-	// The queued base layer renders before every other tier. PreserveContent
-	// makes the existing surface content the base instead, so selecting the
-	// pixmap layer here would immediately cover the external renderer's output.
+	// The queued base layer renders before every other tier. When external
+	// content (g3d) is already on the surface, skip the pixmap base layer
+	// so it does not cover the external renderer's output.
+	// Uses target.PreserveContent — set by compositor (gogpu) via
+	// MarkPreserveContent → externalContent → ContextRenderTarget.PreserveContent().
+	// NOT frameRendered (set by any Flush, including boundary texture flushes).
 	baseLayer := selectBaseLayer(rc.pendingDraws, target.PreserveContent)
 
 	// Build ScissorGroups from per-draw clip state. All command types flow

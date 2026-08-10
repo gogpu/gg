@@ -134,14 +134,13 @@ func TestRenderSessionMSAASurfacePreservationRoute(t *testing.T) {
 	tests := []struct {
 		name            string
 		sampleCount     uint32
-		preserveContent bool
-		previouslyDrawn bool
+		previouslyDrawn bool // simulates external content or earlier gg flush
 		wantComposition bool
 	}{
 		{
 			name:            "external content with MSAA",
 			sampleCount:     4,
-			preserveContent: true,
+			previouslyDrawn: true,
 			wantComposition: true,
 		},
 		{
@@ -157,7 +156,7 @@ func TestRenderSessionMSAASurfacePreservationRoute(t *testing.T) {
 		{
 			name:            "external content without MSAA",
 			sampleCount:     1,
-			preserveContent: true,
+			previouslyDrawn: true,
 		},
 	}
 
@@ -188,10 +187,8 @@ func TestRenderSessionMSAASurfacePreservationRoute(t *testing.T) {
 				ColorR: 1, ColorG: 1, ColorB: 1, ColorA: 1,
 			}}}}
 			target := gg.GPURenderTarget{
-				View:            gpucontext.NewTextureView(unsafe.Pointer(view)),
-				ViewWidth:       width,
-				ViewHeight:      height,
-				PreserveContent: tt.preserveContent,
+				View:      gpucontext.NewTextureView(unsafe.Pointer(view)),
+				ViewWidth: width, ViewHeight: height,
 			}
 			if err := s.RenderFrameGrouped(target, groups, nil, encoder); err != nil {
 				encoder.DiscardEncoding()
@@ -202,10 +199,8 @@ func TestRenderSessionMSAASurfacePreservationRoute(t *testing.T) {
 			if gotComposition != tt.wantComposition {
 				t.Fatalf("composition route = %v, want %v", gotComposition, tt.wantComposition)
 			}
-			if tt.wantComposition && (s.surfaceCompositeVertBuf == nil ||
-				s.surfaceCompositeUniformBuf == nil || s.surfaceCompositeBindGroup == nil) {
-				t.Fatal("composition route did not prepare its dedicated draw resources")
-			}
+			// Surface composite resources are now managed by the compositor
+			// (gogpu). We only verify the composition texture was created.
 			frameRendered, lastView := s.FrameState()
 			if !frameRendered || lastView != view {
 				t.Fatalf("frame state = (%v, %p), want (true, %p)", frameRendered, lastView, view)
@@ -238,11 +233,11 @@ func TestRenderSessionMSAASurfacePreservationNonGrouped(t *testing.T) {
 
 	s := NewGPURenderSession(device, queue, 4)
 	defer s.Destroy()
+	// Simulate external content by setting frame state before rendering.
+	s.SetFrameState(true, view)
 	target := gg.GPURenderTarget{
-		View:            gpucontext.NewTextureView(unsafe.Pointer(view)),
-		ViewWidth:       width,
-		ViewHeight:      height,
-		PreserveContent: true,
+		View:      gpucontext.NewTextureView(unsafe.Pointer(view)),
+		ViewWidth: width, ViewHeight: height,
 	}
 	shapes := []SDFRenderShape{{
 		Kind: 0, CenterX: 24, CenterY: 24, Param1: 12, Param2: 12,
@@ -255,7 +250,6 @@ func TestRenderSessionMSAASurfacePreservationNonGrouped(t *testing.T) {
 		t.Fatal("non-grouped preservation did not use the MSAA composition route")
 	}
 	firstCompositeView := s.textures.compositeView
-	firstBindGroup := s.surfaceCompositeBindGroup
 
 	const resizedWidth, resizedHeight = uint32(128), uint32(80)
 	resizedTex, resizedView := createMockSurfaceView(t, device, resizedWidth, resizedHeight)
@@ -270,12 +264,8 @@ func TestRenderSessionMSAASurfacePreservationNonGrouped(t *testing.T) {
 	if s.textures.compositeView == firstCompositeView {
 		t.Fatal("surface resize did not recreate the composition resolve view")
 	}
-	if s.surfaceCompositeBindGroup == firstBindGroup {
-		t.Fatal("surface resize did not recreate the composition bind group")
-	}
-	if s.surfaceCompositeBoundView != s.textures.compositeView {
-		t.Fatal("composition bind group does not reference the resized resolve view")
-	}
+	// Surface composite bind groups are now managed by the compositor (gogpu).
+	// We only verify that the composition texture was recreated on resize.
 }
 
 func TestRenderSessionMSAAAttachmentDiscardsResolvedStorage(t *testing.T) {

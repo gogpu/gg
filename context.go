@@ -81,6 +81,11 @@ type Context struct {
 	gpuCtx            gpuContextOps
 	gpuFallbackWarned bool // true after first global fallback warning (avoid log spam)
 
+	// Per-frame compositor (ADR-067). Set by ggcanvas.renderDirectToTarget,
+	// included in GPURenderTarget.Compositor for each render call.
+	// Nil when running standalone gg without gogpu.
+	frameCompositor gpucontext.SurfaceCompositor
+
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
 }
@@ -1426,12 +1431,35 @@ func (c *Context) FlushGPUWithView(view gpucontext.TextureView, width, height ui
 	return c.flushGPUWithView(view, width, height, false)
 }
 
-// FlushGPUWithViewPreserveContent is like FlushGPUWithView, but treats the
-// existing view contents as the compositor base instead of clearing or covering
-// them with a queued DrawGPUTextureBase layer. Use this when another renderer
-// has already drawn to the view in this frame.
+// FlushGPUWithViewPreserveContent is like FlushGPUWithView, but signals that
+// the view already has external content that must not be cleared. It marks
+// the GPU render context's frame as rendered (LoadOp::Load) and skips the
+// base layer so the external renderer's output is preserved.
+//
+// For the real GPU path, this sets frameRendered on the GPURenderContext.
+// For custom accelerators, PreserveContent is set on the GPURenderTarget
+// for backward compatibility.
 func (c *Context) FlushGPUWithViewPreserveContent(view gpucontext.TextureView, width, height uint32) error {
+	c.MarkFrameRendered()
 	return c.flushGPUWithView(view, width, height, true)
+}
+
+// MarkFrameRendered signals that external content has already been rendered to
+// the current surface view. Subsequent GPU render passes use LoadOp::Load to
+// preserve that content instead of clearing. The compositor (gogpu) controls
+// when this is appropriate; gg just respects the frame state.
+func (c *Context) MarkFrameRendered() {
+	if rc := c.gpuCtxOps(); rc != nil {
+		rc.MarkFrameRendered()
+	}
+}
+
+// SetPerFrameCompositor stores the compositor for the current frame.
+// The next gpuRenderTarget() call includes it in GPURenderTarget.Compositor.
+// Called per-frame by ggcanvas.renderDirectToTarget (ADR-067 enterprise pattern:
+// compositor context provided with each render call, not as persistent state).
+func (c *Context) SetPerFrameCompositor(comp gpucontext.SurfaceCompositor) {
+	c.frameCompositor = comp
 }
 
 func (c *Context) flushGPUWithView(view gpucontext.TextureView, width, height uint32, preserveContent bool) error {
@@ -1441,6 +1469,10 @@ func (c *Context) flushGPUWithView(view gpucontext.TextureView, width, height ui
 		t.ViewWidth = width
 		t.ViewHeight = height
 	}
+	// PreserveContent on the target is kept for backward compatibility with
+	// custom accelerators that use Accelerator().Flush(). The real GPU path
+	// uses frameRendered on the GPURenderContext instead (set via
+	// MarkFrameRendered before this call).
 	t.PreserveContent = preserveContent
 	rc := c.gpuCtxOps()
 	if rc != nil {
@@ -1538,6 +1570,7 @@ type gpuContextOps interface {
 	SetClipPath(path *Path)
 	ClearClipPath()
 	BeginFrame()
+	MarkFrameRendered()
 	SetPipelineMode(mode PipelineMode)
 	SetAntiAlias(enabled bool)
 	PendingCount() int
@@ -1586,10 +1619,11 @@ func (c *Context) gpuCtxOps() gpuContextOps {
 // gpuRenderTarget returns the current context's pixel buffer as a GPU render target.
 func (c *Context) gpuRenderTarget() GPURenderTarget {
 	return GPURenderTarget{
-		Data:   c.pixmap.Data(),
-		Width:  c.pixmap.Width(),
-		Height: c.pixmap.Height(),
-		Stride: c.pixmap.Width() * 4,
+		Data:       c.pixmap.Data(),
+		Width:      c.pixmap.Width(),
+		Height:     c.pixmap.Height(),
+		Stride:     c.pixmap.Width() * 4,
+		Compositor: c.frameCompositor,
 	}
 }
 
