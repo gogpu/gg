@@ -83,7 +83,9 @@ type Canvas struct {
 // The width and height are logical dimensions.
 //
 // If the provider also implements gpucontext.WindowProvider, the device
-// scale is auto-detected for HiDPI/Retina support. Otherwise defaults to 1.0.
+// scale is auto-detected for HiDPI/Retina support. If it implements
+// gpucontext.PlatformProvider, the OS font smoothing preference is applied.
+// Otherwise ggcanvas leaves the context's text settings unchanged.
 // Use Context() to access and configure the drawing context.
 //
 // Returns error if dimensions are invalid or provider is nil.
@@ -125,6 +127,8 @@ func warnIfPhysicalDimensions(wp gpucontext.WindowProvider, width, height int, s
 // The provider should come from gogpu.App.GPUContextProvider().
 // Scale factor should come from the platform (e.g., gogpu.Context.ScaleFactor()).
 // Typical values: 1.0 (standard), 2.0 (macOS Retina), 3.0 (mobile HiDPI).
+// If the provider implements gpucontext.PlatformProvider, its font smoothing
+// preference and compatible subpixel layout are applied to the gg context.
 //
 // Example:
 //
@@ -171,16 +175,25 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		dirty:    true, // Mark dirty so first Flush creates texture
 	}
 
-	// Auto-detect LCD subpixel layout from platform (ADR-024).
-	// PlatformProvider exposes OS-level display properties; SubpixelLayout
-	// enables ClearType rendering matching native Windows DirectWrite quality.
+	// Apply the platform text edging preference. FontSmoothing selects how
+	// glyph edges are rendered; SubpixelLayout is relevant only when the OS
+	// explicitly requests subpixel smoothing.
 	if pp, ok := provider.(gpucontext.PlatformProvider); ok {
-		switch pp.SubpixelLayout() {
-		case gpucontext.SubpixelRGB:
-			c.ctx.SetLCDLayout(gg.LCDLayoutRGB)
-		case gpucontext.SubpixelBGR:
-			c.ctx.SetLCDLayout(gg.LCDLayoutBGR)
+		textMode := gg.TextModeAuto
+		lcdLayout := gg.LCDLayoutNone
+		switch pp.FontSmoothing() {
+		case gpucontext.FontSmoothingNone:
+			textMode = gg.TextModeAliased
+		case gpucontext.FontSmoothingSubpixel:
+			switch pp.SubpixelLayout() {
+			case gpucontext.SubpixelRGB:
+				lcdLayout = gg.LCDLayoutRGB
+			case gpucontext.SubpixelBGR:
+				lcdLayout = gg.LCDLayoutBGR
+			}
 		}
+		c.ctx.SetTextMode(textMode)
+		c.ctx.SetLCDLayout(lcdLayout)
 	}
 
 	// Auto-register with ResourceTracker if the provider supports it.

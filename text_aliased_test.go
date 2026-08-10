@@ -5,8 +5,71 @@ import (
 	"os"
 	"testing"
 
+	"golang.org/x/image/font/gofont/goregular"
+
 	"github.com/gogpu/gg/text"
 )
+
+type shapedAliasedTestAccelerator struct {
+	*mockAccelerator
+	aliasedCalls int
+	aaCalls      int
+}
+
+type shapedFallbackFillAccelerator struct {
+	*mockAccelerator
+	fillCalls int
+}
+
+func (a *shapedFallbackFillAccelerator) FillPath(GPURenderTarget, *Path, *Paint) error {
+	a.fillCalls++
+	return nil
+}
+
+func (a *shapedAliasedTestAccelerator) DrawShapedGlyphMaskText(
+	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
+) error {
+	a.aaCalls++
+	return nil
+}
+
+func (a *shapedAliasedTestAccelerator) DrawShapedGlyphMaskTextAliased(
+	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
+) error {
+	a.aliasedCalls++
+	return nil
+}
+
+func setAliasedTestAccelerator(t *testing.T, a GPUAccelerator) {
+	t.Helper()
+	accelMu.Lock()
+	previous := accel
+	accel = a
+	accelMu.Unlock()
+	t.Cleanup(func() {
+		accelMu.Lock()
+		accel = previous
+		accelMu.Unlock()
+	})
+}
+
+func aliasedTestShapedGlyphs(t *testing.T) (text.Face, []text.ShapedGlyph) {
+	t.Helper()
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	face := source.Face(24)
+	var glyphs []text.ShapedGlyph
+	for glyph := range face.Glyphs("O") {
+		glyphs = append(glyphs, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
+	}
+	if len(glyphs) == 0 {
+		t.Fatal("test font produced no shaped glyphs")
+	}
+	return face, glyphs
+}
 
 // findAliasedTestFont returns a path to an available system font, or empty string.
 func findAliasedTestFont() string {
@@ -64,6 +127,65 @@ func TestTextModeAliased_SelectStrategy(t *testing.T) {
 	got := dc.selectTextStrategy()
 	if got != TextModeAliased {
 		t.Errorf("selectTextStrategy() = %v, want TextModeAliased", got)
+	}
+}
+
+func TestTextModeAliased_DrawShapedGlyphsUsesAliasedAccelerator(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	accelerator := &shapedAliasedTestAccelerator{
+		mockAccelerator: &mockAccelerator{name: "shaped-aliased-test", canAccel: AccelText},
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetTextMode(TextModeAliased)
+	dc.DrawShapedGlyphs(glyphs, face, 5, 40)
+
+	if accelerator.aliasedCalls != 1 {
+		t.Errorf("aliased shaped calls = %d, want 1", accelerator.aliasedCalls)
+	}
+	if accelerator.aaCalls != 0 {
+		t.Errorf("anti-aliased shaped calls = %d, want 0", accelerator.aaCalls)
+	}
+}
+
+func TestTextModeAliased_DrawShapedGlyphsCPUFallbackIsBinary(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	// Install an accelerator without shaped-text support so the test is
+	// independent of any accelerator registered by another test. Its generic
+	// path acceleration must not substitute for aliased shaped-text support.
+	accelerator := &shapedFallbackFillAccelerator{
+		mockAccelerator: &mockAccelerator{name: "cpu-fallback-test", canAccel: AccelFill},
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetTextMode(TextModeAliased)
+	dc.DrawShapedGlyphs(glyphs, face, 5, 40)
+
+	hasInk := false
+	img := dc.Image().(*image.RGBA)
+	for i := 3; i < len(img.Pix); i += 4 {
+		a := img.Pix[i]
+		if a != 0 && a != 255 {
+			t.Fatalf("shaped aliased CPU fallback produced intermediate alpha %d", a)
+		}
+		if a == 255 {
+			hasInk = true
+		}
+	}
+	if !hasInk {
+		t.Fatal("shaped aliased CPU fallback produced no pixels")
+	}
+	if accelerator.fillCalls != 0 {
+		t.Errorf("generic GPU FillPath calls = %d, want 0", accelerator.fillCalls)
+	}
+	if !dc.AntiAlias() {
+		t.Error("DrawShapedGlyphs did not restore geometry anti-aliasing state")
 	}
 }
 

@@ -40,6 +40,7 @@ var _ gg.DirectRenderCapable = (*SDFAccelerator)(nil)
 var _ gg.AdapterAware = (*SDFAccelerator)(nil)
 var _ gg.GPUTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.GPUGlyphMaskAccelerator = (*SDFAccelerator)(nil)
+var _ gg.GPUShapedAliasedTextAccelerator = (*SDFAccelerator)(nil)
 var _ gg.PipelineModeAware = (*SDFAccelerator)(nil)
 var _ gg.ComputePipelineAware = (*SDFAccelerator)(nil)
 var _ gg.ForceSDFAware = (*SDFAccelerator)(nil)
@@ -254,6 +255,15 @@ func (a *SDFAccelerator) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, fac
 	rc := a.defaultCtx
 	a.mu.Unlock()
 	return rc.DrawGlyphMaskTextAliased(target, face, s, x, y, color, matrix, deviceScale)
+}
+
+// DrawShapedGlyphMaskTextAliased queues aliased pre-shaped glyphs for GPU rendering.
+func (a *SDFAccelerator) DrawShapedGlyphMaskTextAliased(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	a.mu.Lock()
+	a.ensureDefaultCtx()
+	rc := a.defaultCtx
+	a.mu.Unlock()
+	return rc.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, color, matrix, deviceScale)
 }
 
 // FillPath queues a filled path for GPU rendering via the default context.

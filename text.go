@@ -159,9 +159,8 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 	defer c.setGPUClipRect()()
 
 	// TextModeVector opts out of the glyph-mask accelerator and renders the
-	// pre-shaped glyphs as vector outlines (same glyph.X positions). Other
-	// modes need the original string to re-render, which we don't have here.
-	// The GOGPU_TEXT_MODE=vector env override also routes here.
+	// pre-shaped glyphs as vector outlines (same glyph.X positions). The
+	// GOGPU_TEXT_MODE environment override also routes through this selection.
 	mode := c.textMode
 	if m, ok := forceTextMode(); ok {
 		mode = m
@@ -173,6 +172,28 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
+	if mode == TextModeAliased {
+		if rc := c.gpuCtxOps(); rc != nil {
+			if ata, ok := rc.(GPUShapedAliasedTextAccelerator); ok {
+				if ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+					return
+				}
+			}
+		}
+
+		if a := Accelerator(); a != nil {
+			if ata, ok := a.(GPUShapedAliasedTextAccelerator); ok {
+				if ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+					return
+				}
+			}
+		}
+
+		// Do not silently substitute the regular anti-aliased shaped pipeline:
+		// FontSmoothingNone and TextModeAliased explicitly request binary edging.
+		c.drawShapedGlyphsCPUAliased(glyphs, face, x, y)
+		return
+	}
 
 	if rc := c.gpuCtxOps(); rc != nil {
 		if sta, ok := rc.(GPUShapedTextAccelerator); ok {
@@ -248,6 +269,30 @@ func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face tex
 	}
 }
 
+// drawShapedGlyphsCPUAliased renders pre-shaped glyphs as outlines using
+// binary geometry coverage. Rotated, skewed, and otherwise non-uniformly
+// transformed text uses anti-aliased outlines, matching drawStringCPUAliased:
+// binary coverage is only reliable for translation and uniform positive scale.
+func (c *Context) drawShapedGlyphsCPUAliased(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
+	m := c.matrix
+	canUseBinaryCoverage := m.IsTranslationOnly() ||
+		(m.B == 0 && m.D == 0 && m.A == m.E && m.A > 0)
+
+	savedAA := c.antiAlias
+	savedRasterizerMode := c.rasterizerMode
+	c.antiAlias = !canUseBinaryCoverage
+	// Force the software renderer. This is the fallback for accelerators that
+	// cannot preserve aliased shaped glyphs; routing the outlines back through
+	// a generic GPU fill could silently reintroduce anti-aliasing.
+	c.rasterizerMode = RasterizerAnalytic
+	defer func() {
+		c.antiAlias = savedAA
+		c.rasterizerMode = savedRasterizerMode
+	}()
+
+	c.drawShapedGlyphsAsOutlines(glyphs, face, x, y)
+}
+
 // tryGPUText attempts to render text via the GPU MSDF pipeline.
 // The x, y coordinates are in user space (not pre-transformed by the CTM).
 // The CTM is passed to the GPU pipeline so it can apply the full transform
@@ -320,7 +365,9 @@ func (c *Context) tryGPUGlyphMaskTextAliased(s string, x, y float64) bool {
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
 	if rc := c.gpuCtxOps(); rc != nil {
-		return rc.DrawGlyphMaskTextAliased(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+		if ata, ok := rc.(gpuContextAliasedTextOps); ok {
+			return ata.DrawGlyphMaskTextAliased(target, c.face, s, x, y, col, c.totalMatrix(), c.deviceScale) == nil
+		}
 	}
 	a := Accelerator()
 	if a == nil {

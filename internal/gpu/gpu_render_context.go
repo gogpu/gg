@@ -648,6 +648,15 @@ func (rc *GPURenderContext) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, 
 // DrawShapedGlyphMaskText renders pre-shaped glyphs through the glyph mask pipeline.
 // Same as DrawGlyphMaskText but skips shaping — uses stored glyph positions directly.
 func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	return rc.drawShapedGlyphMaskText(target, face, glyphs, x, y, color, matrix, deviceScale, false)
+}
+
+// DrawShapedGlyphMaskTextAliased renders pre-shaped glyphs with binary coverage.
+func (rc *GPURenderContext) DrawShapedGlyphMaskTextAliased(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
+	return rc.drawShapedGlyphMaskText(target, face, glyphs, x, y, color, matrix, deviceScale, true)
+}
+
+func (rc *GPURenderContext) drawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64, aliased bool) error {
 	textFace, ok := face.(text.Face)
 	if !ok || textFace == nil {
 		return gg.ErrFallbackToCPU
@@ -670,7 +679,13 @@ func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, f
 	rc.shared.mu.Unlock()
 
 	isCJK := len(glyphs) > 0 && glyphs[0].IsCJK
-	batch, err := engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, matrix, deviceScale, isCJK)
+	var batch GlyphMaskBatch
+	var err error
+	if aliased {
+		batch, err = engine.LayoutShapedGlyphsAliased(textFace, glyphs, x, y, color, matrix, deviceScale, isCJK)
+	} else {
+		batch, err = engine.LayoutShapedGlyphs(textFace, glyphs, x, y, color, matrix, deviceScale, isCJK)
+	}
 	if err != nil {
 		return gg.ErrFallbackToCPU
 	}

@@ -5,9 +5,53 @@ package gpu
 import (
 	"testing"
 
+	"golang.org/x/image/font/gofont/goregular"
+
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
 )
+
+func TestGlyphMaskEngineLayoutShapedGlyphsAliasedUsesBinaryCoverage(t *testing.T) {
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	face := source.Face(24)
+	var glyphs []text.ShapedGlyph
+	for glyph := range face.Glyphs("O") {
+		glyphs = append(glyphs, text.ShapedGlyph{GID: glyph.GID, X: glyph.X, Y: glyph.Y})
+	}
+
+	engine := NewGlyphMaskEngine()
+	engine.SetLCDLayout(text.LCDLayoutRGB)
+	batch, err := engine.LayoutShapedGlyphsAliased(
+		face, glyphs, 0, 30, gg.RGBA{A: 1}, gg.Identity(), 1, false,
+	)
+	if err != nil {
+		t.Fatalf("LayoutShapedGlyphsAliased: %v", err)
+	}
+	if len(batch.Quads) == 0 {
+		t.Fatal("LayoutShapedGlyphsAliased produced no quads")
+	}
+	if batch.IsLCD {
+		t.Error("aliased shaped glyphs used LCD coverage")
+	}
+
+	atlas, _, _ := engine.Atlas().PageR8Data(0)
+	hasInk := false
+	for _, alpha := range atlas {
+		if alpha != 0 && alpha != 255 {
+			t.Fatalf("aliased shaped atlas contains intermediate alpha %d", alpha)
+		}
+		if alpha == 255 {
+			hasInk = true
+		}
+	}
+	if !hasInk {
+		t.Fatal("aliased shaped atlas contains no glyph pixels")
+	}
+}
 
 func TestSelectGlyphMaskLCD(t *testing.T) {
 	// ADR-060 / BUG-TEXT-001: selectGlyphMaskLCD always returns false for

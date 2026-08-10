@@ -253,6 +253,14 @@ type GPUShapedTextAccelerator interface {
 	DrawShapedGlyphMaskText(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
+// GPUShapedAliasedTextAccelerator is an optional interface for accelerators
+// that render pre-shaped glyphs with binary (non-anti-aliased) coverage.
+// Context.DrawShapedGlyphs uses this interface when TextModeAliased is set,
+// preserving both the stored glyph positions and the requested text edging.
+type GPUShapedAliasedTextAccelerator interface {
+	DrawShapedGlyphMaskTextAliased(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+}
+
 var (
 	accelMu sync.RWMutex
 	accel   GPUAccelerator
