@@ -219,49 +219,55 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 	// Do not hold canvasCache across context creation, accelerator setup, or
 	// tracker callbacks.  Concurrent constructors race only on publication;
 	// the loser is closed outside the cache lock after the winner is selected.
-	if cacheable {
-		// Keep this Canvas lifecycle-locked through publication. A tracker may
-		// close it immediately after TrackResource returns; without this guard a
-		// closed loser could be inserted and returned from the cache.
-		c.lifecycleMu.Lock()
-		if c.closed {
-			c.lifecycleMu.Unlock()
-			return nil, ErrCanvasClosed
-		}
-		canvasCache.Lock()
-		winner := canvasCache.entries[key]
-		if winner == nil {
-			c.cacheKey = key
-			c.cached = true
-			canvasCache.entries[key] = c
-		}
-		canvasCache.Unlock()
-		c.lifecycleMu.Unlock()
-
-		if winner != nil {
-			// Winner may have closed after publication while this constructor was
-			// finishing. Verify it using the same cache/lifecycle protocol before
-			// returning; otherwise retry with this key after cleaning up the loser.
-			_ = c.Close()
-			if live, ok := lookupCachedCanvas(provider, key); ok {
-				return live, nil
-			}
-			return NewWithScale(provider, width, height, scale)
-		}
-	}
-
-	// Uncacheable providers have no publication step to serialize with
-	// shutdown, so still reject a synchronous tracker close before returning.
 	if !cacheable {
-		c.lifecycleMu.Lock()
-		closedAfterTracking := c.closed
-		c.lifecycleMu.Unlock()
-		if closedAfterTracking {
-			return nil, ErrCanvasClosed
-		}
+		return finishUncacheableCanvas(c)
 	}
+	return publishCanvas(c, provider, key, width, height, scale)
+}
 
+// finishUncacheableCanvas rejects a synchronous tracker shutdown before a
+// newly-created Canvas is returned. Providers without stable identity are not
+// entered in canvasCache, so there is no publication step to coordinate.
+func finishUncacheableCanvas(c *Canvas) (*Canvas, error) {
+	c.lifecycleMu.Lock()
+	closed := c.closed
+	c.lifecycleMu.Unlock()
+	if closed {
+		return nil, ErrCanvasClosed
+	}
 	return c, nil
+}
+
+// publishCanvas inserts c into the cache, or cleans it up when another
+// constructor won the same key. Keep the Canvas lifecycle-locked through
+// publication: a tracker may close it immediately after TrackResource returns.
+func publishCanvas(c *Canvas, provider gpucontext.DeviceProvider, key canvasCacheKey, width, height int, scale float64) (*Canvas, error) {
+	c.lifecycleMu.Lock()
+	if c.closed {
+		c.lifecycleMu.Unlock()
+		return nil, ErrCanvasClosed
+	}
+	canvasCache.Lock()
+	winner := canvasCache.entries[key]
+	if winner == nil {
+		c.cacheKey = key
+		c.cached = true
+		canvasCache.entries[key] = c
+	}
+	canvasCache.Unlock()
+	c.lifecycleMu.Unlock()
+
+	if winner == nil {
+		return c, nil
+	}
+	// Winner may have closed after publication while this constructor was
+	// finishing. Verify it using the same cache/lifecycle protocol before
+	// returning; otherwise retry with this key after cleaning up the loser.
+	_ = c.Close()
+	if live, ok := lookupCachedCanvas(provider, key); ok {
+		return live, nil
+	}
+	return NewWithScale(provider, width, height, scale)
 }
 
 // MustNew is like New but panics on error.
