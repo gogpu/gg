@@ -18,6 +18,19 @@ type ClipStack struct {
 	bounds  Rect
 }
 
+// Clone returns an independent copy of the clip stack. Clip masks and rounded
+// rectangle descriptors are immutable after construction, so the entries can
+// safely share those underlying values while retaining independent stack state.
+func (cs *ClipStack) Clone() *ClipStack {
+	if cs == nil {
+		return nil
+	}
+	return &ClipStack{
+		entries: append([]clipEntry(nil), cs.entries...),
+		bounds:  cs.bounds,
+	}
+}
+
 // clipEntry represents a single clip operation in the stack.
 type clipEntry struct {
 	prevBounds Rect
@@ -84,8 +97,13 @@ func (cs *ClipStack) PushRRect(r Rect, radius float64) {
 // The path (given as SOA verb+coords) is rasterized into a mask using the current bounds.
 // If antiAlias is true, the mask will use anti-aliased rendering.
 func (cs *ClipStack) PushPath(verbs []PathVerb, coords []float64, antiAlias bool) error {
+	return cs.PushPathWithRule(verbs, coords, antiAlias, FillRuleNonZero)
+}
+
+// PushPathWithRule pushes a path clip using the requested fill rule.
+func (cs *ClipStack) PushPathWithRule(verbs []PathVerb, coords []float64, antiAlias bool, rule FillRule) error {
 	// Create mask clipper from path
-	mask, err := NewMaskClipper(verbs, coords, cs.bounds, antiAlias)
+	mask, err := NewMaskClipperWithRule(verbs, coords, cs.bounds, antiAlias, rule)
 	if err != nil {
 		return err
 	}

@@ -20,7 +20,7 @@ func (c *Context) Clip() {
 	clipVerbs, clipCoords := ConvertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
-	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
+	_ = c.clipStack.PushPathWithRule(clipVerbs, clipCoords, true, clipFillRule(c.paint.FillRule)) // anti-aliased by default
 
 	// Store the device-space path for GPU depth clipping (GPU-CLIP-003a).
 	// The GPU DepthClipPipeline fan-tessellates this path at draw time.
@@ -43,11 +43,18 @@ func (c *Context) ClipPreserve() {
 	clipVerbs, clipCoords := ConvertPathToClipVerbs(devicePath)
 
 	// Push the path as a clip region
-	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true) // anti-aliased by default
+	_ = c.clipStack.PushPathWithRule(clipVerbs, clipCoords, true, clipFillRule(c.paint.FillRule)) // anti-aliased by default
 
 	// Store the device-space path for GPU depth clipping (GPU-CLIP-003a).
 	c.gpuClipPath = devicePath.Clone()
 	// Path is preserved
+}
+
+func clipFillRule(rule FillRule) clip.FillRule {
+	if rule == FillRuleEvenOdd {
+		return clip.FillRuleEvenOdd
+	}
+	return clip.FillRuleNonZero
 }
 
 // ClipRect sets a rectangular clipping region.

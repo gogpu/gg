@@ -29,6 +29,59 @@ func TestClip(t *testing.T) {
 	}
 }
 
+func TestClipPathFillRule(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		rule       FillRule
+		centerDraw bool
+	}{
+		{name: "non-zero", rule: FillRuleNonZero, centerDraw: true},
+		{name: "even-odd", rule: FillRuleEvenOdd, centerDraw: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := NewContext(100, 100)
+			dc.SetFillRule(tc.rule)
+			dc.DrawRectangle(10, 10, 80, 80)
+			dc.DrawRectangle(30, 30, 40, 40)
+			dc.Clip()
+			dc.SetRGB(1, 0, 0)
+			dc.DrawRectangle(0, 0, 100, 100)
+			if err := dc.Fill(); err != nil {
+				t.Fatalf("Fill: %v", err)
+			}
+
+			center := dc.pixmap.GetPixel(50, 50)
+			if tc.centerDraw && center.A < 0.9 {
+				t.Errorf("non-zero center alpha = %.2f, want opaque", center.A)
+			}
+			if !tc.centerDraw && center.A > 0.1 {
+				t.Errorf("even-odd center alpha = %.2f, want transparent", center.A)
+			}
+		})
+	}
+}
+
+func TestClipPreservePathFillRule(t *testing.T) {
+	dc := NewContext(100, 100)
+	dc.SetFillRule(FillRuleEvenOdd)
+	dc.DrawRectangle(10, 10, 80, 80)
+	dc.DrawRectangle(30, 30, 40, 40)
+	dc.ClipPreserve()
+	if dc.path.NumVerbs() == 0 {
+		t.Fatal("ClipPreserve cleared the current path")
+	}
+
+	dc.ClearPath()
+	dc.SetRGB(1, 0, 0)
+	dc.DrawRectangle(0, 0, 100, 100)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill: %v", err)
+	}
+	if center := dc.pixmap.GetPixel(50, 50); center.A > 0.1 {
+		t.Errorf("even-odd ClipPreserve center alpha = %.2f, want transparent", center.A)
+	}
+}
+
 func TestClipPreserve(t *testing.T) {
 	dc := NewContext(100, 100)
 
@@ -133,8 +186,8 @@ func TestClipWithPushPop(t *testing.T) {
 
 	// Pop should restore to depth 0
 	dc.Pop()
-	if dc.clipStack.Depth() != 0 {
-		t.Errorf("Expected clip depth 0 after second Pop(), got %d", dc.clipStack.Depth())
+	if dc.clipStack != nil {
+		t.Errorf("Expected nil clip stack after second Pop(), got depth %d", dc.clipStack.Depth())
 	}
 }
 
@@ -565,6 +618,37 @@ func TestClipPathClearedOnResetClip(t *testing.T) {
 	dc.ResetClip()
 	if dc.gpuClipPath != nil {
 		t.Error("gpuClipPath should be nil after ResetClip")
+	}
+}
+
+func TestClipResetRestoredByPop(t *testing.T) {
+	dc := NewContext(200, 200)
+	dc.DrawCircle(100, 100, 50)
+	dc.Clip()
+	wantPathBounds := dc.gpuClipPath.Bounds()
+
+	dc.Push()
+	dc.ClipRect(75, 75, 50, 50)
+	dc.Push()
+	dc.ResetClip()
+	if dc.clipStack.Depth() != 0 || dc.gpuClipPath != nil {
+		t.Fatal("ResetClip() should clear the active clip state")
+	}
+
+	dc.Pop()
+	if got := dc.clipStack.Depth(); got != 2 {
+		t.Fatalf("clip depth after inner Pop() = %d, want 2", got)
+	}
+	if dc.gpuClipPath == nil || dc.gpuClipPath.Bounds() != wantPathBounds {
+		t.Fatal("inner Pop() did not restore the saved GPU clip path")
+	}
+
+	dc.Pop()
+	if got := dc.clipStack.Depth(); got != 1 {
+		t.Fatalf("clip depth after outer Pop() = %d, want 1", got)
+	}
+	if dc.gpuClipPath == nil || dc.gpuClipPath.Bounds() != wantPathBounds {
+		t.Fatal("outer Pop() did not restore the original GPU clip path")
 	}
 }
 

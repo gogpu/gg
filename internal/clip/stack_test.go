@@ -21,6 +21,28 @@ func TestNewClipStack(t *testing.T) {
 	}
 }
 
+func TestClipStackClone(t *testing.T) {
+	var nilStack *ClipStack
+	if nilStack.Clone() != nil {
+		t.Fatal("Clone() of nil stack should be nil")
+	}
+
+	stack := NewClipStack(NewRect(0, 0, 100, 100))
+	stack.PushRect(NewRect(10, 10, 80, 80))
+	clone := stack.Clone()
+
+	clone.Pop()
+	if stack.Depth() != 1 {
+		t.Fatalf("modifying clone changed original depth: got %d, want 1", stack.Depth())
+	}
+	if got, want := stack.Bounds(), NewRect(10, 10, 80, 80); got != want {
+		t.Fatalf("modifying clone changed original bounds: got %v, want %v", got, want)
+	}
+	if got, want := clone.Bounds(), NewRect(0, 0, 100, 100); got != want {
+		t.Fatalf("clone bounds after Pop() = %v, want %v", got, want)
+	}
+}
+
 func TestClipStack_PushRect(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 100, 100))
 

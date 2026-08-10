@@ -169,3 +169,46 @@ func TestContextResizeResetsClip(t *testing.T) {
 		t.Error("Resize should reset clip stack")
 	}
 }
+
+func TestContextSurfaceChangeInvalidatesSavedClips(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*testing.T, *Context)
+	}{
+		{
+			name: "resize",
+			change: func(t *testing.T, ctx *Context) {
+				t.Helper()
+				if err := ctx.Resize(200, 200); err != nil {
+					t.Fatalf("Resize() error = %v", err)
+				}
+			},
+		},
+		{
+			name: "device scale",
+			change: func(_ *testing.T, ctx *Context) {
+				ctx.SetDeviceScale(2)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewContext(100, 100)
+			defer func() { _ = ctx.Close() }()
+
+			ctx.ClipRect(10, 10, 80, 80)
+			ctx.Push()
+			tc.change(t, ctx)
+			ctx.ClipRect(20, 20, 20, 20)
+			ctx.Pop()
+
+			if ctx.clipStack != nil {
+				t.Fatalf("surface change and Pop() restored a clip stack with depth %d", ctx.clipStack.Depth())
+			}
+			if ctx.gpuClipPath != nil {
+				t.Fatal("surface change and Pop() restored a stale GPU clip path")
+			}
+		})
+	}
+}

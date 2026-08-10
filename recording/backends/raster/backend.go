@@ -121,18 +121,22 @@ func (b *Backend) SetClip(path *gg.Path, rule recording.FillRule) {
 		return
 	}
 
-	// Set the path on the context
+	// Recording paths are already transformed into world coordinates. Build the
+	// path with an identity user transform so a transform command from the
+	// recording does not transform it a second time.
+	transform := b.ctx.GetTransform()
+	b.ctx.Identity()
 	b.ctx.ClearPath()
 	b.setPathFromElements(path)
 	b.ctx.SetFillRule(convertFillRule(rule))
-	// Note: gg.Context doesn't have a direct Clip method, so we use ClipPreserve behavior
-	// by setting path and letting fill/stroke respect it
+	b.ctx.Clip()
+	// Keep the backend's current transform unchanged for subsequent commands.
+	b.ctx.SetTransform(transform)
 }
 
 // ClearClip removes any clipping region.
 func (b *Backend) ClearClip() {
-	// gg.Context doesn't expose ResetClip directly
-	// We handle this by pushing/popping state around clip operations
+	b.ctx.ResetClip()
 }
 
 // FillPath fills the given path with the brush.

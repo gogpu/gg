@@ -252,6 +252,59 @@ func (m *playbackMockBackend) FillRect(_ Rect, _ Brush)                         
 func (m *playbackMockBackend) DrawImage(_ image.Image, _, _ Rect, _ ImageOptions)    {}
 func (m *playbackMockBackend) DrawText(_ string, _, _ float64, _ text.Face, _ Brush) {}
 
+type clipTransformBackend struct {
+	playbackMockBackend
+	transform     Matrix
+	clipTransform Matrix
+	clipBounds    image.Rectangle
+}
+
+func (b *clipTransformBackend) SetTransform(transform Matrix) {
+	b.transform = transform
+}
+
+func (b *clipTransformBackend) SetClip(path *gg.Path, _ FillRule) {
+	b.clipTransform = b.transform
+	b.clipBounds = path.Bounds()
+}
+
+func TestRecordingPlaybackClipRoundRectTransformOwnership(t *testing.T) {
+	rec := NewRecorder(100, 100)
+	rec.Translate(30, 0)
+	rec.Save()
+	rec.Translate(10, 0)
+	rec.Restore()
+	rec.ClipRoundRect(10, 10, 20, 20, 5)
+	recording := rec.FinishRecording()
+
+	// Exercise Playback's defensive handling of an unmatched Restore command.
+	recording.commands = append([]Command{RestoreCommand{}}, recording.commands...)
+
+	backend := &clipTransformBackend{}
+	if err := recording.Playback(backend); err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+	if !backend.clipTransform.IsIdentity() {
+		t.Fatalf("SetClip transform = %+v, want identity", backend.clipTransform)
+	}
+	if got, want := backend.clipBounds, image.Rect(40, 10, 60, 30); got != want {
+		t.Fatalf("SetClip path bounds = %v, want %v", got, want)
+	}
+	if got, want := backend.transform, Translate(30, 0); got != want {
+		t.Fatalf("transform after SetClip = %+v, want %+v", got, want)
+	}
+
+	zeroRadius := NewRecorder(100, 100)
+	zeroRadius.ClipRoundRect(10, 10, 20, 20, 0)
+	zeroBackend := &clipTransformBackend{}
+	if err := zeroRadius.FinishRecording().Playback(zeroBackend); err != nil {
+		t.Fatalf("zero-radius Playback failed: %v", err)
+	}
+	if got, want := zeroBackend.clipBounds, image.Rect(10, 10, 30, 30); got != want {
+		t.Fatalf("zero-radius SetClip path bounds = %v, want %v", got, want)
+	}
+}
+
 // --- Additional recorder coverage tests ---
 
 func TestRecorderDrawStringWrapped(t *testing.T) {
