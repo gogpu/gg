@@ -155,6 +155,16 @@ func TestNew_ZeroHandleProvidersUsePointerFallback(t *testing.T) {
 	}
 }
 
+func TestCacheKeyFor_NilProviderIsUncacheable(t *testing.T) {
+	key, cacheable := cacheKeyFor(nil, 40, 30, 2)
+	if cacheable {
+		t.Fatal("nil provider must not produce a cacheable key")
+	}
+	if key.width != 40 || key.height != 30 || key.scale != 2 {
+		t.Fatalf("nil-provider key = %+v, want geometry 40x30 at scale 2", key)
+	}
+}
+
 func TestNew_PreservesDistinctGeometryAndScale(t *testing.T) {
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c1, err := New(p, 80, 60)
@@ -236,6 +246,33 @@ func TestResize_RekeysCacheWithoutEvictingOtherGeometry(t *testing.T) {
 	}
 	if other != c2 {
 		t.Fatal("resize evicted an unrelated geometry key")
+	}
+}
+
+func TestDraw_AutoResizeFailureRestoresCache(t *testing.T) {
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	c, err := New(p, 80, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	resizeErr := errors.New("injected context resize failure")
+	c.resizeFn = func(int, int) error { return resizeErr }
+	p.W, p.H = 120, 90
+	called := false
+	if err := c.Draw(func(*gg.Context) { called = true }); !errors.Is(err, resizeErr) {
+		t.Fatalf("Draw resize error = %v, want injected failure", err)
+	}
+	if called {
+		t.Fatal("Draw callback ran after the window resize failed")
+	}
+	reused, err := New(p, 80, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused != c {
+		t.Fatal("failed resize did not restore the original cache entry")
 	}
 }
 
@@ -356,6 +393,50 @@ func TestNew_StaleClosedCacheEntryRetries(t *testing.T) {
 	original.closed = false
 	original.lifecycleMu.Unlock()
 	_ = original.Close()
+	_ = recreated.Close()
+}
+
+func TestPublishCanvas_RetriesWhenWinnerCloses(t *testing.T) {
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	winner, err := New(p, 64, 48)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := winner.cacheKey
+	candidate := &Canvas{
+		ctx:      gg.NewContext(64, 48),
+		provider: p,
+		width:    64,
+		height:   48,
+		dirty:    true,
+	}
+
+	// Model a winner closing immediately after the candidate observed it in
+	// the publication map. Leaving the closed winner cached makes the retry
+	// branch deterministic without scheduler timing.
+	winner.lifecycleMu.Lock()
+	winner.closed = true
+	winner.lifecycleMu.Unlock()
+	canvasCache.Lock()
+	winner.cached = true
+	canvasCache.entries[key] = winner
+	canvasCache.Unlock()
+
+	recreated, err := publishCanvas(candidate, p, key, 64, 48, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recreated == winner || recreated == candidate {
+		t.Fatal("publication retry did not create a fresh live Canvas")
+	}
+	if !candidate.closed {
+		t.Fatal("losing candidate was not closed before retry")
+	}
+
+	winner.lifecycleMu.Lock()
+	winner.closed = false
+	winner.lifecycleMu.Unlock()
+	_ = winner.Close()
 	_ = recreated.Close()
 }
 
