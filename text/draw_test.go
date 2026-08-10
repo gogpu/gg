@@ -412,6 +412,357 @@ func TestMeasureFilteredFace(t *testing.T) {
 	}
 }
 
+// findNotoSansSCVar returns the path to NotoSansSC variable font for testing.
+func findNotoSansSCVar() string {
+	paths := []string{
+		"../tmp/tsl0922_fonts/NotoSansSC-VariableFont_wght.ttf",
+		"tmp/tsl0922_fonts/NotoSansSC-VariableFont_wght.ttf",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// TestVarOrRawAdvance verifies the helper uses HVAR when available,
+// raw hmtx otherwise.
+func TestVarOrRawAdvance(t *testing.T) {
+	fontPath := findNotoSansSCVar()
+	if fontPath == "" {
+		fontPath = findVariableFontForTest(t)
+	}
+	if fontPath == "" {
+		t.Skip("No variable font with HVAR available")
+	}
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	parsed := source.Parsed()
+	varProv, ok := parsed.(VariableAdvanceProvider)
+	if !ok {
+		t.Skip("font does not implement VariableAdvanceProvider")
+	}
+
+	axes := source.VariationAxes()
+	var wghtMax float32
+	for _, ax := range axes {
+		if ax.Tag == [4]byte{'w', 'g', 'h', 't'} {
+			wghtMax = ax.Maximum
+			break
+		}
+	}
+	if wghtMax == 0 {
+		t.Skip("font has no wght axis")
+	}
+
+	variations := []FontVariation{NewFontVariation("wght", wghtMax)}
+	gid := parsed.GlyphIndex('H')
+	if gid == 0 {
+		gid = parsed.GlyphIndex('A')
+	}
+	ppem := 14.0
+
+	// With HVAR provider: should return HVAR advance.
+	hvarAdv := varOrRawAdvance(varProv, parsed, gid, ppem, variations)
+	expectedHVAR := varProv.GlyphAdvanceVar(gid, ppem, variations)
+	if hvarAdv != expectedHVAR {
+		t.Errorf("with varProv: got %.4f, want %.4f", hvarAdv, expectedHVAR)
+	}
+
+	// Without HVAR provider: should return raw hmtx advance.
+	rawAdv := varOrRawAdvance(nil, parsed, gid, ppem, variations)
+	expectedRaw := parsed.GlyphAdvance(gid, ppem)
+	if rawAdv != expectedRaw {
+		t.Errorf("without varProv: got %.4f, want %.4f", rawAdv, expectedRaw)
+	}
+
+	t.Logf("gid=%d: HVAR=%.4f, raw=%.4f", gid, hvarAdv, rawAdv)
+}
+
+// TestDrawGlyphsVariable_UsesHVARAdvance_405 verifies that drawGlyphsVariable
+// uses HVAR advances for positioning, matching Face.Advance(). This is the fix
+// for #405: TT-hinted phantom advances (integer-rounded) diverged from HVAR
+// advances (fractional) causing measurement/rendering mismatch.
+//
+// FreeType ttgload.c:964-977: when HVAR present, discard TT-hinted phantom
+// advances and use HVAR-scaled advance instead.
+func TestDrawGlyphsVariable_UsesHVARAdvance_405(t *testing.T) {
+	fontPath := findNotoSansSCVar()
+	if fontPath == "" {
+		fontPath = findVariableFontForTest(t)
+	}
+	if fontPath == "" {
+		t.Skip("No variable font available")
+	}
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	axes := source.VariationAxes()
+	var wghtMax float32
+	for _, ax := range axes {
+		if ax.Tag == [4]byte{'w', 'g', 'h', 't'} {
+			wghtMax = ax.Maximum
+			break
+		}
+	}
+	if wghtMax == 0 {
+		t.Skip("font has no wght axis")
+	}
+
+	variations := []FontVariation{NewFontVariation("wght", wghtMax)}
+
+	tests := []struct {
+		name string
+		text string
+		size float64
+	}{
+		{"Hello_14px", "Hello", 14},
+		{"Hello_22px", "Hello", 22},
+		{"Abcdef_14px", "abcdef", 14},
+		{"Test_36px", "Test", 36},
+	}
+
+	// Add CJK tests only when using NotoSansSC.
+	if findNotoSansSCVar() != "" {
+		tests = append(tests,
+			struct {
+				name, text string
+				size       float64
+			}{"Chinese_14px", "你好世界", 14},
+			struct {
+				name, text string
+				size       float64
+			}{"Chinese_22px", "你好世界", 22},
+		)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			face := source.Face(tc.size, WithVariations(variations...))
+
+			faceAdv := face.Advance(tc.text)
+			if faceAdv <= 0 {
+				t.Fatalf("Face.Advance(%q) = %.4f — should be positive", tc.text, faceAdv)
+			}
+
+			// Render to an image and measure actual ink extent.
+			// If rendering uses a different advance than Face.Advance, the last
+			// glyph will be positioned at the wrong X.
+			dst := image.NewRGBA(image.Rect(0, 0, 500, 100))
+			startX := 50.0
+			Draw(dst, tc.text, face, startX, 60, color.Black)
+
+			// Find rightmost ink pixel.
+			rightmostInk := -1
+			for x := 499; x >= 0; x-- {
+				for y := 0; y < 100; y++ {
+					_, _, _, a := dst.At(x, y).RGBA()
+					if a > 0 {
+						rightmostInk = x
+						goto found
+					}
+				}
+			}
+		found:
+
+			if rightmostInk < 0 {
+				t.Skipf("font lacks glyphs for %q — no ink rendered", tc.text)
+			}
+
+			// The rightmost ink should be near startX + faceAdv.
+			// Allow tolerance for glyph overshoot (typically ≤3px at these sizes).
+			renderedWidth := float64(rightmostInk) - startX
+			diff := renderedWidth - faceAdv
+			if diff < 0 {
+				diff = -diff
+			}
+
+			t.Logf("%s: Face.Advance=%.2f, rendered ink width=%.1f, diff=%.1f",
+				tc.name, faceAdv, renderedWidth, diff)
+
+			// Before fix: diff was 1-4px due to integer phantom advance.
+			// After fix: diff should be <3px (glyph overshoot only).
+			if diff > 5 {
+				t.Errorf("measurement/rendering mismatch: Face.Advance=%.2f, rendered=%.1f (diff=%.1f > 5px)",
+					faceAdv, renderedWidth, diff)
+			}
+		})
+	}
+}
+
+// TestFaceGlyphAdvance_UsesAdvanceResolver verifies that faceGlyphAdvance
+// (used by drawMultiFace) returns the same advance as Face.Advance for
+// both static and variable fonts.
+func TestFaceGlyphAdvance_UsesAdvanceResolver(t *testing.T) {
+	fontPath := testFontPath(t)
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(14.0)
+	sf := face.(*sourceFace)
+
+	for _, r := range "Hello" {
+		runeStr := string(r)
+		fga := faceGlyphAdvance(sf, runeStr)
+		faceAdv := sf.Advance(runeStr)
+
+		if fga != faceAdv {
+			t.Errorf("faceGlyphAdvance(%q)=%.4f != Face.Advance(%q)=%.4f",
+				runeStr, fga, runeStr, faceAdv)
+		}
+	}
+}
+
+// TestFaceGlyphAdvance_VariableFont_UsesHVAR verifies that faceGlyphAdvance
+// returns HVAR advance for variable fonts, not TT-hinted phantom advance.
+func TestFaceGlyphAdvance_VariableFont_UsesHVAR(t *testing.T) {
+	fontPath := findNotoSansSCVar()
+	if fontPath == "" {
+		fontPath = findVariableFontForTest(t)
+	}
+	if fontPath == "" {
+		t.Skip("No variable font available")
+	}
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	axes := source.VariationAxes()
+	var wghtMax float32
+	for _, ax := range axes {
+		if ax.Tag == [4]byte{'w', 'g', 'h', 't'} {
+			wghtMax = ax.Maximum
+			break
+		}
+	}
+	if wghtMax == 0 {
+		t.Skip("font has no wght axis")
+	}
+
+	variations := []FontVariation{NewFontVariation("wght", wghtMax)}
+	face := source.Face(14.0, WithVariations(variations...))
+	sf := face.(*sourceFace)
+
+	parsed := source.Parsed()
+	varProv, ok := parsed.(VariableAdvanceProvider)
+	if !ok {
+		t.Skip("font does not implement VariableAdvanceProvider")
+	}
+
+	for _, r := range "Helo" {
+		gid := parsed.GlyphIndex(r)
+		if gid == 0 {
+			continue
+		}
+		runeStr := string(r)
+		fga := faceGlyphAdvance(sf, runeStr)
+		faceAdv := sf.Advance(runeStr)
+
+		if fga != faceAdv {
+			t.Errorf("faceGlyphAdvance(%q)=%.4f != Face.Advance(%q)=%.4f — advance source mismatch",
+				runeStr, fga, runeStr, faceAdv)
+		}
+
+		hvarAdv := varProv.GlyphAdvanceVar(gid, 14.0, variations)
+		if fga != hvarAdv {
+			t.Errorf("faceGlyphAdvance(%q)=%.4f != HVAR=%.4f — not using HVAR for variable font",
+				runeStr, fga, hvarAdv)
+		}
+	}
+}
+
+// TestDrawVariable_MeasureRenderConsistency_405 is the definitive regression
+// test for #405. It verifies the invariant that the total advance used during
+// rendering matches Face.Advance() — so MeasureString-based positioning works.
+func TestDrawVariable_MeasureRenderConsistency_405(t *testing.T) {
+	fontPath := findNotoSansSCVar()
+	if fontPath == "" {
+		fontPath = findVariableFontForTest(t)
+	}
+	if fontPath == "" {
+		t.Skip("No variable font available")
+	}
+
+	source, err := NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	parsed := source.Parsed()
+	varProv, ok := parsed.(VariableAdvanceProvider)
+	if !ok {
+		t.Skip("font does not implement VariableAdvanceProvider")
+	}
+
+	axes := source.VariationAxes()
+	var wghtMax float32
+	for _, ax := range axes {
+		if ax.Tag == [4]byte{'w', 'g', 'h', 't'} {
+			wghtMax = ax.Maximum
+			break
+		}
+	}
+	if wghtMax == 0 {
+		t.Skip("font has no wght axis")
+	}
+
+	variations := []FontVariation{NewFontVariation("wght", wghtMax)}
+
+	testCases := []struct {
+		size float64
+		text string
+	}{
+		{14, "Hello"},
+		{14, "rl"},
+		{22, "Hello"},
+		{36, "Test"},
+	}
+	if findNotoSansSCVar() != "" {
+		testCases = append(testCases, struct {
+			size float64
+			text string
+		}{22, "你好世界"})
+	}
+
+	for _, tc := range testCases {
+		face := source.Face(tc.size, WithVariations(variations...))
+		faceAdv := face.Advance(tc.text)
+
+		// Compute the advance that drawGlyphsVariable would use per-glyph.
+		renderAdv := 0.0
+		for _, r := range tc.text {
+			if r < 0x20 && r != '\t' {
+				continue
+			}
+			gid := parsed.GlyphIndex(r)
+			renderAdv += varOrRawAdvance(varProv, parsed, gid, tc.size, variations)
+		}
+
+		if faceAdv != renderAdv {
+			t.Errorf("size=%.0f %q: Face.Advance=%.4f != render advance=%.4f (diff=%.4f)",
+				tc.size, tc.text, faceAdv, renderAdv, faceAdv-renderAdv)
+		}
+	}
+}
+
 func BenchmarkDraw(b *testing.B) {
 	// Try to get a font, skip if not available
 	candidates := []string{

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.16] - 2026-08-10
+
+### Fixed
+
+- **Variable font rendering advance mismatch** ([#405](https://github.com/gogpu/gg/issues/405)) —
+  `drawGlyphsVariable` used TT-hinted phantom advances (integer-rounded) for glyph
+  positioning, while `Face.Advance()` / `MeasureString()` used HVAR advances (fractional).
+  Rendering now uses HVAR advances via `varOrRawAdvance()`, matching FreeType
+  `ttgload.c:964-977`: when HVAR present, discard TT-hinted phantom advances.
+  Also fixed `faceGlyphAdvance()` (used by MultiFace/FilteredFace) to use
+  `advanceResolver` for consistent advances across all text paths.
+
+- **Shear/rotation text garbling in aliased mode** ([#405](https://github.com/gogpu/gg/issues/405)) —
+  `drawStringCPUAliased` and `drawStringCPU` routed sheared text through
+  `drawStringAsOutlines` with `NoAAFiller`, which produces garbled output on
+  non-axis-aligned paths. Now forces anti-aliased coverage for non-axis-aligned
+  outlines, matching Skia's `computeAxisAlignmentForHText` pattern where binary
+  coverage is used only for axis-aligned text.
+
 ## [0.50.15] - 2026-08-09
 
 ### Fixed
