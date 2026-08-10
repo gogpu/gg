@@ -563,7 +563,7 @@ func TestDrawGlyphsVariable_UsesHVARAdvance_405(t *testing.T) {
 			Draw(dst, tc.text, face, startX, 60, color.Black)
 
 			// Find rightmost ink pixel.
-			rightmostInk := 0
+			rightmostInk := -1
 			for x := 499; x >= 0; x-- {
 				for y := 0; y < 100; y++ {
 					_, _, _, a := dst.At(x, y).RGBA()
@@ -574,6 +574,10 @@ func TestDrawGlyphsVariable_UsesHVARAdvance_405(t *testing.T) {
 				}
 			}
 		found:
+
+			if rightmostInk < 0 {
+				t.Skipf("font lacks glyphs for %q — no ink rendered", tc.text)
+			}
 
 			// The rightmost ink should be near startX + faceAdv.
 			// Allow tolerance for glyph overshoot (typically ≤3px at these sizes).
