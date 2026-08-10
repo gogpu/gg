@@ -52,6 +52,7 @@ type resourceTracker interface {
 // or use external synchronization.
 type Canvas struct {
 	ctx                  *gg.Context
+	resizeFn             func(width, height int) error // context resize dependency; lifecycleMu protects replacement
 	provider             gpucontext.DeviceProvider
 	windowProvider       gpucontext.WindowProvider // latest wrapper for dynamic size/scale
 	texture              any                       // Lazy-created texture (*gogpu.Texture)
@@ -182,8 +183,10 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		opts = append(opts, gg.WithDeviceScale(scale))
 	}
 
+	ctx := gg.NewContext(width, height, opts...)
 	c := &Canvas{
-		ctx:      gg.NewContext(width, height, opts...),
+		ctx:      ctx,
+		resizeFn: ctx.Resize,
 		provider: provider,
 		width:    width,
 		height:   height,
@@ -602,8 +605,8 @@ func (c *Canvas) resizeLocked(width, height int) error {
 	c.removeFromCanvasCacheLocked()
 	canvasCache.Unlock()
 
-	// Resize gg context
-	if err := c.ctx.Resize(width, height); err != nil {
+	// Resize gg context.
+	if err := c.resizeFn(width, height); err != nil {
 		// Restore the old cache key when the context rejects the resize.
 		key, cacheable := c.cacheKeyFor(oldWidth, oldHeight, c.ctx.DeviceScale())
 		if cacheable {
