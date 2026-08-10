@@ -21,6 +21,35 @@ type shapedFallbackFillAccelerator struct {
 	fillCalls int
 }
 
+type perContextAliasedTestAccelerator struct {
+	*mockAccelerator
+	context *perContextAliasedTestOps
+}
+
+type perContextAliasedTestOps struct {
+	legacyGPUContext
+	shapedAliasedCalls int
+	aliasedCalls       int
+}
+
+func (a *perContextAliasedTestAccelerator) NewGPURenderContext() any {
+	return a.context
+}
+
+func (c *perContextAliasedTestOps) DrawShapedGlyphMaskTextAliased(
+	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
+) error {
+	c.shapedAliasedCalls++
+	return nil
+}
+
+func (c *perContextAliasedTestOps) DrawGlyphMaskTextAliased(
+	GPURenderTarget, any, string, float64, float64, RGBA, Matrix, float64,
+) error {
+	c.aliasedCalls++
+	return nil
+}
+
 func (a *shapedFallbackFillAccelerator) FillPath(GPURenderTarget, *Path, *Paint) error {
 	a.fillCalls++
 	return nil
@@ -148,6 +177,33 @@ func TestTextModeAliased_DrawShapedGlyphsUsesAliasedAccelerator(t *testing.T) {
 	}
 	if accelerator.aaCalls != 0 {
 		t.Errorf("anti-aliased shaped calls = %d, want 0", accelerator.aaCalls)
+	}
+}
+
+func TestTextModeAliased_UsesPerContextAliasedAccelerator(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	context := &perContextAliasedTestOps{}
+	accelerator := &perContextAliasedTestAccelerator{
+		mockAccelerator: &mockAccelerator{name: "per-context-aliased-test", canAccel: AccelText},
+		context:         context,
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetFont(face)
+	dc.SetTextMode(TextModeAliased)
+	dc.DrawShapedGlyphs(glyphs, face, 5, 40)
+
+	if context.shapedAliasedCalls != 1 {
+		t.Errorf("per-context shaped aliased calls = %d, want 1", context.shapedAliasedCalls)
+	}
+	if !dc.tryGPUGlyphMaskTextAliased("O", 5, 40) {
+		t.Fatal("per-context aliased glyph-mask route was not used")
+	}
+	if context.aliasedCalls != 1 {
+		t.Errorf("per-context aliased glyph-mask calls = %d, want 1", context.aliasedCalls)
 	}
 }
 

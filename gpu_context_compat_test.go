@@ -72,6 +72,7 @@ func (*legacyGPUContext) ClearClipRRect()              {}
 func (*legacyGPUContext) SetClipPath(*Path)            {}
 func (*legacyGPUContext) ClearClipPath()               {}
 func (*legacyGPUContext) BeginFrame()                  {}
+func (*legacyGPUContext) MarkFrameRendered()           {}
 func (*legacyGPUContext) SetPipelineMode(PipelineMode) {}
 func (*legacyGPUContext) SetAntiAlias(bool)            {}
 func (*legacyGPUContext) PendingCount() int            { return 0 }
