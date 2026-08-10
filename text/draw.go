@@ -167,6 +167,15 @@ func hintedOrRawAdvance(ttCache *ttHintCache, glyph Glyph, ppem float64) float64
 //  2. Auto-hinter on the gvar-varied outline
 //  3. Grid-fit fallback
 //
+// Advance priority (FreeType ttgload.c:964-977):
+//
+//	HVAR present → use HVAR advance (fractional, matches Face.Advance)
+//	HVAR absent  → use outline.Advance (TT-hinted phantom points)
+//
+// TT bytecode hinting grid-fits phantom points to integer pixels, but HVAR
+// provides the authoritative variable-font advance. Using TT-hinted phantom
+// advances causes measurement/rendering mismatch (#405).
+//
 // The mode parameter selects coverage computation (Skia pattern: outline source
 // and rasterization mode are orthogonal — variable fonts don't affect AA choice).
 func drawGlyphsVariable(
@@ -190,6 +199,11 @@ func drawGlyphsVariable(
 	src := image.NewUniform(col)
 	extractor := &OutlineExtractor{}
 
+	// HVAR takes priority over TT-hinted phantom advances for positioning.
+	// FreeType ttgload.c:964-977: when HVAR present and hinting active,
+	// discard TT-hinted phantoms and use HVAR-adjusted advance instead.
+	varProv, _ := parsed.(VariableAdvanceProvider)
+
 	advanceX := 0.0
 	for _, r := range text {
 		if r < 0x20 && r != '\t' {
@@ -198,12 +212,7 @@ func drawGlyphsVariable(
 
 		gid := GlyphID(parsed.GlyphIndex(r))
 		if gid == 0 {
-			// Use variable-aware advance for skipped glyphs.
-			if vap, vapOK := parsed.(VariableAdvanceProvider); vapOK {
-				advanceX += vap.GlyphAdvanceVar(uint16(gid), ppem, variations)
-			} else {
-				advanceX += parsed.GlyphAdvance(uint16(gid), ppem)
-			}
+			advanceX += varOrRawAdvance(varProv, parsed, uint16(gid), ppem, variations)
 			continue
 		}
 
@@ -219,9 +228,7 @@ func drawGlyphsVariable(
 		// ExtractOutlineHintedVar applies gvar deltas THEN hinting in one pass.
 		outline, _ := extractor.ExtractOutlineHintedVar(parsed, gid, ppem, hinting, variations)
 		if outline == nil || outline.IsEmpty() {
-			if outline != nil {
-				advanceX += float64(outline.Advance)
-			}
+			advanceX += varOrRawAdvance(varProv, parsed, uint16(gid), ppem, variations)
 			continue
 		}
 
@@ -234,7 +241,7 @@ func drawGlyphsVariable(
 			result, rErr = rast.RasterizeOutline(outline, subpixelX, subpixelY)
 		}
 		if rErr != nil || result == nil {
-			advanceX += float64(outline.Advance)
+			advanceX += varOrRawAdvance(varProv, parsed, uint16(gid), ppem, variations)
 			continue
 		}
 
@@ -250,8 +257,16 @@ func drawGlyphsVariable(
 		destRect := image.Rect(dstX, dstY, dstX+result.Width, dstY+result.Height)
 		draw.DrawMask(dst, destRect, src, image.Point{}, maskImg, image.Point{}, draw.Over)
 
-		advanceX += float64(outline.Advance)
+		advanceX += varOrRawAdvance(varProv, parsed, uint16(gid), ppem, variations)
 	}
+}
+
+// varOrRawAdvance returns the HVAR advance when available, raw hmtx otherwise.
+func varOrRawAdvance(varProv VariableAdvanceProvider, parsed ParsedFont, gid uint16, ppem float64, variations []FontVariation) float64 {
+	if varProv != nil {
+		return varProv.GlyphAdvanceVar(gid, ppem, variations)
+	}
+	return parsed.GlyphAdvance(gid, ppem)
 }
 
 // rasterizeHintedGlyph rasterizes a glyph with 256-level analytic AA coverage.
@@ -363,42 +378,21 @@ func drawFilteredFace(dst draw.Image, text string, ff *FilteredFace, x, y float6
 	}
 }
 
-// faceGlyphAdvance returns the advance width for a single-rune string,
-// using TT hinted advances when available. This is used by drawMultiFace
-// and drawFilteredFace which render one rune at a time and need consistent
-// cursor advancement matching the hinted glyph outlines.
+// faceGlyphAdvance returns the advance width for a single-rune string.
+// Uses advanceResolver (HVAR for variable, TT-hinted for static, raw otherwise).
+// This is used by drawMultiFace and drawFilteredFace which render one rune
+// at a time and need consistent cursor advancement matching Face.Advance().
 func faceGlyphAdvance(face Face, runeStr string) float64 {
 	sf, ok := face.(*sourceFace)
 	if !ok {
 		return unhintedGlyphAdvance(face, runeStr)
 	}
 
-	cache := loadFaceTTCache(sf)
-	if cache == nil {
-		return unhintedGlyphAdvance(face, runeStr)
-	}
-
-	ppem := sf.size
+	ar := newAdvanceResolver(sf)
 	for glyph := range sf.Glyphs(runeStr) {
-		if adv, hintOK := cache.hintedAdvanceWidth(uint16(glyph.GID), int32(ppem)); hintOK {
-			return adv
-		}
-		return glyph.Advance
+		return ar.advance(uint16(glyph.GID))
 	}
 	return 0
-}
-
-// loadFaceTTCache returns the TT hint cache for a sourceFace, or nil if
-// TT bytecode hinting is unavailable or disabled.
-func loadFaceTTCache(sf *sourceFace) *ttHintCache {
-	if sf.config.hinting == HintingNone {
-		return nil
-	}
-	ownFont, ok := sf.source.Parsed().(*ownParsedFont)
-	if !ok {
-		return nil
-	}
-	return ownFont.loadTTHintCache()
 }
 
 // unhintedGlyphAdvance returns the advance from the Glyphs iterator (unhinted).

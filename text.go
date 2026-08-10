@@ -584,6 +584,15 @@ func (c *Context) drawStringCPU(s string, x, y float64) {
 	}
 
 	// Tier 2: Everything else → glyph outlines as paths (Strategy B, Vello pattern).
+	// Force AA for non-axis-aligned transforms — NoAAFiller produces garbled
+	// output on sheared/rotated paths (binary coverage assumes axis-aligned edges).
+	// Skia: computeAxisAlignmentForHText returns kNone for non-axis-aligned baseline.
+	if !c.antiAlias && (m.B != 0 || m.D != 0) {
+		c.antiAlias = true
+		c.drawStringAsOutlines(s, x, y)
+		c.antiAlias = false
+		return
+	}
 	c.drawStringAsOutlines(s, x, y)
 }
 
@@ -621,19 +630,22 @@ func (c *Context) drawStringScaled(s string, x, y float64, deviceSize float64) {
 // Uses GlyphMaskRasterizer.RasterizeAliased (NoAAFiller) to produce per-glyph R8
 // masks with only 0 or 255 values, then composites via draw.DrawMask.
 //
-// For rotation/skew, routes through drawStringAsOutlines with AA disabled so the
-// normal fill pipeline uses NoAAFiller for vector outlines.
+// For rotation/skew, routes through drawStringAsOutlines with AA forced ON.
+// Binary coverage (NoAAFiller) is incompatible with non-axis-aligned geometry —
+// sheared outlines produce garbled output. Skia's computeAxisAlignmentForHText
+// disables binary mode when the baseline is not axis-aligned (returns kNone).
 func (c *Context) drawStringCPUAliased(s string, x, y float64) {
 	m := c.matrix
 
-	// Non-trivial transforms: route through vector outlines with AA disabled.
-	// IsTranslationOnly = identity + translation.
-	// Uniform positive scale: B=0, D=0, A=E, A>0.
+	// Non-axis-aligned transforms: force AA for outline rendering.
+	// NoAAFiller produces garbled output on sheared/rotated paths because
+	// binary coverage assumes axis-aligned edges. All enterprise engines
+	// (Skia, Cairo) use AA for non-axis-aligned text outlines.
 	if !m.IsTranslationOnly() && !(m.B == 0 && m.D == 0 && m.A == m.E && m.A > 0) {
-		saved := c.paint.Antialias
-		c.paint.Antialias = false
+		savedAA := c.antiAlias
+		c.antiAlias = true
 		c.drawStringAsOutlines(s, x, y)
-		c.paint.Antialias = saved
+		c.antiAlias = savedAA
 		return
 	}
 

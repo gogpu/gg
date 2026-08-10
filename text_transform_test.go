@@ -852,3 +852,147 @@ func TestTextTransformGolden(t *testing.T) {
 		// They use a 300x200 canvas, so we just check non-zero (already done in sub-tests).
 	})
 }
+
+// --------------------------------------------------------------------------
+// Shear + Aliased: force-AA for non-axis-aligned outlines (Skia pattern)
+// --------------------------------------------------------------------------
+
+// TestShearAliased_ForceAA_ProducesReadableText verifies that aliased text
+// with shear is readable (not garbled). NoAAFiller produces broken output on
+// sheared outlines — the fix forces AA for non-axis-aligned text paths.
+//
+// Skia: computeAxisAlignmentForHText returns kNone when baseline is not
+// axis-aligned, disabling binary coverage mode.
+func TestShearAliased_ForceAA_ProducesReadableText(t *testing.T) {
+	dc, source := setupTextContext(t, 400, 100, 24)
+	defer func() { _ = source.Close() }()
+
+	dc.SetAntiAlias(false)
+	dc.SetTextMode(TextModeAliased)
+
+	dc.Push()
+	dc.Shear(-0.3, 0)
+	dc.DrawString("Hello World", 30, 60)
+	dc.Pop()
+
+	pixels := countNonWhitePixels(dc, 0, 0, 400, 100)
+	if pixels == 0 {
+		t.Fatal("Shear+aliased text produced no pixels")
+	}
+
+	// Verify text is readable: count distinct ink runs at mid-height.
+	// "Hello World" = 10 visible chars → expect ≥5 ink runs.
+	// Garbled text collapses into 1-3 blobs.
+	midY := 45
+	inkRuns := countInkRuns(dc, midY, 0, 400)
+	t.Logf("ink runs at y=%d: %d, total pixels: %d", midY, inkRuns, pixels)
+	if inkRuns < 4 {
+		t.Errorf("only %d ink runs at y=%d — text is garbled (expected ≥4 for 'Hello World')", inkRuns, midY)
+	}
+}
+
+// TestShearAliased_MatchesShearAA verifies that aliased+shear and AA+shear
+// produce similar pixel count (both route through drawStringAsOutlines with AA).
+func TestShearAliased_MatchesShearAA(t *testing.T) {
+	fontPath := findSystemFont(t)
+	if fontPath == "" {
+		t.Skip("No system font available")
+	}
+
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	render := func(aliased bool) int {
+		dc := NewContext(400, 100)
+		dc.SetFont(source.Face(24))
+		dc.SetRGB(0, 0, 0)
+		dc.ClearWithColor(White)
+		if aliased {
+			dc.SetAntiAlias(false)
+			dc.SetTextMode(TextModeAliased)
+		}
+		dc.Push()
+		dc.Shear(-0.3, 0)
+		dc.DrawString("Test123", 30, 60)
+		dc.Pop()
+		return countNonWhitePixels(dc, 0, 0, 400, 100)
+	}
+
+	aaPixels := render(false)
+	aliasedPixels := render(true)
+
+	if aaPixels == 0 || aliasedPixels == 0 {
+		t.Fatalf("no pixels: AA=%d, aliased=%d", aaPixels, aliasedPixels)
+	}
+
+	// Both should produce similar pixel counts since both force AA for shear.
+	// Allow 50% tolerance for AA edge differences.
+	ratio := float64(aliasedPixels) / float64(aaPixels)
+	t.Logf("AA pixels=%d, aliased pixels=%d, ratio=%.2f", aaPixels, aliasedPixels, ratio)
+	if ratio < 0.5 || ratio > 2.0 {
+		t.Errorf("aliased/AA pixel ratio %.2f outside [0.5, 2.0] — force-AA not working", ratio)
+	}
+}
+
+// TestShearAliased_NoShear_StillBinary verifies that aliased text WITHOUT
+// shear still uses binary (NoAAFiller) rendering — the force-AA only applies
+// to non-axis-aligned transforms.
+func TestShearAliased_NoShear_StillBinary(t *testing.T) {
+	fontPath := findSystemFont(t)
+	if fontPath == "" {
+		t.Skip("No system font available")
+	}
+
+	source, err := text.NewFontSourceFromFile(fontPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = source.Close() }()
+
+	dc := NewContext(200, 60)
+	dc.SetFont(source.Face(20))
+	dc.SetRGB(0, 0, 0)
+	dc.ClearWithColor(White)
+	dc.SetAntiAlias(false)
+	dc.SetTextMode(TextModeAliased)
+	dc.DrawString("Hi", 10, 40)
+
+	// Aliased text should have only 0 or 255 alpha values (binary coverage).
+	// Scan for intermediate values — there should be none.
+	hasGray := false
+	for y := 0; y < 60; y++ {
+		for x := 0; x < 200; x++ {
+			p := dc.pixmap.GetPixel(x, y)
+			r := pixelByte(p.R)
+			if r > 5 && r < 250 {
+				hasGray = true
+				break
+			}
+		}
+		if hasGray {
+			break
+		}
+	}
+	if hasGray {
+		t.Error("aliased text without shear has gray pixels — should be binary coverage only")
+	}
+}
+
+// countInkRuns counts the number of distinct ink runs (non-white segments)
+// along a horizontal scanline.
+func countInkRuns(dc *Context, y, xStart, xEnd int) int {
+	runs := 0
+	inInk := false
+	for x := xStart; x < xEnd && x < dc.width; x++ {
+		p := dc.pixmap.GetPixel(x, y)
+		isInk := pixelByte(p.R) < 200
+		if isInk && !inInk {
+			runs++
+		}
+		inInk = isInk
+	}
+	return runs
+}
