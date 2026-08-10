@@ -483,20 +483,24 @@ func (p *GlyphCachePool) Put(c *GlyphCache) {
 }
 
 // globalGlyphCache is the default shared glyph cache.
-var globalGlyphCache = NewGlyphCache()
+var globalGlyphCache atomic.Pointer[GlyphCache]
+
+func init() {
+	globalGlyphCache.Store(NewGlyphCache())
+}
 
 // GetGlobalGlyphCache returns the global shared glyph cache.
+// It is safe to call concurrently with SetGlobalGlyphCache.
 func GetGlobalGlyphCache() *GlyphCache {
-	return globalGlyphCache
+	return globalGlyphCache.Load()
 }
 
 // SetGlobalGlyphCache replaces the global glyph cache.
 // The old cache is returned for cleanup if needed.
+// It is safe for concurrent use.
 func SetGlobalGlyphCache(cache *GlyphCache) *GlyphCache {
 	if cache == nil {
 		cache = NewGlyphCache()
 	}
-	old := globalGlyphCache
-	globalGlyphCache = cache
-	return old
+	return globalGlyphCache.Swap(cache)
 }

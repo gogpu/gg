@@ -696,6 +696,47 @@ func TestSetGlobalSubpixelCache_Nil(t *testing.T) {
 	}
 }
 
+func TestGlobalSubpixelCacheConcurrentAccess(t *testing.T) {
+	original := GetGlobalSubpixelCache()
+	t.Cleanup(func() {
+		_ = SetGlobalSubpixelCache(original)
+	})
+
+	caches := []*SubpixelCache{
+		NewSubpixelCache(DefaultSubpixelConfig()),
+		NewSubpixelCache(HighQualitySubpixelConfig()),
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(offset int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 1000; j++ {
+				_ = SetGlobalSubpixelCache(caches[(offset+j)%len(caches)])
+			}
+		}(i)
+	}
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 1000; j++ {
+				if GetGlobalSubpixelCache() == nil {
+					t.Error("GetGlobalSubpixelCache returned nil")
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+}
+
 func TestSubpixelCache_Concurrent(t *testing.T) {
 	cache := NewSubpixelCache(DefaultSubpixelConfig())
 	var wg sync.WaitGroup
