@@ -42,6 +42,7 @@
 //
 //   - Texture is created lazily on first Flush()
 //   - Dirty tracking avoids unnecessary GPU uploads
+//   - New and NewWithScale reuse a Canvas for the same provider, size, and scale
 //   - Consider canvas size vs window size for optimal performance
 //
 // # Integration Without Circular Imports
