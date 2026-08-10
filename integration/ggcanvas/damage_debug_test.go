@@ -291,11 +291,8 @@ func TestFormatLabel_ZeroRect(t *testing.T) {
 }
 
 func TestGGDamageOverlay_InterfaceCompliance(t *testing.T) {
-	// Verify compile-time interface check works at test time too.
-	var r gpucontext.DamageOverlayRenderer = &ggDamageOverlay{}
-	if r == nil {
-		t.Error("should not be nil")
-	}
-	// Verify the method exists with correct signature.
+	r := &ggDamageOverlay{}
+	// Verify the method exists with correct signature (compile-time check).
+	var _ gpucontext.DamageOverlayRenderer = r
 	_ = fmt.Sprintf("%T", r)
 }

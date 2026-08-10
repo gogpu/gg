@@ -29,9 +29,6 @@ var _ gpucontext.DamageOverlayRenderer = (*ggDamageOverlay)(nil)
 
 const ggDamageFlashDuration = 400 * time.Millisecond
 
-// labelFontSize is the font size used for overlay labels (physical pixels).
-const labelFontSize = 11.0
-
 // labelPadH is horizontal padding inside the label background box.
 const labelPadH = 4.0
 
