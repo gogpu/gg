@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] - 2026-08-10
+
+### Changed
+
+- **Compositor architecture migration** (ADR-067, gg#493) — gg becomes a pure drawing library. Surface-level compositor decisions (LoadOp, damage scissoring, MSAA overlay compositing) delegated to gogpu via `SurfaceCompositor` interface.
+  - `preserveContent` removed from `GPURenderSession` — compositor decides LoadOp
+  - `shouldPreserveSurface()` simplified to gg-internal multi-pass only
+  - `selectBaseLayer` uses `target.PreserveContent` (explicit external content signal), not `frameRendered`
+  - Per-frame compositor via `GPURenderTarget.Compositor` field (enterprise pattern: compositor context per render call)
+  - `MarkFrameRendered()` replaces `preserveContent` flag for compositor → gg signal
+  - MSAA overlay compositing delegates to `SurfaceCompositor.CompositeMSAAOverlay()` when available
+  - Legacy fallback preserved for standalone gg without gogpu
+  - Tests updated for new compositor signal path
+
+### Changed
+
+- **deps:** gpucontext → v0.27.0 (SurfaceCompositor interface)
+
 ## [0.51.0] - 2026-08-10
 
 ### Added

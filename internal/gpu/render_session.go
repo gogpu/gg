@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"unsafe"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
@@ -213,13 +214,11 @@ type GPURenderSession struct {
 	gpuTexUniformBufs    []*wgpu.Buffer
 	gpuTexBindGroups     []*wgpu.BindGroup
 
-	// Full-surface textured quad used by the MSAA overlay composition path.
-	// These resources are separate from ordinary GPU texture draws so preparing
-	// the final composite cannot overwrite another draw's persistent buffers.
-	surfaceCompositeVertBuf    *wgpu.Buffer
-	surfaceCompositeUniformBuf *wgpu.Buffer
-	surfaceCompositeBindGroup  *wgpu.BindGroup
-	surfaceCompositeBoundView  *wgpu.TextureView
+	// compositor is set per-frame from GPURenderTarget.Compositor (ADR-067).
+	// When non-nil, MSAA overlay compositing is delegated to gogpu.
+	// When nil, gg uses legacy internal paths (standalone gg without gogpu).
+	// Reset each frame in RenderFrame/RenderFrameGrouped from target.
+	compositor gpucontext.SurfaceCompositor
 
 	// Bind groups pending release — deferred until after command buffer submit.
 	// WebGPU requires bind groups to be alive at submit time (wgpu-core track/mod.rs:631).
@@ -263,10 +262,6 @@ type GPURenderSession struct {
 	// Porter-Duff "over" during readback, so LoadOpClear is always safe.
 	frameRendered bool
 
-	// preserveContent signals that the surface has external content (e.g., g3d)
-	// that must remain underneath this pass. ADR-059.
-	preserveContent bool
-
 	// antiAlias determines SDF coverage computation mode.
 	// When true (default), smoothstep produces smooth edges.
 	// When false, binary step produces aliased edges.
@@ -305,6 +300,12 @@ func NewGPURenderSession(device *wgpu.Device, queue *wgpu.Queue, sampleCount uin
 		sampleCount: sampleCount,
 		antiAlias:   true,
 	}
+}
+
+// SetSurfaceCompositor sets the compositor for backward compatibility.
+// Prefer GPURenderTarget.Compositor (per-frame, ADR-067 enterprise pattern).
+func (s *GPURenderSession) SetSurfaceCompositor(c gpucontext.SurfaceCompositor) {
+	s.compositor = c
 }
 
 // SetSurfaceTarget configures the session to render directly to the given
@@ -589,7 +590,9 @@ func (s *GPURenderSession) RenderFrame(
 	if len(sdfShapes) == 0 && len(convexCommands) == 0 && len(stencilPaths) == 0 && len(textBatches) == 0 && len(glyphMaskBatches) == 0 {
 		return nil
 	}
-	s.preserveContent = target.PreserveContent
+
+	// ADR-067: set compositor per-frame from render target.
+	s.compositor = target.Compositor
 
 	// Determine render target view: per-pass target.View takes priority
 	// over session-level surfaceView (backward compat).
@@ -703,7 +706,9 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	if totalItems == 0 && baseLayer == nil {
 		return nil
 	}
-	s.preserveContent = target.PreserveContent
+
+	// ADR-067: set compositor per-frame from render target.
+	s.compositor = target.Compositor
 
 	// Determine render target view: per-pass target.View takes priority
 	// over session-level surfaceView (backward compat).
@@ -1249,27 +1254,17 @@ func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,
 	}
 }
 
-// releaseSurfaceCompositeBinding drops the bind group before its sampled
-// overlay resolve texture is destroyed or replaced. The vertex and uniform
-// buffers remain reusable across surface resizes.
+// releaseSurfaceCompositeBinding is now a no-op — composite resources are
+// managed by the compositor (gogpu). Kept as a method for backward compat
+// with callers during migration; will be removed after full migration.
 func (s *GPURenderSession) releaseSurfaceCompositeBinding() {
-	if s.surfaceCompositeBindGroup != nil {
-		s.surfaceCompositeBindGroup.Release()
-		s.surfaceCompositeBindGroup = nil
-	}
-	s.surfaceCompositeBoundView = nil
+	// No-op: compositor owns surface composite resources (ADR-067).
 }
 
+// destroySurfaceCompositeResources is now a no-op — composite resources are
+// managed by the compositor (gogpu).
 func (s *GPURenderSession) destroySurfaceCompositeResources() {
-	s.releaseSurfaceCompositeBinding()
-	if s.surfaceCompositeUniformBuf != nil {
-		s.surfaceCompositeUniformBuf.Release()
-		s.surfaceCompositeUniformBuf = nil
-	}
-	if s.surfaceCompositeVertBuf != nil {
-		s.surfaceCompositeVertBuf.Release()
-		s.surfaceCompositeVertBuf = nil
-	}
+	// No-op: compositor owns surface composite resources (ADR-067).
 }
 
 // sdfFrameResources holds per-frame GPU resources for SDF rendering.
@@ -2184,11 +2179,13 @@ func (s *GPURenderSession) buildGPUTextureResources(cmds []GPUTextureDrawCommand
 	}, nil
 }
 
-// buildSurfaceCompositeResources prepares a persistent full-surface textured
-// quad that samples the transparent single-sample overlay resolve texture.
-// Dedicated buffers keep this final pass independent from base-layer and
-// ordinary GPU-texture draw resources prepared earlier in the frame.
-func (s *GPURenderSession) buildSurfaceCompositeResources(w, h uint32) (*imageFrameResources, error) {
+// buildLegacySurfaceCompositeResources prepares per-frame resources for the
+// legacy MSAA overlay composite path (no compositor set). Creates temporary
+// vertex buffer, uniform buffer, and bind group for a full-surface blit quad.
+//
+// When the compositor is available (ADR-067), this function is never called;
+// MSAA compositing uses gogpu's dedicated blit pipeline instead.
+func (s *GPURenderSession) buildLegacySurfaceCompositeResources(w, h uint32) (*imageFrameResources, error) {
 	if s.textures.compositeView == nil {
 		return nil, fmt.Errorf("composition resolve view is nil")
 	}
@@ -2200,64 +2197,60 @@ func (s *GPURenderSession) buildSurfaceCompositeResources(w, h uint32) (*imageFr
 	}
 
 	const vertexBufferSize = 6 * imageVertexStride
-	if s.surfaceCompositeVertBuf == nil {
-		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: "surface_composite_vert_buf",
-			Size:  vertexBufferSize,
-			Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create composition vertex buffer: %w", err)
-		}
-		s.surfaceCompositeVertBuf = buf
+	vertBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "legacy_composite_vert_buf",
+		Size:  vertexBufferSize,
+		Usage: gputypes.BufferUsageVertex | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create composition vertex buffer: %w", err)
 	}
 	vertices := buildImageVertices(&ImageDrawCommand{
 		DstW: float32(w), DstH: float32(h),
 		U0: 0, V0: 0, U1: 1, V1: 1,
 	})
-	if err := s.queue.WriteBuffer(s.surfaceCompositeVertBuf, 0, vertices); err != nil {
+	if err := s.queue.WriteBuffer(vertBuf, 0, vertices); err != nil {
+		vertBuf.Release()
 		return nil, fmt.Errorf("upload composition vertices: %w", err)
 	}
 
-	if s.surfaceCompositeUniformBuf == nil {
-		buf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
-			Label: "surface_composite_uniform_buf",
-			Size:  imageUniformSize,
-			Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create composition uniform buffer: %w", err)
-		}
-		s.surfaceCompositeUniformBuf = buf
+	uniformBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "legacy_composite_uniform_buf",
+		Size:  imageUniformSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		vertBuf.Release()
+		return nil, fmt.Errorf("create composition uniform buffer: %w", err)
 	}
-	if err := s.queue.WriteBuffer(s.surfaceCompositeUniformBuf, 0, makeImageUniform(w, h, 1)); err != nil {
+	if err := s.queue.WriteBuffer(uniformBuf, 0, makeImageUniform(w, h, 1)); err != nil {
+		vertBuf.Release()
+		uniformBuf.Release()
 		return nil, fmt.Errorf("upload composition uniform: %w", err)
 	}
 
-	if s.surfaceCompositeBindGroup == nil || s.surfaceCompositeBoundView != s.textures.compositeView {
-		bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
-			Label:  "surface_composite_bind_group",
-			Layout: s.imagePipeline.uniformLayout,
-			Entries: []wgpu.BindGroupEntry{
-				{Binding: 0, Buffer: s.surfaceCompositeUniformBuf, Offset: 0, Size: imageUniformSize},
-				{Binding: 1, TextureView: s.textures.compositeView},
-				{Binding: 2, Sampler: s.imagePipeline.sampler},
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create composition bind group: %w", err)
-		}
-		if s.surfaceCompositeBindGroup != nil {
-			s.pendingBindGroupRelease = append(s.pendingBindGroupRelease, s.surfaceCompositeBindGroup)
-		}
-		s.surfaceCompositeBindGroup = bg
-		s.surfaceCompositeBoundView = s.textures.compositeView
+	bg, err := s.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "legacy_composite_bind_group",
+		Layout: s.imagePipeline.uniformLayout,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: uniformBuf, Offset: 0, Size: imageUniformSize},
+			{Binding: 1, TextureView: s.textures.compositeView},
+			{Binding: 2, Sampler: s.imagePipeline.sampler},
+		},
+	})
+	if err != nil {
+		vertBuf.Release()
+		uniformBuf.Release()
+		return nil, fmt.Errorf("create composition bind group: %w", err)
 	}
 
+	// Schedule cleanup after submit (legacy path creates per-frame resources).
+	s.pendingBindGroupRelease = append(s.pendingBindGroupRelease, bg)
+
 	return &imageFrameResources{
-		vertBuf: s.surfaceCompositeVertBuf,
+		vertBuf: vertBuf,
 		drawCalls: []imageDrawCall{{
-			bindGroup: s.surfaceCompositeBindGroup,
+			bindGroup: bg,
 		}},
 	}, nil
 }
@@ -2809,7 +2802,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 		}
 	}()
 
-	renderTarget, colorLoadOp, compositeRes, err := s.prepareSurfacePass(view, w, h)
+	renderTarget, colorLoadOp, needsComposite, err := s.prepareSurfacePass(view, w, h)
 	if err != nil {
 		return err
 	}
@@ -2867,8 +2860,8 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	if endErr := rp.End(); endErr != nil {
 		return fmt.Errorf("end render pass: %w", endErr)
 	}
-	if compositeRes != nil {
-		if err := s.encodeSurfaceCompositePass(encoder, view, w, h, compositeRes); err != nil {
+	if needsComposite {
+		if err := s.encodeSurfaceCompositePass(encoder, view, w, h); err != nil {
 			return err
 		}
 	}
@@ -3301,34 +3294,38 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 }
 
 // shouldPreserveSurface reports whether this pass must retain the current
-// single-sample surface contents. PreserveContent covers external producers;
-// frameRendered covers earlier gg flushes to the same view.
+// single-sample surface contents. This covers earlier gg flushes to the
+// same view (mid-frame CPU fallback), or when the compositor signals that
+// external content exists (g3d rendered before gg in the same frame).
 func (s *GPURenderSession) shouldPreserveSurface(view *wgpu.TextureView) bool {
-	return s.preserveContent || (s.frameRendered && view == s.lastView)
+	if s.compositor != nil && s.compositor.ShouldPreserveContent() {
+		return true
+	}
+	return s.frameRendered && view == s.lastView
 }
 
 // prepareSurfacePass selects the correct target for a vector surface pass.
 // Single-sample rendering can preserve the surface with LoadOpLoad. An MSAA
 // pass cannot load single-sample surface content into its transient attachment,
 // so it resolves a transparent overlay for a subsequent alpha-composite pass.
+//
+// Returns the render target view, LoadOp, and needsComposite flag. When
+// needsComposite is true, the caller must call encodeSurfaceCompositePass
+// after the render pass to alpha-blend the overlay onto the surface.
 func (s *GPURenderSession) prepareSurfacePass(
 	view *wgpu.TextureView,
 	w, h uint32,
-) (*wgpu.TextureView, gputypes.LoadOp, *imageFrameResources, error) {
+) (*wgpu.TextureView, gputypes.LoadOp, bool, error) {
 	if !s.shouldPreserveSurface(view) {
-		return view, gputypes.LoadOpClear, nil, nil
+		return view, gputypes.LoadOpClear, false, nil
 	}
 	if s.sampleCount <= 1 {
-		return view, gputypes.LoadOpLoad, nil, nil
+		return view, gputypes.LoadOpLoad, false, nil
 	}
 	if err := s.textures.ensureCompositeTexture(s.device, w, h, "session"); err != nil {
-		return nil, 0, nil, fmt.Errorf("ensure composition texture: %w", err)
+		return nil, 0, false, fmt.Errorf("ensure composition texture: %w", err)
 	}
-	res, err := s.buildSurfaceCompositeResources(w, h)
-	if err != nil {
-		return nil, 0, nil, fmt.Errorf("build composition resources: %w", err)
-	}
-	return s.textures.compositeView, gputypes.LoadOpClear, res, nil
+	return s.textures.compositeView, gputypes.LoadOpClear, true, nil
 }
 
 // encodeGroupedSurfacePass records the grouped vector pass. When existing
@@ -3344,7 +3341,7 @@ func (s *GPURenderSession) encodeGroupedSurfacePass(
 	grpRes []groupResources,
 	baseLayerRes *imageFrameResources,
 ) error {
-	renderTarget, colorLoadOp, compositeRes, err := s.prepareSurfacePass(view, w, h)
+	renderTarget, colorLoadOp, needsComposite, err := s.prepareSurfacePass(view, w, h)
 	if err != nil {
 		return err
 	}
@@ -3379,8 +3376,8 @@ func (s *GPURenderSession) encodeGroupedSurfacePass(
 		return fmt.Errorf("end grouped surface pass: %w", endErr)
 	}
 
-	if compositeRes != nil {
-		if err := s.encodeSurfaceCompositePass(encoder, view, w, h, compositeRes); err != nil {
+	if needsComposite {
+		if err := s.encodeSurfaceCompositePass(encoder, view, w, h); err != nil {
 			return err
 		}
 	}
@@ -3391,13 +3388,34 @@ func (s *GPURenderSession) encodeGroupedSurfacePass(
 }
 
 // encodeSurfaceCompositePass alpha-blends the transparent overlay resolve onto
-// the existing single-sample surface with the image pipeline's 1x blit variant.
+// the existing single-sample surface. When a compositor is set (ADR-067), the
+// composition is delegated to gogpu's blit pipeline via CompositeMSAAOverlay.
+// Otherwise falls back to the image pipeline's 1x blit variant.
 func (s *GPURenderSession) encodeSurfaceCompositePass(
 	encoder *wgpu.CommandEncoder,
 	view *wgpu.TextureView,
 	w, h uint32,
-	res *imageFrameResources,
 ) error {
+	if s.textures.compositeView == nil {
+		return fmt.Errorf("composite view is nil")
+	}
+
+	// ADR-067: delegate to gogpu's compositor when available.
+	if s.compositor != nil {
+		encHandle := gpucontext.NewCommandEncoder(unsafe.Pointer(encoder))                //nolint:gosec // Go spec Rule 1
+		viewHandle := gpucontext.NewTextureView(unsafe.Pointer(view))                     //nolint:gosec // Go spec Rule 1
+		compHandle := gpucontext.NewTextureView(unsafe.Pointer(s.textures.compositeView)) //nolint:gosec // Go spec Rule 1
+		return s.compositor.CompositeMSAAOverlay(encHandle, viewHandle, compHandle, w, h)
+	}
+
+	// Legacy path: use gg's own image pipeline blit.
+	if s.imagePipeline == nil {
+		return fmt.Errorf("no image pipeline for surface composite")
+	}
+	if err := s.imagePipeline.ensureBlitPipeline(); err != nil {
+		return fmt.Errorf("ensure blit pipeline for composite: %w", err)
+	}
+
 	rp, err := encoder.BeginRenderPass(&wgpu.RenderPassDescriptor{
 		Label: "session_surface_composite_pass",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
@@ -3412,7 +3430,17 @@ func (s *GPURenderSession) encodeSurfaceCompositePass(
 	}
 	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
 	rp.SetScissorRect(0, 0, w, h)
+
+	// Build resources for the legacy path using the composite texture.
+	res, buildErr := s.buildLegacySurfaceCompositeResources(w, h)
+	if buildErr != nil {
+		if endErr := rp.End(); endErr != nil {
+			slogger().Warn("end surface composite pass after build error", "err", endErr)
+		}
+		return fmt.Errorf("build legacy surface composite resources: %w", buildErr)
+	}
 	s.imagePipeline.RecordBlitDraws(rp, res)
+
 	if endErr := rp.End(); endErr != nil {
 		return fmt.Errorf("end surface composite pass: %w", endErr)
 	}

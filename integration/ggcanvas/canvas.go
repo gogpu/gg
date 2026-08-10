@@ -631,13 +631,22 @@ func (c *Canvas) renderDirectToTarget(
 	if preserver, ok := dc.(ContentPreserver); ok {
 		preserveContent = preserver.PreserveContent()
 	}
+
+	// ADR-067: pass compositor per-frame to gg's render target.
+	type compositorProvider interface {
+		Compositor() gpucontext.SurfaceCompositor
+	}
+	var comp gpucontext.SurfaceCompositor
+	if cp, ok := dc.(compositorProvider); ok {
+		comp = cp.Compositor()
+	}
+	c.ctx.SetPerFrameCompositor(comp)
+
 	if encoder.IsNil() {
 		return c.renderDirect(surfaceView, width, height, preserveContent)
 	}
 
 	c.ctx.SetSharedEncoder(encoder)
-	// The target owns submission. Always clear the borrowed encoder before a
-	// fallback path can flush to a different destination.
 	defer c.ctx.SetSharedEncoder(gpucontext.CommandEncoder{})
 	return c.renderDirect(surfaceView, width, height, preserveContent)
 }
@@ -763,6 +772,8 @@ func (c *Canvas) Render(dc RenderTarget) error {
 			setter.SetDamageOverlayRenderer(c.damageOverlay)
 		}
 	}
+
+	// ADR-067: compositor wiring moved to renderDirectToTarget (per-frame via GPURenderTarget.Compositor).
 
 	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
 	if wp, ok := c.provider.(gpucontext.WindowProvider); ok {

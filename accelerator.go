@@ -74,6 +74,11 @@ type GPURenderTarget struct {
 	// Set by gogpu after MarkExternalContent(). ADR-059.
 	PreserveContent bool
 
+	// Compositor handles surface-level decisions (LoadOp, damage scissoring,
+	// MSAA overlay compositing). Set per-frame by the host framework (gogpu)
+	// through ggcanvas. When nil, gg uses legacy internal paths. ADR-067.
+	Compositor gpucontext.SurfaceCompositor
+
 	// Damage-aware compositing (ADR-026/028): when non-empty, compositor
 	// uses LoadOpLoad (preserve previous frame) and per-rect scissor.
 	// Single rect: one scissor for entire pass.
