@@ -3,15 +3,18 @@ package gg
 import "image"
 
 // Mask represents an alpha mask for compositing operations.
-// Values range from 0 (fully transparent) to 255 (fully opaque).
+// Values range from 0 (fully transparent) to 255 (fully opaque). Mask dimensions
+// and coordinates are in pixel space; for HiDPI Contexts, use physical
+// dimensions (PixelWidth/PixelHeight).
 type Mask struct {
 	width  int
 	height int
 	data   []uint8
 }
 
-// NewMask creates a new empty mask with the given dimensions.
-// All values are initialized to 0 (fully transparent).
+// NewMask creates a new empty mask with the given pixel dimensions.
+// All values are initialized to 0 (fully transparent). For a HiDPI Context,
+// use PixelWidth and PixelHeight rather than Width and Height.
 func NewMask(width, height int) *Mask {
 	return &Mask{
 		width:  width,

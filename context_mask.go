@@ -1,6 +1,8 @@
 package gg
 
-// SetMask sets an alpha mask for subsequent drawing operations.
+// SetMask sets an alpha mask for subsequent drawing operations. Mask
+// coordinates are physical pixel coordinates; AsMask returns a mask at the
+// context's physical dimensions.
 // The mask modulates the alpha of all Fill and Stroke operations —
 // each pixel's coverage is multiplied by the mask value at that pixel.
 // A mask value of 255 means fully visible, 0 means fully transparent.
@@ -32,7 +34,8 @@ func (c *Context) ClearMask() {
 }
 
 // ApplyMask applies a mask to already-drawn content using DestinationIn blending.
-// For each pixel, the alpha is modulated by the mask value:
+// Mask coordinates are physical pixel coordinates. For each pixel, the alpha
+// is modulated by the mask value:
 //
 //	pixel.A = pixel.A * mask.At(x,y) / 255
 //
@@ -80,10 +83,14 @@ func (c *Context) ApplyMask(mask *Mask) {
 //	dc.Fill()              // clears the path!
 //	mask := dc.AsMask()    // path is empty → mask is all zeros
 func (c *Context) AsMask() *Mask {
-	mask := NewMask(c.Width(), c.Height())
+	// Masks are indexed in device pixels, just like the context pixmap. Keep
+	// AsMask output physical-sized so it can be passed directly to SetMask,
+	// ApplyMask, or PushMaskLayer at any device scale.
+	mask := NewMask(c.PixelWidth(), c.PixelHeight())
 
-	// Create a temporary context for rasterizing the path
-	temp := NewContext(c.Width(), c.Height())
+	// Create a temporary context for rasterizing the path at the same device
+	// scale as the source context.
+	temp := NewContext(c.Width(), c.Height(), WithDeviceScale(c.deviceScale))
 	temp.path = c.path.Clone()
 	temp.SetRGBA(1, 1, 1, 1)
 	_ = temp.Fill() // Software renderer never fails

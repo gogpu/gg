@@ -65,8 +65,10 @@ func (c *Context) PushLayer(blendMode BlendMode, opacity float64) {
 		c.basePixmap = c.pixmap
 	}
 
-	// Create new pixmap for the layer (same size as context)
-	layerPixmap := NewPixmap(c.width, c.height)
+	// Create the layer at the physical resolution used by the renderer. The
+	// context dimensions are logical when deviceScale != 1, but drawing paths
+	// are transformed into device coordinates before rasterization.
+	layerPixmap := NewPixmap(c.PixelWidth(), c.PixelHeight())
 	layerPixmap.Clear(Transparent)
 
 	// Create layer
@@ -162,8 +164,10 @@ func (c *Context) PushMaskLayer(mask *Mask) {
 		c.basePixmap = c.pixmap
 	}
 
-	// Create new pixmap for the layer (same size as context).
-	layerPixmap := NewPixmap(c.width, c.height)
+	// Create the layer at the physical resolution used by the renderer. The
+	// context dimensions are logical when deviceScale != 1, but drawing paths
+	// are transformed into device coordinates before rasterization.
+	layerPixmap := NewPixmap(c.PixelWidth(), c.PixelHeight())
 	layerPixmap.Clear(Transparent)
 
 	// Create layer with mask.

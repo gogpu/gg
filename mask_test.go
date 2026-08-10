@@ -494,6 +494,94 @@ func TestAsMask_AfterFill(t *testing.T) {
 	}
 }
 
+// TestAsMaskPushMaskLayerDeviceScale verifies that AsMask returns a mask in
+// the physical pixel space used by a HiDPI context. The mask can then be
+// passed directly to PushMaskLayer without losing the scaled path bounds.
+func TestAsMaskPushMaskLayerDeviceScale(t *testing.T) {
+	const (
+		logicalWidth  = 3
+		logicalHeight = 2
+		deviceScale   = 2.0
+	)
+
+	dc := NewContext(logicalWidth, logicalHeight, WithDeviceScale(deviceScale))
+	defer func() { _ = dc.Close() }()
+
+	dc.DrawRectangle(0, 0, logicalWidth, logicalHeight)
+	mask := dc.AsMask()
+	if got, want := mask.Width(), dc.PixelWidth(); got != want {
+		t.Fatalf("AsMask width = %d, want physical width %d", got, want)
+	}
+	if got, want := mask.Height(), dc.PixelHeight(); got != want {
+		t.Fatalf("AsMask height = %d, want physical height %d", got, want)
+	}
+	dc.ClearPath()
+
+	dc.PushMaskLayer(mask)
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, logicalWidth, logicalHeight)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+	dc.PopLayer()
+
+	for _, point := range [][2]int{
+		{0, 0},
+		{dc.PixelWidth() - 1, 0},
+		{0, dc.PixelHeight() - 1},
+		{dc.PixelWidth() - 1, dc.PixelHeight() - 1},
+	} {
+		pixel := dc.pixmap.GetPixel(point[0], point[1])
+		if pixel.R < 0.9 || pixel.A < 0.9 {
+			t.Errorf("pixel at physical (%d,%d) = %+v, want opaque red", point[0], point[1], pixel)
+		}
+	}
+}
+
+// TestAsMaskPushMaskLayerDeviceScaleNested verifies that independently
+// generated physical masks compose correctly through nested masked layers.
+func TestAsMaskPushMaskLayerDeviceScaleNested(t *testing.T) {
+	const (
+		logicalSize = 4
+		deviceScale = 2.0
+	)
+
+	dc := NewContext(logicalSize, logicalSize, WithDeviceScale(deviceScale))
+	defer func() { _ = dc.Close() }()
+
+	// The outer mask covers the whole logical canvas; the inner mask covers its
+	// centered 2x2 logical rectangle.
+	dc.DrawRectangle(0, 0, logicalSize, logicalSize)
+	outerMask := dc.AsMask()
+	dc.ClearPath()
+	dc.DrawRectangle(1, 1, 2, 2)
+	innerMask := dc.AsMask()
+	dc.ClearPath()
+
+	dc.PushMaskLayer(outerMask)
+	dc.PushMaskLayer(innerMask)
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, logicalSize, logicalSize)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+	dc.PopLayer()
+	dc.PopLayer()
+
+	for _, point := range [][2]int{{4, 4}} {
+		pixel := dc.pixmap.GetPixel(point[0], point[1])
+		if pixel.R < 0.9 || pixel.A < 0.9 {
+			t.Errorf("pixel inside nested masks at physical (%d,%d) = %+v, want opaque red", point[0], point[1], pixel)
+		}
+	}
+	for _, point := range [][2]int{{0, 0}, {1, 1}, {7, 7}} {
+		pixel := dc.pixmap.GetPixel(point[0], point[1])
+		if pixel.A != 0 {
+			t.Errorf("pixel outside nested masks at physical (%d,%d) = %+v, want transparent", point[0], point[1], pixel)
+		}
+	}
+}
+
 // TestSetMask_Rider21Reproduction reproduces the exact scenario from gg#238.
 // User creates a mask from a circle, sets it, then fills a rectangle.
 // Without the fix, the mask was ignored and the full rectangle was drawn.
@@ -789,6 +877,56 @@ func TestPushMaskLayer_Basic(t *testing.T) {
 	aCorner := pixelAlpha(img, 5, 5)
 	if aCorner != 0 {
 		t.Errorf("corner should be transparent, got a=%d", aCorner)
+	}
+}
+
+// TestPushMaskLayerDeviceScaleCompositesPhysicalBounds verifies that masked
+// layers are allocated at the physical resolution of a HiDPI context. Masks
+// are pixel-space data, so this test supplies one at the physical dimensions.
+func TestPushMaskLayerDeviceScaleCompositesPhysicalBounds(t *testing.T) {
+	const (
+		logicalWidth  = 3
+		logicalHeight = 2
+		deviceScale   = 2.0
+	)
+
+	dc := NewContext(logicalWidth, logicalHeight, WithDeviceScale(deviceScale))
+	defer func() { _ = dc.Close() }()
+
+	mask := NewMask(dc.PixelWidth(), dc.PixelHeight())
+	mask.Fill(255)
+	dc.PushMaskLayer(mask)
+	if got, want := dc.pixmap.Width(), dc.PixelWidth(); got != want {
+		t.Fatalf("masked layer width = %d, want physical width %d", got, want)
+	}
+	if got, want := dc.pixmap.Height(), dc.PixelHeight(); got != want {
+		t.Fatalf("masked layer height = %d, want physical height %d", got, want)
+	}
+
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, logicalWidth, logicalHeight)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+	dc.PopLayer()
+
+	if got, want := dc.Image().Bounds().Dx(), dc.PixelWidth(); got != want {
+		t.Fatalf("composited image width = %d, want physical width %d", got, want)
+	}
+	if got, want := dc.Image().Bounds().Dy(), dc.PixelHeight(); got != want {
+		t.Fatalf("composited image height = %d, want physical height %d", got, want)
+	}
+
+	for _, point := range [][2]int{
+		{0, 0},
+		{dc.PixelWidth() - 1, 0},
+		{0, dc.PixelHeight() - 1},
+		{dc.PixelWidth() - 1, dc.PixelHeight() - 1},
+	} {
+		pixel := dc.pixmap.GetPixel(point[0], point[1])
+		if pixel.R < 0.9 || pixel.A < 0.9 {
+			t.Errorf("pixel at physical (%d,%d) = %+v, want opaque red", point[0], point[1], pixel)
+		}
 	}
 }
 
