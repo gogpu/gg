@@ -5,13 +5,17 @@ package ggcanvas
 
 import (
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 )
 
 // stableProvider is intentionally a fresh wrapper around the same opaque
@@ -31,6 +35,48 @@ type closeOnTrackProvider struct {
 
 func (p *closeOnTrackProvider) TrackResource(c io.Closer) { _ = c.Close() }
 func (p *closeOnTrackProvider) UntrackResource(io.Closer) {}
+
+// valueProvider deliberately has no stable identity. A value provider is a
+// valid CPU-only DeviceProvider, but cacheKeyFor conservatively leaves it
+// uncacheable because two equal values need not represent the same resources.
+type valueProvider struct {
+	format gputypes.TextureFormat
+}
+
+func newValueProvider() valueProvider {
+	return valueProvider{format: gputypes.TextureFormatBGRA8Unorm}
+}
+
+func (p valueProvider) Device() gpucontext.Device             { return gpucontext.Device{} }
+func (p valueProvider) Queue() gpucontext.Queue               { return gpucontext.Queue{} }
+func (p valueProvider) Adapter() gpucontext.Adapter           { return gpucontext.Adapter{} }
+func (p valueProvider) SurfaceFormat() gputypes.TextureFormat { return p.format }
+func (valueProvider) AdapterInfo() gpucontext.AdapterInfo {
+	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
+}
+
+type closeValueProvider struct {
+	valueProvider
+}
+
+func (closeValueProvider) TrackResource(c io.Closer) { _ = c.Close() }
+func (closeValueProvider) UntrackResource(io.Closer) {}
+
+// barrierProvider keeps constructors together after resource tracking and
+// before cache publication. This makes the loser-cleanup path deterministic
+// instead of relying on scheduler timing.
+type barrierProvider struct {
+	*stableProvider
+	arrived chan struct{}
+	release <-chan struct{}
+}
+
+func (p *barrierProvider) TrackResource(c io.Closer) {
+	p.arrived <- struct{}{}
+	<-p.release
+}
+
+func (p *barrierProvider) UntrackResource(io.Closer) {}
 
 func newStableProvider(device, queue, adapter unsafe.Pointer) *stableProvider {
 	return &stableProvider{
@@ -329,5 +375,208 @@ func TestNew_TrackerCloseDoesNotPublishClosedCanvas(t *testing.T) {
 		if cached, ok := lookupCachedCanvas(p, key); ok || cached != nil {
 			t.Fatal("tracker-closed construction left a stale cache entry")
 		}
+	}
+}
+
+func TestNew_ValueProviderSkipsCache(t *testing.T) {
+	p := newValueProvider()
+	c1, err := NewWithScale(p, 64, 48, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := NewWithScale(p, 64, 48, 1)
+	if err != nil {
+		c1.Close()
+		t.Fatal(err)
+	}
+	defer c1.Close()
+	defer c2.Close()
+	if c1 == c2 {
+		t.Fatal("value providers must not alias through the Canvas cache")
+	}
+}
+
+func TestNew_ValueProviderTrackerCloseIsRejected(t *testing.T) {
+	p := closeValueProvider{valueProvider: newValueProvider()}
+	c, err := NewWithScale(p, 64, 48, 1)
+	if c != nil {
+		t.Fatal("tracker-closed value-provider construction returned a Canvas")
+	}
+	if !errors.Is(err, ErrCanvasClosed) {
+		t.Fatalf("tracker-closed value-provider construction error = %v, want ErrCanvasClosed", err)
+	}
+}
+
+func TestNewWithScale_NormalizesNonFiniteScale(t *testing.T) {
+	for _, scale := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		t.Run(fmt.Sprintf("scale_%v", scale), func(t *testing.T) {
+			p := newStableProvider(
+				unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), //nolint:gosec // opaque test handles
+			)
+			c, err := NewWithScale(p, 64, 48, scale)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			if got := c.DeviceScale(); got != 1 {
+				t.Fatalf("DeviceScale for %v = %v, want 1", scale, got)
+			}
+			reused, err := NewWithScale(p, 64, 48, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reused != c {
+				t.Fatalf("normalized scale %v did not reuse the scale-1 Canvas", scale)
+			}
+		})
+	}
+}
+
+func TestSetDeviceScale_RekeysAndPreservesDestinationOwner(t *testing.T) {
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	c, err := NewWithScale(p, 64, 48, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DeviceScale() != 1 {
+		t.Fatalf("initial DeviceScale = %v, want 1", c.DeviceScale())
+	}
+	c.SetDeviceScale(1) // unchanged scale is a no-op
+	for _, invalid := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		c.SetDeviceScale(invalid)
+	}
+	if c.DeviceScale() != 1 {
+		t.Fatalf("invalid scale changed DeviceScale to %v", c.DeviceScale())
+	}
+	c.SetDeviceScale(2)
+	if got := c.DeviceScale(); got != 2 {
+		t.Fatalf("DeviceScale after change = %v, want 2", got)
+	}
+	if !c.IsDirty() {
+		t.Fatal("changing device scale must mark the Canvas dirty")
+	}
+	reused, err := NewWithScale(p, 64, 48, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused != c {
+		t.Fatal("scale change did not publish the Canvas under its new key")
+	}
+	oldScale, err := NewWithScale(p, 64, 48, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldScale == c {
+		t.Fatal("old scale key still points at the rescaled Canvas")
+	}
+	oldScale.Close()
+	c.Close()
+	c.SetDeviceScale(3) // closed canvases ignore scale changes
+
+	p2 := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	first, err := NewWithScale(p2, 64, 48, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := NewWithScale(p2, 64, 48, 2)
+	if err != nil {
+		first.Close()
+		t.Fatal(err)
+	}
+	first.SetDeviceScale(2)
+	if got, err := NewWithScale(p2, 64, 48, 2); err != nil || got != destination {
+		t.Fatalf("rescale collision replaced destination Canvas: got=%p want=%p err=%v", got, destination, err)
+	}
+	first.Close()
+	destination.Close()
+}
+
+func TestDraw_ClosedReturnsErrCanvasClosed(t *testing.T) {
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	c, err := New(p, 32, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Draw(nil); !errors.Is(err, ErrCanvasClosed) {
+		t.Fatalf("Draw on closed Canvas error = %v, want ErrCanvasClosed", err)
+	}
+}
+
+func TestRender_TracksWindowScaleChange(t *testing.T) {
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	c, err := New(p, 32, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	p.SF = 2
+	target := &renderMockPixelWriter{}
+	if err := c.Render(target); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.DeviceScale(); got != 2 {
+		t.Fatalf("Render did not apply window scale: got %v want 2", got)
+	}
+	if target.writtenW != 64 || target.writtenH != 48 {
+		t.Fatalf("rendered physical size = %dx%d, want 64x48", target.writtenW, target.writtenH)
+	}
+}
+
+func TestNew_ConcurrentDuplicateConstructionPublishesOneWinner(t *testing.T) {
+	const workers = 8
+	release := make(chan struct{})
+	p := &barrierProvider{
+		stableProvider: newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))), //nolint:gosec // opaque test handles
+		arrived:        make(chan struct{}, workers),
+		release:        release,
+	}
+	results := make(chan *Canvas, workers)
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, err := NewWithScale(p, 96, 72, 1)
+			results <- c
+			errs <- err
+		}()
+	}
+	for i := 0; i < workers; i++ {
+		select {
+		case <-p.arrived:
+		case <-time.After(2 * time.Second):
+			t.Fatal("constructors did not all reach resource tracking")
+		}
+	}
+	close(release)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	var winner *Canvas
+	for c := range results {
+		if c == nil {
+			t.Fatal("concurrent constructor returned nil Canvas")
+		}
+		if winner == nil {
+			winner = c
+		} else if c != winner {
+			t.Fatalf("concurrent constructors returned %p and %p", winner, c)
+		}
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent constructor error: %v", err)
+		}
+	}
+	if winner == nil {
+		t.Fatal("no winning Canvas")
+	}
+	if err := winner.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
