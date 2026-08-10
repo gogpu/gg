@@ -22,6 +22,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/integration/ggcanvas"
+	"github.com/gogpu/gg/text"
 	"github.com/gogpu/gogpu"
 	"github.com/gogpu/gpucontext"
 )
@@ -81,7 +82,9 @@ func main() {
 		if err := canvas.Draw(func(cc *gg.Context) {
 			cc.ResetFrameDamage()
 			if fp := findSystemFont(); fp != "" {
-				_ = cc.LoadFontFace(fp, 14)
+				if src, err := text.NewFontSourceFromFile(fp); err == nil {
+					cc.SetFont(src.Face(14))
+				}
 			}
 
 			// STATIC elements — redraw every frame (immediate mode) but

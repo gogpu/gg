@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.50.16
+## Current State: v0.51.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs). 30% faster on small paths
