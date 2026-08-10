@@ -1,6 +1,7 @@
 package gg
 
 import (
+	"image"
 	"math"
 	"testing"
 )
@@ -263,6 +264,15 @@ func TestPath_Reset(t *testing.T) {
 	}
 	if cap(p.coords) != coordCap {
 		t.Errorf("After Reset: coord capacity changed from %d to %d", coordCap, cap(p.coords))
+	}
+	if got := p.Bounds(); !got.Empty() {
+		t.Errorf("After Reset: bounds = %v, want empty", got)
+	}
+
+	p.MoveTo(-100, -80)
+	p.LineTo(-60, -40)
+	if got, want := p.Bounds(), image.Rect(-100, -80, -60, -40); got != want {
+		t.Errorf("After Reset and reuse: bounds = %v, want %v", got, want)
 	}
 }
 
@@ -944,6 +954,75 @@ func TestPath_Append(t *testing.T) {
 	if p1.current != p2.current {
 		t.Errorf("After Append: current = %v, want %v", p1.current, p2.current)
 	}
+	if got, want := p1.Bounds(), image.Rect(0, 0, 30, 30); got != want {
+		t.Errorf("After Append: bounds = %v, want %v", got, want)
+	}
+}
+
+func TestPath_AppendIntoEmptyPreservesBounds(t *testing.T) {
+	p := NewPath()
+	other := NewPath()
+	other.MoveTo(20, 30)
+	other.LineTo(40, 60)
+
+	p.Append(other)
+
+	if got, want := p.Bounds(), image.Rect(20, 30, 40, 60); got != want {
+		t.Errorf("Append into empty path: bounds = %v, want %v", got, want)
+	}
+}
+
+func TestPath_AppendPreservesComplexBounds(t *testing.T) {
+	p := NewPath()
+	p.Rectangle(0, 0, 10, 10)
+
+	other := NewPath()
+	other.MoveTo(20, 20)
+	other.QuadraticTo(40, -30, 30, 30)
+	other.MoveTo(-50, 5)
+	other.LineTo(-40, 15)
+
+	p.Append(other)
+
+	if got, want := p.Bounds(), image.Rect(-50, -30, 40, 30); got != want {
+		t.Errorf("Append complex path: bounds = %v, want %v", got, want)
+	}
+}
+
+func TestPath_AppendSelfPreservesBounds(t *testing.T) {
+	p := NewPath()
+	p.MoveTo(-10, 5)
+	p.QuadraticTo(20, -30, 40, 10)
+	want := p.Bounds()
+	wantVerbs := 2 * p.NumVerbs()
+
+	p.Append(p)
+
+	if got := p.Bounds(); got != want {
+		t.Errorf("Append self: bounds = %v, want %v", got, want)
+	}
+	if got := p.NumVerbs(); got != wantVerbs {
+		t.Errorf("Append self: %d verbs, want %d", got, wantVerbs)
+	}
+}
+
+func TestPath_ClonePreservesBounds(t *testing.T) {
+	p := NewPath()
+	p.MoveTo(-10, 20)
+	p.LineTo(30, 40)
+
+	clone := p.Clone()
+	if got, want := clone.Bounds(), image.Rect(-10, 20, 30, 40); got != want {
+		t.Errorf("Clone bounds = %v, want %v", got, want)
+	}
+
+	clone.LineTo(100, 200)
+	if got, want := p.Bounds(), image.Rect(-10, 20, 30, 40); got != want {
+		t.Errorf("Original bounds after modifying clone = %v, want %v", got, want)
+	}
+	if got, want := clone.Bounds(), image.Rect(-10, 20, 100, 200); got != want {
+		t.Errorf("Modified clone bounds = %v, want %v", got, want)
+	}
 }
 
 func TestPath_Append_Nil(t *testing.T) {
@@ -957,10 +1036,14 @@ func TestPath_Append_Nil(t *testing.T) {
 
 func TestPath_Append_Empty(t *testing.T) {
 	p := NewPath()
-	p.MoveTo(0, 0)
+	p.MoveTo(7, 9)
+	wantBounds := p.Bounds()
 	p.Append(NewPath()) // Append empty path
 	if len(p.verbs) != 1 {
 		t.Errorf("After Append(empty): %d verbs, want 1", len(p.verbs))
+	}
+	if got := p.Bounds(); got != wantBounds {
+		t.Errorf("After Append(empty): bounds = %v, want %v", got, wantBounds)
 	}
 }
 
