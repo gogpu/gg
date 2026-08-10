@@ -42,6 +42,19 @@ type ttHintCache struct {
 type ttHintCacheEntry struct {
 	instance *ttHintInstance
 	err      error // non-nil if instance creation failed
+
+	// advances caches hinted advance widths per glyph ID.
+	// Key: glyphID (uint16), Value: ttCachedAdvance.
+	// Avoids re-running the full TT bytecode interpreter for advance-only
+	// queries (Face.Advance, Face.Glyphs) which are called multiple times
+	// per frame per DrawString (damage tracking, GPU layout, rendering).
+	advances sync.Map
+}
+
+// ttCachedAdvance stores a cached hinted advance result for a single glyph.
+type ttCachedAdvance struct {
+	width float64
+	ok    bool
 }
 
 // newTTHintCache creates a hint cache for the given font data.
@@ -66,24 +79,11 @@ func newTTHintCache(fontData []byte) *ttHintCache {
 // getInstance returns the hint instance for the given ppem, creating it
 // if needed. The instance is cached for reuse across glyphs at the same size.
 func (c *ttHintCache) getInstance(ppem int32) (*ttHintInstance, error) {
-	if ppem <= 0 {
+	entry := c.getEntry(ppem)
+	if entry == nil {
 		return nil, nil //nolint:nilnil // invalid ppem
 	}
-
-	// Check cache first.
-	if v, ok := c.entries.Load(ppem); ok {
-		entry := v.(*ttHintCacheEntry)
-		return entry.instance, entry.err
-	}
-
-	// Create new instance (fpgm + prep execution).
-	instance, err := newTTHintInstance(c.font, ppem, ttTargetSmooth)
-	entry := &ttHintCacheEntry{instance: instance, err: err}
-
-	// Store in cache (LoadOrStore handles races).
-	actual, _ := c.entries.LoadOrStore(ppem, entry)
-	stored := actual.(*ttHintCacheEntry)
-	return stored.instance, stored.err
+	return entry.instance, entry.err
 }
 
 // hintGlyphOutline loads, hints, and returns the glyph outline with hinted
@@ -144,19 +144,67 @@ func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutl
 }
 
 // hintedAdvanceWidth returns the hinted advance width for a glyph in pixels.
-// This runs the full TT interpreter to get phantom point positions, then
-// computes the advance from phantom[1].x - phantom[0].x.
+// Results are cached per (ppem, glyphID) to avoid re-running the TT bytecode
+// interpreter on every call. The advance for a given glyph at a given size
+// is deterministic (same font program, same CVT, same input points), so
+// caching is safe and matches FreeType/skrifa which also cache scaled metrics.
+//
+// Without this cache, each call runs the full TT interpreter: glyph outline
+// loading (~5 allocations), bytecode execution (~7 allocations), phantom
+// point extraction. Face.Advance() and Face.Glyphs() call this per glyph,
+// and DrawString triggers both (damage tracking + rendering), causing
+// ~600+ interpreter executions per frame for typical text-heavy UIs.
 //
 // Returns 0, false if TT hinting is unavailable or the glyph cannot be hinted.
 func (c *ttHintCache) hintedAdvanceWidth(glyphID uint16, ppem int32) (float64, bool) {
+	// Get or create the per-ppem cache entry.
+	entry := c.getEntry(ppem)
+	if entry == nil {
+		return 0, false
+	}
+
+	// Check advance cache first.
+	if v, ok := entry.advances.Load(glyphID); ok {
+		cached := v.(ttCachedAdvance)
+		return cached.width, cached.ok
+	}
+
+	// Cache miss: run the full interpreter.
 	outline, err := c.hintGlyphOutline(glyphID, ppem)
 	if err != nil || outline == nil {
+		// Cache negative result to avoid re-running on unhintable glyphs.
+		entry.advances.Store(glyphID, ttCachedAdvance{width: 0, ok: false})
 		return 0, false
 	}
 
 	// Convert 26.6 advance to pixels.
 	advance26dot6 := outline.hintedAdvance()
-	return float64(advance26dot6) / 64.0, true
+	width := float64(advance26dot6) / 64.0
+
+	entry.advances.Store(glyphID, ttCachedAdvance{width: width, ok: true})
+	return width, true
+}
+
+// getEntry returns the ttHintCacheEntry for the given ppem, creating it if
+// needed. Separated from getInstance to provide direct access to the entry
+// struct (for advance caching) without duplicating instance creation logic.
+func (c *ttHintCache) getEntry(ppem int32) *ttHintCacheEntry {
+	if ppem <= 0 {
+		return nil
+	}
+
+	// Check cache first.
+	if v, ok := c.entries.Load(ppem); ok {
+		return v.(*ttHintCacheEntry)
+	}
+
+	// Create new instance (fpgm + prep execution).
+	instance, err := newTTHintInstance(c.font, ppem, ttTargetSmooth)
+	entry := &ttHintCacheEntry{instance: instance, err: err}
+
+	// Store in cache (LoadOrStore handles races).
+	actual, _ := c.entries.LoadOrStore(ppem, entry)
+	return actual.(*ttHintCacheEntry)
 }
 
 // hintGlyphOutlineVar loads, applies gvar deltas, hints, and returns the

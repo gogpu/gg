@@ -61,14 +61,20 @@ type Canvas struct {
 	width                int
 	height               int
 	closed               bool
-	tracked              bool               // true if auto-registered with a ResourceTracker
-	damageFlashs         damageOverlayState // debug overlay fade state
-	lastFrameDamageRects []image.Rectangle  // damage rects from last Render (for diagnostics)
-	prevFrameDamageRects []image.Rectangle  // previous frame damage for 2-frame union (Wayland pattern)
+	tracked              bool              // true if auto-registered with a ResourceTracker
+	damageOverlay        *ggDamageOverlay  // debug overlay renderer (ADR-066)
+	lastFrameDamageRects []image.Rectangle // damage rects from last Render (for diagnostics)
+	prevFrameDamageRects []image.Rectangle // previous frame damage for 2-frame union (Wayland pattern)
+
+	// damageSource is the registered damage reporter for gg (ADR-065).
+	// Set on first Render() call via interface assertion on the RenderTarget.
+	// When set, forwardDamageRects reports damage through this reporter
+	// instead of the removed DamageRectSetter interface.
+	damageSource gpucontext.DamageReporter
 
 	// presentDamageRects holds damage rects for the next present call (ADR-021 Phase 4).
 	// Set by caller (e.g. ui retained tree) via SetPresentDamage().
-	// Consumed and cleared by Render() after forwarding to SetDamageRects().
+	// Consumed and cleared by Render() after forwarding via damageSource.
 	presentDamageRects []image.Rectangle
 }
 
@@ -310,14 +316,18 @@ func (c *Canvas) LastDamageRects() []image.Rectangle {
 // NeedsAnimationFrame reports whether the canvas needs another frame
 // for debug overlay fade animation. Caller should RequestRedraw if true.
 func (c *Canvas) NeedsAnimationFrame() bool {
-	return c.damageFlashs.needsAnimationFrame()
+	if c.damageOverlay == nil {
+		return false
+	}
+	return c.damageOverlay.needsAnimationFrame()
 }
 
 // SetPresentDamage sets damage rectangles for the next present call (ADR-021 Level 4).
 // Rects are in logical (user-space) coordinates with top-left origin. They are
-// automatically scaled to physical pixels and forwarded to gogpu SetDamageRects()
-// → wgpu PresentWithDamage() → OS compositor hint (VK_KHR_incremental_present,
-// DX12 Present1, eglSwapBuffersWithDamage).
+// automatically scaled to physical pixels and forwarded via the registered
+// DamageReporter (ADR-065) → gogpu compositor → wgpu PresentWithDamage() →
+// OS compositor hint (VK_KHR_incremental_present, DX12 Present1,
+// eglSwapBuffersWithDamage).
 //
 // Callers with retained-mode knowledge (e.g. ui widget tree) should provide
 // BOTH old and new bounds of moved/resized objects. Immediate-mode callers
@@ -343,26 +353,23 @@ func (c *Canvas) SetPresentDamage(rects []image.Rectangle) {
 	c.presentDamageRects = rects
 }
 
-// forwardDamageRects sends damage rects to the OS compositor via SetDamageRects
-// (ADR-021 Level 4). Unions explicit rects from SetPresentDamage with
+// forwardDamageRects reports damage rects to the compositor via the registered
+// DamageReporter (ADR-065). Unions explicit rects from SetPresentDamage with
 // immediate-mode FrameDamage — never lets caller understate actual damage.
 // Includes previous frame damage (2-frame ring, Wayland wlr_damage_ring pattern)
 // so moved objects don't leave trails on double-buffered surfaces.
 // Clears presentDamageRects after forwarding (one-shot per frame).
-func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectangle) {
-	setter, ok := dc.(DamageRectSetter)
-	if !ok {
+func (c *Canvas) forwardDamageRects(frameDamage []image.Rectangle) {
+	if c.damageSource == nil {
 		c.presentDamageRects = nil
 		c.prevFrameDamageRects = frameDamage
 		return
 	}
 
-	// First frame or after Resize: full-window damage. The pixmap is complete
+	// First frame or after Resize: full-surface damage. The pixmap is complete
 	// but the window surface is uninitialized — must blit everything.
 	if c.prevFrameDamageRects == nil {
-		setter.SetDamageRects([]image.Rectangle{
-			image.Rect(0, 0, c.width, c.height),
-		})
+		c.damageSource.ReportDamage(image.Rect(0, 0, c.width, c.height))
 		c.presentDamageRects = nil
 		// Empty (not nil) marks "initialized" — nil means "first frame".
 		if frameDamage != nil {
@@ -386,7 +393,7 @@ func (c *Canvas) forwardDamageRects(dc RenderTarget, frameDamage []image.Rectang
 		rects = append(rects, c.prevFrameDamageRects...)
 	}
 	if len(rects) > 0 {
-		setter.SetDamageRects(rects)
+		c.damageSource.ReportDamage(rects...)
 	}
 	c.presentDamageRects = nil
 	c.prevFrameDamageRects = frameDamage
@@ -706,13 +713,6 @@ type CommandEncoderProvider interface {
 	CommandEncoder() gpucontext.CommandEncoder
 }
 
-// DamageRectSetter is an optional interface for RenderTargets that support
-// damage-aware presentation (ADR-021 Level 3-4). gogpu.ContextRenderTarget
-// implements this via Context.SetDamageRects().
-type DamageRectSetter interface {
-	SetDamageRects(rects []image.Rectangle)
-}
-
 // SurfacePixelWriter is an optional interface for RenderTargets that support
 // direct pixel upload to the surface framebuffer (software backend zero-copy).
 // Bypasses texture creation, render pass, and SPIR-V — single memcpy+swizzle.
@@ -738,6 +738,32 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return ErrCanvasClosed
 	}
 
+	// Register as "gg" damage source on first Render call (ADR-065).
+	// Uses interface assertion to discover RegisterDamageSource without
+	// importing gogpu — same duck-typing pattern as CommandEncoderProvider,
+	// SurfacePixelWriter, etc.
+	if c.damageSource == nil {
+		type damageSourceRegistrar interface {
+			RegisterDamageSource(name string) gpucontext.DamageReporter
+		}
+		if reg, ok := dc.(damageSourceRegistrar); ok {
+			c.damageSource = reg.RegisterDamageSource("gg")
+		}
+	}
+
+	// Register gg damage overlay renderer on first Render call (ADR-066).
+	// Provides text-enhanced overlay (source labels, reason, rect count)
+	// that replaces gogpu's built-in flat-color quads.
+	if c.damageOverlay == nil {
+		type overlayRendererSetter interface {
+			SetDamageOverlayRenderer(gpucontext.DamageOverlayRenderer)
+		}
+		if setter, ok := dc.(overlayRendererSetter); ok {
+			c.damageOverlay = &ggDamageOverlay{ctx: c.ctx}
+			setter.SetDamageOverlayRenderer(c.damageOverlay)
+		}
+	}
+
 	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
 	if wp, ok := c.provider.(gpucontext.WindowProvider); ok {
 		if newScale := wp.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
@@ -755,18 +781,6 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	c.lastFrameDamageRects = damageRects
 	c.ctx.ResetFrameDamage()
 
-	// Debug damage overlay (ADR-021 Phase 6a).
-	// Draw overlay BEFORE present so it's visible on ALL backends.
-	// Android SurfaceFlinger pattern: flash-and-fade on dirty regions.
-	if isDebugDamageEnabled() {
-		c.damageFlashs.update(damageRects)
-		if len(c.damageFlashs.flashes) > 0 {
-			c.ctx.SetDamageTracking(false)
-			c.damageFlashs.drawAll(c.ctx)
-			c.ctx.SetDamageTracking(true)
-		}
-	}
-
 	// Try GPU-direct path (zero-copy surface rendering).
 	// Only attempt if the accelerator is actually capable — on CPU-only
 	// adapters (llvmpipe, SwiftShader) the accelerator stays uninitialized
@@ -775,7 +789,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	if !sv.IsNil() && gg.AcceleratorCanRenderDirect() {
 		sw, sh := dc.SurfaceSize()
 		if err := c.renderDirectToTarget(dc, sv, sw, sh); err == nil {
-			c.forwardDamageRects(dc, damageRects)
+			c.forwardDamageRects(damageRects)
 			return nil
 		}
 	}
@@ -790,7 +804,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		if err := c.ctx.FlushGPU(); err != nil {
 			gg.Logger().Debug("ggcanvas: FlushGPU before PresentPixels failed", "err", err)
 		}
-		c.forwardDamageRects(dc, damageRects)
+		c.forwardDamageRects(damageRects)
 		pixmap := c.ctx.ResizeTarget()
 		if err := pw.WriteSurfacePixels(pixmap.Data(), uint32(c.ctx.PixelWidth()), uint32(c.ctx.PixelHeight())); err == nil {
 			c.dirty = false
@@ -811,7 +825,7 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		return err
 	}
 
-	c.forwardDamageRects(dc, damageRects)
+	c.forwardDamageRects(damageRects)
 
 	return dc.PresentTexture(tex)
 }

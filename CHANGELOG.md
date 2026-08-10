@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] - 2026-08-10
+
+### Added
+
+- **Damage source registration API** (ADR-065) — ggcanvas migrated from
+  `DamageRectSetter` to `gpucontext.DamageReporter`. Each renderer registers
+  as a named damage source (`RegisterDamageSource`), gogpu unions all sources
+  at present time. Chromium `cc` compositor pattern — one path for all sources.
+
+- **Damage debug overlay** (ADR-066) — `GOGPU_DEBUG_DAMAGE=overlay` renders
+  per-source colored flash-and-fade overlays with text labels via gg.Context.
+  Pluggable via `gpucontext.DamageOverlayRenderer` — gogpu provides built-in
+  minimal overlay, gg registers richer version with anti-aliased borders and
+  text. Per-source colors (Chromium `debug_colors.cc` pattern).
+
+### Fixed
+
+- **TT bytecode advance cache** ([#490](https://github.com/gogpu/gg/issues/490)) —
+  `advanceResolver` ran the full TT bytecode interpreter per glyph in
+  `Advance()` and `Glyphs()`, causing 60fps→15fps regression (v0.50.13).
+  Added per-(ppem, glyphID) advance width cache in `ttHintCacheEntry`.
+  First frame: ~40 interpreter executions (cache warm-up). Subsequent
+  frames: 0 interpreter executions for advance queries.
+
+### Changed
+
+- Updated `gogpu/gpucontext` v0.24.0 → v0.26.0, `gogpu/wgpu` v0.30.37 → v0.31.0,
+  `gogpu/gogpu` v0.50.2 → v0.51.0.
+- Examples migrated from deprecated `LoadFontFace` to `text.NewFontSourceFromFile` API.
+- `GOGPU_DEBUG_DAMAGE=1` renamed to `GOGPU_DEBUG_DAMAGE=overlay` (pre-v1.0 clean cut).
+
 ## [0.50.16] - 2026-08-10
 
 ### Fixed

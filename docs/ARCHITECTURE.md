@@ -825,7 +825,7 @@ Key components:
 - **`Context.FrameDamage()`** — `[]image.Rectangle` list of per-operation damage rects for immediate-mode
 - **Threshold merge** — >16 rects merged to bounding box (Swiss cheese prevention, Wayland compositor pattern)
 - **`DamageRectSetter`** — ggcanvas passes per-rect damage to `gogpu.SetDamageRects()` → `wgpu.PresentWithDamage()`
-- **`GOGPU_DEBUG_DAMAGE=1`** — green overlay on damage regions (Android SurfaceFlinger pattern, full recompose per debug frame)
+- **`GOGPU_DEBUG_DAMAGE=overlay`** — green overlay on damage regions (Android SurfaceFlinger pattern, full recompose per debug frame)
 
 ### Render Mode (ADR-020)
 

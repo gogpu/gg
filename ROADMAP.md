@@ -19,7 +19,7 @@
 
 ---
 
-## Current State: v0.50.16
+## Current State: v0.51.0
 
 ✅ **Production-ready** with GPU-accelerated rendering:
 - **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs). 30% faster on small paths
@@ -171,7 +171,7 @@
 - [x] GPU scene clip: transform Push/Pop fix (BUG-GG-GPU-SCENE-CLIP-001)
 - [x] Rect clips → hardware scissor in GPUSceneRenderer
 - [x] SetDamageTracking API (ADR-021)
-- [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=1)
+- [x] Flash-and-fade damage debug overlay (GOGPU_DEBUG_DAMAGE=overlay)
 - [x] Scene Append layer-aware encoding
 - [x] TagStroke LineCap/LineJoin/MiterLimit fix
 - [x] Software backend softwareMode flag (lazy GPU init)
