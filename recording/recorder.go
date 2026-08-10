@@ -171,6 +171,16 @@ func (r *Recording) Playback(backend Backend) error {
 		case FillRectCommand:
 			brush := r.resources.GetBrush(c.Brush)
 			backend.FillRect(c.Rect, brush)
+		case StrokeRectCommand:
+			brush := r.resources.GetBrush(c.Brush)
+			path := gg.BuildPath().Rect(c.Rect.MinX, c.Rect.MinY, c.Rect.Width(), c.Rect.Height()).Build()
+			// StrokeRectCommand stores world-space bounds. Isolate the identity
+			// transform so backends do not apply the recording transform twice,
+			// then restore their complete graphics state for later commands.
+			backend.Save()
+			backend.SetTransform(Identity())
+			backend.StrokePath(path, brush, c.Stroke)
+			backend.Restore()
 		case DrawImageCommand:
 			img := r.resources.GetImage(c.Image)
 			backend.DrawImage(img, c.SrcRect, c.DstRect, c.Options)
@@ -839,13 +849,6 @@ func (r *Recorder) FillRectangle(x, y, w, h float64) {
 
 // StrokeRectangle strokes a rectangle without adding it to the path.
 func (r *Recorder) StrokeRectangle(x, y, w, h float64) {
-	// Transform corners
-	x1, y1 := r.transform.TransformPoint(x, y)
-	x2, y2 := r.transform.TransformPoint(x+w, y+h)
-
-	rect := NewRectFromPoints(x1, y1, x2, y2)
-	brushRef := r.resources.AddBrush(r.strokeBrush)
-
 	stroke := Stroke{
 		Width:       r.lineWidth,
 		Cap:         r.lineCap,
@@ -854,6 +857,61 @@ func (r *Recorder) StrokeRectangle(x, y, w, h float64) {
 		DashPattern: r.dashPattern,
 		DashOffset:  r.dashOffset,
 	}
+	// Recorder paths contain world-space coordinates, while gg applies the
+	// current transform's scale to stroke metrics at draw time. Playback uses
+	// identity for those world-space paths, so capture the same metric scaling
+	// in the command. Dash lengths follow gg's current convention and scale
+	// only when the transform enlarges the path.
+	transformScale := r.transform.ScaleFactor()
+	if transformScale <= 0 {
+		transformScale = 1
+	}
+	stroke.Width *= transformScale
+	if transformScale > 1 && len(stroke.DashPattern) > 0 {
+		stroke.DashPattern = append([]float64(nil), stroke.DashPattern...)
+		for i := range stroke.DashPattern {
+			stroke.DashPattern[i] *= transformScale
+		}
+		stroke.DashOffset *= transformScale
+	}
+	brushRef := r.resources.AddBrush(r.strokeBrush)
+
+	// StrokeRectCommand stores only normalized world-space bounds, so it is
+	// exact only when translation is the complete transform and the input
+	// dimensions preserve the path's top-left start and clockwise traversal.
+	// Other transforms need all four transformed corners, especially for
+	// dashed strokes where traversal direction is observable.
+	translationOnly := r.transform.A == 1 && r.transform.B == 0 &&
+		r.transform.D == 0 && r.transform.E == 1
+	if w < 0 || h < 0 || !translationOnly {
+		path := gg.NewPath()
+		x1, y1 := r.transform.TransformPoint(x, y)
+		path.MoveTo(x1, y1)
+		x2, y2 := r.transform.TransformPoint(x+w, y)
+		path.LineTo(x2, y2)
+		x3, y3 := r.transform.TransformPoint(x+w, y+h)
+		path.LineTo(x3, y3)
+		x4, y4 := r.transform.TransformPoint(x, y+h)
+		path.LineTo(x4, y4)
+		path.Close()
+		pathRef := r.resources.AddPath(path)
+
+		// Isolate identity around the world-space path so every backend applies
+		// its coordinates and captured stroke metrics exactly once.
+		r.commands = append(r.commands,
+			SaveCommand{},
+			SetTransformCommand{Matrix: Identity()},
+			StrokePathCommand{Path: pathRef, Brush: brushRef, Stroke: stroke},
+			RestoreCommand{},
+		)
+		return
+	}
+
+	// Keep the compact representation for the common axis-aligned,
+	// traversal-preserving case.
+	x1, y1 := r.transform.TransformPoint(x, y)
+	x2, y2 := r.transform.TransformPoint(x+w, y+h)
+	rect := NewRectFromPoints(x1, y1, x2, y2)
 
 	r.commands = append(r.commands, StrokeRectCommand{
 		Rect:   rect,
