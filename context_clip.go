@@ -58,8 +58,21 @@ func (c *Context) ClipRect(x, y, w, h float64) {
 		c.initClipStack()
 	}
 
-	// Transform the rectangle corners to device coordinates.
 	tm := c.totalMatrix()
+	// A scissor rectangle can represent the transformed shape only when the
+	// linear part of the transform keeps the rectangle axis-aligned.  The old
+	// implementation transformed just two opposite corners and took their
+	// bounding box, which collapses a square at 45 degrees and clips the wrong
+	// pixels for any rotation or shear.  Preserve the cheap rectangle path for
+	// translations/scales, and rasterize the exact device-space quadrilateral
+	// otherwise.
+	if !isAxisAlignedTransform(tm) {
+		devicePath := transformedRectPath(tm, x, y, w, h)
+		c.pushDevicePathClip(devicePath)
+		return
+	}
+
+	// Transform the rectangle corners to device coordinates.
 	p1 := tm.TransformPoint(Pt(x, y))
 	p2 := tm.TransformPoint(Pt(x+w, y+h))
 
@@ -76,12 +89,16 @@ func (c *Context) ClipRect(x, y, w, h float64) {
 
 // ClipRoundRect sets a rounded rectangle clipping region.
 // The rectangle is defined by (x, y, w, h) in user coordinates and the
-// corners are rounded with the given radius. The radius is clamped to
-// min(w, h)/2. If radius is zero, this is equivalent to ClipRect.
+// corners are rounded with the given radius. The radius is clamped to half the
+// minimum absolute dimension. If radius is zero, this is equivalent to
+// ClipRect.
 //
-// On GPU, this uses a two-level clip strategy:
+// On GPU, axis-aligned clips use a two-level strategy:
 //   - Scissor rect (hardware, free) for the bounding box
 //   - Analytic SDF in the fragment shader for the rounded corners
+//
+// Transformed clips use the depth clip path so the rotated/sheared shape is
+// preserved exactly.
 //
 // On CPU, the SDF is evaluated per-pixel during coverage computation.
 func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
@@ -94,8 +111,21 @@ func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
 		c.initClipStack()
 	}
 
-	// Transform the rectangle corners to device coordinates.
 	tm := c.totalMatrix()
+	// A rounded rectangle remains an axis-aligned rounded rectangle only when
+	// the transform has no rotation/shear and applies the same magnitude of
+	// scale on both axes. Under a general affine transform its quarter-circles
+	// become rotated/elliptical curves, so use a transformed path rather than
+	// approximating the shape with its bounding box and a scalar radius.
+	if !isUniformAxisAlignedTransform(tm) {
+		pathX, pathY, pathW, pathH := normalizeRect(x, y, w, h)
+		userPath := NewPath()
+		userPath.RoundedRectangle(pathX, pathY, pathW, pathH, radius)
+		c.pushDevicePathClip(userPath.Transform(tm))
+		return
+	}
+
+	// Transform the rectangle corners to device coordinates.
 	p1 := tm.TransformPoint(Pt(x, y))
 	p2 := tm.TransformPoint(Pt(x+w, y+h))
 
@@ -116,6 +146,66 @@ func (c *Context) ClipRoundRect(x, y, w, h, radius float64) {
 
 	rect := clip.NewRect(devX, devY, devW, devH)
 	c.clipStack.PushRRect(rect, scaledRadius)
+}
+
+// isAxisAlignedTransform reports whether the linear part of m keeps the axes
+// axis-aligned, possibly swapping them. Use exact comparisons: treating a
+// small shear as zero can produce a large clipping error when combined with
+// large coordinates or a very small axis scale.
+func isAxisAlignedTransform(m Matrix) bool {
+	return (m.B == 0 && m.D == 0) || (m.A == 0 && m.E == 0)
+}
+
+// isUniformAxisAlignedTransform reports whether m keeps rounded rectangles
+// axis-aligned without changing circular corners into ellipses. Reflections
+// are included; only the magnitudes of the two axis scales must match.
+func isUniformAxisAlignedTransform(m Matrix) bool {
+	switch {
+	case m.B == 0 && m.D == 0:
+		return math.Abs(m.A) == math.Abs(m.E)
+	case m.A == 0 && m.E == 0:
+		return math.Abs(m.B) == math.Abs(m.D)
+	default:
+		return false
+	}
+}
+
+// normalizeRect rewrites a rectangle with negative dimensions using its
+// geometric top-left corner and positive extents. This matches ClipRect's
+// min/abs handling and keeps transformed rounded-rectangle paths well formed.
+func normalizeRect(x, y, w, h float64) (float64, float64, float64, float64) {
+	if w < 0 {
+		x += w
+		w = -w
+	}
+	if h < 0 {
+		y += h
+		h = -h
+	}
+	return x, y, w, h
+}
+
+// transformedRectPath builds a closed rectangle in device coordinates.
+func transformedRectPath(tm Matrix, x, y, w, h float64) *Path {
+	p := NewPath()
+	p1 := tm.TransformPoint(Pt(x, y))
+	p2 := tm.TransformPoint(Pt(x+w, y))
+	p3 := tm.TransformPoint(Pt(x+w, y+h))
+	p4 := tm.TransformPoint(Pt(x, y+h))
+	p.MoveTo(p1.X, p1.Y)
+	p.LineTo(p2.X, p2.Y)
+	p.LineTo(p3.X, p3.Y)
+	p.LineTo(p4.X, p4.Y)
+	p.Close()
+	return p
+}
+
+// pushDevicePathClip adds an already device-space path to the clip stack and
+// keeps a copy for the GPU depth-clip path when a GPU backend is active.
+func (c *Context) pushDevicePathClip(devicePath *Path) {
+	clipVerbs, clipCoords := ConvertPathToClipVerbs(devicePath)
+	_ = c.clipStack.PushPath(clipVerbs, clipCoords, true)
+	c.gpuClipPath = devicePath.Clone()
 }
 
 // ResetClip removes all clipping regions, restoring the full canvas as drawable.
