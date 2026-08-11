@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.2] - 2026-08-11
+
+### Fixed
+
+- **Concurrent global text cache race** ([#494](https://github.com/gogpu/gg/pull/494), @besmpl) —
+  `globalGlyphCache` and `globalSubpixelCache` used bare pointer reads/writes.
+  Replaced with `atomic.Pointer[T]` for lock-free thread safety.
+
+- **Path bounds not preserved across Reset/Append/Clone** ([#497](https://github.com/gogpu/gg/pull/497), @besmpl) —
+  `Reset()` did not clear `boundsValid`, `Append()` did not merge bounds,
+  `Clone()` did not copy bounds fields. Fixed all three operations.
+
+- **Premultiplied alpha double-multiplication in scene renderer** ([#500](https://github.com/gogpu/gg/pull/500), @besmpl) —
+  `render/software.go` multiplied already-premultiplied source channels by alpha
+  a second time, making semi-transparent fills appear darker than correct.
+
+- **HiDPI layer and mask dimensions** ([#502](https://github.com/gogpu/gg/pull/502), @besmpl) —
+  `PushLayer`, `PushMaskLayer`, and `AsMask` used logical dimensions instead of
+  physical (`PixelWidth`/`PixelHeight`), clipping content at non-1x device scales.
+
+- **Transformed rectangular clips** ([#503](https://github.com/gogpu/gg/pull/503), @besmpl) —
+  `ClipRect` and `ClipRoundRect` transformed only two diagonal corners, producing
+  axis-aligned bounding box clips under rotation/shear. Now transforms all four
+  corners and uses a path clip for non-axis-aligned transforms.
+
+- **Recording stroke rectangles under transforms** ([#498](https://github.com/gogpu/gg/pull/498), @besmpl) —
+  `StrokeRectangle` in the recording system used the same two-corner transform bug.
+  Now transforms all four corners for non-translation transforms, with scaled
+  stroke metrics matching direct rendering.
+
+- **Recording clips were no-ops** ([#499](https://github.com/gogpu/gg/pull/499), @besmpl) —
+  Raster backend `SetClip` set the path but never called `Clip()`.
+  `ClearClip` was empty. Also fixed mask clipper fill rule (was hardcoded
+  even-odd), subpath separation, and Push/Pop clip state restoration.
+
+- **Recording ClipRoundRect transform parity** — Playback `ClipRoundRectCommand`
+  now matches `Context.ClipRoundRect` for non-uniform/non-axis-aligned transforms
+  (interaction fix between #499 and #503).
+
 ## [0.52.1] - 2026-08-11
 
 ### Fixed

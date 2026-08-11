@@ -165,22 +165,7 @@ func (r *Recording) Playback(backend Backend) error {
 		case ClearClipCommand:
 			backend.ClearClip()
 		case ClipRoundRectCommand:
-			// Convert RRect clip to a path for backends that don't
-			// natively support rounded rectangle clipping. Match Context's
-			// ClipRoundRect transform semantics: transform the two diagonal
-			// corners into an axis-aligned box and scale the corner radius.
-			x1, y1 := transform.TransformPoint(c.X, c.Y)
-			x2, y2 := transform.TransformPoint(c.X+c.W, c.Y+c.H)
-			x := math.Min(x1, x2)
-			y := math.Min(y1, y2)
-			w := math.Abs(x2 - x1)
-			h := math.Abs(y2 - y1)
-			radius := 0.0
-			if c.Radius > 0 {
-				radius = c.Radius * transform.ScaleFactor()
-				radius = math.Min(radius, math.Min(w, h)/2)
-			}
-			rrPath := gg.BuildPath().RoundRect(x, y, w, h, radius).Build()
+			rrPath := buildClipRoundRectPath(c, transform)
 			setPlaybackClip(backend, rrPath, FillRuleNonZero, transform)
 		case FillPathCommand:
 			path := r.resources.GetPath(c.Path)
@@ -236,6 +221,54 @@ func setPlaybackClip(backend Backend, path *gg.Path, rule FillRule, transform Ma
 	backend.SetTransform(Identity())
 	backend.SetClip(path, rule)
 	backend.SetTransform(transform)
+}
+
+// buildClipRoundRectPath builds a world-space rounded-rectangle clip path.
+// For uniform axis-aligned transforms, uses the fast two-corner + scaled radius
+// path. For rotation/shear/non-uniform scale, builds the rounded rect in user
+// space and transforms the full path — matching Context.ClipRoundRect (#503).
+func buildClipRoundRectPath(c ClipRoundRectCommand, t Matrix) *gg.Path {
+	if isUniformAxisAligned(t) {
+		x1, y1 := t.TransformPoint(c.X, c.Y)
+		x2, y2 := t.TransformPoint(c.X+c.W, c.Y+c.H)
+		x := math.Min(x1, x2)
+		y := math.Min(y1, y2)
+		w := math.Abs(x2 - x1)
+		h := math.Abs(y2 - y1)
+		radius := 0.0
+		if c.Radius > 0 {
+			radius = c.Radius * t.ScaleFactor()
+			radius = math.Min(radius, math.Min(w, h)/2)
+		}
+		return gg.BuildPath().RoundRect(x, y, w, h, radius).Build()
+	}
+	px, py := c.X, c.Y
+	pw, ph := math.Abs(c.W), math.Abs(c.H)
+	if c.W < 0 {
+		px += c.W
+	}
+	if c.H < 0 {
+		py += c.H
+	}
+	userPath := gg.NewPath()
+	userPath.RoundedRectangle(px, py, pw, ph, c.Radius)
+	return userPath.Transform(gg.Matrix{
+		A: t.A, B: t.B, C: t.C,
+		D: t.D, E: t.E, F: t.F,
+	})
+}
+
+// isUniformAxisAligned reports whether the transform keeps rounded rectangles
+// axis-aligned with circular (not elliptical) corners.
+func isUniformAxisAligned(t Matrix) bool {
+	switch {
+	case t.B == 0 && t.D == 0:
+		return math.Abs(t.A) == math.Abs(t.E)
+	case t.A == 0 && t.E == 0:
+		return math.Abs(t.B) == math.Abs(t.D)
+	default:
+		return false
+	}
 }
 
 // --------------------------------------------------------------------------
