@@ -265,3 +265,23 @@ jobs:
 
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated"
         exit 0
+
+    - name: Verify go.mod is tidy
+      run: |
+        go mod tidy
+        if ! git diff --exit-code go.mod go.sum; then
+          echo "::error::go.mod/go.sum are not tidy — run 'go mod tidy' and commit"
+          exit 1
+        fi
+
+    - name: Verify no forbidden dependencies
+      run: |
+        FORBIDDEN="github.com/gogpu/gogpu github.com/gogpu/ui"
+        FOUND=0
+        for m in $FORBIDDEN; do
+          if go list -m all 2>/dev/null | grep -q "^$m "; then
+            echo "::error::Forbidden dependency $m found in module graph (gg must not depend on gogpu or ui)"
+            FOUND=1
+          fi
+        done
+        exit $FOUND
