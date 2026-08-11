@@ -2,6 +2,7 @@ package gg
 
 import (
 	"bytes"
+	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -294,6 +295,9 @@ func TestSetPath(t *testing.T) {
 	if x != 30 || y != 40 {
 		t.Errorf("GetCurrentPoint() = (%v, %v), want (30, 40)", x, y)
 	}
+	if got, want := dc.path.Bounds(), image.Rect(10, 20, 30, 40); got != want {
+		t.Errorf("SetPath bounds = %v, want %v", got, want)
+	}
 }
 
 func TestSetPathNil(t *testing.T) {
@@ -326,6 +330,9 @@ func TestAppendPath(t *testing.T) {
 	}
 	if x != 70 || y != 80 {
 		t.Errorf("GetCurrentPoint() = (%v, %v), want (70, 80)", x, y)
+	}
+	if got, want := dc.path.Bounds(), image.Rect(10, 20, 70, 80); got != want {
+		t.Errorf("AppendPath bounds = %v, want %v", got, want)
 	}
 }
 

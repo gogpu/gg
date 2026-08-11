@@ -134,6 +134,49 @@ func TestContextFrameDamage_AfterFill(t *testing.T) {
 	}
 }
 
+func TestContextFrameDamage_PathAPIs(t *testing.T) {
+	path := NewPath()
+	path.Rectangle(10, 20, 20, 30)
+
+	tests := []struct {
+		name  string
+		setup func(*Context)
+		want  image.Rectangle
+	}{
+		{
+			name: "SetPath",
+			setup: func(dc *Context) {
+				dc.SetPath(path)
+			},
+			want: image.Rect(10, 20, 30, 50),
+		},
+		{
+			name: "AppendPath",
+			setup: func(dc *Context) {
+				dc.DrawRectangle(0, 0, 5, 5)
+				dc.AppendPath(path)
+			},
+			want: image.Rect(0, 0, 30, 50),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dc := NewContext(100, 100)
+			defer dc.Close()
+
+			tc.setup(dc)
+			if err := dc.Fill(); err != nil {
+				t.Fatalf("Fill: %v", err)
+			}
+			got := dc.FrameDamage()
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("FrameDamage = %v, want [%v]", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestContextFrameDamage_MultipleFillsSeparateRects(t *testing.T) {
 	dc := NewContext(400, 400)
 	defer dc.Close()

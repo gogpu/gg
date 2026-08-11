@@ -182,6 +182,7 @@ func (p *Path) Reset() {
 	p.coords = p.coords[:0]
 	p.start = Point{}
 	p.current = Point{}
+	p.boundsValid = false
 }
 
 // Append adds all elements from other to this path.
@@ -194,6 +195,10 @@ func (p *Path) Append(other *Path) {
 	p.coords = append(p.coords, other.coords...)
 	p.current = other.current
 	p.start = other.start
+	if other.boundsValid {
+		p.expandBounds(other.boundsMinX, other.boundsMinY)
+		p.expandBounds(other.boundsMaxX, other.boundsMaxY)
+	}
 }
 
 // Iterate calls fn for each verb in the path with the corresponding coordinate slice.
@@ -392,10 +397,15 @@ func (p *Path) RoundedRectangle(x, y, w, h, r float64) {
 // Clone creates a deep copy of the path.
 func (p *Path) Clone() *Path {
 	result := &Path{
-		verbs:   make([]PathVerb, len(p.verbs)),
-		coords:  make([]float64, len(p.coords)),
-		start:   p.start,
-		current: p.current,
+		verbs:       make([]PathVerb, len(p.verbs)),
+		coords:      make([]float64, len(p.coords)),
+		start:       p.start,
+		current:     p.current,
+		boundsMinX:  p.boundsMinX,
+		boundsMinY:  p.boundsMinY,
+		boundsMaxX:  p.boundsMaxX,
+		boundsMaxY:  p.boundsMaxY,
+		boundsValid: p.boundsValid,
 	}
 	copy(result.verbs, p.verbs)
 	copy(result.coords, p.coords)
