@@ -27,6 +27,7 @@ const (
 type MaskClipper struct {
 	mask   *image.ImageBuf
 	bounds Rect
+	rule   FillRule
 }
 
 // NewMaskClipper creates a mask clipper by rasterizing the given path
@@ -40,6 +41,11 @@ type MaskClipper struct {
 //
 // The mask is stored as FormatGray8 (1 byte per pixel) for memory efficiency.
 func NewMaskClipper(verbs []PathVerb, coords []float64, bounds Rect, antiAlias bool) (*MaskClipper, error) {
+	return NewMaskClipperWithRule(verbs, coords, bounds, antiAlias, FillRuleNonZero)
+}
+
+// NewMaskClipperWithRule creates a mask clipper using the requested fill rule.
+func NewMaskClipperWithRule(verbs []PathVerb, coords []float64, bounds Rect, antiAlias bool, rule FillRule) (*MaskClipper, error) {
 	// Validate bounds - empty bounds means no clipping needed
 	if bounds.IsEmpty() {
 		return nil, image.ErrInvalidDimensions
@@ -61,6 +67,7 @@ func NewMaskClipper(verbs []PathVerb, coords []float64, bounds Rect, antiAlias b
 	mc := &MaskClipper{
 		mask:   mask,
 		bounds: bounds,
+		rule:   rule,
 	}
 
 	// Rasterize path into mask
@@ -132,24 +139,30 @@ func (mc *MaskClipper) rasterizePath(verbs []PathVerb, coords []float64, antiAli
 		return
 	}
 
-	// Flatten path to line segments
-	points := mc.flattenPath(verbs, coords)
-	if len(points) < 2 {
+	// Flatten path to line segments. Keep each subpath separate so that an
+	// implicit move between subpaths cannot become a spurious connecting edge.
+	subpaths := mc.flattenPath(verbs, coords)
+	if len(subpaths) == 0 {
 		return
 	}
 
 	// Build edge list for scanline rasterization
-	edges := make([]edge, 0, len(points))
-	for i := 0; i < len(points)-1; i++ {
-		p0 := points[i]
-		p1 := points[i+1]
-
-		// Skip horizontal edges
-		if p1.Y == p0.Y {
+	edges := make([]edge, 0)
+	for _, points := range subpaths {
+		if len(points) < 2 {
 			continue
 		}
+		for i := 0; i < len(points)-1; i++ {
+			p0 := points[i]
+			p1 := points[i+1]
 
-		edges = append(edges, mc.makeEdge(p0, p1))
+			// Skip horizontal edges
+			if p1.Y == p0.Y {
+				continue
+			}
+
+			edges = append(edges, mc.makeEdge(p0, p1))
+		}
 	}
 
 	if len(edges) == 0 {
@@ -173,6 +186,15 @@ type edge struct {
 	x0, y0 float64 // Start point
 	x1, y1 float64 // End point
 	dir    int     // Direction: +1 for down, -1 for up
+}
+
+type intersection struct {
+	x   float64
+	dir int
+}
+
+type span struct {
+	x1, x2 float64
 }
 
 // makeEdge creates an edge from two points, ensuring y0 < y1.
@@ -206,23 +228,23 @@ func (mc *MaskClipper) rasterizeScanlineAA(edges []edge, y int) {
 		scanY := float64(y) + off
 
 		// Find edge intersections at this sub-scanline.
-		var intersections []float64
+		intersections := make([]intersection, 0, len(edges))
 		for _, e := range edges {
 			if e.y0 <= scanY && scanY < e.y1 {
 				t := (scanY - e.y0) / (e.y1 - e.y0)
 				x := e.x0 + t*(e.x1-e.x0)
-				intersections = append(intersections, x)
+				intersections = append(intersections, intersection{x: x, dir: e.dir})
 			}
 		}
 		if len(intersections) == 0 {
 			continue
 		}
-		sortFloats(intersections)
+		sortIntersections(intersections)
 
 		// Fill spans with fractional edge coverage.
-		for i := 0; i+1 < len(intersections); i += 2 {
-			x1 := intersections[i]
-			x2 := intersections[i+1]
+		for _, s := range spans(intersections, mc.rule) {
+			x1 := s.x1
+			x2 := s.x2
 
 			px1 := int(x1)
 			px2 := int(x2)
@@ -288,18 +310,18 @@ func (mc *MaskClipper) rasterizeScanlineAA(edges []edge, y int) {
 	}
 }
 
-// rasterizeScanline fills a single scanline using the non-zero winding rule.
+// rasterizeScanline fills a single scanline using the configured fill rule.
 func (mc *MaskClipper) rasterizeScanline(edges []edge, y int) {
 	scanY := float64(y) + 0.5
 
 	// Find edges that intersect this scanline
-	var intersections []float64
+	intersections := make([]intersection, 0, len(edges))
 	for _, e := range edges {
 		if e.y0 <= scanY && scanY < e.y1 {
 			// Compute x intersection
 			t := (scanY - e.y0) / (e.y1 - e.y0)
 			x := e.x0 + t*(e.x1-e.x0)
-			intersections = append(intersections, x)
+			intersections = append(intersections, intersection{x: x, dir: e.dir})
 		}
 	}
 
@@ -308,12 +330,11 @@ func (mc *MaskClipper) rasterizeScanline(edges []edge, y int) {
 	}
 
 	// Sort intersections
-	sortFloats(intersections)
+	sortIntersections(intersections)
 
-	// Fill spans using even-odd rule (pairs of intersections)
-	for i := 0; i+1 < len(intersections); i += 2 {
-		x1 := intersections[i]
-		x2 := intersections[i+1]
+	for _, s := range spans(intersections, mc.rule) {
+		x1 := s.x1
+		x2 := s.x2
 
 		// Convert to pixel coordinates
 		px1 := int(x1)
@@ -334,16 +355,37 @@ func (mc *MaskClipper) rasterizeScanline(edges []edge, y int) {
 	}
 }
 
-// flattenPath converts path (verb+coords) into a sequence of points.
-func (mc *MaskClipper) flattenPath(verbs []PathVerb, coords []float64) []Point {
+// flattenPath converts path (verb+coords) into independent subpaths of points.
+// Keeping subpaths separate prevents the edge builder from joining a MoveTo
+// in one subpath to the preceding point in another subpath.
+func (mc *MaskClipper) flattenPath(verbs []PathVerb, coords []float64) [][]Point {
+	var subpaths [][]Point
 	var points []Point
 	var current Point
+	var subpathStart Point
 	ci := 0
+	closeSubpath := func() {
+		if len(points) > 0 && (current.X != subpathStart.X || current.Y != subpathStart.Y) {
+			points = append(points, subpathStart)
+			current = subpathStart
+		}
+	}
+	flush := func() {
+		if len(points) > 0 {
+			// Filling implicitly closes an open contour, just like the main
+			// rasterizer does at the next MoveTo and at end of path.
+			closeSubpath()
+			subpaths = append(subpaths, points)
+			points = nil
+		}
+	}
 
 	for _, v := range verbs {
 		switch v {
 		case VerbMoveTo:
+			flush()
 			current = Point{X: coords[ci], Y: coords[ci+1]}
+			subpathStart = current
 			points = append(points, current)
 			ci += 2
 
@@ -380,13 +422,12 @@ func (mc *MaskClipper) flattenPath(verbs []PathVerb, coords []float64) []Point {
 			ci += 6
 
 		case VerbClose:
-			if len(points) > 0 {
-				points = append(points, points[0])
-			}
+			closeSubpath()
 		}
 	}
 
-	return points
+	flush()
+	return subpaths
 }
 
 // evalQuadraticBezier evaluates a quadratic Bezier curve at parameter t.
@@ -411,7 +452,18 @@ func evalCubicBezier(p0, p1, p2, p3 Point, t float64) Point {
 	}
 }
 
-// sortFloats sorts a slice of float64 values (simple bubble sort for small slices).
+func sortIntersections(values []intersection) {
+	n := len(values)
+	for i := 0; i < n-1; i++ {
+		for j := 0; j < n-i-1; j++ {
+			if values[j].x > values[j+1].x {
+				values[j], values[j+1] = values[j+1], values[j]
+			}
+		}
+	}
+}
+
+// sortFloats is retained for the package's raster helper tests.
 func sortFloats(values []float64) {
 	n := len(values)
 	for i := 0; i < n-1; i++ {
@@ -421,4 +473,29 @@ func sortFloats(values []float64) {
 			}
 		}
 	}
+}
+
+func spans(intersections []intersection, rule FillRule) []span {
+	result := make([]span, 0, len(intersections)/2)
+	if rule == FillRuleEvenOdd {
+		for i := 0; i+1 < len(intersections); i += 2 {
+			result = append(result, span{x1: intersections[i].x, x2: intersections[i+1].x})
+		}
+		return result
+	}
+
+	winding := 0
+	var start float64
+	for _, crossing := range intersections {
+		wasInside := winding != 0
+		winding += crossing.dir
+		isInside := winding != 0
+		switch {
+		case !wasInside && isInside:
+			start = crossing.x
+		case wasInside && !isInside:
+			result = append(result, span{x1: start, x2: crossing.x})
+		}
+	}
+	return result
 }

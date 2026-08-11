@@ -41,7 +41,7 @@ type Context struct {
 	matrix         Matrix // user transform (starts as Identity, user-space only)
 	deviceMatrix   Matrix // device scale transform (Identity when scale=1.0, NEVER modified by user)
 	stack          []Matrix
-	clipStackDepth []int // Tracks clip stack depth for each Push/Pop
+	clipStateStack []contextClipState
 
 	// Layer support
 	layerStack *layerStack // Layer stack for compositing
@@ -88,6 +88,11 @@ type Context struct {
 
 	// Lifecycle
 	closed bool // Indicates whether Close has been called
+}
+
+type contextClipState struct {
+	stack       *clip.ClipStack
+	gpuClipPath *Path
 }
 
 // Ensure Context implements io.Closer
@@ -178,7 +183,7 @@ func NewContext(width, height int, opts ...ContextOption) *Context {
 		matrix:                Identity(),
 		deviceMatrix:          deviceMatrix,
 		stack:                 make([]Matrix, 0, 8),
-		clipStackDepth:        make([]int, 0, 8),
+		clipStateStack:        make([]contextClipState, 0, 8),
 		pipelineMode:          options.pipelineMode,
 		damageTrackingEnabled: true,
 		antiAlias:             true,
@@ -217,7 +222,7 @@ func NewContextForImage(img image.Image, opts ...ContextOption) *Context {
 		matrix:         Identity(),
 		deviceMatrix:   Identity(),
 		stack:          make([]Matrix, 0, 8),
-		clipStackDepth: make([]int, 0, 8),
+		clipStateStack: make([]contextClipState, 0, 8),
 		pipelineMode:   options.pipelineMode,
 	}
 }
@@ -275,7 +280,7 @@ func (c *Context) Close() error {
 
 	// Clear state stack
 	c.stack = nil
-	c.clipStackDepth = nil
+	c.clipStateStack = nil
 	c.maskStack = nil
 	c.mask = nil
 	c.gpuClipPath = nil
@@ -454,6 +459,7 @@ func (c *Context) SetDeviceScale(scale float64) {
 	// Reset clip stack (clip regions are in pixel coordinates)
 	c.clipStack = nil
 	c.gpuClipPath = nil
+	clear(c.clipStateStack)
 	c.ClearPath()
 }
 
@@ -926,12 +932,12 @@ func (c *Context) StrokePreserve() error {
 func (c *Context) Push() {
 	c.stack = append(c.stack, c.matrix)
 
-	// Save current clip stack depth
-	depth := 0
-	if c.clipStack != nil {
-		depth = c.clipStack.Depth()
-	}
-	c.clipStackDepth = append(c.clipStackDepth, depth)
+	// Save an independent clip stack so ResetClip and replacement clips inside
+	// the saved scope cannot destroy the state that Pop must restore.
+	c.clipStateStack = append(c.clipStateStack, contextClipState{
+		stack:       c.clipStack.Clone(),
+		gpuClipPath: c.gpuClipPath,
+	})
 
 	// Save current mask (clone if exists)
 	var maskCopy *Mask
@@ -958,21 +964,13 @@ func (c *Context) Pop() {
 	c.matrix = c.stack[len(c.stack)-1]
 	c.stack = c.stack[:len(c.stack)-1]
 
-	// Restore clip stack depth
-	if len(c.clipStackDepth) > 0 {
-		targetDepth := c.clipStackDepth[len(c.clipStackDepth)-1]
-		c.clipStackDepth = c.clipStackDepth[:len(c.clipStackDepth)-1]
-
-		// Pop clip stack entries until we reach the target depth
-		if c.clipStack != nil {
-			for c.clipStack.Depth() > targetDepth {
-				c.clipStack.Pop()
-			}
-			// Clear GPU clip path if all path clips were popped.
-			if c.gpuClipPath != nil && c.clipStack.IsRRectOnly() {
-				c.gpuClipPath = nil
-			}
-		}
+	// Restore the complete saved clip state. Restoring only a depth is not
+	// sufficient after ResetClip, which removes the entries themselves.
+	if len(c.clipStateStack) > 0 {
+		state := c.clipStateStack[len(c.clipStateStack)-1]
+		c.clipStateStack = c.clipStateStack[:len(c.clipStateStack)-1]
+		c.clipStack = state.stack
+		c.gpuClipPath = state.gpuClipPath
 	}
 
 	// Restore mask
@@ -1322,6 +1320,7 @@ func (c *Context) Resize(width, height int) error {
 	// Reset clip stack to full rectangle
 	c.clipStack = nil
 	c.gpuClipPath = nil
+	clear(c.clipStateStack)
 
 	// Clear any existing path
 	c.ClearPath()

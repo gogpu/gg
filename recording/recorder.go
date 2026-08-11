@@ -141,25 +141,47 @@ func (r *Recording) Playback(backend Backend) error {
 		return err
 	}
 
+	transform := Identity()
+	transformStack := make([]Matrix, 0, 8)
+
 	// Replay each command
 	for _, cmd := range r.commands {
 		switch c := cmd.(type) {
 		case SaveCommand:
+			transformStack = append(transformStack, transform)
 			backend.Save()
 		case RestoreCommand:
 			backend.Restore()
+			if len(transformStack) > 0 {
+				transform = transformStack[len(transformStack)-1]
+				transformStack = transformStack[:len(transformStack)-1]
+			}
 		case SetTransformCommand:
+			transform = c.Matrix
 			backend.SetTransform(c.Matrix)
 		case SetClipCommand:
 			path := r.resources.GetPath(c.Path)
-			backend.SetClip(path, c.Rule)
+			setPlaybackClip(backend, path, c.Rule, transform)
 		case ClearClipCommand:
 			backend.ClearClip()
 		case ClipRoundRectCommand:
 			// Convert RRect clip to a path for backends that don't
-			// natively support rounded rectangle clipping.
-			rrPath := gg.BuildPath().RoundRect(c.X, c.Y, c.W, c.H, c.Radius).Build()
-			backend.SetClip(rrPath, FillRuleNonZero)
+			// natively support rounded rectangle clipping. Match Context's
+			// ClipRoundRect transform semantics: transform the two diagonal
+			// corners into an axis-aligned box and scale the corner radius.
+			x1, y1 := transform.TransformPoint(c.X, c.Y)
+			x2, y2 := transform.TransformPoint(c.X+c.W, c.Y+c.H)
+			x := math.Min(x1, x2)
+			y := math.Min(y1, y2)
+			w := math.Abs(x2 - x1)
+			h := math.Abs(y2 - y1)
+			radius := 0.0
+			if c.Radius > 0 {
+				radius = c.Radius * transform.ScaleFactor()
+				radius = math.Min(radius, math.Min(w, h)/2)
+			}
+			rrPath := gg.BuildPath().RoundRect(x, y, w, h, radius).Build()
+			setPlaybackClip(backend, rrPath, FillRuleNonZero, transform)
 		case FillPathCommand:
 			path := r.resources.GetPath(c.Path)
 			brush := r.resources.GetBrush(c.Brush)
@@ -205,6 +227,15 @@ func (r *Recording) Playback(backend Backend) error {
 	}
 
 	return backend.End()
+}
+
+// setPlaybackClip applies a world-space clip without disturbing the backend's
+// current transform. Save/Restore cannot be used here because Restore would
+// also discard the newly installed clip.
+func setPlaybackClip(backend Backend, path *gg.Path, rule FillRule, transform Matrix) {
+	backend.SetTransform(Identity())
+	backend.SetClip(path, rule)
+	backend.SetTransform(transform)
 }
 
 // --------------------------------------------------------------------------
