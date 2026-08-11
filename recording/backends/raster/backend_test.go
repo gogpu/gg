@@ -3,6 +3,7 @@ package raster
 import (
 	"bytes"
 	"image"
+	"math"
 	"testing"
 
 	"github.com/gogpu/gg"
@@ -449,6 +450,85 @@ func TestRecordingPlaybackViaRegistry(t *testing.T) {
 	pixel := rgba.RGBAAt(50, 50)
 	if pixel.G < 200 || pixel.R > 50 || pixel.B > 50 {
 		t.Errorf("pixel = %v, expected green", pixel)
+	}
+}
+
+func TestRecordingPlaybackStrokeRectangle(t *testing.T) {
+	rec := recording.NewRecorder(100, 100)
+	rec.SetStrokeRGB(1, 0, 0)
+	rec.SetLineWidth(4)
+	rec.StrokeRectangle(20, 20, 60, 60)
+
+	backend := NewBackend()
+	if err := rec.FinishRecording().Playback(backend); err != nil {
+		t.Fatalf("Playback failed: %v", err)
+	}
+
+	rgba, ok := backend.Image().(*image.RGBA)
+	if !ok {
+		t.Fatal("expected *image.RGBA")
+	}
+	if pixel := rgba.RGBAAt(20, 50); pixel.R < 200 || pixel.G > 50 || pixel.B > 50 || pixel.A == 0 {
+		t.Fatalf("left rectangle edge pixel = %v, want opaque red", pixel)
+	}
+	if pixel := rgba.RGBAAt(50, 50); pixel.A != 0 {
+		t.Fatalf("rectangle interior pixel = %v, want transparent", pixel)
+	}
+}
+
+func TestRecordingPlaybackStrokeRectangleMatchesDirect(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		x, y, width, height float64
+		transform           recording.Matrix
+	}{
+		{name: "translation", x: 20, y: 20, width: 60, height: 50, transform: recording.Translate(10, 15)},
+		{name: "positive nonuniform scale", x: 20, y: 20, width: 50, height: 60, transform: recording.Matrix{A: 1.5, C: 5, E: 0.75, F: 10}},
+		{name: "scale down", x: 20, y: 20, width: 80, height: 80, transform: recording.Matrix{A: 0.5, C: 10, E: 0.75, F: 10}},
+		{name: "zero scale", x: 20, y: 20, width: 80, height: 80, transform: recording.Matrix{C: 90, F: 90}},
+		{name: "rotation", x: -30, y: -20, width: 60, height: 40, transform: recording.Translate(90, 90).Multiply(recording.Rotate(math.Pi / 4))},
+		{name: "shear", x: 10, y: 10, width: 60, height: 50, transform: recording.Translate(20, 20).Multiply(recording.Shear(0.4, 0.2))},
+		{name: "reflection", x: 20, y: 20, width: 60, height: 50, transform: recording.Translate(130, 0).Multiply(recording.Scale(-1, 1))},
+		{name: "negative width", x: 80, y: 20, width: -60, height: 60, transform: recording.Identity()},
+		{name: "negative height", x: 20, y: 80, width: 60, height: -60, transform: recording.Identity()},
+		{name: "negative width and height", x: 80, y: 80, width: -60, height: -60, transform: recording.Identity()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			direct := gg.NewContext(180, 180)
+			direct.SetRGB(0, 0, 0)
+			direct.SetLineWidth(2)
+			direct.SetDash(11, 7)
+			direct.SetDashOffset(3)
+			direct.SetTransform(gg.Matrix{
+				A: tc.transform.A, B: tc.transform.B, C: tc.transform.C,
+				D: tc.transform.D, E: tc.transform.E, F: tc.transform.F,
+			})
+			direct.DrawRectangle(tc.x, tc.y, tc.width, tc.height)
+			if err := direct.Stroke(); err != nil {
+				t.Fatalf("direct Stroke failed: %v", err)
+			}
+
+			rec := recording.NewRecorder(180, 180)
+			rec.SetStrokeRGB(0, 0, 0)
+			rec.SetLineWidth(2)
+			rec.SetDash(11, 7)
+			rec.SetDashOffset(3)
+			rec.SetTransform(tc.transform)
+			rec.StrokeRectangle(tc.x, tc.y, tc.width, tc.height)
+			backend := NewBackend()
+			if err := rec.FinishRecording().Playback(backend); err != nil {
+				t.Fatalf("Playback failed: %v", err)
+			}
+
+			got, ok := backend.Image().(*image.RGBA)
+			if !ok {
+				t.Fatal("expected raster backend to return *image.RGBA")
+			}
+			want := direct.Image().(*image.RGBA)
+			if !bytes.Equal(got.Pix, want.Pix) {
+				t.Fatalf("recorded stroke differs from direct stroke for transform %#v and dimensions (%v,%v)", tc.transform, tc.width, tc.height)
+			}
+		})
 	}
 }
 
