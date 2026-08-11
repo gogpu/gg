@@ -487,7 +487,7 @@ const maxDamageRects = 16
 
 // FrameDamage returns the list of damage rectangles from draw operations
 // this frame. Each rect corresponds to one or more Fill/Stroke operations.
-// Used by ggcanvas → SetDamageRects → PresentWithDamage for per-rect OS blit.
+// Used by ggcanvas → DamageReporter.ReportDamage → compositor unions at present (ADR-065).
 // Returns nil if no drawing operations occurred.
 func (c *Context) FrameDamage() []image.Rectangle {
 	if len(c.frameDamageRects) == 0 {
