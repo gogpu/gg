@@ -544,6 +544,44 @@ func TestSetGlobalGlyphCache_Nil(t *testing.T) {
 	}
 }
 
+func TestGlobalGlyphCacheConcurrentAccess(t *testing.T) {
+	original := GetGlobalGlyphCache()
+	t.Cleanup(func() {
+		_ = SetGlobalGlyphCache(original)
+	})
+
+	caches := []*GlyphCache{NewGlyphCache(), NewGlyphCache()}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(offset int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 1000; j++ {
+				_ = SetGlobalGlyphCache(caches[(offset+j)%len(caches)])
+			}
+		}(i)
+	}
+
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 1000; j++ {
+				if GetGlobalGlyphCache() == nil {
+					t.Error("GetGlobalGlyphCache returned nil")
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+}
+
 func TestOutlineCacheKey_Uniqueness(t *testing.T) {
 	cache := NewGlyphCache()
 

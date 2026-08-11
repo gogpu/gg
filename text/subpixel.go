@@ -3,6 +3,7 @@ package text
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // SubpixelMode controls subpixel text positioning.
@@ -415,20 +416,24 @@ func MakeSubpixelKey(baseKey OutlineCacheKey, x, y float64, config SubpixelConfi
 }
 
 // globalSubpixelCache is the default shared subpixel cache.
-var globalSubpixelCache = NewSubpixelCache(DefaultSubpixelConfig())
+var globalSubpixelCache atomic.Pointer[SubpixelCache]
+
+func init() {
+	globalSubpixelCache.Store(NewSubpixelCache(DefaultSubpixelConfig()))
+}
 
 // GetGlobalSubpixelCache returns the global shared subpixel cache.
+// It is safe to call concurrently with SetGlobalSubpixelCache.
 func GetGlobalSubpixelCache() *SubpixelCache {
-	return globalSubpixelCache
+	return globalSubpixelCache.Load()
 }
 
 // SetGlobalSubpixelCache replaces the global subpixel cache.
 // The old cache is returned for cleanup if needed.
+// It is safe for concurrent use.
 func SetGlobalSubpixelCache(cache *SubpixelCache) *SubpixelCache {
 	if cache == nil {
 		cache = NewSubpixelCache(DefaultSubpixelConfig())
 	}
-	old := globalSubpixelCache
-	globalSubpixelCache = cache
-	return old
+	return globalSubpixelCache.Swap(cache)
 }
