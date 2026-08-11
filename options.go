@@ -48,12 +48,19 @@ func WithRenderer(r Renderer) ContextOption {
 }
 
 // WithPixmap sets a custom pixmap for the Context.
-// The pixmap dimensions should match the Context dimensions.
+// The pixmap dimensions must match the Context's physical dimensions. At the
+// default device scale, this is Width x Height; when WithDeviceScale is used,
+// allocate PixelWidth x PixelHeight (logical dimensions multiplied by scale).
 //
 // Example:
 //
 //	pm := gg.NewPixmap(800, 600)
 //	dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
+//
+// For a 2x context, use a physical pixmap:
+//
+//	pm := gg.NewPixmap(1600, 1200)
+//	dc := gg.NewContext(800, 600, gg.WithDeviceScale(2), gg.WithPixmap(pm))
 func WithPixmap(pm *Pixmap) ContextOption {
 	return func(o *contextOptions) {
 		o.pixmap = pm

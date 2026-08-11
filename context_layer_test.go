@@ -92,6 +92,93 @@ func TestLayerCompositing(t *testing.T) {
 	}
 }
 
+// TestPushLayerDeviceScaleCompositesPhysicalBounds verifies that a layer uses
+// the physical dimensions of a HiDPI context. Rendering still uses logical
+// coordinates, but the transformed path covers the complete physical target.
+func TestPushLayerDeviceScaleCompositesPhysicalBounds(t *testing.T) {
+	const (
+		logicalWidth  = 3
+		logicalHeight = 2
+		deviceScale   = 2.0
+	)
+
+	dc := NewContext(logicalWidth, logicalHeight, WithDeviceScale(deviceScale))
+	defer func() { _ = dc.Close() }()
+
+	dc.PushLayer(BlendNormal, 1.0)
+	if got, want := dc.pixmap.Width(), dc.PixelWidth(); got != want {
+		t.Fatalf("layer width = %d, want physical width %d", got, want)
+	}
+	if got, want := dc.pixmap.Height(), dc.PixelHeight(); got != want {
+		t.Fatalf("layer height = %d, want physical height %d", got, want)
+	}
+
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, logicalWidth, logicalHeight)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+	dc.PopLayer()
+
+	if got, want := dc.Image().Bounds().Dx(), dc.PixelWidth(); got != want {
+		t.Fatalf("composited image width = %d, want physical width %d", got, want)
+	}
+	if got, want := dc.Image().Bounds().Dy(), dc.PixelHeight(); got != want {
+		t.Fatalf("composited image height = %d, want physical height %d", got, want)
+	}
+
+	for _, point := range [][2]int{
+		{0, 0},
+		{dc.PixelWidth() - 1, 0},
+		{0, dc.PixelHeight() - 1},
+		{dc.PixelWidth() - 1, dc.PixelHeight() - 1},
+	} {
+		pixel := dc.pixmap.GetPixel(point[0], point[1])
+		if pixel.R < 0.9 || pixel.A < 0.9 {
+			t.Errorf("pixel at physical (%d,%d) = %+v, want opaque red", point[0], point[1], pixel)
+		}
+	}
+}
+
+// TestPushLayerWithPhysicalPixmapDeviceScale verifies that a custom pixmap
+// sized to the physical HiDPI dimensions remains the layer compositing target.
+func TestPushLayerWithPhysicalPixmapDeviceScale(t *testing.T) {
+	const (
+		logicalWidth  = 3
+		logicalHeight = 2
+		deviceScale   = 2.0
+	)
+
+	physicalPixmap := NewPixmap(logicalWidth*2, logicalHeight*2)
+	dc := NewContext(logicalWidth, logicalHeight,
+		WithDeviceScale(deviceScale), WithPixmap(physicalPixmap))
+	defer func() { _ = dc.Close() }()
+
+	if dc.pixmap != physicalPixmap {
+		t.Fatal("context did not use the supplied physical pixmap")
+	}
+
+	dc.PushLayer(BlendNormal, 1.0)
+	dc.SetRGBA(1, 0, 0, 1)
+	dc.DrawRectangle(0, 0, logicalWidth, logicalHeight)
+	if err := dc.Fill(); err != nil {
+		t.Fatalf("Fill failed: %v", err)
+	}
+	dc.PopLayer()
+
+	for _, point := range [][2]int{
+		{0, 0},
+		{dc.PixelWidth() - 1, 0},
+		{0, dc.PixelHeight() - 1},
+		{dc.PixelWidth() - 1, dc.PixelHeight() - 1},
+	} {
+		pixel := physicalPixmap.GetPixel(point[0], point[1])
+		if pixel.R < 0.9 || pixel.A < 0.9 {
+			t.Errorf("pixel at physical (%d,%d) = %+v, want opaque red", point[0], point[1], pixel)
+		}
+	}
+}
+
 // TestPopWithoutPush tests that PopLayer doesn't crash when no layer is pushed.
 func TestPopWithoutPush(t *testing.T) {
 	dc := NewContext(100, 100)
