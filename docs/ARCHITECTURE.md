@@ -813,10 +813,11 @@ Level 2: TILE DIRTY (DirtyRegion)
     Damage rects → mark intersecting 64×64 tiles (atomic bitmap, lock-free)
          ↓
 Level 3: GPU SCISSOR (FlushGPUWithViewDamage)
-    LoadOpLoad (preserve previous frame) + scissor clip to dirty region
+    LoadOpLoad (preserve gg-internal multi-pass content) + scissor clip to dirty region
+    Cross-renderer preservation (g3d content) is compositor-driven via PreserveContent (ADR-067)
          ↓
 Level 4: OS PRESENT (PresentWithDamage)
-    Per-rect OS blit: BitBlt (Windows), XPutImage (Linux), VK_KHR_incremental_present
+    Compositor unions all damage sources (ADR-065) → VK_KHR_incremental_present
 ```
 
 Key components:
@@ -824,8 +825,20 @@ Key components:
 - **`Path.Bounds()`** — incremental bounding box during path construction (Skia `SkPathRef::fBounds` pattern, O(1) per verb)
 - **`Context.FrameDamage()`** — `[]image.Rectangle` list of per-operation damage rects for immediate-mode
 - **Threshold merge** — >16 rects merged to bounding box (Swiss cheese prevention, Wayland compositor pattern)
-- **`DamageRectSetter`** — ggcanvas passes per-rect damage to `gogpu.SetDamageRects()` → `wgpu.PresentWithDamage()`
-- **`GOGPU_DEBUG_DAMAGE=overlay`** — green overlay on damage regions (Android SurfaceFlinger pattern, full recompose per debug frame)
+- **`DamageReporter`** (ADR-065) — ggcanvas registers as named damage source via `RegisterDamageSource("gg")`, reports per-frame damage through `ReportDamage()`. Compositor unions all sources at present time.
+- **`GOGPU_DEBUG_DAMAGE=overlay`** — per-source colored overlay on damage regions (Chromium `debug_colors.cc` pattern). Pluggable via `DamageOverlayRenderer` (ADR-066).
+
+### Compositor Delegation (ADR-067)
+
+gg is a pure drawing library — surface-level compositor decisions are delegated to gogpu:
+
+- **LoadOp**: compositor decides Clear vs Load via `SurfaceCompositor.ShouldPreserveContent()`
+- **Damage scissoring**: compositor owns damage source union, gg reports its damage via `DamageReporter`
+- **MSAA overlay compositing**: delegated to `SurfaceCompositor.CompositeMSAAOverlay()` when available
+- **`selectBaseLayer`**: uses `target.PreserveContent` (explicit external content signal from g3d), not `frameRendered`
+- **`shouldPreserveSurface`**: gg-internal only (mid-frame CPU fallback, multi-pass within same frame)
+- **Per-frame compositor**: `GPURenderTarget.Compositor` provides compositor context each render call
+- **Legacy fallback**: standalone gg without gogpu uses per-frame bind groups and self-managed LoadOp
 
 ### Render Mode (ADR-020)
 
