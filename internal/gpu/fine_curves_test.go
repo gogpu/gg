@@ -180,8 +180,9 @@ func TestRasterizeCurvesCirclePath(t *testing.T) {
 	path.CubicTo(cx+k, cy-r, cx+r, cy-k, cx+r, cy)
 	path.Close()
 
-	// Build edges from path
+	// Build edges from path (native forward-diff cubics for FineRasterizer).
 	eb := raster.NewEdgeBuilder(2)
+	eb.SetFlattenCurves(false)
 	BuildEdgesFromScenePath(eb, path, scene.IdentityAffine())
 
 	// Bin edges

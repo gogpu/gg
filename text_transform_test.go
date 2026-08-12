@@ -880,14 +880,21 @@ func TestShearAliased_ForceAA_ProducesReadableText(t *testing.T) {
 		t.Fatal("Shear+aliased text produced no pixels")
 	}
 
-	// Verify text is readable: count distinct ink runs at mid-height.
-	// "Hello World" = 10 visible chars → expect ≥5 ink runs.
-	// Garbled text collapses into 1-3 blobs.
-	midY := 45
-	inkRuns := countInkRuns(dc, midY, 0, 400)
-	t.Logf("ink runs at y=%d: %d, total pixels: %d", midY, inkRuns, pixels)
-	if inkRuns < 4 {
-		t.Errorf("only %d ink runs at y=%d — text is garbled (expected ≥4 for 'Hello World')", inkRuns, midY)
+	// Verify text is readable: find the scanline with the most ink runs in the
+	// text band. Shear rotates baselines — a fixed Y can collapse to one run
+	// even when glyphs are separated on other rows.
+	const yMin, yMax = 20, 80
+	maxRuns, bestY := 0, yMin
+	for y := yMin; y < yMax; y++ {
+		runs := countInkRuns(dc, y, 0, 400)
+		if runs > maxRuns {
+			maxRuns = runs
+			bestY = y
+		}
+	}
+	t.Logf("max ink runs: %d at y=%d, total pixels: %d", maxRuns, bestY, pixels)
+	if maxRuns < 4 {
+		t.Errorf("only %d ink runs (best y=%d) — text is garbled (expected ≥4 for 'Hello World')", maxRuns, bestY)
 	}
 }
 

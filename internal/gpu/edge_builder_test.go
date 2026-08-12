@@ -239,6 +239,7 @@ func TestEdgeBuilderLinePath(t *testing.T) {
 // TestEdgeBuilderQuadPath tests building edges from a quadratic path.
 func TestEdgeBuilderQuadPath(t *testing.T) {
 	eb := raster.NewEdgeBuilder(0)
+	eb.SetFlattenCurves(false) // native QuadraticEdge path under test
 
 	// Path with quadratic curve that goes up then back down (arch)
 	// Start at (0,0), control at (50,100), end at (100,0)
@@ -266,6 +267,7 @@ func TestEdgeBuilderQuadPath(t *testing.T) {
 // TestEdgeBuilderCubicPath tests building edges from a cubic path.
 func TestEdgeBuilderCubicPath(t *testing.T) {
 	eb := raster.NewEdgeBuilder(0)
+	eb.SetFlattenCurves(false) // native CubicEdge path under test
 
 	// S-curve (has 2 Y extrema)
 	path := scene.NewPath().
@@ -343,6 +345,7 @@ func TestEdgeBuilderAllEdgesOrder(t *testing.T) {
 // TestEdgeBuilderCircle tests building edges from a circle.
 func TestEdgeBuilderCircle(t *testing.T) {
 	eb := raster.NewEdgeBuilder(0)
+	eb.SetFlattenCurves(false) // circle uses native cubic arcs
 
 	// Circle - 4 cubic curves
 	path := scene.NewPath().Circle(100, 100, 50)

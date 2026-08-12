@@ -34,6 +34,24 @@ import (
 // This limits the number of line segments per curve.
 const MaxCoeffShift = 6
 
+// kDefaultAccuracy is Skia's analytic-edge accuracy (SkAnalyticEdge.h).
+// Analytic QuadraticEdge/CubicEdge construct FDot6 coords at (shift+6) scale,
+// then right-shift by this amount to reach pixel-space SkFixed.
+// Skia's setQuadratic/setCubic always pass shift=kDefaultAccuracy=2.
+const kDefaultAccuracy = 2
+
+// curvePixelAccuracy returns how many bits to right-shift forward-diff
+// coefficients from AA-scaled FDot6 space into pixel-space SkFixed.
+//
+// When shift >= kDefaultAccuracy (AnalyticFiller, aaShift=2), this is 2 —
+// matching Skia's unconditional >>= kDefaultAccuracy.
+// When shift < kDefaultAccuracy (NoAAFiller, aaShift=0), the input is already
+// pixel FDot6 (scale=64), so shifting by 2 would shrink coordinates 4×
+// (e.g. circle center 335 → ~83). See #509 / #405 comment.
+func curvePixelAccuracy(shift int) int {
+	return min(shift, kDefaultAccuracy)
+}
+
 // CurveEdger is the interface implemented by curve edges (quadratic, cubic).
 // It allows polymorphic handling of different curve types in the AET.
 type CurveEdger interface {
@@ -481,11 +499,11 @@ func NewQuadraticEdge(p0, p1, p2 CurvePoint, shift int) (QuadraticEdge, bool) {
 		storedShift = 0
 	}
 
-	// --- Phase 2: setQuadratic() coefficient >>= kDefaultAccuracy (Skia lines 429-436) ---
-	// Convert from AA-scaled space to pixel-space by dividing by 4 (1 << accuracy).
-	// This is the key step that was missing (Bug 2): without it, forward-diff
-	// steps are 4× too large, producing only ~2 segments instead of ~8.
-	const accuracy = 2 // kDefaultAccuracy
+	// --- Phase 2: setQuadratic() coefficient >>= accuracy (Skia lines 429-436) ---
+	// Convert from AA-scaled space to pixel-space. At aaShift=2 this divides by 4
+	// (kDefaultAccuracy). At aaShift=0 the input is already pixel FDot6 — no shift
+	// (see curvePixelAccuracy / #509).
+	accuracy := curvePixelAccuracy(shift)
 	qx >>= accuracy
 	qy >>= accuracy
 	qdx >>= accuracy
@@ -830,10 +848,10 @@ func newCubicEdgeSetup(p0, p1, p2, p3 CurvePoint, shift int) (CubicEdge, bool) {
 	cLastX := FDot6ToFDot16(x3)
 	cLastY := FDot6ToFDot16(y3)
 
-	// --- Phase 2: setCubic() coefficient >>= kDefaultAccuracy (Skia lines 521-528) ---
-	// Convert from AA-scaled space to pixel-space by dividing by 4 (1 << accuracy).
-	// Same pattern as QuadraticEdge: without this, forward-diff steps are 4x too large.
-	const accuracy = 2 // kDefaultAccuracy
+	// --- Phase 2: setCubic() coefficient >>= accuracy (Skia lines 521-528) ---
+	// Convert from AA-scaled space to pixel-space. Same pattern as QuadraticEdge:
+	// aaShift=2 → >>=2; aaShift=0 → no shift (already pixel FDot6). See #509.
+	accuracy := curvePixelAccuracy(shift)
 	cx >>= accuracy
 	cy >>= accuracy
 	cdx >>= accuracy

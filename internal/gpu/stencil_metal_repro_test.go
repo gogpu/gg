@@ -36,6 +36,22 @@ func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 		t.Skipf("metal RequestDevice: %v", err)
 	}
 	queue := device.Queue()
+	// Skip when the adapter cannot allocate MSAA render targets (software fallback).
+	probe, err := device.CreateTexture(&wgpu.TextureDescriptor{
+		Label:         "msaa-probe",
+		Size:          wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   4,
+		Dimension:     wgpu.TextureDimension2D,
+		Format:        wgpu.TextureFormatBGRA8Unorm,
+		Usage:         wgpu.TextureUsageRenderAttachment,
+	})
+	if err != nil {
+		device.Release()
+		instance.Release()
+		t.Skipf("MSAA SampleCount=4 not supported (need real Metal): %v", err)
+	}
+	probe.Release()
 	cleanup := func() {
 		device.Release()
 		instance.Release()
@@ -80,8 +96,8 @@ func TestMetalStencilCoverMasksToShape(t *testing.T) {
 	}
 
 	// Opaque red fill.
-	color := gg.RGBA{R: 1, G: 0, B: 0, A: 1}
-	if err := sr.RenderPath(target, path, color, gg.FillRuleNonZero); err != nil {
+	fillColor := gg.RGBA{R: 1, G: 0, B: 0, A: 1}
+	if err := sr.RenderPath(target, path, fillColor, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath: %v", err)
 	}
 
@@ -137,8 +153,8 @@ func TestMetalStencilRoundedRectMasking(t *testing.T) {
 		Height: H,
 		Stride: W * 4,
 	}
-	color := gg.RGBA{R: 0, G: 0.6, B: 1, A: 1}
-	if err := sr.RenderPath(target, path, color, gg.FillRuleNonZero); err != nil {
+	fillColor := gg.RGBA{R: 0, G: 0.6, B: 1, A: 1}
+	if err := sr.RenderPath(target, path, fillColor, gg.FillRuleNonZero); err != nil {
 		t.Fatalf("RenderPath: %v", err)
 	}
 
@@ -195,8 +211,8 @@ func TestMetalStencilEvenOddMasking(t *testing.T) {
 		Height: H,
 		Stride: W * 4,
 	}
-	color := gg.RGBA{R: 0, G: 1, B: 0, A: 1}
-	if err := sr.RenderPath(target, path, color, gg.FillRuleEvenOdd); err != nil {
+	fillColor := gg.RGBA{R: 0, G: 1, B: 0, A: 1}
+	if err := sr.RenderPath(target, path, fillColor, gg.FillRuleEvenOdd); err != nil {
 		t.Fatalf("RenderPath: %v", err)
 	}
 

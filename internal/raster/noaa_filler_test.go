@@ -306,3 +306,112 @@ func TestFixedRoundToInt(t *testing.T) {
 		})
 	}
 }
+
+func TestCurvePixelAccuracy(t *testing.T) {
+	if got := curvePixelAccuracy(0); got != 0 {
+		t.Errorf("curvePixelAccuracy(0) = %d, want 0 (NoAA must not shrink coords)", got)
+	}
+	if got := curvePixelAccuracy(1); got != 1 {
+		t.Errorf("curvePixelAccuracy(1) = %d, want 1", got)
+	}
+	if got := curvePixelAccuracy(2); got != kDefaultAccuracy {
+		t.Errorf("curvePixelAccuracy(2) = %d, want %d", got, kDefaultAccuracy)
+	}
+	if got := curvePixelAccuracy(4); got != kDefaultAccuracy {
+		t.Errorf("curvePixelAccuracy(4) = %d, want %d", got, kDefaultAccuracy)
+	}
+}
+
+// TestNoAAFiller_CubicCircleBounds is the #509 unit-level regression:
+// native CubicEdge (flatten=false) at aaShift=0 must keep circle at the
+// correct X position — pre-fix kDefaultAccuracy always >>=2 shrank X by 4×.
+func TestNoAAFiller_CubicCircleBounds(t *testing.T) {
+	const (
+		w, h      = 400, 120
+		cx, cy, r = 335.0, 40.0, 20.0
+	)
+	path := makeCirclePath(cx, cy, r)
+
+	for _, flatten := range []bool{true, false} {
+		name := "flatten"
+		if !flatten {
+			name = "nativeCubic"
+		}
+		t.Run(name, func(t *testing.T) {
+			eb := NewEdgeBuilder(0)
+			eb.SetFlattenCurves(flatten)
+			eb.BuildFromPath(path, IdentityTransform{})
+			if eb.IsEmpty() {
+				t.Fatal("no edges")
+			}
+
+			buf := make([]uint8, w*h)
+			FillToBufferNoAA(eb, w, h, FillRuleNonZero, buf)
+
+			minX, minY, maxX, maxY, count := noaaInkBounds(buf, w, h)
+			if count == 0 {
+				t.Fatal("no ink")
+			}
+			gotCX := float64(minX+maxX) / 2
+			gotCY := float64(minY+maxY) / 2
+			if gotCX < cx-3 || gotCX > cx+3 {
+				t.Fatalf("center X=%.1f, want ~%.0f (pre-fix nativeCubic: ~83)", gotCX, cx)
+			}
+			if gotCY < cy-3 || gotCY > cy+3 {
+				t.Fatalf("center Y=%.1f, want ~%.0f", gotCY, cy)
+			}
+			width := maxX - minX + 1
+			if width < 35 || width > 45 {
+				t.Fatalf("width=%d, want ~40 (pre-fix nativeCubic: ~10)", width)
+			}
+		})
+	}
+}
+
+// TestNoAAFiller_CubicEdgeFirstX verifies NewCubicEdge(shift=0) starts near
+// the geometric X, not X/4.
+func TestNoAAFiller_CubicEdgeFirstX(t *testing.T) {
+	const kappa = float32(0.5522847498)
+	const cx, cy, r = float32(335), float32(40), float32(20)
+	// Right→bottom arc of a circle (same kappa construction as DrawCircle).
+	p0 := CurvePoint{X: cx + r, Y: cy}
+	p1 := CurvePoint{X: cx + r, Y: cy + r*kappa}
+	p2 := CurvePoint{X: cx + r*kappa, Y: cy + r}
+	p3 := CurvePoint{X: cx, Y: cy + r}
+
+	edge, ok := NewCubicEdge(p0, p1, p2, p3, 0)
+	if !ok {
+		t.Fatal("NewCubicEdge failed")
+	}
+	x := fixedRoundToInt(edge.Line().X)
+	// Start should be near cx+r=355, not (cx+r)/4 ≈ 89.
+	if x < int(cx+r)-5 || x > int(cx+r)+5 {
+		t.Fatalf("first segment X=%d, want ~%d (pre-fix: ~%d)", x, int(cx+r), int(cx+r)/4)
+	}
+}
+
+func noaaInkBounds(buf []uint8, w, h int) (minX, minY, maxX, maxY, count int) {
+	minX, minY = w, h
+	maxX, maxY = -1, -1
+	for y := range h {
+		for x := range w {
+			if buf[y*w+x] == 0 {
+				continue
+			}
+			count++
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	return
+}
