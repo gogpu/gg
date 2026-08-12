@@ -49,10 +49,7 @@ const kDefaultAccuracy = 2
 // pixel FDot6 (scale=64), so shifting by 2 would shrink coordinates 4×
 // (e.g. circle center 335 → ~83). See #509 / #405 comment.
 func curvePixelAccuracy(shift int) int {
-	if shift < kDefaultAccuracy {
-		return shift
-	}
-	return kDefaultAccuracy
+	return min(shift, kDefaultAccuracy)
 }
 
 // CurveEdger is the interface implemented by curve edges (quadratic, cubic).

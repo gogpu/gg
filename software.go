@@ -595,7 +595,7 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 // those assume kDefaultAccuracy and are AnalyticFiller-only (ADR-063).
 // Using native forward-diff curves at aaShift=0 previously displaced curved
 // strokes by ~4× in X (#509 / #405).
-func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error { //nolint:unparam // error reserved for future clip failures
+func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Lazy-init the no-AA edge builder and filler.
 	if r.noAAEdgeBuilder == nil {
 		r.noAAEdgeBuilder = raster.NewEdgeBuilder(0) // aaShift=0, flattenCurves=true (Skia NoAA)

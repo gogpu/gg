@@ -37,7 +37,7 @@ func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	}
 	queue := device.Queue()
 	// Skip when the adapter cannot allocate MSAA render targets (software fallback).
-	if _, err := device.CreateTexture(&wgpu.TextureDescriptor{
+	probe, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "msaa-probe",
 		Size:          wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
 		MipLevelCount: 1,
@@ -45,11 +45,13 @@ func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 		Dimension:     wgpu.TextureDimension2D,
 		Format:        wgpu.TextureFormatBGRA8Unorm,
 		Usage:         wgpu.TextureUsageRenderAttachment,
-	}); err != nil {
+	})
+	if err != nil {
 		device.Release()
 		instance.Release()
 		t.Skipf("MSAA SampleCount=4 not supported (need real Metal): %v", err)
 	}
+	probe.Release()
 	cleanup := func() {
 		device.Release()
 		instance.Release()
