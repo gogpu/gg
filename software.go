@@ -491,7 +491,8 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// Non-AA path: completely separate code path (Skia/tiny-skia pattern).
 	// Integer scanline, binary coverage, no CoverageFiller/AnalyticFiller.
 	if !r.antiAlias {
-		return r.fillNoAA(pixmap, p, paint)
+		r.fillNoAA(pixmap, p, paint)
+		return nil
 	}
 
 	// Force mode: specific algorithm without auto-selection.
@@ -595,7 +596,7 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 // those assume kDefaultAccuracy and are AnalyticFiller-only (ADR-063).
 // Using native forward-diff curves at aaShift=0 previously displaced curved
 // strokes by ~4× in X (#509 / #405).
-func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
+func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) {
 	// Lazy-init the no-AA edge builder and filler.
 	if r.noAAEdgeBuilder == nil {
 		r.noAAEdgeBuilder = raster.NewEdgeBuilder(0) // aaShift=0, flattenCurves=true (Skia NoAA)
@@ -625,7 +626,7 @@ func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 	}
 
 	if r.noAAEdgeBuilder.IsEmpty() {
-		return nil
+		return
 	}
 
 	coreFillRule := raster.FillRuleNonZero
@@ -646,8 +647,6 @@ func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 			r.blitNoAAPaintSpan(pixmap, y, left, spanWidth, paint, clipFn, maskFn, bfn)
 		})
 	}
-
-	return nil
 }
 
 // blitNoAASolidSpan blits a solid-color span with optional clip and mask.
