@@ -78,6 +78,29 @@ func (p *barrierProvider) TrackResource(c io.Closer) {
 
 func (p *barrierProvider) UntrackResource(io.Closer) {}
 
+func resetCanvasCache(t *testing.T) {
+	t.Helper()
+
+	reset := func() {
+		canvasCache.Lock()
+		canvases := make(map[*Canvas]struct{}, len(canvasCache.entries))
+		for _, canvas := range canvasCache.entries {
+			if canvas != nil {
+				canvases[canvas] = struct{}{}
+			}
+		}
+		canvasCache.entries = make(map[canvasCacheKey]*Canvas)
+		canvasCache.Unlock()
+
+		for canvas := range canvases {
+			_ = canvas.Close()
+		}
+	}
+
+	reset()
+	t.Cleanup(reset)
+}
+
 func newStableProvider(device, queue, adapter unsafe.Pointer) *stableProvider {
 	return &stableProvider{
 		mockProvider: newMockProvider(),
@@ -100,6 +123,7 @@ func (p *stableProvider) ScaleFactor() float64        { return p.NullWindowProvi
 func (p *stableProvider) RequestRedraw()              {}
 
 func TestNew_ReusesStableGPUHandlesAcrossProviderWrappers(t *testing.T) {
+	resetCanvasCache(t)
 	device, queue, adapter := new(int), new(int), new(int)
 	p1 := newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
 	p2 := newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
@@ -130,6 +154,7 @@ func TestNew_ReusesStableGPUHandlesAcrossProviderWrappers(t *testing.T) {
 }
 
 func TestNew_ZeroHandleProvidersUsePointerFallback(t *testing.T) {
+	resetCanvasCache(t)
 	p1 := newMockProvider()
 	p2 := newMockProvider()
 	c1, err := New(p1, 40, 30)
@@ -156,6 +181,7 @@ func TestNew_ZeroHandleProvidersUsePointerFallback(t *testing.T) {
 }
 
 func TestCacheKeyFor_NilProviderIsUncacheable(t *testing.T) {
+	resetCanvasCache(t)
 	key, cacheable := cacheKeyFor(nil, 40, 30, 2)
 	if cacheable {
 		t.Fatal("nil provider must not produce a cacheable key")
@@ -166,6 +192,7 @@ func TestCacheKeyFor_NilProviderIsUncacheable(t *testing.T) {
 }
 
 func TestNew_PreservesDistinctGeometryAndScale(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c1, err := New(p, 80, 60)
 	if err != nil {
@@ -188,6 +215,7 @@ func TestNew_PreservesDistinctGeometryAndScale(t *testing.T) {
 }
 
 func TestNew_CloseEvictsBeforeRecreate(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c1, err := New(p, 80, 60)
 	if err != nil {
@@ -210,6 +238,7 @@ func TestNew_CloseEvictsBeforeRecreate(t *testing.T) {
 }
 
 func TestResize_RekeysCacheWithoutEvictingOtherGeometry(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c1, err := New(p, 80, 60)
 	if err != nil {
@@ -250,6 +279,7 @@ func TestResize_RekeysCacheWithoutEvictingOtherGeometry(t *testing.T) {
 }
 
 func TestDraw_AutoResizeFailureRestoresCache(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := New(p, 80, 60)
 	if err != nil {
@@ -277,6 +307,7 @@ func TestDraw_AutoResizeFailureRestoresCache(t *testing.T) {
 }
 
 func TestDraw_AutoResizesFromWindowProvider(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := New(p, 80, 60)
 	if err != nil {
@@ -306,6 +337,7 @@ func TestDraw_AutoResizesFromWindowProvider(t *testing.T) {
 }
 
 func TestDraw_ZeroWindowSizeDoesNotResize(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := New(p, 80, 60)
 	if err != nil {
@@ -322,6 +354,7 @@ func TestDraw_ZeroWindowSizeDoesNotResize(t *testing.T) {
 }
 
 func TestNew_ConcurrentDuplicateConstruction(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	const workers = 32
 	results := make(chan *Canvas, workers)
@@ -362,6 +395,7 @@ func TestNew_ConcurrentDuplicateConstruction(t *testing.T) {
 }
 
 func TestNew_StaleClosedCacheEntryRetries(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	original, err := New(p, 64, 48)
 	if err != nil {
@@ -397,6 +431,7 @@ func TestNew_StaleClosedCacheEntryRetries(t *testing.T) {
 }
 
 func TestPublishCanvas_RetriesWhenWinnerCloses(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	winner, err := New(p, 64, 48)
 	if err != nil {
@@ -441,6 +476,7 @@ func TestPublishCanvas_RetriesWhenWinnerCloses(t *testing.T) {
 }
 
 func TestNew_TrackerCloseDoesNotPublishClosedCanvas(t *testing.T) {
+	resetCanvasCache(t)
 	p := &closeOnTrackProvider{stableProvider: newStableProvider(
 		unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), //nolint:gosec // opaque test handles
 	)}
@@ -460,6 +496,7 @@ func TestNew_TrackerCloseDoesNotPublishClosedCanvas(t *testing.T) {
 }
 
 func TestNew_ValueProviderSkipsCache(t *testing.T) {
+	resetCanvasCache(t)
 	p := newValueProvider()
 	c1, err := NewWithScale(p, 64, 48, 1)
 	if err != nil {
@@ -478,6 +515,7 @@ func TestNew_ValueProviderSkipsCache(t *testing.T) {
 }
 
 func TestNew_ValueProviderTrackerCloseIsRejected(t *testing.T) {
+	resetCanvasCache(t)
 	p := closeValueProvider{valueProvider: newValueProvider()}
 	c, err := NewWithScale(p, 64, 48, 1)
 	if c != nil {
@@ -489,6 +527,7 @@ func TestNew_ValueProviderTrackerCloseIsRejected(t *testing.T) {
 }
 
 func TestNewWithScale_NormalizesNonFiniteScale(t *testing.T) {
+	resetCanvasCache(t)
 	for _, scale := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		t.Run(fmt.Sprintf("scale_%v", scale), func(t *testing.T) {
 			p := newStableProvider(
@@ -514,6 +553,7 @@ func TestNewWithScale_NormalizesNonFiniteScale(t *testing.T) {
 }
 
 func TestSetDeviceScale_RekeysAndPreservesDestinationOwner(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := NewWithScale(p, 64, 48, 1)
 	if err != nil {
@@ -573,6 +613,7 @@ func TestSetDeviceScale_RekeysAndPreservesDestinationOwner(t *testing.T) {
 }
 
 func TestDraw_ClosedReturnsErrCanvasClosed(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := New(p, 32, 24)
 	if err != nil {
@@ -587,6 +628,7 @@ func TestDraw_ClosedReturnsErrCanvasClosed(t *testing.T) {
 }
 
 func TestRender_TracksWindowScaleChange(t *testing.T) {
+	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
 	c, err := New(p, 32, 24)
 	if err != nil {
@@ -607,6 +649,7 @@ func TestRender_TracksWindowScaleChange(t *testing.T) {
 }
 
 func TestNew_ConcurrentDuplicateConstructionPublishesOneWinner(t *testing.T) {
+	resetCanvasCache(t)
 	const workers = 8
 	release := make(chan struct{})
 	p := &barrierProvider{

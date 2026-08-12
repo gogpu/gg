@@ -48,8 +48,10 @@ type resourceTracker interface {
 // Canvas wraps gg.Context with gogpu integration.
 // It manages the CPU-to-GPU pipeline automatically.
 //
-// Canvas is NOT safe for concurrent use. Create one Canvas per goroutine,
-// or use external synchronization.
+// Cache-visible lifecycle operations (construction, resize, scale changes, and
+// close) are internally serialized. Drawing and general Canvas use are NOT
+// safe concurrently; callers must use one Canvas per goroutine or provide
+// external synchronization.
 type Canvas struct {
 	ctx                  *gg.Context
 	resizeFn             func(width, height int) error // context resize dependency; lifecycleMu protects replacement
