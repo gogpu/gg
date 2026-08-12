@@ -29,6 +29,7 @@ type perContextAliasedTestAccelerator struct {
 type perContextAliasedTestOps struct {
 	legacyGPUContext
 	shapedAliasedCalls int
+	shapedCalls        int
 	aliasedCalls       int
 }
 
@@ -41,6 +42,8 @@ func (c *perContextAliasedTestOps) DrawShapedGlyphMaskText(
 ) error {
 	if mode == TextModeAliased {
 		c.shapedAliasedCalls++
+	} else {
+		c.shapedCalls++
 	}
 	return nil
 }
@@ -176,6 +179,44 @@ func TestTextModeAliased_DrawShapedGlyphsUsesAliasedAccelerator(t *testing.T) {
 	}
 	if accelerator.aaCalls != 0 {
 		t.Errorf("anti-aliased shaped calls = %d, want 0", accelerator.aaCalls)
+	}
+}
+
+func TestDrawShapedGlyphsUsesPerContextAccelerator(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	context := &perContextAliasedTestOps{}
+	accelerator := &perContextAliasedTestAccelerator{
+		mockAccelerator: &mockAccelerator{name: "per-context-shaped-test", canAccel: AccelText},
+		context:         context,
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetTextMode(TextModeGlyphMask)
+	dc.DrawShapedGlyphs(glyphs, face, 5, 40)
+
+	if context.shapedCalls != 1 {
+		t.Errorf("per-context shaped calls = %d, want 1", context.shapedCalls)
+	}
+}
+
+func TestDrawShapedGlyphsUsesGlobalAccelerator(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	accelerator := &shapedAliasedTestAccelerator{
+		mockAccelerator: &mockAccelerator{name: "global-shaped-test", canAccel: AccelText},
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetTextMode(TextModeGlyphMask)
+	dc.DrawShapedGlyphs(glyphs, face, 5, 40)
+
+	if accelerator.aaCalls != 1 {
+		t.Errorf("global shaped calls = %d, want 1", accelerator.aaCalls)
 	}
 }
 
