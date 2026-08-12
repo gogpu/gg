@@ -132,3 +132,139 @@ func TestSetAntiAlias_RectNoCoverage(t *testing.T) {
 		}
 	}
 }
+
+// inkBounds returns the axis-aligned bounding box of non-white pixels and count.
+// Used by NoAA stroke regression tests (#509).
+func inkBounds(pm *Pixmap) (minX, minY, maxX, maxY, count int) {
+	w, h := pm.Width(), pm.Height()
+	minX, minY = w, h
+	maxX, maxY = -1, -1
+	for y := range h {
+		for x := range w {
+			c := pm.GetPixel(x, y)
+			// White background is ~1,1,1; ink is darker.
+			if c.R >= 0.99 && c.G >= 0.99 && c.B >= 0.99 {
+				continue
+			}
+			count++
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+	return
+}
+
+// TestSetAntiAlias_StrokeCircleBounds is the #509 / #405 regression:
+// SetAntiAlias(false) + Stroke() on a circle must not displace the curve
+// (previously X shrunk ~4×: center 335 → ~83, width 43 → ~10).
+func TestSetAntiAlias_StrokeCircleBounds(t *testing.T) {
+	const (
+		cx, cy, r = 335.0, 40.0, 20.0
+		lineW     = 3.0
+		canvasW   = 400
+		canvasH   = 300
+	)
+
+	render := func(aa bool) (minX, minY, maxX, maxY, count int) {
+		dc := NewContext(canvasW, canvasH)
+		defer dc.Close()
+		dc.SetAntiAlias(aa)
+		dc.ClearWithColor(White)
+		dc.SetRGB(0, 0, 0)
+		dc.SetLineWidth(lineW)
+		dc.DrawCircle(cx, cy, r)
+		if err := dc.Stroke(); err != nil {
+			t.Fatalf("Stroke(aa=%v): %v", aa, err)
+		}
+		return inkBounds(dc.pixmap)
+	}
+
+	aaMinX, aaMinY, aaMaxX, aaMaxY, aaCount := render(true)
+	noMinX, noMinY, noMaxX, noMaxY, noCount := render(false)
+
+	if aaCount == 0 {
+		t.Fatal("AA circle stroke produced no ink")
+	}
+	if noCount == 0 {
+		t.Fatal("NoAA circle stroke produced no ink")
+	}
+
+	// AA reference from issue #509: ~(313,18)-(356,61)
+	if aaMinX < 300 || aaMaxX > 370 || aaMinY < 10 || aaMaxY > 70 {
+		t.Fatalf("AA bounds=(%d,%d)-(%d,%d) outside expected circle region",
+			aaMinX, aaMinY, aaMaxX, aaMaxY)
+	}
+
+	// NoAA must land near the same center — not the pre-fix ~83 X collapse.
+	noCX := float64(noMinX+noMaxX) / 2
+	noCY := float64(noMinY+noMaxY) / 2
+	if noCX < cx-8 || noCX > cx+8 {
+		t.Fatalf("NoAA stroke center X=%.1f, want ~%.0f (pre-fix bug: ~83)", noCX, cx)
+	}
+	if noCY < cy-8 || noCY > cy+8 {
+		t.Fatalf("NoAA stroke center Y=%.1f, want ~%.0f", noCY, cy)
+	}
+
+	noW := noMaxX - noMinX + 1
+	noH := noMaxY - noMinY + 1
+	// Stroke width 3 around r=20 → outer diameter ~43. Collapsed bug was ~10.
+	if noW < 35 || noW > 55 {
+		t.Fatalf("NoAA stroke width=%d, want ~43 (pre-fix bug: ~10)", noW)
+	}
+	if noH < 35 || noH > 55 {
+		t.Fatalf("NoAA stroke height=%d, want ~43", noH)
+	}
+
+	// NoAA bounds should be within a few pixels of AA (rounding / binary edges).
+	const slack = 4
+	if absInt(noMinX-aaMinX) > slack || absInt(noMaxX-aaMaxX) > slack ||
+		absInt(noMinY-aaMinY) > slack || absInt(noMaxY-aaMaxY) > slack {
+		t.Fatalf("NoAA bounds=(%d,%d)-(%d,%d) diverge from AA=(%d,%d)-(%d,%d) by >%dpx",
+			noMinX, noMinY, noMaxX, noMaxY, aaMinX, aaMinY, aaMaxX, aaMaxY, slack)
+	}
+}
+
+// TestSetAntiAlias_StrokeLineUnchanged verifies straight-line strokes stay
+// correct under NoAA (control for #509 — lines were never broken).
+func TestSetAntiAlias_StrokeLineUnchanged(t *testing.T) {
+	render := func(aa bool) (minX, maxX, count int) {
+		dc := NewContext(100, 80)
+		defer dc.Close()
+		dc.SetAntiAlias(aa)
+		dc.ClearWithColor(White)
+		dc.SetRGB(0, 0, 0)
+		dc.SetLineWidth(3)
+		dc.DrawLine(20, 50, 80, 50)
+		if err := dc.Stroke(); err != nil {
+			t.Fatalf("Stroke(aa=%v): %v", aa, err)
+		}
+		minX, _, maxX, _, count = inkBounds(dc.pixmap)
+		return
+	}
+
+	aaMin, aaMax, aaCount := render(true)
+	noMin, noMax, noCount := render(false)
+	if aaCount == 0 || noCount == 0 {
+		t.Fatalf("line stroke empty: aa=%d noaa=%d", aaCount, noCount)
+	}
+	if absInt(aaMin-noMin) > 2 || absInt(aaMax-noMax) > 2 {
+		t.Fatalf("line X range AA=[%d,%d] NoAA=[%d,%d]", aaMin, aaMax, noMin, noMax)
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}

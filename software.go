@@ -589,10 +589,16 @@ func (r *SoftwareRenderer) Fill(pixmap *Pixmap, p *Path, paint *Paint) error {
 // Uses a dedicated NoAAFiller that produces solid horizontal spans with
 // binary coverage (0 or 255). This is a completely separate code path
 // from the AA rasterizer (Skia SkScan::FillPath / tiny-skia scan::path pattern).
-func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error {
+//
+// Curves are flattened to line segments (SetFlattenCurves remains true).
+// Skia's non-AA FillPath does not use analytic QuadraticEdge/CubicEdge —
+// those assume kDefaultAccuracy and are AnalyticFiller-only (ADR-063).
+// Using native forward-diff curves at aaShift=0 previously displaced curved
+// strokes by ~4× in X (#509 / #405).
+func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error { //nolint:unparam // error reserved for future clip failures
 	// Lazy-init the no-AA edge builder and filler.
 	if r.noAAEdgeBuilder == nil {
-		r.noAAEdgeBuilder = raster.NewEdgeBuilder(0) // aaShift=0: no sub-pixel
+		r.noAAEdgeBuilder = raster.NewEdgeBuilder(0) // aaShift=0, flattenCurves=true (Skia NoAA)
 		if r.deviceScale > 1.0 {
 			r.noAAEdgeBuilder.SetFlattenTolerance(0.1 / r.deviceScale)
 		}
@@ -611,9 +617,6 @@ func (r *SoftwareRenderer) fillNoAA(pixmap *Pixmap, p *Path, paint *Paint) error
 		MaxY: float32(pixmap.Height()) + clipMargin,
 	}
 	r.noAAEdgeBuilder.SetClipRect(&clipRect)
-
-	r.noAAEdgeBuilder.SetFlattenCurves(false)
-	defer r.noAAEdgeBuilder.SetFlattenCurves(true)
 
 	verbs := p.Verbs()
 	if len(verbs) > 0 {

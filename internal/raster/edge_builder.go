@@ -199,7 +199,10 @@ func NewEdgeBuilder(aaShift int) *EdgeBuilder {
 		cubicEdges:     make([]CubicEdge, 0, 16),
 		velloLines:     make([]VelloLine, 0, 64),
 		aaShift:        aaShift,
-		bounds:         newEmptyBounds(),
+		// Default true matches Skia SkScan::FillPath / CoverageFiller needs.
+		// AnalyticFiller opts into native forward-diff via SetFlattenCurves(false).
+		flattenCurves: true,
+		bounds:        newEmptyBounds(),
 	}
 }
 
@@ -640,10 +643,12 @@ func (eb *EdgeBuilder) curveBBoxInsideClip(coords ...float32) bool {
 // De Casteljau subdivision (0.1px tolerance). Required for CoverageFiller
 // (SparseStrips/TileCompute) which depends on VelloLines populated only
 // in this mode. Also populates VelloLines for the Vello compute pipeline.
+// Required for NoAAFiller (aaShift=0): Skia non-AA FillPath uses line edges.
 //
-// When false: curves kept as native QuadraticEdge with FDot6 forward-
-// differencing (Skia AAA pattern, O(1) per step). Works with AnalyticFiller
-// only. CubicEdge forward-diff NOT yet fixed (use true for cubic paths).
+// When false: curves kept as native QuadraticEdge/CubicEdge with FDot6
+// forward-differencing (Skia AAA pattern, O(1) per step). AnalyticFiller
+// only — requires aaShift >= kDefaultAccuracy (typically 2). Combining
+// flatten=false with aaShift=0 previously displaced curves by ~4× in X (#509).
 //
 // Performance (benchmarked 2026-07-31, Intel i7-1255U, 20×20 icon):
 //
@@ -655,8 +660,8 @@ func (eb *EdgeBuilder) curveBBoxInsideClip(coords ...float32) bool {
 //	vs Skia golden: max diff 7 (6 pixels) — same algorithm family
 //	vs flatten mode: max diff 25 (20 pixels) — different curve eval
 //
-// Production uses flatten=true because CoverageFiller path requires
-// VelloLines. Forward-diff is available for AnalyticFiller-only paths.
+// Production uses flatten=true because CoverageFiller / NoAA paths require
+// line edges. Forward-diff is available for AnalyticFiller-only paths.
 // See ADR-063 for architecture and GG-AA-018 for roadmap.
 func (eb *EdgeBuilder) SetFlattenCurves(flatten bool) {
 	eb.flattenCurves = flatten
