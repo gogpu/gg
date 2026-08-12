@@ -247,18 +247,13 @@ type GPUAliasedTextAccelerator interface {
 // pre-shaped glyph rendering. This eliminates re-shaping at render time —
 // the scene's stored glyph IDs and positions are used directly.
 //
+// textMode selects regular or binary coverage without requiring a second
+// public accelerator interface.
+//
 // Implements the ADR-022 "shape once, render anywhere" guarantee.
 // Enterprise pattern: Skia drawTextBlob, Vello draw_glyphs, Flutter drawParagraph.
 type GPUShapedTextAccelerator interface {
-	DrawShapedGlyphMaskText(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
-}
-
-// GPUShapedAliasedTextAccelerator is an optional interface for accelerators
-// that render pre-shaped glyphs with binary (non-anti-aliased) coverage.
-// Context.DrawShapedGlyphs uses this interface when TextModeAliased is set,
-// preserving both the stored glyph positions and the requested text edging.
-type GPUShapedAliasedTextAccelerator interface {
-	DrawShapedGlyphMaskTextAliased(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
+	DrawShapedGlyphMaskText(target GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color RGBA, matrix Matrix, deviceScale float64, textMode TextMode) error
 }
 
 var (

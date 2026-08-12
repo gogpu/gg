@@ -647,13 +647,8 @@ func (rc *GPURenderContext) DrawGlyphMaskTextAliased(target gg.GPURenderTarget, 
 
 // DrawShapedGlyphMaskText renders pre-shaped glyphs through the glyph mask pipeline.
 // Same as DrawGlyphMaskText but skips shaping — uses stored glyph positions directly.
-func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
-	return rc.drawShapedGlyphMaskText(target, face, glyphs, x, y, color, matrix, deviceScale, false)
-}
-
-// DrawShapedGlyphMaskTextAliased renders pre-shaped glyphs with binary coverage.
-func (rc *GPURenderContext) DrawShapedGlyphMaskTextAliased(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
-	return rc.drawShapedGlyphMaskText(target, face, glyphs, x, y, color, matrix, deviceScale, true)
+func (rc *GPURenderContext) DrawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64, textMode gg.TextMode) error {
+	return rc.drawShapedGlyphMaskText(target, face, glyphs, x, y, color, matrix, deviceScale, textMode == gg.TextModeAliased)
 }
 
 func (rc *GPURenderContext) drawShapedGlyphMaskText(target gg.GPURenderTarget, face any, glyphs []text.ShapedGlyph, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64, aliased bool) error {

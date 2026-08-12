@@ -65,6 +65,9 @@ type Canvas struct {
 	damageOverlay        *ggDamageOverlay  // debug overlay renderer (ADR-066)
 	lastFrameDamageRects []image.Rectangle // damage rects from last Render (for diagnostics)
 	prevFrameDamageRects []image.Rectangle // previous frame damage for 2-frame union (Wayland pattern)
+	platformTextSet      bool
+	fontSmoothing        gpucontext.FontSmoothing
+	subpixelLayout       gpucontext.SubpixelLayout
 
 	// damageSource is the registered damage reporter for gg (ADR-065).
 	// Set on first Render() call via interface assertion on the RenderTarget.
@@ -175,26 +178,7 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		dirty:    true, // Mark dirty so first Flush creates texture
 	}
 
-	// Apply the platform text edging preference. FontSmoothing selects how
-	// glyph edges are rendered; SubpixelLayout is relevant only when the OS
-	// explicitly requests subpixel smoothing.
-	if pp, ok := provider.(gpucontext.PlatformProvider); ok {
-		textMode := gg.TextModeAuto
-		lcdLayout := gg.LCDLayoutNone
-		switch pp.FontSmoothing() {
-		case gpucontext.FontSmoothingNone:
-			textMode = gg.TextModeAliased
-		case gpucontext.FontSmoothingSubpixel:
-			switch pp.SubpixelLayout() {
-			case gpucontext.SubpixelRGB:
-				lcdLayout = gg.LCDLayoutRGB
-			case gpucontext.SubpixelBGR:
-				lcdLayout = gg.LCDLayoutBGR
-			}
-		}
-		c.ctx.SetTextMode(textMode)
-		c.ctx.SetLCDLayout(lcdLayout)
-	}
+	c.applyPlatformTextSettings()
 
 	// Auto-register with ResourceTracker if the provider supports it.
 	// This enables automatic cleanup on application shutdown without
@@ -448,6 +432,7 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 		return ErrCanvasClosed
 	}
 	gg.BeginAcceleratorFrame()
+	c.applyPlatformTextSettings()
 	c.ctx.Push()
 	c.ctx.Identity()
 	c.ctx.ClearPath()
@@ -456,6 +441,44 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	c.ctx.Pop()
 	c.MarkDirty()
 	return nil
+}
+
+// applyPlatformTextSettings refreshes text edging only when the platform
+// preference changes. This picks up runtime OS setting changes without
+// repeatedly overriding an explicit Context configuration on every frame.
+func (c *Canvas) applyPlatformTextSettings() {
+	pp, ok := c.provider.(gpucontext.PlatformProvider)
+	if !ok {
+		return
+	}
+
+	smoothing := pp.FontSmoothing()
+	subpixel := gpucontext.SubpixelNone
+	if smoothing == gpucontext.FontSmoothingSubpixel {
+		subpixel = pp.SubpixelLayout()
+	}
+	if c.platformTextSet && c.fontSmoothing == smoothing && c.subpixelLayout == subpixel {
+		return
+	}
+
+	textMode := gg.TextModeAuto
+	lcdLayout := gg.LCDLayoutNone
+	switch smoothing {
+	case gpucontext.FontSmoothingNone:
+		textMode = gg.TextModeAliased
+	case gpucontext.FontSmoothingSubpixel:
+		switch subpixel {
+		case gpucontext.SubpixelRGB:
+			lcdLayout = gg.LCDLayoutRGB
+		case gpucontext.SubpixelBGR:
+			lcdLayout = gg.LCDLayoutBGR
+		}
+	}
+	c.ctx.SetTextMode(textMode)
+	c.ctx.SetLCDLayout(lcdLayout)
+	c.platformTextSet = true
+	c.fontSmoothing = smoothing
+	c.subpixelLayout = subpixel
 }
 
 // IsDirty returns true if the canvas has pending changes

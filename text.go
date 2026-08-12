@@ -179,7 +179,7 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 	target := c.gpuRenderTarget()
 	if rc := c.gpuCtxOps(); rc != nil {
 		if sta, ok := rc.(GPUShapedTextAccelerator); ok {
-			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale, mode) == nil {
 				return
 			}
 		}
@@ -188,7 +188,7 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 	a := Accelerator()
 	if a != nil {
 		if sta, ok := a.(GPUShapedTextAccelerator); ok {
-			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+			if sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale, mode) == nil {
 				return
 			}
 		}
@@ -204,12 +204,12 @@ func (c *Context) DrawShapedGlyphs(glyphs []text.ShapedGlyph, face text.Face, x,
 func (c *Context) drawShapedGlyphsAliased(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
 	col := FromColor(c.currentColor())
 	target := c.gpuRenderTarget()
-	if ata, ok := c.gpuCtxOps().(GPUShapedAliasedTextAccelerator); ok &&
-		ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+	if sta, ok := c.gpuCtxOps().(GPUShapedTextAccelerator); ok &&
+		sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale, TextModeAliased) == nil {
 		return
 	}
-	if ata, ok := Accelerator().(GPUShapedAliasedTextAccelerator); ok &&
-		ata.DrawShapedGlyphMaskTextAliased(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale) == nil {
+	if sta, ok := Accelerator().(GPUShapedTextAccelerator); ok &&
+		sta.DrawShapedGlyphMaskText(target, face, glyphs, x, y, col, c.totalMatrix(), c.deviceScale, TextModeAliased) == nil {
 		return
 	}
 	c.drawShapedGlyphsCPUAliased(glyphs, face, x, y)

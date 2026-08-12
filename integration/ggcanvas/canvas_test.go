@@ -136,6 +136,50 @@ func TestNewWithScaleUsesPlatformFontSmoothing(t *testing.T) {
 	}
 }
 
+func TestDrawRefreshesChangedPlatformFontSmoothing(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &textPreferenceAccelerator{
+		renderTargetCaptureAccelerator: &renderTargetCaptureAccelerator{},
+	}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	provider := &mockPlatformProvider{
+		mockProvider:   newMockProvider(),
+		fontSmoothing:  gpucontext.FontSmoothingNone,
+		subpixelLayout: gpucontext.SubpixelNone,
+	}
+	canvas, err := NewWithScale(provider, 10, 10, 1)
+	if err != nil {
+		t.Fatalf("NewWithScale: %v", err)
+	}
+	t.Cleanup(func() { _ = canvas.Close() })
+
+	provider.fontSmoothing = gpucontext.FontSmoothingSubpixel
+	provider.subpixelLayout = gpucontext.SubpixelBGR
+	if err := canvas.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatalf("Draw: %v", err)
+	}
+	if got := canvas.Context().TextMode(); got != gg.TextModeAuto {
+		t.Errorf("TextMode after platform change = %v, want %v", got, gg.TextModeAuto)
+	}
+	if got := accelerator.lcdLayout; got != gg.LCDLayoutBGR {
+		t.Errorf("LCD layout after platform change = %v, want %v", got, gg.LCDLayoutBGR)
+	}
+
+	// An unchanged platform preference must not overwrite an explicit context
+	// override on every frame.
+	canvas.Context().SetTextMode(gg.TextModeVector)
+	if err := canvas.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatalf("second Draw: %v", err)
+	}
+	if got := canvas.Context().TextMode(); got != gg.TextModeVector {
+		t.Errorf("unchanged platform preference overwrote TextMode: got %v", got)
+	}
+}
+
 func (m *mockProvider) Device() gpucontext.Device             { return gpucontext.Device{} }
 func (m *mockProvider) Queue() gpucontext.Queue               { return gpucontext.Queue{} }
 func (m *mockProvider) Adapter() gpucontext.Adapter           { return gpucontext.Adapter{} }

@@ -36,10 +36,12 @@ func (a *perContextAliasedTestAccelerator) NewGPURenderContext() any {
 	return a.context
 }
 
-func (c *perContextAliasedTestOps) DrawShapedGlyphMaskTextAliased(
-	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
+func (c *perContextAliasedTestOps) DrawShapedGlyphMaskText(
+	_ GPURenderTarget, _ any, _ []text.ShapedGlyph, _, _ float64, _ RGBA, _ Matrix, _ float64, mode TextMode,
 ) error {
-	c.shapedAliasedCalls++
+	if mode == TextModeAliased {
+		c.shapedAliasedCalls++
+	}
 	return nil
 }
 
@@ -56,16 +58,13 @@ func (a *shapedFallbackFillAccelerator) FillPath(GPURenderTarget, *Path, *Paint)
 }
 
 func (a *shapedAliasedTestAccelerator) DrawShapedGlyphMaskText(
-	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
+	_ GPURenderTarget, _ any, _ []text.ShapedGlyph, _, _ float64, _ RGBA, _ Matrix, _ float64, mode TextMode,
 ) error {
-	a.aaCalls++
-	return nil
-}
-
-func (a *shapedAliasedTestAccelerator) DrawShapedGlyphMaskTextAliased(
-	GPURenderTarget, any, []text.ShapedGlyph, float64, float64, RGBA, Matrix, float64,
-) error {
-	a.aliasedCalls++
+	if mode == TextModeAliased {
+		a.aliasedCalls++
+	} else {
+		a.aaCalls++
+	}
 	return nil
 }
 
@@ -242,6 +241,36 @@ func TestTextModeAliased_DrawShapedGlyphsCPUFallbackIsBinary(t *testing.T) {
 	}
 	if !dc.AntiAlias() {
 		t.Error("DrawShapedGlyphs did not restore geometry anti-aliasing state")
+	}
+}
+
+func TestTextModeAliased_DrawShapedGlyphsShearForcesAntialiasing(t *testing.T) {
+	t.Setenv("GOGPU_TEXT_MODE", "")
+	accelerator := &shapedFallbackFillAccelerator{
+		mockAccelerator: &mockAccelerator{name: "cpu-shear-fallback-test", canAccel: AccelFill},
+	}
+	setAliasedTestAccelerator(t, accelerator)
+	face, glyphs := aliasedTestShapedGlyphs(t)
+
+	dc := NewContext(100, 70)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.SetTextMode(TextModeAliased)
+	dc.Shear(-0.3, 0)
+	dc.DrawShapedGlyphs(glyphs, face, 20, 45)
+
+	hasIntermediateAlpha := false
+	img := dc.Image().(*image.RGBA)
+	for i := 3; i < len(img.Pix); i += 4 {
+		if alpha := img.Pix[i]; alpha != 0 && alpha != 255 {
+			hasIntermediateAlpha = true
+			break
+		}
+	}
+	if !hasIntermediateAlpha {
+		t.Fatal("sheared shaped text did not force anti-aliased coverage")
+	}
+	if !dc.AntiAlias() {
+		t.Fatal("DrawShapedGlyphs did not restore geometry anti-aliasing state")
 	}
 }
 
