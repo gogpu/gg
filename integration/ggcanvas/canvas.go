@@ -9,6 +9,7 @@ import (
 	"image"
 	"io"
 	"math"
+	"sync"
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gpucontext"
@@ -47,20 +48,27 @@ type resourceTracker interface {
 // Canvas wraps gg.Context with gogpu integration.
 // It manages the CPU-to-GPU pipeline automatically.
 //
-// Canvas is NOT safe for concurrent use. Create one Canvas per goroutine,
-// or use external synchronization.
+// Cache-visible lifecycle operations (construction, resize, scale changes, and
+// close) are internally serialized. Drawing and general Canvas use are NOT
+// safe concurrently; callers must use one Canvas per goroutine or provide
+// external synchronization.
 type Canvas struct {
 	ctx                  *gg.Context
+	resizeFn             func(width, height int) error // context resize dependency; lifecycleMu protects replacement
 	provider             gpucontext.DeviceProvider
-	texture              any             // Lazy-created texture (*gogpu.Texture)
-	oldTexture           any             // Previous texture awaiting deferred destruction
-	dirty                bool            // Needs GPU upload
-	dirtyRect            image.Rectangle // Accumulated dirty region (zero = full upload)
-	regionBuf            []byte          // Reusable buffer for partial texture upload
-	sizeChanged          bool            // Resize pending — texture must be recreated
+	windowProvider       gpucontext.WindowProvider // latest wrapper for dynamic size/scale
+	texture              any                       // Lazy-created texture (*gogpu.Texture)
+	oldTexture           any                       // Previous texture awaiting deferred destruction
+	dirty                bool                      // Needs GPU upload
+	dirtyRect            image.Rectangle           // Accumulated dirty region (zero = full upload)
+	regionBuf            []byte                    // Reusable buffer for partial texture upload
+	sizeChanged          bool                      // Resize pending — texture must be recreated
 	width                int
 	height               int
 	closed               bool
+	cacheKey             canvasCacheKey
+	cached               bool
+	lifecycleMu          sync.Mutex        // serializes cache-visible lifecycle changes
 	tracked              bool              // true if auto-registered with a ResourceTracker
 	damageOverlay        *ggDamageOverlay  // debug overlay renderer (ADR-066)
 	lastFrameDamageRects []image.Rectangle // damage rects from last Render (for diagnostics)
@@ -78,13 +86,16 @@ type Canvas struct {
 	presentDamageRects []image.Rectangle
 }
 
-// New creates a Canvas for integrated mode.
+// New creates (or reuses) a Canvas for integrated mode.
 // The provider should come from gogpu.App.GPUContextProvider().
 // The width and height are logical dimensions.
 //
 // If the provider also implements gpucontext.WindowProvider, the device
 // scale is auto-detected for HiDPI/Retina support. Otherwise defaults to 1.0.
 // Use Context() to access and configure the drawing context.
+// Repeated calls with the same logical provider identity, dimensions, and
+// normalized scale return the existing Canvas. Call Close to evict it before
+// creating a replacement.
 //
 // Returns error if dimensions are invalid or provider is nil.
 func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error) {
@@ -118,13 +129,15 @@ func warnIfPhysicalDimensions(wp gpucontext.WindowProvider, width, height int, s
 	}
 }
 
-// NewWithScale creates a Canvas with HiDPI device scale support.
+// NewWithScale creates (or reuses) a Canvas with HiDPI device scale support.
 // The width and height are logical dimensions. The internal pixmap is
 // allocated at physical resolution (width*scale x height*scale).
 //
 // The provider should come from gogpu.App.GPUContextProvider().
 // Scale factor should come from the platform (e.g., gogpu.Context.ScaleFactor()).
 // Typical values: 1.0 (standard), 2.0 (macOS Retina), 3.0 (mobile HiDPI).
+// Calls with the same provider identity, dimensions, and normalized scale are
+// idempotent; different dimensions or scales retain independent canvases.
 //
 // Example:
 //
@@ -139,8 +152,17 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("%w: width=%d, height=%d", ErrInvalidDimensions, width, height)
 	}
-	if scale <= 0 {
-		scale = 1.0
+	scale = normalizeScale(scale)
+
+	// The provider returned by gogpu.App.GPUContextProvider is a fresh adapter
+	// on each call.  Cache by its stable GPU handles (or, for zero-handle test
+	// providers, by pointer identity) so constructing a canvas in every frame
+	// reuses the existing context and texture pipeline.
+	key, cacheable := cacheKeyFor(provider, width, height, scale)
+	if cacheable {
+		if cached, ok := lookupCachedCanvas(provider, key); ok {
+			return cached, nil
+		}
 	}
 
 	physW := int(float64(width) * scale)
@@ -163,12 +185,17 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		opts = append(opts, gg.WithDeviceScale(scale))
 	}
 
+	ctx := gg.NewContext(width, height, opts...)
 	c := &Canvas{
-		ctx:      gg.NewContext(width, height, opts...),
+		ctx:      ctx,
+		resizeFn: ctx.Resize,
 		provider: provider,
 		width:    width,
 		height:   height,
 		dirty:    true, // Mark dirty so first Flush creates texture
+	}
+	if wp, ok := provider.(gpucontext.WindowProvider); ok {
+		c.windowProvider = wp
 	}
 
 	// Auto-detect LCD subpixel layout from platform (ADR-024).
@@ -187,11 +214,65 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 	// This enables automatic cleanup on application shutdown without
 	// requiring manual OnClose callbacks.
 	if tracker, ok := provider.(resourceTracker); ok {
-		tracker.TrackResource(c)
+		// Set the flag before the callback.  A tracker that is already shutting
+		// down may synchronously close a newly tracked resource.
+		c.lifecycleMu.Lock()
 		c.tracked = true
+		c.lifecycleMu.Unlock()
+		tracker.TrackResource(c)
 	}
+	// Do not hold canvasCache across context creation, accelerator setup, or
+	// tracker callbacks.  Concurrent constructors race only on publication;
+	// the loser is closed outside the cache lock after the winner is selected.
+	if !cacheable {
+		return finishUncacheableCanvas(c)
+	}
+	return publishCanvas(c, provider, key, width, height, scale)
+}
 
+// finishUncacheableCanvas rejects a synchronous tracker shutdown before a
+// newly-created Canvas is returned. Providers without stable identity are not
+// entered in canvasCache, so there is no publication step to coordinate.
+func finishUncacheableCanvas(c *Canvas) (*Canvas, error) {
+	c.lifecycleMu.Lock()
+	closed := c.closed
+	c.lifecycleMu.Unlock()
+	if closed {
+		return nil, ErrCanvasClosed
+	}
 	return c, nil
+}
+
+// publishCanvas inserts c into the cache, or cleans it up when another
+// constructor won the same key. Keep the Canvas lifecycle-locked through
+// publication: a tracker may close it immediately after TrackResource returns.
+func publishCanvas(c *Canvas, provider gpucontext.DeviceProvider, key canvasCacheKey, width, height int, scale float64) (*Canvas, error) {
+	c.lifecycleMu.Lock()
+	if c.closed {
+		c.lifecycleMu.Unlock()
+		return nil, ErrCanvasClosed
+	}
+	canvasCache.Lock()
+	winner := canvasCache.entries[key]
+	if winner == nil {
+		c.cacheKey = key
+		c.cached = true
+		canvasCache.entries[key] = c
+	}
+	canvasCache.Unlock()
+	c.lifecycleMu.Unlock()
+
+	if winner == nil {
+		return c, nil
+	}
+	// Winner may have closed after publication while this constructor was
+	// finishing. Verify it using the same cache/lifecycle protocol before
+	// returning; otherwise retry with this key after cleaning up the loser.
+	_ = c.Close()
+	if live, ok := lookupCachedCanvas(provider, key); ok {
+		return live, nil
+	}
+	return NewWithScale(provider, width, height, scale)
 }
 
 // MustNew is like New but panics on error.
@@ -281,15 +362,40 @@ func (c *Canvas) PixmapTextureView() gpucontext.TextureView {
 // This delegates to the gg.Context and marks the canvas for re-upload.
 // Scale must be > 0; values <= 0 are ignored.
 func (c *Canvas) SetDeviceScale(scale float64) {
-	if c.closed || c.ctx == nil || scale <= 0 {
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
+		return
+	}
+	scale = normalizeScale(scale)
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.closed || c.ctx == nil {
 		return
 	}
 	if scale == c.ctx.DeviceScale() {
 		return
 	}
+	// Remove the old key before mutating the context.  A concurrent New call
+	// must not receive a Canvas whose scale no longer matches its cache key.
+	canvasCache.Lock()
+	c.removeFromCanvasCacheLocked()
+	canvasCache.Unlock()
 	c.ctx.SetDeviceScale(scale)
 	c.sizeChanged = true
 	c.dirty = true
+
+	// Re-publish under the new normalized scale.  If another live Canvas already
+	// owns this destination key, leave this one uncached rather than replacing
+	// a legitimate different-size/scale Canvas.
+	key, cacheable := c.cacheKeyFor(c.width, c.height, scale)
+	if cacheable {
+		canvasCache.Lock()
+		if winner := canvasCache.entries[key]; winner == nil || winner == c {
+			c.cacheKey = key
+			c.cached = true
+			canvasCache.entries[key] = c
+		}
+		canvasCache.Unlock()
+	}
 }
 
 // MarkDirty flags the canvas for GPU upload on next Flush().
@@ -430,10 +536,30 @@ func (c *Canvas) MarkDirtyRegion(r image.Rectangle) {
 // Per-frame state (matrix, path, clip, mask) is automatically reset via
 // Push/Pop wrapper (Skia SkAutoCanvasRestore pattern, ADR-032). Configuration
 // state (font, paint color, textMode) persists across frames.
+// If the provider implements gpucontext.WindowProvider, a valid changed
+// logical window size is applied before fn runs. Zero dimensions reported
+// during startup or teardown are ignored.
 func (c *Canvas) Draw(fn func(*gg.Context)) error {
+	c.lifecycleMu.Lock()
 	if c.closed {
+		c.lifecycleMu.Unlock()
 		return ErrCanvasClosed
 	}
+	// A gogpu frame often obtains a fresh GPUContextProvider wrapper.  Its
+	// WindowProvider geometry remains the authoritative logical size, so update
+	// the retained gg context before invoking user drawing code.  During startup
+	// and teardown platforms may report zero; keep the existing valid canvas in
+	// that case rather than attempting an invalid resize.
+	if c.windowProvider != nil {
+		if width, height := c.windowProvider.Size(); width > 0 && height > 0 && (width != c.width || height != c.height) {
+			if err := c.resizeLocked(width, height); err != nil {
+				c.lifecycleMu.Unlock()
+				return err
+			}
+		}
+	}
+	c.lifecycleMu.Unlock()
+
 	gg.BeginAcceleratorFrame()
 	c.ctx.Push()
 	c.ctx.Identity()
@@ -456,6 +582,12 @@ func (c *Canvas) IsDirty() bool {
 //
 // Returns error if dimensions are invalid or canvas is closed.
 func (c *Canvas) Resize(width, height int) error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	return c.resizeLocked(width, height)
+}
+
+func (c *Canvas) resizeLocked(width, height int) error {
 	if c.closed {
 		return ErrCanvasClosed
 	}
@@ -468,8 +600,26 @@ func (c *Canvas) Resize(width, height int) error {
 		return nil
 	}
 
-	// Resize gg context
-	if err := c.ctx.Resize(width, height); err != nil {
+	oldWidth, oldHeight := c.width, c.height
+	// Evict before changing the gg context so no New call can observe the old
+	// dimensions mapped to a Canvas that is midway through a resize.
+	canvasCache.Lock()
+	c.removeFromCanvasCacheLocked()
+	canvasCache.Unlock()
+
+	// Resize gg context.
+	if err := c.resizeFn(width, height); err != nil {
+		// Restore the old cache key when the context rejects the resize.
+		key, cacheable := c.cacheKeyFor(oldWidth, oldHeight, c.ctx.DeviceScale())
+		if cacheable {
+			canvasCache.Lock()
+			if winner := canvasCache.entries[key]; winner == nil || winner == c {
+				c.cacheKey = key
+				c.cached = true
+				canvasCache.entries[key] = c
+			}
+			canvasCache.Unlock()
+		}
 		return fmt.Errorf("ggcanvas: context resize failed: %w", err)
 	}
 
@@ -478,6 +628,17 @@ func (c *Canvas) Resize(width, height int) error {
 	c.sizeChanged = true
 	c.dirty = true
 	c.prevFrameDamageRects = nil
+
+	key, cacheable := c.cacheKeyFor(width, height, c.ctx.DeviceScale())
+	if cacheable {
+		canvasCache.Lock()
+		if winner := canvasCache.entries[key]; winner == nil || winner == c {
+			c.cacheKey = key
+			c.cached = true
+			canvasCache.entries[key] = c
+		}
+		canvasCache.Unlock()
+	}
 
 	return nil
 }
@@ -776,8 +937,8 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	// ADR-067: compositor wiring moved to renderDirectToTarget (per-frame via GPURenderTarget.Compositor).
 
 	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
-	if wp, ok := c.provider.(gpucontext.WindowProvider); ok {
-		if newScale := wp.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
+	if c.windowProvider != nil {
+		if newScale := c.windowProvider.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
 			c.SetDeviceScale(newScale)
 		}
 	}
@@ -913,35 +1074,51 @@ func (c *Canvas) Texture() any {
 // After Close, the Canvas should not be used.
 // Close is idempotent - multiple calls are safe.
 func (c *Canvas) Close() error {
+	c.lifecycleMu.Lock()
+	// Evict and mark closed together, before any tracker callback or resource
+	// teardown.  A new constructor can therefore never receive this Canvas
+	// through a stale cache entry.
+	canvasCache.Lock()
 	if c.closed {
+		canvasCache.Unlock()
+		c.lifecycleMu.Unlock()
 		return nil
 	}
+	c.removeFromCanvasCacheLocked()
 	c.closed = true
+	canvasCache.Unlock()
+
+	provider := c.provider
+	tracked := c.tracked
+	c.tracked = false
+	oldTexture := c.oldTexture
+	c.oldTexture = nil
+	texture := c.texture
+	c.texture = nil
+	ctx := c.ctx
+	c.ctx = nil
+	c.provider = nil
+	c.windowProvider = nil
+	c.lifecycleMu.Unlock()
 
 	// Untrack from ResourceTracker if auto-registered, to prevent double-close.
-	if c.tracked {
-		if tracker, ok := c.provider.(resourceTracker); ok {
+	if tracked {
+		if tracker, ok := provider.(resourceTracker); ok {
 			tracker.UntrackResource(c)
 		}
-		c.tracked = false
 	}
 
 	// Note: no need to clear surface target — per-pass View routing handles
 	// target selection. Session-level surfaceView is no longer set.
 
 	// Destroy textures (current and any deferred old texture).
-	destroyTexture(c.oldTexture)
-	c.oldTexture = nil
-	destroyTexture(c.texture)
-	c.texture = nil
+	destroyTexture(oldTexture)
+	destroyTexture(texture)
 
 	// Close gg context
-	if c.ctx != nil {
-		_ = c.ctx.Close()
-		c.ctx = nil
+	if ctx != nil {
+		_ = ctx.Close()
 	}
-
-	c.provider = nil
 	return nil
 }
 
