@@ -1553,7 +1553,6 @@ type gpuContextOps interface {
 	StrokePath(target GPURenderTarget, path *Path, paint *Paint) error
 	DrawText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 	DrawGlyphMaskText(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
-	DrawGlyphMaskTextAliased(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 	QueueImageDraw(target GPURenderTarget, pixelData []byte, genID uint64, imgWidth, imgHeight, imgStride int,
 		dstX, dstY, dstW, dstH, opacity float32, viewportW, viewportH uint32,
 		u0, v0, u1, v1 float32)
@@ -1574,6 +1573,13 @@ type gpuContextOps interface {
 	SetAntiAlias(enabled bool)
 	PendingCount() int
 	Close()
+}
+
+// gpuContextAliasedTextOps is an optional per-context capability. Keep it
+// separate from gpuContextOps so adding aliased text support does not reject
+// existing GPURenderContextProvider implementations at context creation.
+type gpuContextAliasedTextOps interface {
+	DrawGlyphMaskTextAliased(target GPURenderTarget, face any, s string, x, y float64, color RGBA, matrix Matrix, deviceScale float64) error
 }
 
 // GPURenderContext returns the per-context GPU render context, lazily created.

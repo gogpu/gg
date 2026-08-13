@@ -21,9 +21,162 @@ type mockProvider struct {
 	format gputypes.TextureFormat
 }
 
+type mockPlatformProvider struct {
+	*mockProvider
+	gpucontext.NullPlatformProvider
+	fontSmoothing       gpucontext.FontSmoothing
+	subpixelLayout      gpucontext.SubpixelLayout
+	fontSmoothingCalls  int
+	subpixelLayoutCalls int
+}
+
+func (m *mockPlatformProvider) FontSmoothing() gpucontext.FontSmoothing {
+	m.fontSmoothingCalls++
+	return m.fontSmoothing
+}
+
+func (m *mockPlatformProvider) SubpixelLayout() gpucontext.SubpixelLayout {
+	m.subpixelLayoutCalls++
+	return m.subpixelLayout
+}
+
+type textPreferenceAccelerator struct {
+	*renderTargetCaptureAccelerator
+	lcdLayout gg.LCDLayout
+}
+
+func (a *textPreferenceAccelerator) SetLCDLayout(layout gg.LCDLayout) {
+	a.lcdLayout = layout
+}
+
 func newMockProvider() *mockProvider {
 	return &mockProvider{
 		format: gputypes.TextureFormatBGRA8Unorm,
+	}
+}
+
+func TestNewWithScaleUsesPlatformFontSmoothing(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &textPreferenceAccelerator{
+		renderTargetCaptureAccelerator: &renderTargetCaptureAccelerator{},
+	}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	tests := []struct {
+		name             string
+		smoothing        gpucontext.FontSmoothing
+		subpixel         gpucontext.SubpixelLayout
+		wantTextMode     gg.TextMode
+		wantLCDLayout    gg.LCDLayout
+		wantSubpixelRead bool
+	}{
+		{
+			name: "none_disables_antialiasing", smoothing: gpucontext.FontSmoothingNone,
+			subpixel: gpucontext.SubpixelRGB, wantTextMode: gg.TextModeAliased, wantLCDLayout: gg.LCDLayoutNone,
+		},
+		{
+			name: "grayscale_disables_subpixel", smoothing: gpucontext.FontSmoothingGrayscale,
+			subpixel: gpucontext.SubpixelRGB, wantTextMode: gg.TextModeAuto, wantLCDLayout: gg.LCDLayoutNone,
+		},
+		{
+			name: "subpixel_rgb", smoothing: gpucontext.FontSmoothingSubpixel,
+			subpixel: gpucontext.SubpixelRGB, wantTextMode: gg.TextModeAuto, wantLCDLayout: gg.LCDLayoutRGB,
+			wantSubpixelRead: true,
+		},
+		{
+			name: "subpixel_bgr", smoothing: gpucontext.FontSmoothingSubpixel,
+			subpixel: gpucontext.SubpixelBGR, wantTextMode: gg.TextModeAuto, wantLCDLayout: gg.LCDLayoutBGR,
+			wantSubpixelRead: true,
+		},
+		{
+			name: "subpixel_without_known_layout", smoothing: gpucontext.FontSmoothingSubpixel,
+			subpixel: gpucontext.SubpixelNone, wantTextMode: gg.TextModeAuto, wantLCDLayout: gg.LCDLayoutNone,
+			wantSubpixelRead: true,
+		},
+		{
+			name: "unknown_smoothing_is_safe_grayscale", smoothing: gpucontext.FontSmoothing(99),
+			subpixel: gpucontext.SubpixelRGB, wantTextMode: gg.TextModeAuto, wantLCDLayout: gg.LCDLayoutNone,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accelerator.lcdLayout = gg.LCDLayout(99)
+			provider := &mockPlatformProvider{
+				mockProvider:   newMockProvider(),
+				fontSmoothing:  tt.smoothing,
+				subpixelLayout: tt.subpixel,
+			}
+			canvas, err := NewWithScale(provider, 10, 10, 1)
+			if err != nil {
+				t.Fatalf("NewWithScale: %v", err)
+			}
+			t.Cleanup(func() { _ = canvas.Close() })
+
+			if got := canvas.Context().TextMode(); got != tt.wantTextMode {
+				t.Errorf("TextMode = %v, want %v", got, tt.wantTextMode)
+			}
+			if accelerator.lcdLayout != tt.wantLCDLayout {
+				t.Errorf("LCD layout = %v, want %v", accelerator.lcdLayout, tt.wantLCDLayout)
+			}
+			if provider.fontSmoothingCalls != 1 {
+				t.Errorf("FontSmoothing calls = %d, want 1", provider.fontSmoothingCalls)
+			}
+			wantSubpixelCalls := 0
+			if tt.wantSubpixelRead {
+				wantSubpixelCalls = 1
+			}
+			if provider.subpixelLayoutCalls != wantSubpixelCalls {
+				t.Errorf("SubpixelLayout calls = %d, want %d", provider.subpixelLayoutCalls, wantSubpixelCalls)
+			}
+		})
+	}
+}
+
+func TestDrawRefreshesChangedPlatformFontSmoothing(t *testing.T) {
+	gg.CloseAccelerator()
+	accelerator := &textPreferenceAccelerator{
+		renderTargetCaptureAccelerator: &renderTargetCaptureAccelerator{},
+	}
+	if err := gg.RegisterAccelerator(accelerator); err != nil {
+		t.Fatalf("RegisterAccelerator: %v", err)
+	}
+	t.Cleanup(gg.CloseAccelerator)
+
+	provider := &mockPlatformProvider{
+		mockProvider:   newMockProvider(),
+		fontSmoothing:  gpucontext.FontSmoothingNone,
+		subpixelLayout: gpucontext.SubpixelNone,
+	}
+	canvas, err := NewWithScale(provider, 10, 10, 1)
+	if err != nil {
+		t.Fatalf("NewWithScale: %v", err)
+	}
+	t.Cleanup(func() { _ = canvas.Close() })
+
+	provider.fontSmoothing = gpucontext.FontSmoothingSubpixel
+	provider.subpixelLayout = gpucontext.SubpixelBGR
+	if err := canvas.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatalf("Draw: %v", err)
+	}
+	if got := canvas.Context().TextMode(); got != gg.TextModeAuto {
+		t.Errorf("TextMode after platform change = %v, want %v", got, gg.TextModeAuto)
+	}
+	if got := accelerator.lcdLayout; got != gg.LCDLayoutBGR {
+		t.Errorf("LCD layout after platform change = %v, want %v", got, gg.LCDLayoutBGR)
+	}
+
+	// An unchanged platform preference must not overwrite an explicit context
+	// override on every frame.
+	canvas.Context().SetTextMode(gg.TextModeVector)
+	if err := canvas.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatalf("second Draw: %v", err)
+	}
+	if got := canvas.Context().TextMode(); got != gg.TextModeVector {
+		t.Errorf("unchanged platform preference overwrote TextMode: got %v", got)
 	}
 }
 

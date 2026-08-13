@@ -65,6 +65,9 @@ type Canvas struct {
 	damageOverlay        *ggDamageOverlay  // debug overlay renderer (ADR-066)
 	lastFrameDamageRects []image.Rectangle // damage rects from last Render (for diagnostics)
 	prevFrameDamageRects []image.Rectangle // previous frame damage for 2-frame union (Wayland pattern)
+	platformTextSet      bool
+	fontSmoothing        gpucontext.FontSmoothing
+	subpixelLayout       gpucontext.SubpixelLayout
 
 	// damageSource is the registered damage reporter for gg (ADR-065).
 	// Set on first Render() call via interface assertion on the RenderTarget.
@@ -83,7 +86,9 @@ type Canvas struct {
 // The width and height are logical dimensions.
 //
 // If the provider also implements gpucontext.WindowProvider, the device
-// scale is auto-detected for HiDPI/Retina support. Otherwise defaults to 1.0.
+// scale is auto-detected for HiDPI/Retina support. If it implements
+// gpucontext.PlatformProvider, the OS font smoothing preference is applied.
+// Otherwise ggcanvas leaves the context's text settings unchanged.
 // Use Context() to access and configure the drawing context.
 //
 // Returns error if dimensions are invalid or provider is nil.
@@ -125,6 +130,8 @@ func warnIfPhysicalDimensions(wp gpucontext.WindowProvider, width, height int, s
 // The provider should come from gogpu.App.GPUContextProvider().
 // Scale factor should come from the platform (e.g., gogpu.Context.ScaleFactor()).
 // Typical values: 1.0 (standard), 2.0 (macOS Retina), 3.0 (mobile HiDPI).
+// If the provider implements gpucontext.PlatformProvider, its font smoothing
+// preference and compatible subpixel layout are applied to the gg context.
 //
 // Example:
 //
@@ -171,17 +178,7 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		dirty:    true, // Mark dirty so first Flush creates texture
 	}
 
-	// Auto-detect LCD subpixel layout from platform (ADR-024).
-	// PlatformProvider exposes OS-level display properties; SubpixelLayout
-	// enables ClearType rendering matching native Windows DirectWrite quality.
-	if pp, ok := provider.(gpucontext.PlatformProvider); ok {
-		switch pp.SubpixelLayout() {
-		case gpucontext.SubpixelRGB:
-			c.ctx.SetLCDLayout(gg.LCDLayoutRGB)
-		case gpucontext.SubpixelBGR:
-			c.ctx.SetLCDLayout(gg.LCDLayoutBGR)
-		}
-	}
+	c.applyPlatformTextSettings()
 
 	// Auto-register with ResourceTracker if the provider supports it.
 	// This enables automatic cleanup on application shutdown without
@@ -435,6 +432,7 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 		return ErrCanvasClosed
 	}
 	gg.BeginAcceleratorFrame()
+	c.applyPlatformTextSettings()
 	c.ctx.Push()
 	c.ctx.Identity()
 	c.ctx.ClearPath()
@@ -443,6 +441,44 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	c.ctx.Pop()
 	c.MarkDirty()
 	return nil
+}
+
+// applyPlatformTextSettings refreshes text edging only when the platform
+// preference changes. This picks up runtime OS setting changes without
+// repeatedly overriding an explicit Context configuration on every frame.
+func (c *Canvas) applyPlatformTextSettings() {
+	pp, ok := c.provider.(gpucontext.PlatformProvider)
+	if !ok {
+		return
+	}
+
+	smoothing := pp.FontSmoothing()
+	subpixel := gpucontext.SubpixelNone
+	if smoothing == gpucontext.FontSmoothingSubpixel {
+		subpixel = pp.SubpixelLayout()
+	}
+	if c.platformTextSet && c.fontSmoothing == smoothing && c.subpixelLayout == subpixel {
+		return
+	}
+
+	textMode := gg.TextModeAuto
+	lcdLayout := gg.LCDLayoutNone
+	switch smoothing {
+	case gpucontext.FontSmoothingNone:
+		textMode = gg.TextModeAliased
+	case gpucontext.FontSmoothingSubpixel:
+		switch subpixel {
+		case gpucontext.SubpixelRGB:
+			lcdLayout = gg.LCDLayoutRGB
+		case gpucontext.SubpixelBGR:
+			lcdLayout = gg.LCDLayoutBGR
+		}
+	}
+	c.ctx.SetTextMode(textMode)
+	c.ctx.SetLCDLayout(lcdLayout)
+	c.platformTextSet = true
+	c.fontSmoothing = smoothing
+	c.subpixelLayout = subpixel
 }
 
 // IsDirty returns true if the canvas has pending changes

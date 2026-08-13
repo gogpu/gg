@@ -264,7 +264,7 @@ func TestDrawShapedGlyphMaskText_NilFace_ReturnsError(t *testing.T) {
 
 	target := makeTestTarget(100, 100)
 
-	err := rc.DrawShapedGlyphMaskText(target, nil, nil, 10, 20, gg.Red, gg.Identity(), 1.0)
+	err := rc.DrawShapedGlyphMaskText(target, nil, nil, 10, 20, gg.Red, gg.Identity(), 1.0, gg.TextModeGlyphMask)
 	if !errors.Is(err, gg.ErrFallbackToCPU) {
 		t.Errorf("DrawShapedGlyphMaskText(nil face) = %v, want ErrFallbackToCPU", err)
 	}

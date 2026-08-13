@@ -234,6 +234,34 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	deviceScale float64,
 	isCJK bool,
 ) (GlyphMaskBatch, error) {
+	return e.layoutShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, false)
+}
+
+// LayoutShapedGlyphsAliased lays out pre-shaped glyphs using binary coverage.
+// It preserves the supplied glyph IDs and positions while disabling LCD masks
+// and separating the aliased atlas entries from anti-aliased entries.
+func (e *GlyphMaskEngine) LayoutShapedGlyphsAliased(
+	face text.Face,
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+	deviceScale float64,
+	isCJK bool,
+) (GlyphMaskBatch, error) {
+	return e.layoutShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, true)
+}
+
+func (e *GlyphMaskEngine) layoutShapedGlyphs(
+	face text.Face,
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+	deviceScale float64,
+	isCJK bool,
+	aliased bool,
+) (GlyphMaskBatch, error) {
 	if face == nil || len(glyphs) == 0 {
 		return GlyphMaskBatch{}, nil
 	}
@@ -252,7 +280,7 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
 	hinting := selectGlyphMaskHinting(fontSize, matrix, isCJK, deviceScale)
-	useLCD := e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
+	useLCD := !aliased && e.lcdLayout != text.LCDLayoutNone && selectGlyphMaskLCD(fontSize, matrix)
 
 	premul := color.Premultiply()
 	batchColor := [4]float32{
@@ -260,8 +288,13 @@ func (e *GlyphMaskEngine) LayoutShapedGlyphs(
 		float32(premul.B), float32(premul.A),
 	}
 
+	lcdLayout := e.lcdLayout
 	lcdFilter := e.lcdFilter
-	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, e.lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, false), nil
+	if aliased {
+		lcdLayout = text.LCDLayoutNone
+		lcdFilter = text.LCDFilter{}
+	}
+	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, aliased), nil
 }
 
 // snapXGrid precomputes the integer device-space X position for each glyph by
@@ -307,7 +340,7 @@ func glyphPlacement(absX, absY, deviceScale float64, hinting text.Hinting, snapp
 }
 
 // layoutGlyphs is the common implementation for LayoutText, LayoutTextAliased,
-// and LayoutShapedGlyphs. Must be called with e.mu held.
+// LayoutShapedGlyphs, and LayoutShapedGlyphsAliased. Must be called with e.mu held.
 //
 // When aliased is true, glyphs are rasterized with binary coverage (0/255 only)
 // using RasterizeAliased instead of RasterizeHinted, and the cache key has the

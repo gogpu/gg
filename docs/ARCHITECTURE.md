@@ -768,7 +768,7 @@ The `integration/ggcanvas/` package bridges gg with gogpu for windowed rendering
 import "github.com/gogpu/gg/integration/ggcanvas"
 
 canvas := ggcanvas.New(provider, width, height)
-// Auto-configures: device scale, requested LCD layout, resource tracking
+// Auto-configures: device scale, OS font smoothing/LCD layout, resource tracking
 
 // Draw() marks canvas dirty atomically — recommended pattern:
 canvas.Draw(func(dc *gg.Context) {
@@ -939,7 +939,7 @@ gg and gogpu are **independent libraries** that can interoperate via gpucontext:
 | **Driver Pattern** | database/sql | Backend registration via blank import |
 | **Device Sharing** | Skia Graphite | DeviceProviderAware for gogpu integration |
 | **Per-Pass Render Target** | WebGPU spec, Skia GrContext | GPURenderTarget.View for per-pass target (surface or offscreen) |
-| **LCD Auto-Detection** | Skia/Chrome, Qt6 | Platform subpixel detection (ADR-024): Windows SPI+registry, macOS None, Linux Xft/Wayland. Auto-enabled via PlatformProvider. |
+| **Font Smoothing Auto-Detection** | Skia/Chrome, Qt6 | `PlatformProvider` propagates the aliased, grayscale, or subpixel preference; RGB/BGR layout is used only when subpixel smoothing is requested (ADR-024/057). |
 | **Deferred Ortho Projection** | Skia `sk_RTAdjust`, Vello | Ortho computed at flush time from render target dimensions, not draw time (ADR-025). Enables correct offscreen rendering. |
 
 ## See Also
