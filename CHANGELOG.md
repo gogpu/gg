@@ -7,14 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.3] - 2026-08-13
+
 ### Added
 
-- **Platform font smoothing integration** ([gogpu/ui#196](https://github.com/gogpu/ui/issues/196)) —
+- **Platform font smoothing integration** ([#495](https://github.com/gogpu/gg/pull/495), @besmpl) —
   `ggcanvas` now applies `PlatformProvider.FontSmoothing`: disabled smoothing
   selects `TextModeAliased`, grayscale disables LCD masks, and subpixel mode
   uses the reported RGB/BGR layout. Aliased mode now also preserves binary
   coverage for pre-shaped scene glyphs instead of routing them through the
   regular anti-aliased shaped-text pipeline.
+
+### Fixed
+
+- **NoAA curved strokes no longer collapse by 4x** ([#510](https://github.com/gogpu/gg/pull/510), @lkmavi, [#509](https://github.com/gogpu/gg/issues/509)) —
+  `SetAntiAlias(false)` + `Stroke()` on circles/arcs displaced geometry (~335→~83 in X).
+  Root cause: `curvePixelAccuracy()` unconditionally right-shifted by `kDefaultAccuracy=2`
+  at `aaShift=0`. Fixed with `min(shift, kDefaultAccuracy)`. NoAA path now defaults to
+  `flattenCurves=true` (Skia `SkScan::FillPath` pattern). Dropped unused error return
+  from `fillNoAA`.
+
+### Changed
+
+- deps: gpucontext v0.27.0 → v0.28.0, wgpu v0.31.0 → v0.31.4, gputypes v0.5.1 → v0.5.2
 
 ## [0.52.2] - 2026-08-11
 
