@@ -125,13 +125,14 @@ func (e *GlyphMaskEngine) LayoutText(
 	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if multi, ok := face.(*text.MultiFace); ok {
-			for _, run := range multi.FontRuns(s) {
+		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
+			runs := runsFace.FontRuns(s)
+			for _, run := range runs {
 				if run.Face == nil || run.Face.Source() == nil {
 					return GlyphMaskBatch{}, fmt.Errorf("glyph mask: fallback face has no FontSource")
 				}
 			}
-			return e.layoutMultiFaceText(multi, s, x, y, color, matrix, deviceScale, false), nil
+			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, false), nil
 		}
 		return GlyphMaskBatch{}, fmt.Errorf("glyph mask: face has no FontSource (MultiFace requires ADR-065)")
 	}
@@ -194,13 +195,14 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if multi, ok := face.(*text.MultiFace); ok {
-			for _, run := range multi.FontRuns(s) {
+		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
+			runs := runsFace.FontRuns(s)
+			for _, run := range runs {
 				if run.Face == nil || run.Face.Source() == nil {
 					return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: fallback face has no FontSource")
 				}
 			}
-			return e.layoutMultiFaceText(multi, s, x, y, color, matrix, deviceScale, true), nil
+			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, true), nil
 		}
 		return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: face has no FontSource (MultiFace requires ADR-065)")
 	}
@@ -288,17 +290,21 @@ func (e *GlyphMaskEngine) layoutShapedGlyphs(
 	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if multi, ok := face.(*text.MultiFace); ok {
+		if _, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
+			var defaultFace text.Face
+			if multi, ok := face.(*text.MultiFace); ok {
+				defaultFace = multi.FaceForRune(0)
+			}
 			for _, glyph := range glyphs {
 				owner := glyph.Face
 				if owner == nil {
-					owner = multi.FaceForRune(0)
+					owner = defaultFace
 				}
 				if owner == nil || owner.Source() == nil {
 					return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: fallback face has no FontSource")
 				}
 			}
-			return e.layoutMultiFaceShapedGlyphs(multi, glyphs, x, y, color, matrix, deviceScale, isCJK, aliased), nil
+			return e.layoutMultiFaceShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, aliased), nil
 		}
 		return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: face has no FontSource (MultiFace requires ADR-065)")
 	}
@@ -327,24 +333,22 @@ func (e *GlyphMaskEngine) layoutShapedGlyphs(
 // source order, so one queued GlyphMaskBatch preserves batching and advances.
 // e.mu must be held by the caller.
 func (e *GlyphMaskEngine) layoutMultiFaceText(
-	face *text.MultiFace,
-	s string,
+	runs []text.FontRun,
 	x, y float64,
 	color gg.RGBA,
 	matrix gg.Matrix,
 	deviceScale float64,
 	aliased bool,
 ) GlyphMaskBatch {
-	if face == nil {
-		return GlyphMaskBatch{}
-	}
-	runs := face.FontRuns(s)
 	if len(runs) == 0 {
 		return GlyphMaskBatch{}
 	}
 
 	var result GlyphMaskBatch
 	for _, run := range runs {
+		if run.Face == nil {
+			continue
+		}
 		var shaped []text.ShapedGlyph
 		for glyph := range run.Face.Glyphs(run.Text) {
 			shaped = append(shaped, text.ShapedGlyph{
@@ -374,7 +378,7 @@ func (e *GlyphMaskEngine) layoutMultiFaceText(
 // contract and use the first fallback face.
 // e.mu must be held by the caller.
 func (e *GlyphMaskEngine) layoutMultiFaceShapedGlyphs(
-	face *text.MultiFace,
+	face text.Face,
 	glyphs []text.ShapedGlyph,
 	x, y float64,
 	color gg.RGBA,
@@ -386,21 +390,26 @@ func (e *GlyphMaskEngine) layoutMultiFaceShapedGlyphs(
 	if face == nil || len(glyphs) == 0 {
 		return GlyphMaskBatch{}
 	}
-	defaultFace := face.FaceForRune(0)
+	var defaultFace text.Face
+	if multi, ok := face.(*text.MultiFace); ok {
+		defaultFace = multi.FaceForRune(0)
+	}
 	var result GlyphMaskBatch
 	start := 0
 	for start < len(glyphs) {
 		owner := glyphs[start].Face
+		groupSourceAware := owner != nil
 		if owner == nil {
 			owner = defaultFace
 		}
 		end := start + 1
+		groupIsCJK := glyphs[start].IsCJK
 		for end < len(glyphs) {
 			next := glyphs[end].Face
 			if next == nil {
 				next = defaultFace
 			}
-			if next != owner {
+			if next != owner || glyphs[end].IsCJK != groupIsCJK {
 				break
 			}
 			end++
@@ -412,11 +421,15 @@ func (e *GlyphMaskEngine) layoutMultiFaceShapedGlyphs(
 				group[i].Face = owner
 			}
 		}
-		groupIsCJK := isCJK
-		if len(group) > 0 {
-			groupIsCJK = group[0].IsCJK
+		// Keep the explicit caller hint only for legacy glyphs that predate the
+		// per-glyph IsCJK bit. Source-aware Shape results carry the exact script
+		// class and must not let an adjacent Latin glyph force full hinting on a
+		// CJK glyph (or vice versa).
+		groupCJK := groupIsCJK
+		if !groupSourceAware {
+			groupCJK = isCJK
 		}
-		batch := e.layoutShapedGlyphsForFace(owner, group, x, y, color, matrix, deviceScale, groupIsCJK, aliased)
+		batch := e.layoutShapedGlyphsForFace(owner, group, x, y, color, matrix, deviceScale, groupCJK, aliased)
 		if len(batch.Quads) > 0 {
 			if len(result.Quads) == 0 {
 				result = batch

@@ -84,4 +84,13 @@ func TestGPUTextEngineMultiFaceKeepsFallbackGlyphsBatched(t *testing.T) {
 	if len(batch.Quads) < 2 {
 		t.Fatalf("LayoutText(MultiFace) emitted %d quads, want at least 2", len(batch.Quads))
 	}
+
+	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
+	filteredBatch, err := engine.LayoutText(filtered, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredBatch.Quads) == 0 {
+		t.Fatal("LayoutText(FilteredFace(MultiFace)) dropped the allowed run")
+	}
 }

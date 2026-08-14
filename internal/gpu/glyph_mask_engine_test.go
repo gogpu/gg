@@ -86,6 +86,23 @@ func TestGlyphMaskEngineMultiFaceStaysOnGPUAndPreservesShapedRuns(t *testing.T) 
 	if len(shapedBatch.Quads) < 2 {
 		t.Fatalf("LayoutShapedGlyphs(MultiFace) emitted %d quads, want at least 2", len(shapedBatch.Quads))
 	}
+
+	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
+	filteredBatch, err := engine.LayoutText(filtered, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredBatch.Quads) == 0 {
+		t.Fatal("LayoutText(FilteredFace(MultiFace)) dropped the allowed fallback run")
+	}
+	filteredGlyphs := text.Shape("AБ", filtered)
+	filteredShaped, err := engine.LayoutShapedGlyphs(filtered, filteredGlyphs, 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1, false)
+	if err != nil {
+		t.Fatalf("LayoutShapedGlyphs(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredShaped.Quads) == 0 {
+		t.Fatal("LayoutShapedGlyphs(FilteredFace(MultiFace)) dropped the allowed run")
+	}
 }
 
 func TestSelectGlyphMaskLCD(t *testing.T) {

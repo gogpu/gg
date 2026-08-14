@@ -113,17 +113,20 @@ func (e *GPUTextEngine) LayoutText(
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if multi, ok := face.(*text.MultiFace); ok {
-		for _, run := range multi.FontRuns(s) {
-			if run.Face == nil || run.Face.Source() == nil {
-				return TextBatch{}, fmt.Errorf("MSDF text: fallback face has no FontSource")
+	if face.Source() == nil {
+		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
+			runs := runsFace.FontRuns(s)
+			for _, run := range runs {
+				if run.Face == nil || run.Face.Source() == nil {
+					return TextBatch{}, fmt.Errorf("MSDF text: fallback face has no FontSource")
+				}
 			}
+			// A TextBatch has one atlas binding. Keep all fallback runs in the
+			// shared Latin atlas so the complete string remains one ordered GPU
+			// batch (including mixed-script fallback) rather than silently
+			// downgrading the operation to CPU.
+			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale), nil
 		}
-		// A TextBatch has one atlas binding. Keep all fallback runs in the
-		// shared Latin atlas so the complete string remains one ordered GPU
-		// batch (including mixed-script fallback) rather than silently
-		// downgrading the operation to CPU.
-		return e.layoutMultiFaceText(multi, s, x, y, color, matrix, deviceScale), nil
 	}
 
 	logicalSize := face.Size()
@@ -270,17 +273,12 @@ func (e *GPUTextEngine) LayoutText(
 // each run's FontID and are never interpreted using another face's parser.
 // e.mu must be held by the caller.
 func (e *GPUTextEngine) layoutMultiFaceText(
-	face *text.MultiFace,
-	s string,
+	runs []text.FontRun,
 	x, y float64,
 	color gg.RGBA,
 	matrix gg.Matrix,
 	deviceScale float64,
 ) TextBatch {
-	if face == nil {
-		return TextBatch{}
-	}
-	runs := face.FontRuns(s)
 	if len(runs) == 0 {
 		return TextBatch{}
 	}
@@ -290,6 +288,9 @@ func (e *GPUTextEngine) layoutMultiFaceText(
 	refSize := float64(e.msdfSize)
 	var quads []TextQuad
 	for _, run := range runs {
+		if run.Face == nil {
+			continue
+		}
 		fontSource := run.Face.Source()
 		if fontSource == nil {
 			continue
