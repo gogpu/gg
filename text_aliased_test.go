@@ -220,6 +220,46 @@ func TestDrawShapedGlyphsUsesGlobalAccelerator(t *testing.T) {
 	}
 }
 
+func TestDrawShapedGlyphsOutlineFallbackOwnerValidation(t *testing.T) {
+	face, glyphs := aliasedTestShapedGlyphs(t)
+	multi, err := text.NewMultiFace(face)
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+
+	dc := NewContext(80, 60)
+	t.Cleanup(func() { _ = dc.Close() })
+	dc.drawShapedGlyphsAsOutlines(glyphs, multi, 5, 40)
+
+	modified := false
+	for y := range dc.Image().Bounds().Dy() {
+		for x := range dc.Image().Bounds().Dx() {
+			_, _, _, alpha := dc.Image().At(x, y).RGBA()
+			if alpha != 0 {
+				modified = true
+				break
+			}
+		}
+		if modified {
+			break
+		}
+	}
+	if !modified {
+		t.Fatal("legacy MultiFace glyph did not use the first fallback owner")
+	}
+
+	// Invalid source identity and input are skipped per glyph without affecting
+	// already rendered fallback glyphs.
+	badOwner := glyphs[0]
+	badOwner.Face = multi
+	dc.drawShapedGlyphsAsOutlines([]text.ShapedGlyph{badOwner}, face, 5, 40)
+	dc.drawShapedGlyphsAsOutlines(glyphs, nil, 5, 40)
+	badGID := glyphs[0]
+	badGID.Face = face
+	badGID.GID = text.GlyphID(^uint16(0))
+	dc.drawShapedGlyphsAsOutlines([]text.ShapedGlyph{badGID}, face, 5, 40)
+}
+
 func TestTextModeAliased_UsesPerContextAliasedAccelerator(t *testing.T) {
 	t.Setenv("GOGPU_TEXT_MODE", "")
 	context := &perContextAliasedTestOps{}

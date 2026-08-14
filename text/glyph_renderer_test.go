@@ -1,6 +1,7 @@
 package text
 
 import (
+	"errors"
 	"image/color"
 	"testing"
 )
@@ -219,6 +220,51 @@ func TestGlyphRenderer_RenderRunMultiFaceUsesGlyphOwners(t *testing.T) {
 		if outline == nil || outline.IsEmpty() {
 			t.Errorf("glyph %d lost its source-owned outline", i)
 		}
+	}
+}
+
+func TestGlyphRendererRenderRunSkipsInvalidOwnersAndDefaultsSize(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	face := source.Face(18)
+	glyphs := Shape("A", face)
+	if len(glyphs) != 1 {
+		t.Fatalf("Shape returned %d glyphs, want 1", len(glyphs))
+	}
+	ownerless := glyphs[0]
+	ownerless.Face = nil
+
+	noSource, err := NewMultiFace(newMockFace(18, DirectionLTR, map[rune]float64{'A': 10}))
+	if err != nil {
+		t.Fatalf("NewMultiFace no source: %v", err)
+	}
+	missingSource := glyphs[0]
+	missingSource.Face = noSource
+
+	closedSource, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource closed: %v", err)
+	}
+	closedFace := closedSource.Face(18)
+	if err := closedSource.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	missingParsed := glyphs[0]
+	missingParsed.Face = closedFace
+
+	outlines := NewGlyphRenderer().RenderRun(&ShapedRun{
+		Glyphs: []ShapedGlyph{ownerless, missingSource, missingParsed},
+		Face:   face,
+		Size:   0,
+	}, DefaultRenderParams())
+	if len(outlines) != 3 || outlines[0] == nil {
+		t.Fatalf("RenderRun result = %#v, want first outline and stable nil slots", outlines)
+	}
+	if outlines[1] != nil || outlines[2] != nil {
+		t.Fatalf("invalid owners rendered unexpectedly: %#v", outlines)
 	}
 }
 
@@ -553,6 +599,34 @@ func TestTextRenderer_ShapeAndRenderMultiFace(t *testing.T) {
 				if outline == nil || outline.IsEmpty() {
 					t.Errorf("glyph %d lost its source-owned outline", i)
 				}
+			}
+		})
+	}
+}
+
+func TestTextRendererRejectsClosedFontSource(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	face := source.Face(16)
+	if err := source.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	original := GetShaper()
+	t.Cleanup(func() { SetShaper(original) })
+	SetShaper(&mockShaper{glyphs: []ShapedGlyph{{GID: 1, XAdvance: 8}}})
+
+	renderer := NewTextRenderer()
+	renderer.SetDefaultFace(face)
+	for name, call := range map[string]func() ([]*GlyphOutline, error){
+		"origin":     func() ([]*GlyphOutline, error) { return renderer.ShapeAndRender("A") },
+		"translated": func() ([]*GlyphOutline, error) { return renderer.ShapeAndRenderAt("A", 2, 3) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := call(); !errors.Is(err, ErrUnsupportedFontType) {
+				t.Fatalf("error = %v, want ErrUnsupportedFontType", err)
 			}
 		})
 	}

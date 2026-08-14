@@ -191,9 +191,6 @@ func (r *GlyphRenderer) RenderRun(run *ShapedRun, params RenderParams) []*GlyphO
 		if owner == nil {
 			owner = run.Face
 		}
-		if owner == nil {
-			continue
-		}
 		source := owner.Source()
 		if source == nil {
 			continue
