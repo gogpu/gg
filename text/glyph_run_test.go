@@ -102,6 +102,38 @@ func TestGlyphRunBuilder_AddShapedGlyph_Nil(t *testing.T) {
 	}
 }
 
+func TestGlyphRunBuilder_AddShapedRunMultiFaceUsesGlyphOwners(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+	glyphs := Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+
+	builder := NewGlyphRunBuilder(NewGlyphCache())
+	builder.AddShapedRun(&ShapedRun{Glyphs: glyphs, Face: multi, Size: 16}, Point{})
+	if builder.Len() != len(glyphs) {
+		t.Fatalf("AddShapedRun added %d instances, want %d", builder.Len(), len(glyphs))
+	}
+	for i, instance := range builder.Instances() {
+		if instance.GlyphID != glyphs[i].GID {
+			t.Errorf("instance %d GID=%d, want %d", i, instance.GlyphID, glyphs[i].GID)
+		}
+		if instance.Size != 16 {
+			t.Errorf("instance %d size=%v, want 16", i, instance.Size)
+		}
+	}
+}
+
 func TestGlyphRunBuilder_AddShapedGlyphs(t *testing.T) {
 	builder := NewGlyphRunBuilder(NewGlyphCache())
 

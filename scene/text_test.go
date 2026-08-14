@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 func TestDefaultTextRendererConfig(t *testing.T) {
@@ -226,6 +227,41 @@ func TestTextRenderer_RenderRun_Nil(t *testing.T) {
 	}
 	if rendered != nil {
 		t.Errorf("RenderRun empty should return nil")
+	}
+}
+
+func TestTextRenderer_RenderRunMultiFaceUsesGlyphOwners(t *testing.T) {
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("failed to create test font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := text.NewFilteredFace(source.Face(18), text.RangeBasicLatin)
+	cyrillic := text.NewFilteredFace(source.Face(18), text.RangeCyrillic)
+	multi, err := text.NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+	glyphs := text.Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+
+	rendered, err := NewTextRenderer().RenderRun(&text.ShapedRun{
+		Glyphs: glyphs,
+		Face:   multi,
+		Size:   18,
+	})
+	if err != nil {
+		t.Fatalf("RenderRun(MultiFace): %v", err)
+	}
+	if len(rendered) != len(glyphs) {
+		t.Fatalf("RenderRun returned %d glyphs, want %d", len(rendered), len(glyphs))
+	}
+	for i, glyph := range rendered {
+		if glyph == nil || glyph.Path == nil || glyph.Path.IsEmpty() {
+			t.Errorf("glyph %d lost its source-owned outline", i)
+		}
 	}
 }
 

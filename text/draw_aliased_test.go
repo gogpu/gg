@@ -166,3 +166,35 @@ func TestDrawAliased_VsDraw_DifferentAlpha(t *testing.T) {
 		t.Log("Confirmed: AA path produces intermediate alpha, aliased path does not")
 	}
 }
+
+func TestDrawAliased_MultiFacePreservesFallback(t *testing.T) {
+	source, err := NewFontSourceFromFile(testFontPath(t))
+	if err != nil {
+		t.Fatalf("Failed to load font: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	latin := NewFilteredFace(source.Face(24), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(24), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, 240, 60))
+	DrawAliased(dst, "AБ", multi, 10, 42, color.Black)
+
+	hasNonZero := false
+	for i := 3; i < len(dst.Pix); i += 4 {
+		a := dst.Pix[i]
+		if a != 0 && a != 255 {
+			t.Fatalf("pixel alpha = %d, want binary coverage", a)
+		}
+		if a != 0 {
+			hasNonZero = true
+		}
+	}
+	if !hasNonZero {
+		t.Fatal("DrawAliased dropped all MultiFace fallback glyphs")
+	}
+}
