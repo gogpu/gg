@@ -263,6 +263,50 @@ func TestTextRenderer_RenderRunMultiFaceUsesGlyphOwners(t *testing.T) {
 			t.Errorf("glyph %d lost its source-owned outline", i)
 		}
 	}
+
+	legacy := glyphs[0]
+	legacy.Face = nil
+	if _, err := NewTextRenderer().RenderGlyphs([]text.ShapedGlyph{legacy}, multi); err == nil {
+		t.Fatal("legacy composite glyph without an owner should report an error")
+	}
+}
+
+func TestTextRendererSourceOwnerValidation(t *testing.T) {
+	renderer := NewTextRenderer()
+	if _, err := renderer.RenderGlyph(text.ShapedGlyph{}, nil); err == nil {
+		t.Fatal("RenderGlyph nil face should report an error")
+	}
+	if _, err := renderer.RenderGlyphs([]text.ShapedGlyph{{GID: 1}}, nil); err == nil {
+		t.Fatal("RenderGlyphs nil face should report an error")
+	}
+
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	primary := source.Face(18)
+	owner := source.Face(20)
+	glyphs := text.Shape("A", owner)
+	if len(glyphs) != 1 {
+		t.Fatalf("Shape returned %d glyphs, want 1", len(glyphs))
+	}
+	if rendered, err := renderer.RenderGlyphs(glyphs, owner); err != nil || len(rendered) != 1 || rendered[0] == nil {
+		t.Fatalf("single-source RenderGlyphs = (%#v, %v)", rendered, err)
+	}
+	rendered, err := renderer.RenderGlyphs(glyphs, primary)
+	if err != nil || len(rendered) != 1 || rendered[0] == nil || rendered[0].Path == nil {
+		t.Fatalf("source-owned RenderGlyphs = (%#v, %v)", rendered, err)
+	}
+
+	if err := source.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := renderer.RenderGlyph(text.ShapedGlyph{GID: 1}, primary); err == nil {
+		t.Fatal("RenderGlyph closed source should report an error")
+	}
+	if _, err := renderer.RenderGlyphs([]text.ShapedGlyph{{GID: 1}}, primary); err == nil {
+		t.Fatal("RenderGlyphs closed source should report an error")
+	}
 }
 
 func TestTextRenderer_RenderText_Empty(t *testing.T) {

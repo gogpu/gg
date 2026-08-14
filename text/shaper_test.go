@@ -74,6 +74,75 @@ func TestShapeMultiFaceRetainsSourceFaces(t *testing.T) {
 	}
 }
 
+func TestShapeRunsSourceAndBoundaryPaths(t *testing.T) {
+	face := builtinTestFace(t)
+	if runs := ShapeRuns("", face); runs != nil {
+		t.Fatalf("ShapeRuns empty = %#v, want nil", runs)
+	}
+	if runs := ShapeRuns("x", nil); runs != nil {
+		t.Fatalf("ShapeRuns nil face = %#v, want nil", runs)
+	}
+
+	runs := ShapeRuns("A", face)
+	if len(runs) != 1 || runs[0].Face != face || len(runs[0].Glyphs) != 1 {
+		t.Fatalf("source ShapeRuns = %#v, want one source-owned run", runs)
+	}
+
+	original := GetShaper()
+	t.Cleanup(func() { SetShaper(original) })
+	SetShaper(&mockShaper{})
+	if runs := ShapeRuns("A", face); runs != nil {
+		t.Fatalf("empty shaper ShapeRuns = %#v, want nil", runs)
+	}
+
+	if runs := shapeMultiFaceRuns("x", nil, original); runs != nil {
+		t.Fatalf("nil multi shape = %#v, want nil", runs)
+	}
+	if runs := shapeFontRuns("x", nil, original); runs != nil {
+		t.Fatalf("empty font runs = %#v, want nil", runs)
+	}
+	if runs := shapeFontRuns("x", []FontRun{{Face: face, Text: "x"}}, nil); runs != nil {
+		t.Fatalf("nil shaper font runs = %#v, want nil", runs)
+	}
+	if glyphs := flattenShapedRuns(nil); glyphs != nil {
+		t.Fatalf("flatten empty = %#v, want nil", glyphs)
+	}
+}
+
+func TestDirectShapersHonorMultiFaceOwners(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+
+	for name, shaper := range map[string]Shaper{
+		"builtin": &BuiltinShaper{},
+		"own":     NewOwnShaper(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			glyphs := shaper.Shape("AБ", multi)
+			if len(glyphs) != 2 || glyphs[0].Face != latin || glyphs[1].Face != cyrillic {
+				t.Fatalf("direct Shape lost owners: %#v", glyphs)
+			}
+		})
+	}
+}
+
+func TestShapeFontRunsSkipsEmptyShaperResult(t *testing.T) {
+	face := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})
+	runs := shapeFontRuns("a", []FontRun{{Face: face, Text: "a"}}, &mockShaper{})
+	if len(runs) != 0 {
+		t.Fatalf("empty shaped result = %#v, want no runs", runs)
+	}
+}
+
 // TestBuiltinShapeLatinText tests shaping basic Latin text.
 func TestBuiltinShapeLatinText(t *testing.T) {
 	face := builtinTestFace(t)
