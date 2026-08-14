@@ -190,6 +190,38 @@ func TestGlyphRenderer_RenderRun_NilInputs(t *testing.T) {
 	}
 }
 
+func TestGlyphRenderer_RenderRunMultiFaceUsesGlyphOwners(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create test font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(18), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(18), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+	glyphs := Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+
+	rendered := NewGlyphRenderer().RenderRun(&ShapedRun{
+		Glyphs: glyphs,
+		Face:   multi,
+		Size:   18,
+	}, DefaultRenderParams())
+	if len(rendered) != len(glyphs) {
+		t.Fatalf("RenderRun returned %d outlines, want %d", len(rendered), len(glyphs))
+	}
+	for i, outline := range rendered {
+		if outline == nil || outline.IsEmpty() {
+			t.Errorf("glyph %d lost its source-owned outline", i)
+		}
+	}
+}
+
 func TestGlyphRenderer_RenderLayout_NilInputs(t *testing.T) {
 	r := NewGlyphRenderer()
 	params := DefaultRenderParams()
@@ -479,5 +511,49 @@ func TestTextRenderer_ShapeAndRenderAt_NoFace(t *testing.T) {
 	_, err := tr.ShapeAndRenderAt("hello", 10, 20)
 	if err == nil {
 		t.Error("expected error when no face is set")
+	}
+}
+
+func TestTextRenderer_ShapeAndRenderMultiFace(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create test font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(18), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(18), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	renderer := NewTextRenderer()
+	renderer.SetDefaultFace(multi)
+	renderer.SetDefaultSize(18)
+	for _, tc := range []struct {
+		name string
+		call func() ([]*GlyphOutline, error)
+	}{
+		{name: "origin", call: func() ([]*GlyphOutline, error) {
+			return renderer.ShapeAndRender("AБ")
+		}},
+		{name: "translated", call: func() ([]*GlyphOutline, error) {
+			return renderer.ShapeAndRenderAt("AБ", 10, 20)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outlines, err := tc.call()
+			if err != nil {
+				t.Fatalf("ShapeAndRender: %v", err)
+			}
+			if len(outlines) != 2 {
+				t.Fatalf("got %d outlines, want 2", len(outlines))
+			}
+			for i, outline := range outlines {
+				if outline == nil || outline.IsEmpty() {
+					t.Errorf("glyph %d lost its source-owned outline", i)
+				}
+			}
+		})
 	}
 }

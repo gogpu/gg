@@ -86,23 +86,32 @@ func (b *GlyphRunBuilder) AddShapedGlyph(fontID uint64, glyph *ShapedGlyph, size
 	})
 }
 
-// AddShapedRun adds all glyphs from a ShapedRun.
-// The origin parameter specifies the starting position for the run.
+// AddShapedRun adds all glyphs from a ShapedRun. Source-aware glyphs are
+// resolved individually because a fallback run may contain GIDs from several
+// font namespaces. The origin parameter specifies the starting position.
 func (b *GlyphRunBuilder) AddShapedRun(run *ShapedRun, origin Point) {
 	if run == nil || len(run.Glyphs) == 0 || run.Face == nil {
 		return
 	}
 
-	font := run.Face.Source().Parsed()
-	if font == nil {
-		return
-	}
-
-	fontID := computeFontID(font)
-	size := float32(run.Size)
-
 	for i := range run.Glyphs {
 		glyph := &run.Glyphs[i]
+		owner := glyph.Face
+		if owner == nil {
+			owner = run.Face
+		}
+		if owner == nil || owner.Source() == nil {
+			continue
+		}
+		font := owner.Source().Parsed()
+		if font == nil {
+			continue
+		}
+		fontID := computeFontID(font)
+		size := float32(run.Size)
+		if size <= 0 {
+			size = float32(owner.Size())
+		}
 		pos := Point{
 			X: origin.X + float32(glyph.X),
 			Y: origin.Y + float32(glyph.Y),
