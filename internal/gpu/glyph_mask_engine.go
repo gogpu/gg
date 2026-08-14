@@ -123,17 +123,14 @@ func (e *GlyphMaskEngine) LayoutText(
 	if fontSize <= 0 {
 		fontSize = face.Size()
 	}
+	if runs, ok := fallbackFontRuns(face, s); ok {
+		if !fontRunsHaveSources(runs) {
+			return GlyphMaskBatch{}, fmt.Errorf("glyph mask: fallback face has no FontSource")
+		}
+		return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, false), nil
+	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
-			runs := runsFace.FontRuns(s)
-			for _, run := range runs {
-				if run.Face == nil || run.Face.Source() == nil {
-					return GlyphMaskBatch{}, fmt.Errorf("glyph mask: fallback face has no FontSource")
-				}
-			}
-			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, false), nil
-		}
 		return GlyphMaskBatch{}, fmt.Errorf("glyph mask: face has no FontSource (MultiFace requires ADR-065)")
 	}
 	fontID := computeGlyphMaskFontID(fontSource)
@@ -193,17 +190,14 @@ func (e *GlyphMaskEngine) LayoutTextAliased(
 	if fontSize <= 0 {
 		fontSize = face.Size()
 	}
+	if runs, ok := fallbackFontRuns(face, s); ok {
+		if !fontRunsHaveSources(runs) {
+			return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: fallback face has no FontSource")
+		}
+		return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, true), nil
+	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
-			runs := runsFace.FontRuns(s)
-			for _, run := range runs {
-				if run.Face == nil || run.Face.Source() == nil {
-					return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: fallback face has no FontSource")
-				}
-			}
-			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale, true), nil
-		}
 		return GlyphMaskBatch{}, fmt.Errorf("glyph mask aliased: face has no FontSource (MultiFace requires ADR-065)")
 	}
 	fontID := computeGlyphMaskFontID(fontSource)
@@ -290,23 +284,7 @@ func (e *GlyphMaskEngine) layoutShapedGlyphs(
 	}
 	fontSource := face.Source()
 	if fontSource == nil {
-		if _, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
-			var defaultFace text.Face
-			if multi, ok := face.(*text.MultiFace); ok {
-				defaultFace = multi.FaceForRune(0)
-			}
-			for _, glyph := range glyphs {
-				owner := glyph.Face
-				if owner == nil {
-					owner = defaultFace
-				}
-				if owner == nil || owner.Source() == nil {
-					return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: fallback face has no FontSource")
-				}
-			}
-			return e.layoutMultiFaceShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, aliased), nil
-		}
-		return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: face has no FontSource (MultiFace requires ADR-065)")
+		return e.layoutFallbackShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, aliased)
 	}
 	fontID := computeGlyphMaskFontID(fontSource)
 	parsed := fontSource.Parsed()
@@ -326,6 +304,59 @@ func (e *GlyphMaskEngine) layoutShapedGlyphs(
 		lcdFilter = text.LCDFilter{}
 	}
 	return e.layoutGlyphs(glyphs, x, y, fontSize, fontID, parsed, hinting, useLCD, lcdLayout, face.Variations(), &lcdFilter, batchColor, matrix, deviceScale, isCJK, aliased), nil
+}
+
+type fontRunProvider interface {
+	FontRuns(string) []text.FontRun
+}
+
+func fallbackFontRuns(face text.Face, s string) ([]text.FontRun, bool) {
+	if face.Source() != nil {
+		return nil, false
+	}
+	provider, ok := face.(fontRunProvider)
+	if !ok {
+		return nil, false
+	}
+	return provider.FontRuns(s), true
+}
+
+func fontRunsHaveSources(runs []text.FontRun) bool {
+	for _, run := range runs {
+		if run.Face == nil || run.Face.Source() == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *GlyphMaskEngine) layoutFallbackShapedGlyphs(
+	face text.Face,
+	glyphs []text.ShapedGlyph,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+	deviceScale float64,
+	isCJK bool,
+	aliased bool,
+) (GlyphMaskBatch, error) {
+	if _, ok := face.(fontRunProvider); !ok {
+		return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: face has no FontSource (MultiFace requires ADR-065)")
+	}
+	var defaultFace text.Face
+	if multi, ok := face.(*text.MultiFace); ok {
+		defaultFace = multi.FaceForRune(0)
+	}
+	for _, glyph := range glyphs {
+		owner := glyph.Face
+		if owner == nil {
+			owner = defaultFace
+		}
+		if owner == nil || owner.Source() == nil {
+			return GlyphMaskBatch{}, fmt.Errorf("glyph mask shaped: fallback face has no FontSource")
+		}
+	}
+	return e.layoutMultiFaceShapedGlyphs(face, glyphs, x, y, color, matrix, deviceScale, isCJK, aliased), nil
 }
 
 // layoutMultiFaceText keeps fallback glyphs on the GPU by rasterizing each

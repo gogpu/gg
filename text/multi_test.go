@@ -331,3 +331,39 @@ func TestMultiFaceFacesAndFontRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestMultiFaceSourceAwareBoundaryCases(t *testing.T) {
+	var zero MultiFace
+	if face := zero.FaceForRune('x'); face != nil {
+		t.Fatalf("zero-value FaceForRune = %v, want nil", face)
+	}
+	if runs := zero.FontRuns("x"); runs != nil {
+		t.Fatalf("zero-value FontRuns = %#v, want nil", runs)
+	}
+	if runs := zero.ShapeRuns("x"); runs != nil {
+		t.Fatalf("zero-value ShapeRuns = %#v, want nil", runs)
+	}
+	if runs := (*MultiFace)(nil).ShapeRuns("x"); runs != nil {
+		t.Fatalf("nil ShapeRuns = %#v, want nil", runs)
+	}
+
+	latin := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})
+	nested, err := NewMultiFace(latin)
+	if err != nil {
+		t.Fatalf("NewMultiFace nested: %v", err)
+	}
+	filtered := NewFilteredFace(nested, RangeBasicLatin)
+	outer, err := NewMultiFace(filtered)
+	if err != nil {
+		t.Fatalf("NewMultiFace outer: %v", err)
+	}
+	if got := outer.FaceForRune('a'); got != latin {
+		t.Fatalf("nested fallback owner = %T, want underlying source face", got)
+	}
+
+	// A malformed zero-like value must not emit a run with no owner.
+	broken := &MultiFace{faces: []Face{nil}}
+	if runs := broken.FontRuns("x"); runs != nil {
+		t.Fatalf("FontRuns with no usable owner = %#v, want nil", runs)
+	}
+}

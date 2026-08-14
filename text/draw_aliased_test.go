@@ -198,3 +198,22 @@ func TestDrawAliased_MultiFacePreservesFallback(t *testing.T) {
 		t.Fatal("DrawAliased dropped all MultiFace fallback glyphs")
 	}
 }
+
+func TestDrawAliasedCompositeBoundaryCases(t *testing.T) {
+	dst := image.NewRGBA(image.Rect(0, 0, 120, 50))
+	var nilSourceFace *sourceFace
+	DrawAliased(dst, "A", nilSourceFace, 5, 35, color.Black)
+
+	source, err := NewFontSourceFromFile(testFontPath(t))
+	if err != nil {
+		t.Fatalf("NewFontSourceFromFile: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	filtered := NewFilteredFace(source.Face(24), RangeBasicLatin)
+	DrawAliased(dst, "Б", filtered, 5, 35, color.Black)
+	for i, value := range dst.Pix {
+		if value != 0 {
+			t.Fatalf("rejected filtered rune changed pixel byte %d", i)
+		}
+	}
+}

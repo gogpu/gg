@@ -114,19 +114,7 @@ func (e *GPUTextEngine) LayoutText(
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if face.Source() == nil {
-		if runsFace, ok := face.(interface{ FontRuns(string) []text.FontRun }); ok {
-			runs := runsFace.FontRuns(s)
-			for _, run := range runs {
-				if run.Face == nil || run.Face.Source() == nil {
-					return TextBatch{}, fmt.Errorf("MSDF text: fallback face has no FontSource")
-				}
-			}
-			// A TextBatch has one atlas binding. Keep all fallback runs in the
-			// shared Latin atlas so the complete string remains one ordered GPU
-			// batch (including mixed-script fallback) rather than silently
-			// downgrading the operation to CPU.
-			return e.layoutMultiFaceText(runs, x, y, color, matrix, deviceScale), nil
-		}
+		return e.layoutFallbackText(face, s, x, y, color, matrix)
 	}
 
 	logicalSize := face.Size()
@@ -134,9 +122,6 @@ func (e *GPUTextEngine) LayoutText(
 		logicalSize = 16 // fallback: never zero
 	}
 	fontSource := face.Source()
-	if fontSource == nil {
-		return TextBatch{}, fmt.Errorf("MSDF text: face has no FontSource (MultiFace requires ADR-065)")
-	}
 	fontID := computeFontID(fontSource)
 
 	// ADR-054: pass variations for variable font gvar deltas.
@@ -267,6 +252,26 @@ func (e *GPUTextEngine) LayoutText(
 	}, nil
 }
 
+func (e *GPUTextEngine) layoutFallbackText(
+	face text.Face,
+	s string,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+) (TextBatch, error) {
+	runs, ok := fallbackFontRuns(face, s)
+	if !ok {
+		return TextBatch{}, fmt.Errorf("MSDF text: face has no FontSource (MultiFace requires ADR-065)")
+	}
+	if !fontRunsHaveSources(runs) {
+		return TextBatch{}, fmt.Errorf("MSDF text: fallback face has no FontSource")
+	}
+	// A TextBatch has one atlas binding. Keep all fallback runs in the shared
+	// Latin atlas so the complete string remains one ordered GPU batch (including
+	// mixed-script fallback) rather than silently downgrading the operation to CPU.
+	return e.layoutMultiFaceText(runs, x, y, color, matrix), nil
+}
+
 // layoutMultiFaceText lays out source-aware fallback runs into one MSDF atlas
 // and one ordered batch. A batch can bind only one atlas texture, so fallback
 // runs use the shared Latin atlas here; glyph IDs remain source-qualified by
@@ -277,7 +282,6 @@ func (e *GPUTextEngine) layoutMultiFaceText(
 	x, y float64,
 	color gg.RGBA,
 	matrix gg.Matrix,
-	deviceScale float64,
 ) TextBatch {
 	if len(runs) == 0 {
 		return TextBatch{}

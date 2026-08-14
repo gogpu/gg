@@ -100,7 +100,7 @@ func (b *GlyphRunBuilder) AddShapedRun(run *ShapedRun, origin Point) {
 		if owner == nil {
 			owner = run.Face
 		}
-		if owner == nil || owner.Source() == nil {
+		if owner.Source() == nil {
 			continue
 		}
 		font := owner.Source().Parsed()
