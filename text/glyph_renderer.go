@@ -179,7 +179,11 @@ func (r *GlyphRenderer) RenderRun(run *ShapedRun, params RenderParams) []*GlyphO
 		return nil
 	}
 
-	font := run.Face.Source().Parsed()
+	source := run.Face.Source()
+	if source == nil {
+		return nil
+	}
+	font := source.Parsed()
 	if font == nil {
 		return nil
 	}
