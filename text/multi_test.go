@@ -37,7 +37,15 @@ func (m *mockFace) Language() string            { return "en" }
 func (m *mockFace) Variations() []FontVariation { return nil }
 func (m *mockFace) private()                    {}
 func (m *mockFace) HasGlyph(r rune) bool        { _, ok := m.glyphs[r]; return ok }
-func (m *mockFace) Advance(text string) float64 { panic("not implemented") }
+func (m *mockFace) Advance(text string) float64 {
+	var total float64
+	for _, r := range text {
+		if advance, ok := m.glyphs[r]; ok {
+			total += advance
+		}
+	}
+	return total
+}
 func (m *mockFace) Glyphs(text string) iter.Seq[Glyph] {
 	return func(yield func(Glyph) bool) {
 		x := 0.0
@@ -287,5 +295,39 @@ func TestMultiFaceLanguage(t *testing.T) {
 
 	if mf.Language() != "en" {
 		t.Errorf("expected language \"en\", got %q", mf.Language())
+	}
+}
+
+func TestMultiFaceFacesAndFontRuns(t *testing.T) {
+	latin := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6, 'b': 7})
+	fallback := newMockFace(12, DirectionLTR, map[rune]float64{'界': 12})
+	mf, err := NewMultiFace(latin, fallback)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	faces := mf.Faces()
+	if len(faces) != 2 || faces[0] != latin || faces[1] != fallback {
+		t.Fatalf("Faces() = %#v, want the original fallback order", faces)
+	}
+	faces[0] = fallback
+	if mf.FaceForRune('a') != latin {
+		t.Fatal("Faces returned a mutable view of the fallback chain")
+	}
+
+	runs := mf.FontRuns("a界b")
+	if len(runs) != 3 {
+		t.Fatalf("FontRuns produced %d runs, want 3", len(runs))
+	}
+	wantText := []string{"a", "界", "b"}
+	wantFace := []Face{latin, fallback, latin}
+	wantOffset := []float64{0, 6, 18}
+	for i, run := range runs {
+		if run.Text != wantText[i] || run.Face != wantFace[i] {
+			t.Errorf("run %d = (%q, %T), want (%q, %T)", i, run.Text, run.Face, wantText[i], wantFace[i])
+		}
+		if run.Offset != wantOffset[i] {
+			t.Errorf("run %d offset = %v, want %v", i, run.Offset, wantOffset[i])
+		}
 	}
 }

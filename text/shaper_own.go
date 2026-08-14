@@ -65,6 +65,9 @@ func (s *OwnShaper) Shape(text string, face Face) []ShapedGlyph {
 	if text == "" || face == nil {
 		return nil
 	}
+	if multi, ok := face.(*MultiFace); ok {
+		return flattenShapedRuns(shapeMultiFaceRuns(text, multi, s))
+	}
 
 	source := face.Source()
 	if source == nil {

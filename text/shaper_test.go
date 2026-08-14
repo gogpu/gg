@@ -30,6 +30,40 @@ func TestBuiltinShapeEmpty(t *testing.T) {
 	}
 }
 
+func TestShapeMultiFaceRetainsSourceFaces(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	// The second range is intentionally disjoint from the primary face. Both
+	// wrappers share the same font data, but the shaped glyphs still retain the
+	// exact Face that owns each run (and therefore remain source-safe for GPU
+	// lookup).
+	other := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, other)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	glyphs := Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+	if glyphs[0].Face != latin || glyphs[1].Face != other {
+		t.Fatalf("source faces not retained: got %T and %T", glyphs[0].Face, glyphs[1].Face)
+	}
+	if glyphs[1].X <= glyphs[0].X {
+		t.Fatalf("fallback glyph position did not preserve run advance: x0=%v x1=%v", glyphs[0].X, glyphs[1].X)
+	}
+
+	runs := ShapeRuns("AБ", multi)
+	if len(runs) != 2 || runs[0].Face != latin || runs[1].Face != other {
+		t.Fatalf("ShapeRuns did not retain source runs: %#v", runs)
+	}
+}
+
 // TestBuiltinShapeLatinText tests shaping basic Latin text.
 func TestBuiltinShapeLatinText(t *testing.T) {
 	face := builtinTestFace(t)
