@@ -71,6 +71,7 @@ func drawGlyphs(
 	text string,
 	x, y float64,
 	col color.Color,
+	mode glyphRasterMode,
 	rasterize glyphRasterizeFunc,
 ) {
 	if vars := sf.Variations(); len(vars) > 0 {
@@ -115,7 +116,12 @@ func drawGlyphs(
 		subpixelX := glyphX - intX
 		subpixelY := glyphY - intY
 
-		result, err := rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+		key := makeCPUGlyphMaskCacheKey(glyph.GID, ppem, subpixelX, subpixelY, hinting, mode)
+		cached := sf.source.cpuGlyphMaskCache().GetOrCreate(key, func() cpuGlyphMaskCacheValue {
+			result, err := rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+			return cpuGlyphMaskCacheValue{result: result, err: err}
+		})
+		result, err := cached.result, cached.err
 		if err != nil || result == nil {
 			advanceX += hintedOrRawAdvance(ttCache, glyph, ppem)
 			continue
@@ -304,7 +310,7 @@ func rasterizeAliasedGlyph(
 // HintingNone advances (ADR-039), while outline rasterization still uses
 // the face's configured hinting for crisp stems.
 func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, col color.Color) {
-	drawGlyphs(dst, sf, text, x, y, col, rasterizeHintedGlyph)
+	drawGlyphs(dst, sf, text, x, y, col, rasterModeAA, rasterizeHintedGlyph)
 }
 
 // drawMultiFace renders text using a MultiFace, selecting the appropriate font for each rune.
