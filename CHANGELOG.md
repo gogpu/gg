@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Text-outline glyph cache collision between font faces** — Font IDs used by
+  `Context`'s glyph-outline cache now include the full face name, preventing
+  regular and bold faces in the same family from sharing cached outlines.
+
 ## [0.52.3] - 2026-08-13
 
 ### Added
