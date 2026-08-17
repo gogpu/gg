@@ -1929,22 +1929,13 @@ func (c *Context) applyClipToPaint() {
 	// Only needed on rasterAtlas (CPU dispatch). GPU uses hardware scissor + depth clip.
 	needsMask := !cs.IsRectOnly() && !AcceleratorCanRenderDirect()
 	if needsMask {
-		w := int(bounds.W + 0.5)
-		h := int(bounds.H + 0.5)
-		if w > 0 && h > 0 {
-			mask := make([]uint8, w*h)
-			originX := int(bounds.X)
-			originY := int(bounds.Y)
-			for py := 0; py < h; py++ {
-				for px := 0; px < w; px++ {
-					mask[py*w+px] = cs.Coverage(float64(originX+px)+0.5, float64(originY+py)+0.5)
-				}
-			}
-			c.paint.ClipMask = mask
-			c.paint.ClipMaskW = w
-			c.paint.ClipMaskH = h
-			c.paint.ClipMaskX = originX
-			c.paint.ClipMaskY = originY
+		mask := cs.RasterizedMask()
+		if len(mask.Pixels) > 0 {
+			c.paint.ClipMask = mask.Pixels
+			c.paint.ClipMaskW = mask.Width
+			c.paint.ClipMaskH = mask.Height
+			c.paint.ClipMaskX = mask.OriginX
+			c.paint.ClipMaskY = mask.OriginY
 		}
 	}
 
