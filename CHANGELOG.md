@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Text-outline glyph cache collision between font faces** — Font IDs used by
-  `Context`'s glyph-outline cache now include the full face name, preventing
-  regular and bold faces in the same family from sharing cached outlines.
+- **Text-outline glyph cache collision between font faces** ([#514](https://github.com/gogpu/gg/pull/514), @kivutar) —
+  Font IDs now include the full face name, preventing regular and bold faces
+  in the same family from sharing cached outlines. Font ID computation unified
+  into `text.ComputeFontID` — single source of truth for CPU, MSDF, and glyph
+  mask pipelines.
 
 ## [0.52.3] - 2026-08-13
 

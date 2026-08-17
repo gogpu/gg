@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"fmt"
-	"hash/fnv"
 	"math"
 	"os"
 	"sync"
@@ -729,17 +728,7 @@ func selectGlyphMaskLCD(_ float64, _ gg.Matrix) bool {
 }
 
 // computeGlyphMaskFontID generates a stable hash identifier for a font source.
-// Uses the same approach as computeFontID in gpu_text.go.
+// Delegates to text.ComputeFontID — single source of truth for font hashing.
 func computeGlyphMaskFontID(source *text.FontSource) uint64 {
-	if source == nil {
-		return 0
-	}
-	h := fnv.New64a()
-	parsed := source.Parsed()
-	fullName := parsed.FullName()
-	if fullName == "" {
-		fullName = source.Name()
-	}
-	_, _ = fmt.Fprintf(h, "%s:%d", fullName, parsed.NumGlyphs())
-	return h.Sum64()
+	return text.ComputeFontID(source)
 }
