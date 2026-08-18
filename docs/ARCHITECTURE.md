@@ -551,11 +551,6 @@ gg/
 │   │   ├── lru.go          # LRU eviction
 │   │   └── sharded.go      # Sharded cache for concurrency
 │   │
-│   ├── gpucore/            # GPU core types and shaders
-│   │   ├── adapter.go      # Core GPU adapter
-│   │   ├── pipeline.go     # Core pipeline
-│   │   ├── types.go        # Core GPU types
-│   │   └── shaders/        # WGSL compute shaders
 │   │
 │   ├── blend/              # Color blending (29 modes)
 │   ├── parallel/           # Parallel tile rendering
