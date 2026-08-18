@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into `text.ComputeFontID` — single source of truth for CPU, MSDF, and glyph
   mask pipelines.
 
+### Removed
+
+- **Dead `internal/gpucore` abstraction layer** ([#518](https://github.com/gogpu/gg/issues/518)) —
+  Removed ~1,740 LOC of orphaned code (`gpucore/` package + `HALAdapter`).
+  Planned as GPU abstraction for Vello compute but never adopted — production
+  uses `*wgpu.Device`/`*wgpu.Queue` directly (Vello pattern).
+
 ## [0.52.3] - 2026-08-13
 
 ### Added
