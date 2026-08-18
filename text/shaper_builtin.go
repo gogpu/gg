@@ -25,6 +25,11 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 	if text == "" || face == nil {
 		return nil
 	}
+	if face.Source() == nil {
+		if runsFace, ok := face.(interface{ FontRuns(string) []FontRun }); ok {
+			return flattenShapedRuns(shapeFontRuns(text, runsFace.FontRuns(text), s))
+		}
+	}
 
 	source := face.Source()
 	if source == nil {

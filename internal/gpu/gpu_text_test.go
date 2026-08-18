@@ -5,6 +5,7 @@ package gpu
 import (
 	"testing"
 
+	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
@@ -59,5 +60,37 @@ func TestComputeFontID_SameFontStableID(t *testing.T) {
 	id2 := computeFontID(src)
 	if id1 != id2 {
 		t.Errorf("same font source should produce stable ID: %d != %d", id1, id2)
+	}
+}
+
+func TestGPUTextEngineMultiFaceKeepsFallbackGlyphsBatched(t *testing.T) {
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := text.NewFilteredFace(source.Face(20), text.RangeBasicLatin)
+	cyrillic := text.NewFilteredFace(source.Face(20), text.RangeCyrillic)
+	face, err := text.NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+
+	engine := NewGPUTextEngine()
+	batch, err := engine.LayoutText(face, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(MultiFace): %v", err)
+	}
+	if len(batch.Quads) < 2 {
+		t.Fatalf("LayoutText(MultiFace) emitted %d quads, want at least 2", len(batch.Quads))
+	}
+
+	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
+	filteredBatch, err := engine.LayoutText(filtered, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredBatch.Quads) == 0 {
+		t.Fatal("LayoutText(FilteredFace(MultiFace)) dropped the allowed run")
 	}
 }

@@ -53,6 +53,58 @@ func TestGlyphMaskEngineLayoutShapedGlyphsAliasedUsesBinaryCoverage(t *testing.T
 	}
 }
 
+func TestGlyphMaskEngineMultiFaceStaysOnGPUAndPreservesShapedRuns(t *testing.T) {
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := text.NewFilteredFace(source.Face(20), text.RangeBasicLatin)
+	cyrillic := text.NewFilteredFace(source.Face(20), text.RangeCyrillic)
+	face, err := text.NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+
+	engine := NewGlyphMaskEngine()
+	batch, err := engine.LayoutText(face, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(MultiFace): %v", err)
+	}
+	if len(batch.Quads) < 2 {
+		t.Fatalf("LayoutText(MultiFace) emitted %d quads, want at least 2", len(batch.Quads))
+	}
+
+	shaped := text.Shape("AБ", face)
+	if len(shaped) < 2 || shaped[0].Face != latin || shaped[1].Face != cyrillic {
+		t.Fatalf("Shape did not retain source faces: %#v", shaped)
+	}
+	shapedBatch, err := engine.LayoutShapedGlyphs(face, shaped, 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1, false)
+	if err != nil {
+		t.Fatalf("LayoutShapedGlyphs(MultiFace): %v", err)
+	}
+	if len(shapedBatch.Quads) < 2 {
+		t.Fatalf("LayoutShapedGlyphs(MultiFace) emitted %d quads, want at least 2", len(shapedBatch.Quads))
+	}
+
+	filtered := text.NewFilteredFace(face, text.RangeBasicLatin)
+	filteredBatch, err := engine.LayoutText(filtered, "AБ", 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1)
+	if err != nil {
+		t.Fatalf("LayoutText(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredBatch.Quads) == 0 {
+		t.Fatal("LayoutText(FilteredFace(MultiFace)) dropped the allowed fallback run")
+	}
+	filteredGlyphs := text.Shape("AБ", filtered)
+	filteredShaped, err := engine.LayoutShapedGlyphs(filtered, filteredGlyphs, 0, 24, gg.RGBA{A: 1}, gg.Identity(), 1, false)
+	if err != nil {
+		t.Fatalf("LayoutShapedGlyphs(FilteredFace(MultiFace)): %v", err)
+	}
+	if len(filteredShaped.Quads) == 0 {
+		t.Fatal("LayoutShapedGlyphs(FilteredFace(MultiFace)) dropped the allowed run")
+	}
+}
+
 func TestSelectGlyphMaskLCD(t *testing.T) {
 	// ADR-060 / BUG-TEXT-001: selectGlyphMaskLCD always returns false for
 	// the GPU pipeline because standard SrcOver blend cannot do per-channel

@@ -217,25 +217,34 @@ func (c *Context) drawShapedGlyphsAliased(glyphs []text.ShapedGlyph, face text.F
 // CPU fallback when GPU shaped text is unavailable.
 // ADR-054: uses ExtractOutlineHintedVar to apply gvar deltas for variable fonts.
 func (c *Context) drawShapedGlyphsAsOutlines(glyphs []text.ShapedGlyph, face text.Face, x, y float64) {
-	source := face.Source()
-	if source == nil {
-		return
-	}
-
-	parsed := source.Parsed()
 	extractor := text.NewOutlineExtractor()
-	variations := face.Variations()
-
-	outlineFunc := func(gid text.GlyphID) *text.GlyphOutline {
-		outline, err := extractor.ExtractOutlineHintedVar(parsed, gid, face.Size(), text.HintingNone, variations)
-		if err != nil {
-			return nil
-		}
-		return outline
-	}
 
 	for _, glyph := range glyphs {
-		outline := outlineFunc(glyph.GID)
+		owner := glyph.Face
+		if owner == nil {
+			owner = face
+			if multi, ok := face.(*text.MultiFace); ok {
+				// Legacy shaped data predates source identity. Use the first
+				// fallback face as a visible replacement rather than silently
+				// dropping the entire shaped draw; source-aware Shape results
+				// always carry the precise owner above.
+				owner = multi.FaceForRune(0)
+			}
+		}
+		if owner == nil {
+			continue
+		}
+		source := owner.Source()
+		if source == nil {
+			// A legacy shaped glyph without source identity cannot safely
+			// infer which font owns its local GID. Skip only that glyph; a
+			// source-aware MultiFace shape continues rendering other runs.
+			continue
+		}
+		outline, err := extractor.ExtractOutlineHintedVar(source.Parsed(), glyph.GID, owner.Size(), text.HintingNone, owner.Variations())
+		if err != nil {
+			continue
+		}
 		if outline == nil || outline.IsEmpty() {
 			continue
 		}

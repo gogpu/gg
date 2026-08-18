@@ -5,6 +5,7 @@ import (
 
 	"github.com/gogpu/gg"
 	"github.com/gogpu/gg/text"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 func TestDefaultTextRendererConfig(t *testing.T) {
@@ -226,6 +227,85 @@ func TestTextRenderer_RenderRun_Nil(t *testing.T) {
 	}
 	if rendered != nil {
 		t.Errorf("RenderRun empty should return nil")
+	}
+}
+
+func TestTextRenderer_RenderRunMultiFaceUsesGlyphOwners(t *testing.T) {
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("failed to create test font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := text.NewFilteredFace(source.Face(18), text.RangeBasicLatin)
+	cyrillic := text.NewFilteredFace(source.Face(18), text.RangeCyrillic)
+	multi, err := text.NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+	glyphs := text.Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+
+	rendered, err := NewTextRenderer().RenderRun(&text.ShapedRun{
+		Glyphs: glyphs,
+		Face:   multi,
+		Size:   18,
+	})
+	if err != nil {
+		t.Fatalf("RenderRun(MultiFace): %v", err)
+	}
+	if len(rendered) != len(glyphs) {
+		t.Fatalf("RenderRun returned %d glyphs, want %d", len(rendered), len(glyphs))
+	}
+	for i, glyph := range rendered {
+		if glyph == nil || glyph.Path == nil || glyph.Path.IsEmpty() {
+			t.Errorf("glyph %d lost its source-owned outline", i)
+		}
+	}
+
+	legacy := glyphs[0]
+	legacy.Face = nil
+	if _, err := NewTextRenderer().RenderGlyphs([]text.ShapedGlyph{legacy}, multi); err == nil {
+		t.Fatal("legacy composite glyph without an owner should report an error")
+	}
+}
+
+func TestTextRendererSourceOwnerValidation(t *testing.T) {
+	renderer := NewTextRenderer()
+	if _, err := renderer.RenderGlyph(text.ShapedGlyph{}, nil); err == nil {
+		t.Fatal("RenderGlyph nil face should report an error")
+	}
+	if _, err := renderer.RenderGlyphs([]text.ShapedGlyph{{GID: 1}}, nil); err == nil {
+		t.Fatal("RenderGlyphs nil face should report an error")
+	}
+
+	source, err := text.NewFontSource(goregular.TTF)
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	primary := source.Face(18)
+	owner := source.Face(20)
+	glyphs := text.Shape("A", owner)
+	if len(glyphs) != 1 {
+		t.Fatalf("Shape returned %d glyphs, want 1", len(glyphs))
+	}
+	if rendered, err := renderer.RenderGlyphs(glyphs, owner); err != nil || len(rendered) != 1 || rendered[0] == nil {
+		t.Fatalf("single-source RenderGlyphs = (%#v, %v)", rendered, err)
+	}
+	rendered, err := renderer.RenderGlyphs(glyphs, primary)
+	if err != nil || len(rendered) != 1 || rendered[0] == nil || rendered[0].Path == nil {
+		t.Fatalf("source-owned RenderGlyphs = (%#v, %v)", rendered, err)
+	}
+
+	if err := source.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := renderer.RenderGlyph(text.ShapedGlyph{GID: 1}, primary); err == nil {
+		t.Fatal("RenderGlyph closed source should report an error")
+	}
+	if _, err := renderer.RenderGlyphs([]text.ShapedGlyph{{GID: 1}}, primary); err == nil {
+		t.Fatal("RenderGlyphs closed source should report an error")
 	}
 }
 

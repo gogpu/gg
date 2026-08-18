@@ -102,6 +102,85 @@ func TestGlyphRunBuilder_AddShapedGlyph_Nil(t *testing.T) {
 	}
 }
 
+func TestGlyphRunBuilder_AddShapedRunMultiFaceUsesGlyphOwners(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+	glyphs := Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+
+	builder := NewGlyphRunBuilder(NewGlyphCache())
+	builder.AddShapedRun(&ShapedRun{Glyphs: glyphs, Face: multi, Size: 16}, Point{})
+	if builder.Len() != len(glyphs) {
+		t.Fatalf("AddShapedRun added %d instances, want %d", builder.Len(), len(glyphs))
+	}
+	for i, instance := range builder.Instances() {
+		if instance.GlyphID != glyphs[i].GID {
+			t.Errorf("instance %d GID=%d, want %d", i, instance.GlyphID, glyphs[i].GID)
+		}
+		if instance.Size != 16 {
+			t.Errorf("instance %d size=%v, want 16", i, instance.Size)
+		}
+	}
+}
+
+func TestGlyphRunBuilderAddShapedRunOwnerValidationAndDefaultSize(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	face := source.Face(17)
+	glyphs := Shape("A", face)
+	if len(glyphs) != 1 {
+		t.Fatalf("Shape returned %d glyphs, want 1", len(glyphs))
+	}
+	ownerless := glyphs[0]
+	ownerless.Face = nil
+
+	noSource, err := NewMultiFace(newMockFace(17, DirectionLTR, map[rune]float64{'A': 10}))
+	if err != nil {
+		t.Fatalf("NewMultiFace no source: %v", err)
+	}
+	missingSource := glyphs[0]
+	missingSource.Face = noSource
+
+	closedSource, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource closed: %v", err)
+	}
+	closedFace := closedSource.Face(17)
+	if err := closedSource.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	missingParsed := glyphs[0]
+	missingParsed.Face = closedFace
+
+	builder := NewGlyphRunBuilder(NewGlyphCache())
+	builder.AddShapedRun(&ShapedRun{
+		Glyphs: []ShapedGlyph{ownerless, missingSource, missingParsed},
+		Face:   face,
+		Size:   0,
+	}, Point{X: 2, Y: 3})
+	instances := builder.Instances()
+	if len(instances) != 1 {
+		t.Fatalf("instances = %#v, want only valid owner", instances)
+	}
+	if instances[0].Size != 17 || instances[0].Position.X != 2 || instances[0].Position.Y != 3 {
+		t.Fatalf("defaulted instance = %#v", instances[0])
+	}
+}
+
 func TestGlyphRunBuilder_AddShapedGlyphs(t *testing.T) {
 	builder := NewGlyphRunBuilder(NewGlyphCache())
 
