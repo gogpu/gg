@@ -418,6 +418,26 @@ func TestTTHintedOutlineToGlyphOutline(t *testing.T) {
 	}
 }
 
+func TestTTHintCacheReusesHintedOutline(t *testing.T) {
+	data := loadTTTestFont(t, "tthint_subset.ttf")
+	cache := newTTHintCache(data)
+	if cache == nil {
+		t.Fatal("expected non-nil cache")
+	}
+
+	first, err := cache.hintGlyphOutline(1, 16)
+	if err != nil || first == nil {
+		t.Fatalf("first hintGlyphOutline() = (%v, %v), want outline", first, err)
+	}
+	second, err := cache.hintGlyphOutline(1, 16)
+	if err != nil {
+		t.Fatalf("second hintGlyphOutline() error = %v", err)
+	}
+	if second != first {
+		t.Fatal("second hintGlyphOutline() did not reuse the cached outline")
+	}
+}
+
 func TestParseGlyfFlags(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/gogpu/gg/internal/cache"
 )
 
 // FontSource represents a loaded font file.
@@ -28,7 +30,13 @@ type FontSource struct {
 	// Mutex protects caches and internal state
 	mu sync.RWMutex
 
-	// Caches (to be implemented in TASK-044)
+	// cpuGlyphMasks caches final rasterized masks for the software text path.
+	// It is initialized lazily because many FontSources are only used by GPU
+	// text paths that have their own atlas.
+	cpuGlyphMasksOnce sync.Once
+	cpuGlyphMasks     *cache.ShardedCache[cpuGlyphMaskCacheKey, cpuGlyphMaskCacheValue]
+
+	// Other caches (to be implemented in TASK-044)
 	// shapingCache  *Cache[shapingKey, []Glyph]
 	// glyphCache    *Cache[glyphKey, *GlyphImage]
 	// hasGlyphCache *runeToBoolMap
@@ -147,6 +155,7 @@ func (s *FontSource) Close() error {
 	// Clear data
 	s.data = nil
 	s.parsed = nil
+	s.clearCPUGlyphMaskCache()
 
 	// Clear caches (when implemented in TASK-044)
 
