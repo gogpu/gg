@@ -257,8 +257,17 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 
 	s.gpuReady = true
 
-	// Initialize internal VelloAccelerator with the shared device.
-	s.initVelloAccelerator(s.device, s.queue)
+	// Check compute support before attempting compute pipeline creation.
+	// Matches Skia Graphite caps->computeSupport() gate (AtlasProvider.cpp:42)
+	// and Flutter SupportsCompute() check. Without this, GLES 3.0 backends
+	// would attempt to create compute pipelines that fail at the HAL level.
+	if CheckGPUComputeSupport(provider) {
+		s.initVelloAccelerator(s.device, s.queue)
+	} else {
+		slogger().Info("gpu-shared: compute shaders not supported, skipping VelloAccelerator",
+			"strategy", s.strategy.String(),
+		)
+	}
 
 	slogger().Info("gpu-shared: switched to shared GPU device",
 		"strategy", s.strategy.String(),
@@ -489,8 +498,17 @@ func (s *GPUShared) initGPU() error {
 
 	s.gpuReady = true
 
-	// Initialize internal VelloAccelerator for compute routing.
-	s.initVelloAccelerator(s.device, s.queue)
+	// Check compute support before attempting compute pipeline creation.
+	// Matches Skia Graphite caps->computeSupport() gate (AtlasProvider.cpp:42).
+	// In standalone mode we query the adapter directly (no DeviceProvider).
+	downlevel := adapter.DownlevelCapabilities()
+	if downlevel.Flags.Contains(gputypes.DownlevelFlagsComputeShaders) {
+		s.initVelloAccelerator(s.device, s.queue)
+	} else {
+		slogger().Info("gpu-shared: compute shaders not supported, skipping VelloAccelerator",
+			"adapter", adapterInfo.Name,
+		)
+	}
 
 	slogger().Info("gpu-shared: GPU initialized",
 		"strategy", s.strategy.String(),
