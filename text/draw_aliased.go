@@ -32,5 +32,5 @@ func DrawAliased(dst draw.Image, text string, face Face, x, y float64, col color
 		return
 	}
 
-	drawGlyphs(dst, sf, text, x, y, col, rasterizeAliasedGlyph)
+	drawGlyphs(dst, sf, text, x, y, col, rasterModeAliased, rasterizeAliasedGlyph)
 }

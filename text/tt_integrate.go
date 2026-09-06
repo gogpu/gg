@@ -21,7 +21,11 @@ package text
 
 import (
 	"sync"
+
+	"github.com/gogpu/gg/internal/cache"
 )
+
+const ttHintOutlineCacheCapacity = 32
 
 // ttHintCache provides cached TT hint instances per font+size combination.
 // Thread-safe via sync.Map for concurrent access from multiple goroutines.
@@ -43,6 +47,11 @@ type ttHintCacheEntry struct {
 	instance *ttHintInstance
 	err      error // non-nil if instance creation failed
 
+	// outlines caches final hinted outlines per glyph. Face measurement asks
+	// for hinted advances before Draw rasterizes the same glyphs; retaining the
+	// immutable result avoids running the loader and TT interpreter twice.
+	outlines *cache.ShardedCache[uint16, *ttCachedOutline]
+
 	// advances caches hinted advance widths per glyph ID.
 	// Key: glyphID (uint16), Value: ttCachedAdvance.
 	// Avoids re-running the full TT bytecode interpreter for advance-only
@@ -55,6 +64,12 @@ type ttHintCacheEntry struct {
 type ttCachedAdvance struct {
 	width float64
 	ok    bool
+}
+
+type ttCachedOutline struct {
+	once    sync.Once
+	outline *ttGlyphOutline
+	err     error
 }
 
 // newTTHintCache creates a hint cache for the given font data.
@@ -101,9 +116,27 @@ func (c *ttHintCache) getInstance(ppem int32) (*ttHintInstance, error) {
 //
 //nolint:nilnil // nil result = "no hintable outline"
 func (c *ttHintCache) hintGlyphOutline(glyphID uint16, ppem int32) (*ttGlyphOutline, error) {
-	instance, err := c.getInstance(ppem)
-	if err != nil {
-		return nil, err
+	entry := c.getEntry(ppem)
+	if entry == nil {
+		return nil, nil
+	}
+
+	cached := entry.outlines.GetOrCreate(glyphID, func() *ttCachedOutline {
+		return &ttCachedOutline{}
+	})
+	cached.once.Do(func() {
+		cached.outline, cached.err = c.hintGlyphOutlineUncached(entry.instance, entry.err, glyphID)
+	})
+	return cached.outline, cached.err
+}
+
+func (c *ttHintCache) hintGlyphOutlineUncached(
+	instance *ttHintInstance,
+	instanceErr error,
+	glyphID uint16,
+) (*ttGlyphOutline, error) {
+	if instanceErr != nil {
+		return nil, instanceErr
 	}
 	if instance == nil {
 		return nil, nil
@@ -200,7 +233,14 @@ func (c *ttHintCache) getEntry(ppem int32) *ttHintCacheEntry {
 
 	// Create new instance (fpgm + prep execution).
 	instance, err := newTTHintInstance(c.font, ppem, ttTargetSmooth)
-	entry := &ttHintCacheEntry{instance: instance, err: err}
+	entry := &ttHintCacheEntry{
+		instance: instance,
+		err:      err,
+		outlines: cache.NewSharded[uint16, *ttCachedOutline](
+			ttHintOutlineCacheCapacity,
+			func(glyphID uint16) uint64 { return uint64(glyphID) },
+		),
+	}
 
 	// Store in cache (LoadOrStore handles races).
 	actual, _ := c.entries.LoadOrStore(ppem, entry)

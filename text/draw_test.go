@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -64,6 +65,65 @@ func TestDrawEmpty(t *testing.T) {
 
 	// Draw empty string (should not panic)
 	Draw(dst, "", face, 10, 30, color.Black)
+}
+
+func TestDrawCachesCPUGlyphMasksPerFontSource(t *testing.T) {
+	source := loadTestFont(t)
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(16)
+	dst := image.NewRGBA(image.Rect(0, 0, 200, 50))
+	Draw(dst, "Repeated text", face, 10, 30, color.Black)
+
+	cache := source.cpuGlyphMaskCache()
+	if cache.Len() == 0 {
+		t.Fatal("CPU glyph mask cache is empty after drawing text")
+	}
+	cache.ResetStats()
+
+	Draw(dst, "Repeated text", face, 10, 30, color.Black)
+	stats := cache.Stats()
+	if stats.Hits == 0 {
+		t.Fatal("second draw did not reuse cached CPU glyph masks")
+	}
+	if stats.Misses != 0 {
+		t.Fatalf("second draw cache misses = %d, want 0", stats.Misses)
+	}
+}
+
+func TestDrawCPUGlyphMaskCacheSeparatesRasterModes(t *testing.T) {
+	source := loadTestFont(t)
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(16)
+	dst := image.NewRGBA(image.Rect(0, 0, 100, 50))
+	Draw(dst, "A", face, 10, 30, color.Black)
+	entriesAfterAA := source.cpuGlyphMaskCache().Len()
+
+	DrawAliased(dst, "A", face, 10, 30, color.Black)
+	if got := source.cpuGlyphMaskCache().Len(); got <= entriesAfterAA {
+		t.Fatalf("cache entries after aliased draw = %d, want more than AA entries %d", got, entriesAfterAA)
+	}
+}
+
+func TestDrawCPUGlyphMaskCacheConcurrent(t *testing.T) {
+	source := loadTestFont(t)
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(16)
+	const goroutines = 8
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			dst := image.NewRGBA(image.Rect(0, 0, 200, 50))
+			for range 10 {
+				Draw(dst, "Concurrent text", face, 10, 30, color.Black)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestDrawNilFace(t *testing.T) {
@@ -798,6 +858,25 @@ func BenchmarkDraw(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Draw(dst, text, face, 10, 50, color.Black)
+	}
+}
+
+func BenchmarkDrawCPUGlyphMaskCacheHit(b *testing.B) {
+	source, err := NewFontSource(requireTestFont(b))
+	if err != nil {
+		b.Fatalf("NewFontSource: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	face := source.Face(16)
+	dst := image.NewRGBA(image.Rect(0, 0, 400, 100))
+	const value = "The quick brown fox jumps over the lazy dog"
+	Draw(dst, value, face, 10, 50, color.Black)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		Draw(dst, value, face, 10, 50, color.Black)
 	}
 }
 
