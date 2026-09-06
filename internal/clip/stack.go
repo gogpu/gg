@@ -1,6 +1,9 @@
 package clip
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 // RRectClip describes a rounded rectangle clip region.
 // The Rect field holds the bounding rectangle in device coordinates,
@@ -14,8 +17,25 @@ type RRectClip struct {
 // It maintains a stack of clip entries, where each entry can be either a
 // rectangular clip, a rounded rectangle clip, or a path-based mask clip.
 type ClipStack struct {
-	entries []clipEntry
-	bounds  Rect
+	entries        []clipEntry
+	bounds         Rect
+	rasterizedMask *rasterizedMaskCache
+}
+
+// CoverageMask is a read-only, pixel-aligned clip coverage mask.
+type CoverageMask struct {
+	Pixels           []uint8
+	Width, Height    int
+	OriginX, OriginY int
+}
+
+// rasterizedMaskCache holds the immutable coverage mask for one clip-stack
+// state. Clones share the cache while their entries are identical. Each pushed
+// entry retains the previous cache so Pop can restore it without rerasterizing;
+// the new state receives a separate cache so queued paint commands stay valid.
+type rasterizedMaskCache struct {
+	once sync.Once
+	mask CoverageMask
 }
 
 // Clone returns an independent copy of the clip stack. Clip masks and rounded
@@ -26,17 +46,19 @@ func (cs *ClipStack) Clone() *ClipStack {
 		return nil
 	}
 	return &ClipStack{
-		entries: append([]clipEntry(nil), cs.entries...),
-		bounds:  cs.bounds,
+		entries:        append([]clipEntry(nil), cs.entries...),
+		bounds:         cs.bounds,
+		rasterizedMask: cs.rasterizedMask,
 	}
 }
 
 // clipEntry represents a single clip operation in the stack.
 type clipEntry struct {
-	prevBounds Rect
-	mask       *MaskClipper
-	rrect      *RRectClip // non-nil for rounded rectangle clips
-	antiAlias  bool
+	prevBounds         Rect
+	prevRasterizedMask *rasterizedMaskCache
+	mask               *MaskClipper
+	rrect              *RRectClip // non-nil for rounded rectangle clips
+	antiAlias          bool
 }
 
 // NewClipStack creates a new clip stack with the given bounds.
@@ -56,13 +78,17 @@ func (cs *ClipStack) PushRect(r Rect) {
 
 	// Push entry onto stack
 	cs.entries = append(cs.entries, clipEntry{
-		prevBounds: cs.bounds,
-		mask:       nil, // No mask for rectangular clips
-		antiAlias:  false,
+		prevBounds:         cs.bounds,
+		prevRasterizedMask: cs.rasterizedMask,
+		mask:               nil, // No mask for rectangular clips
+		antiAlias:          false,
 	})
 
 	// Update current bounds
 	cs.bounds = newBounds
+	if cs.rasterizedMask != nil {
+		cs.rasterizedMask = &rasterizedMaskCache{}
+	}
 }
 
 // PushRRect pushes a rounded rectangle clip region onto the stack.
@@ -85,12 +111,14 @@ func (cs *ClipStack) PushRRect(r Rect, radius float64) {
 
 	// Push entry with rrect data.
 	cs.entries = append(cs.entries, clipEntry{
-		prevBounds: cs.bounds,
-		rrect:      &RRectClip{Rect: r, Radius: radius},
+		prevBounds:         cs.bounds,
+		prevRasterizedMask: cs.rasterizedMask,
+		rrect:              &RRectClip{Rect: r, Radius: radius},
 	})
 
 	// Update current bounds.
 	cs.bounds = newBounds
+	cs.rasterizedMask = &rasterizedMaskCache{}
 }
 
 // PushPath pushes a path-based clip region onto the stack.
@@ -113,13 +141,15 @@ func (cs *ClipStack) PushPathWithRule(verbs []PathVerb, coords []float64, antiAl
 
 	// Push entry onto stack
 	cs.entries = append(cs.entries, clipEntry{
-		prevBounds: cs.bounds,
-		mask:       mask,
-		antiAlias:  antiAlias,
+		prevBounds:         cs.bounds,
+		prevRasterizedMask: cs.rasterizedMask,
+		mask:               mask,
+		antiAlias:          antiAlias,
 	})
 
 	// Update current bounds
 	cs.bounds = newBounds
+	cs.rasterizedMask = &rasterizedMaskCache{}
 
 	return nil
 }
@@ -137,6 +167,7 @@ func (cs *ClipStack) Pop() {
 
 	// Restore previous bounds
 	cs.bounds = entry.prevBounds
+	cs.rasterizedMask = entry.prevRasterizedMask
 
 	// Remove entry from stack
 	cs.entries = cs.entries[:lastIdx]
@@ -222,6 +253,40 @@ func (cs *ClipStack) Coverage(x, y float64) byte {
 	}
 
 	return byte(coverage)
+}
+
+// RasterizedMask returns a read-only, pixel-aligned coverage mask for the
+// current clip-stack state. Repeated calls reuse the same backing array until
+// the stack is mutated. The mask is sampled at pixel centers and uses the same
+// bounds rounding as the software rendering pipeline.
+func (cs *ClipStack) RasterizedMask() CoverageMask {
+	if cs == nil || cs.IsRectOnly() {
+		return CoverageMask{}
+	}
+	if cs.rasterizedMask == nil {
+		cs.rasterizedMask = &rasterizedMaskCache{}
+	}
+	cache := cs.rasterizedMask
+	cache.once.Do(func() {
+		bounds := cs.bounds
+		mask := &cache.mask
+		mask.Width = int(bounds.W + 0.5)
+		mask.Height = int(bounds.H + 0.5)
+		mask.OriginX = int(bounds.X)
+		mask.OriginY = int(bounds.Y)
+		if mask.Width > 0 && mask.Height > 0 {
+			mask.Pixels = make([]uint8, mask.Width*mask.Height)
+			for py := 0; py < mask.Height; py++ {
+				for px := 0; px < mask.Width; px++ {
+					mask.Pixels[py*mask.Width+px] = cs.Coverage(
+						float64(mask.OriginX+px)+0.5,
+						float64(mask.OriginY+py)+0.5,
+					)
+				}
+			}
+		}
+	})
+	return cache.mask
 }
 
 // rrectSDF computes the signed distance from point (px, py) to the rounded
@@ -312,4 +377,5 @@ func (cs *ClipStack) Depth() int {
 func (cs *ClipStack) Reset(bounds Rect) {
 	cs.entries = cs.entries[:0]
 	cs.bounds = bounds
+	cs.rasterizedMask = nil
 }

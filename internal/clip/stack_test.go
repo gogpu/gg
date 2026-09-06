@@ -617,6 +617,72 @@ func TestClipStack_PushRRect(t *testing.T) {
 	}
 }
 
+func TestClipStack_RasterizedMaskCache(t *testing.T) {
+	stack := NewClipStack(NewRect(0, 0, 200, 200))
+	stack.PushRRect(NewRect(20, 30, 100, 80), 10)
+
+	first := stack.RasterizedMask()
+	if len(first.Pixels) != 100*80 || first.Width != 100 || first.Height != 80 || first.OriginX != 20 || first.OriginY != 30 {
+		t.Fatalf(
+			"RasterizedMask() = len %d, %dx%d at %d,%d; want len 8000, 100x80 at 20,30",
+			len(first.Pixels), first.Width, first.Height, first.OriginX, first.OriginY,
+		)
+	}
+	second := stack.RasterizedMask()
+	if &first.Pixels[0] != &second.Pixels[0] {
+		t.Fatal("unchanged clip stack did not reuse its rasterized mask")
+	}
+
+	clone := stack.Clone()
+	fromClone := clone.RasterizedMask()
+	if &first.Pixels[0] != &fromClone.Pixels[0] {
+		t.Fatal("clone of unchanged clip stack did not share its rasterized mask")
+	}
+
+	clone.PushRect(NewRect(25, 35, 40, 30))
+	mutated := clone.RasterizedMask()
+	if len(mutated.Pixels) == 0 {
+		t.Fatal("mutated clip stack produced an empty rasterized mask")
+	}
+	if &first.Pixels[0] == &mutated.Pixels[0] {
+		t.Fatal("mutating clone reused the previous clip state's mask")
+	}
+	clone.Pop()
+	restored := clone.RasterizedMask()
+	if len(restored.Pixels) == 0 || &first.Pixels[0] != &restored.Pixels[0] {
+		t.Fatal("popping clone did not restore the previous clip state's mask")
+	}
+	afterMutation := stack.RasterizedMask()
+	if &first.Pixels[0] != &afterMutation.Pixels[0] {
+		t.Fatal("mutating clone invalidated the original clip stack's mask")
+	}
+}
+
+func TestClipStack_RasterizedMaskCacheConcurrentClones(t *testing.T) {
+	stack := NewClipStack(NewRect(0, 0, 200, 200))
+	stack.PushRRect(NewRect(20, 30, 100, 80), 10)
+
+	const workers = 16
+	results := make(chan CoverageMask, workers)
+	for range workers {
+		clone := stack.Clone()
+		go func() {
+			results <- clone.RasterizedMask()
+		}()
+	}
+
+	first := <-results
+	if len(first.Pixels) == 0 {
+		t.Fatal("concurrent mask generation produced an empty mask")
+	}
+	for range workers - 1 {
+		mask := <-results
+		if len(mask.Pixels) == 0 || &first.Pixels[0] != &mask.Pixels[0] {
+			t.Fatal("clones did not share one concurrently initialized mask")
+		}
+	}
+}
+
 func TestClipStack_PushRRect_ZeroRadius(t *testing.T) {
 	stack := NewClipStack(NewRect(0, 0, 200, 200))
 
