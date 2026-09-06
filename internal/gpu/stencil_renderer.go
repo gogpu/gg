@@ -382,13 +382,13 @@ func (sr *StencilRenderer) encodeAndReadback(
 	rp.SetPipeline(stencilPipeline)
 	rp.SetBindGroup(0, bufs.stencilBindGroup, nil)
 	rp.SetVertexBuffer(0, bufs.fanVertBuf, 0)
-	rp.Draw(bufs.fanVertexCount, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{VertexCount: bufs.fanVertexCount, InstanceCount: 1})
 
 	rp.SetPipeline(sr.nonZeroCoverPipeline)
 	rp.SetBindGroup(0, bufs.coverBindGroup, nil)
 	rp.SetVertexBuffer(0, bufs.coverVertBuf, 0)
 	rp.SetStencilReference(0)
-	rp.Draw(6, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 
 	_ = rp.End()
 
@@ -502,7 +502,7 @@ func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilC
 	rp.SetPipeline(stencilPipeline)
 	rp.SetBindGroup(0, bufs.stencilBindGroup, nil)
 	rp.SetVertexBuffer(0, bufs.fanVertBuf, 0)
-	rp.Draw(bufs.fanVertexCount, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{VertexCount: bufs.fanVertexCount, InstanceCount: 1})
 
 	// Pass 2: Cover (clip applied here — writes color output).
 	rp.SetPipeline(coverPipeline)
@@ -512,7 +512,7 @@ func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilC
 	}
 	rp.SetVertexBuffer(0, bufs.coverVertBuf, 0)
 	rp.SetStencilReference(0)
-	rp.Draw(6, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1})
 }
 
 // makeStencilFillUniform creates the 16-byte uniform buffer for the stencil fill pass.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/software"
 )
 
@@ -17,8 +18,8 @@ import (
 // LoadOpLoad preserves content, scissor clips draws, pixels are verifiable.
 func createSoftwareDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := software.API{}
-	instance, err := api.CreateInstance(nil)
+	backend := software.NewBackend()
+	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("software CreateInstance: %v", err)
 	}
@@ -108,8 +109,8 @@ func TestDamageBlit_LoadOpLoad_PreservesContent(t *testing.T) {
 			StoreOp: gputypes.StoreOpStore,
 		}},
 	})
-	rp2.SetViewport(0, 0, W, H, 0, 1)
-	rp2.SetScissorRect(2, 2, 4, 4)
+	rp2.SetViewport(gputypes.Viewport{Width: W, Height: H, MinDepth: 0, MaxDepth: 1})
+	rp2.SetScissorRect(gputypes.ScissorRect{X: 2, Y: 2, Width: 4, Height: 4})
 	rp2.End()
 	cmd2, _ := enc2.Finish()
 	queue.Submit(cmd2)

@@ -5,8 +5,8 @@ go 1.25.0
 require (
 	github.com/gogpu/gpucontext v0.31.3
 	github.com/gogpu/gputypes v0.8.0
-	github.com/gogpu/naga v0.18.0
-	github.com/gogpu/wgpu v0.31.6
+	github.com/gogpu/naga v0.19.0
+	github.com/gogpu/wgpu v0.34.3
 	golang.org/x/image v0.44.0
 	golang.org/x/text v0.40.0
 )

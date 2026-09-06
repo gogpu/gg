@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/hal/noop"
 )
 
@@ -22,8 +23,8 @@ func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
 // Returns the device, queue, and a cleanup function.
 func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := noop.API{}
-	instance, err := api.CreateInstance(nil)
+	backend := noop.NewBackend()
+	instance, err := backend.CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)
 	}
