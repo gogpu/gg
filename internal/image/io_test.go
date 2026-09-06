@@ -28,6 +28,39 @@ func TestFromStdImage_RGBA(t *testing.T) {
 	}
 }
 
+func TestFromStdImage_RGBAPreservesPremultiplication(t *testing.T) {
+	rgba := &image.RGBA{
+		Pix:    []byte{100, 50, 25, 128},
+		Stride: 4,
+		Rect:   image.Rect(0, 0, 1, 1),
+	}
+
+	buf := FromStdImage(rgba)
+
+	if buf.Format() != FormatRGBAPremul {
+		t.Fatalf("Format = %v, want %v", buf.Format(), FormatRGBAPremul)
+	}
+	if got := buf.PremultipliedData(); !bytes.Equal(got, rgba.Pix) {
+		t.Errorf("PremultipliedData() = %v, want %v", got, rgba.Pix)
+	}
+}
+
+func TestFromStdImage_GenericConvertsToStraightRGBA(t *testing.T) {
+	nrgba := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	nrgba.SetNRGBA(0, 0, color.NRGBA{R: 200, G: 100, B: 50, A: 128})
+	generic := struct{ image.Image }{Image: nrgba}
+
+	buf := FromStdImage(generic)
+
+	if buf.Format() != FormatRGBA8 {
+		t.Fatalf("Format = %v, want %v", buf.Format(), FormatRGBA8)
+	}
+	r, g, b, a := buf.GetRGBA(0, 0)
+	if r != 200 || g != 100 || b != 50 || a != 128 {
+		t.Errorf("Pixel = (%d, %d, %d, %d), want (200, 100, 50, 128)", r, g, b, a)
+	}
+}
+
 func TestFromStdImage_NRGBA(t *testing.T) {
 	nrgba := image.NewNRGBA(image.Rect(0, 0, 10, 10))
 	nrgba.Set(3, 3, color.NRGBA{R: 128, G: 64, B: 32, A: 200})

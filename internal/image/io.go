@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -183,16 +184,17 @@ func (b *ImageBuf) EncodeJPEG(w io.Writer, quality int) error {
 }
 
 // FromStdImage creates an ImageBuf from a standard library image.Image.
-// The resulting ImageBuf will be in RGBA8 format.
+// Premultiplied RGBA inputs retain their native representation; all other
+// images are converted to straight RGBA8.
 func FromStdImage(img image.Image) *ImageBuf {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	buf, _ := NewImageBuf(width, height, FormatRGBA8)
-
-	// Fast path for RGBA images
+	// image.RGBA stores premultiplied color channels. Preserve that format so
+	// callers of PremultipliedData do not multiply the channels a second time.
 	if rgba, ok := img.(*image.RGBA); ok {
+		buf, _ := NewImageBuf(width, height, FormatRGBAPremul)
 		// Direct copy if stride matches
 		if rgba.Stride == buf.Stride() {
 			copy(buf.Data(), rgba.Pix)
@@ -205,6 +207,8 @@ func FromStdImage(img image.Image) *ImageBuf {
 		}
 		return buf
 	}
+
+	buf, _ := NewImageBuf(width, height, FormatRGBA8)
 
 	// Fast path for NRGBA images
 	if nrgba, ok := img.(*image.NRGBA); ok {
@@ -222,11 +226,8 @@ func FromStdImage(img image.Image) *ImageBuf {
 	// Generic slow path for any image type
 	for y := range height {
 		for x := range width {
-			c := img.At(bounds.Min.X+x, bounds.Min.Y+y)
-			r, g, b, a := c.RGBA()
-			// RGBA() returns 16-bit values, scale to 8-bit
-			// Right shift by 8 guarantees result fits in uint8
-			_ = buf.SetRGBA(x, y, byte(r>>8), byte(g>>8), byte(b>>8), byte(a>>8))
+			c := color.NRGBAModel.Convert(img.At(bounds.Min.X+x, bounds.Min.Y+y)).(color.NRGBA)
+			_ = buf.SetRGBA(x, y, c.R, c.G, c.B, c.A)
 		}
 	}
 
