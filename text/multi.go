@@ -13,6 +13,21 @@ type MultiFace struct {
 	direction Direction
 }
 
+// FontRun is a contiguous source-font run in a fallback face.
+//
+// Start and End are byte offsets into the input passed to FontRuns. Offset is
+// the advance of all preceding runs and can be used as the run's origin. The
+// IsCJK flag lets GPU consumers keep script-specific atlas and hinting policy
+// while still emitting one ordered batch for the complete string.
+type FontRun struct {
+	Face   Face
+	Text   string
+	Start  int
+	End    int
+	Offset float64
+	IsCJK  bool
+}
+
 // NewMultiFace creates a MultiFace from faces.
 // All faces must have the same direction.
 // Returns error if faces is empty or directions don't match.
@@ -75,6 +90,93 @@ func (m *MultiFace) HasGlyph(r rune) bool {
 		}
 	}
 	return false
+}
+
+// Faces returns the fallback chain in priority order.
+//
+// The returned slice is a copy and can be modified by the caller without
+// changing this MultiFace.
+func (m *MultiFace) Faces() []Face {
+	faces := make([]Face, len(m.faces))
+	copy(faces, m.faces)
+	return faces
+}
+
+// FaceForRune returns the first source face that contains r. Composite faces
+// are resolved recursively so callers always receive a face that can expose a
+// FontSource when one exists. If no face contains r, the first face is used as
+// the replacement-glyph fallback, matching Glyphs and AppendGlyphs.
+func (m *MultiFace) FaceForRune(r rune) Face {
+	for _, face := range m.faces {
+		if face != nil && face.HasGlyph(r) {
+			return resolveFallbackFace(face, r)
+		}
+	}
+	if len(m.faces) == 0 {
+		return nil
+	}
+	return resolveFallbackFace(m.faces[0], r)
+}
+
+// FontRuns splits text into contiguous runs that share a source face and
+// script class. Runs retain their original byte ranges and cumulative x
+// offsets, allowing GPU consumers to rasterize each source independently and
+// append quads without dropping shaped positions or leaving the GPU path.
+func (m *MultiFace) FontRuns(text string) []FontRun {
+	if text == "" || len(m.faces) == 0 {
+		return nil
+	}
+
+	var runs []FontRun
+	start := 0
+	var current Face
+	var currentCJK bool
+	var offset float64
+
+	flush := func(end int) {
+		if current == nil || start >= end {
+			return
+		}
+		runText := text[start:end]
+		runs = append(runs, FontRun{
+			Face:   current,
+			Text:   runText,
+			Start:  start,
+			End:    end,
+			Offset: offset,
+			IsCJK:  currentCJK,
+		})
+		offset += current.Advance(runText)
+	}
+
+	for byteIndex, r := range text {
+		face := m.FaceForRune(r)
+		isCJK := IsCJKRune(r)
+		if current == nil {
+			current = face
+			currentCJK = isCJK
+			start = byteIndex
+			continue
+		}
+		if face != current || isCJK != currentCJK {
+			flush(byteIndex)
+			start = byteIndex
+			current = face
+			currentCJK = isCJK
+		}
+	}
+	flush(len(text))
+	return runs
+}
+
+// ShapeRuns is the method form of [ShapeRuns] for callers that already hold a
+// MultiFace. Every returned ShapedRun carries the source Face used to produce
+// its glyph IDs.
+func (m *MultiFace) ShapeRuns(text string) []ShapedRun {
+	if m == nil || text == "" {
+		return nil
+	}
+	return shapeMultiFaceRuns(text, m, GetShaper())
 }
 
 // Glyphs implements Face.Glyphs.
@@ -175,11 +277,22 @@ func (m *MultiFace) private() {}
 // faceForRune returns the first face that has the glyph for the rune.
 // If no face has the glyph, returns the first face as fallback.
 func (m *MultiFace) faceForRune(r rune) Face {
-	for _, face := range m.faces {
-		if face.HasGlyph(r) {
-			return face
+	return m.FaceForRune(r)
+}
+
+// resolveFallbackFace unwraps nested composite faces while retaining any
+// filtering decision that selected the face in the first place.
+func resolveFallbackFace(face Face, r rune) Face {
+	switch f := face.(type) {
+	case *MultiFace:
+		return f.FaceForRune(r)
+	case *FilteredFace:
+		if nested, ok := f.face.(*MultiFace); ok && nested.HasGlyph(r) {
+			return resolveFallbackFace(nested, r)
 		}
+		// Keep the filter wrapper: GPU consumers can use its FontSource while
+		// preserving the caller's range policy for glyph iteration.
+		return f
 	}
-	// Fallback to first face if no face has the glyph
-	return m.faces[0]
+	return face
 }

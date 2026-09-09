@@ -179,17 +179,42 @@ func (r *GlyphRenderer) RenderRun(run *ShapedRun, params RenderParams) []*GlyphO
 		return nil
 	}
 
-	font := run.Face.Source().Parsed()
-	if font == nil {
-		return nil
+	// A source-aware MultiFace run can contain glyph IDs from several font
+	// namespaces. Resolve each glyph's owner before extracting its outline;
+	// using run.Face.Source() would either return nil for MultiFace or parse a
+	// different font's GID. The returned slice keeps RenderGlyphs' one-entry-
+	// per-input-glyph contract, including nil entries for empty glyphs.
+	var result []*GlyphOutline
+	for i := range run.Glyphs {
+		glyph := &run.Glyphs[i]
+		owner := glyph.Face
+		if owner == nil {
+			owner = run.Face
+		}
+		source := owner.Source()
+		if source == nil {
+			continue
+		}
+		font := source.Parsed()
+		if font == nil {
+			continue
+		}
+		if result == nil {
+			result = make([]*GlyphOutline, len(run.Glyphs))
+		}
+		glyphParams := params
+		// ADR-054: propagate variations from the owning face when not set in
+		// params. Fallback runs may use different variation instances.
+		if len(glyphParams.Variations) == 0 {
+			glyphParams.Variations = owner.Variations()
+		}
+		size := run.Size
+		if size <= 0 {
+			size = owner.Size()
+		}
+		result[i] = r.RenderGlyph(glyph, font, size, glyphParams)
 	}
-
-	// ADR-054: propagate variations from face if not set in params.
-	if len(params.Variations) == 0 {
-		params.Variations = run.Face.Variations()
-	}
-
-	return r.RenderGlyphs(run.Glyphs, font, run.Size, params)
+	return result
 }
 
 // RenderLayout renders a complete layout to outlines.
@@ -449,15 +474,23 @@ func (tr *TextRenderer) ShapeAndRender(text string) ([]*GlyphOutline, error) {
 		return nil, nil
 	}
 
-	// Get the parsed font
-	font := tr.defaultFace.Source().Parsed()
-	if font == nil {
-		return nil, ErrUnsupportedFontType
-	}
-
 	params := RenderParams{
 		Color:   tr.defaultColor,
 		Opacity: 1.0,
+	}
+	if tr.defaultFace.Source() == nil {
+		// MultiFace has no single ParsedFont. Render each source-aware glyph
+		// through its owning face instead of panicking or dropping the run.
+		return tr.glyphRenderer.RenderRun(&ShapedRun{
+			Glyphs: glyphs,
+			Face:   tr.defaultFace,
+			Size:   tr.defaultSize,
+		}, params), nil
+	}
+
+	font := tr.defaultFace.Source().Parsed()
+	if font == nil {
+		return nil, ErrUnsupportedFontType
 	}
 
 	return tr.glyphRenderer.RenderGlyphs(glyphs, font, tr.defaultSize, params), nil
@@ -475,16 +508,22 @@ func (tr *TextRenderer) ShapeAndRenderAt(text string, x, y float64) ([]*GlyphOut
 		return nil, nil
 	}
 
-	// Get the parsed font
-	font := tr.defaultFace.Source().Parsed()
-	if font == nil {
-		return nil, ErrUnsupportedFontType
-	}
-
 	params := RenderParams{
 		Transform: TranslateTransform(float32(x), float32(y)),
 		Color:     tr.defaultColor,
 		Opacity:   1.0,
+	}
+	if tr.defaultFace.Source() == nil {
+		return tr.glyphRenderer.RenderRun(&ShapedRun{
+			Glyphs: glyphs,
+			Face:   tr.defaultFace,
+			Size:   tr.defaultSize,
+		}, params), nil
+	}
+
+	font := tr.defaultFace.Source().Parsed()
+	if font == nil {
+		return nil, ErrUnsupportedFontType
 	}
 
 	return tr.glyphRenderer.RenderGlyphs(glyphs, font, tr.defaultSize, params), nil

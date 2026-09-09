@@ -30,6 +30,119 @@ func TestBuiltinShapeEmpty(t *testing.T) {
 	}
 }
 
+func TestShapeMultiFaceRetainsSourceFaces(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	// The second range is intentionally disjoint from the primary face. Both
+	// wrappers share the same font data, but the shaped glyphs still retain the
+	// exact Face that owns each run (and therefore remain source-safe for GPU
+	// lookup).
+	other := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, other)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	glyphs := Shape("AБ", multi)
+	if len(glyphs) != 2 {
+		t.Fatalf("Shape returned %d glyphs, want 2", len(glyphs))
+	}
+	if glyphs[0].Face != latin || glyphs[1].Face != other {
+		t.Fatalf("source faces not retained: got %T and %T", glyphs[0].Face, glyphs[1].Face)
+	}
+	if glyphs[1].X <= glyphs[0].X {
+		t.Fatalf("fallback glyph position did not preserve run advance: x0=%v x1=%v", glyphs[0].X, glyphs[1].X)
+	}
+
+	runs := ShapeRuns("AБ", multi)
+	if len(runs) != 2 || runs[0].Face != latin || runs[1].Face != other {
+		t.Fatalf("ShapeRuns did not retain source runs: %#v", runs)
+	}
+
+	filtered := NewFilteredFace(multi, RangeBasicLatin)
+	filteredRuns := filtered.FontRuns("AБ")
+	if len(filteredRuns) != 1 || filteredRuns[0].Text != "A" || filteredRuns[0].Face != latin {
+		t.Fatalf("filtered composite runs = %#v, want only the Latin source run", filteredRuns)
+	}
+	filteredGlyphs := Shape("AБ", filtered)
+	if len(filteredGlyphs) != 1 || filteredGlyphs[0].Face != latin {
+		t.Fatalf("filtered composite Shape = %#v, want one Latin glyph", filteredGlyphs)
+	}
+}
+
+func TestShapeRunsSourceAndBoundaryPaths(t *testing.T) {
+	face := builtinTestFace(t)
+	if runs := ShapeRuns("", face); runs != nil {
+		t.Fatalf("ShapeRuns empty = %#v, want nil", runs)
+	}
+	if runs := ShapeRuns("x", nil); runs != nil {
+		t.Fatalf("ShapeRuns nil face = %#v, want nil", runs)
+	}
+
+	runs := ShapeRuns("A", face)
+	if len(runs) != 1 || runs[0].Face != face || len(runs[0].Glyphs) != 1 {
+		t.Fatalf("source ShapeRuns = %#v, want one source-owned run", runs)
+	}
+
+	original := GetShaper()
+	t.Cleanup(func() { SetShaper(original) })
+	SetShaper(&mockShaper{})
+	if runs := ShapeRuns("A", face); runs != nil {
+		t.Fatalf("empty shaper ShapeRuns = %#v, want nil", runs)
+	}
+
+	if runs := shapeMultiFaceRuns("x", nil, original); runs != nil {
+		t.Fatalf("nil multi shape = %#v, want nil", runs)
+	}
+	if runs := shapeFontRuns("x", nil, original); runs != nil {
+		t.Fatalf("empty font runs = %#v, want nil", runs)
+	}
+	if runs := shapeFontRuns("x", []FontRun{{Face: face, Text: "x"}}, nil); runs != nil {
+		t.Fatalf("nil shaper font runs = %#v, want nil", runs)
+	}
+	if glyphs := flattenShapedRuns(nil); glyphs != nil {
+		t.Fatalf("flatten empty = %#v, want nil", glyphs)
+	}
+}
+
+func TestDirectShapersHonorMultiFaceOwners(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+
+	for name, shaper := range map[string]Shaper{
+		"builtin": &BuiltinShaper{},
+		"own":     NewOwnShaper(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			glyphs := shaper.Shape("AБ", multi)
+			if len(glyphs) != 2 || glyphs[0].Face != latin || glyphs[1].Face != cyrillic {
+				t.Fatalf("direct Shape lost owners: %#v", glyphs)
+			}
+		})
+	}
+}
+
+func TestShapeFontRunsSkipsEmptyShaperResult(t *testing.T) {
+	face := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})
+	runs := shapeFontRuns("a", []FontRun{{Face: face, Text: "a"}}, &mockShaper{})
+	if len(runs) != 0 {
+		t.Fatalf("empty shaped result = %#v, want no runs", runs)
+	}
+}
+
 // TestBuiltinShapeLatinText tests shaping basic Latin text.
 func TestBuiltinShapeLatinText(t *testing.T) {
 	face := builtinTestFace(t)
@@ -316,6 +429,78 @@ func TestCustomShaperIntegration(t *testing.T) {
 
 	if result[0].GID != 100 || result[1].GID != 101 {
 		t.Error("custom shaper glyphs not returned correctly")
+	}
+}
+
+func TestShapeDoesNotMutateReusableShaperBuffer(t *testing.T) {
+	original := GetShaper()
+	t.Cleanup(func() { SetShaper(original) })
+
+	face1 := builtinTestFace(t)
+	face2 := face1.Source().Face(24)
+	shared := []ShapedGlyph{{GID: 7, Cluster: 0, XAdvance: 10}}
+	SetShaper(&mockShaper{glyphs: shared})
+
+	first := Shape("a", face1)
+	second := Shape("b", face2)
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("unexpected shaped lengths: first=%d second=%d", len(first), len(second))
+	}
+	if first[0].Face != face1 {
+		t.Fatalf("first glyph face = %v, want first face", first[0].Face)
+	}
+	if second[0].Face != face2 {
+		t.Fatalf("second glyph face = %v, want second face", second[0].Face)
+	}
+	if shared[0].Face != nil {
+		t.Fatal("Shape mutated the reusable shaper result buffer")
+	}
+}
+
+type reusableFaceShaper struct {
+	glyphs []ShapedGlyph
+}
+
+func (s *reusableFaceShaper) Shape(string, Face) []ShapedGlyph {
+	return s.glyphs
+}
+
+func TestShapeRunsCopiesReusableShaperBuffer(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("failed to create font source: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	latin := NewFilteredFace(source.Face(16), RangeBasicLatin)
+	cyrillic := NewFilteredFace(source.Face(16), RangeCyrillic)
+	multi, err := NewMultiFace(latin, cyrillic)
+	if err != nil {
+		t.Fatalf("NewMultiFace failed: %v", err)
+	}
+
+	// This shaper reuses a result slice and supplies source identity itself.
+	// ShapeRuns must still copy before applying run offsets; otherwise the
+	// second run rewrites the first run's positions in place.
+	shared := []ShapedGlyph{{GID: 1, Face: latin, XAdvance: 10}}
+	original := GetShaper()
+	t.Cleanup(func() { SetShaper(original) })
+	SetShaper(&reusableFaceShaper{glyphs: shared})
+
+	runs := ShapeRuns("AБ", multi)
+	if len(runs) != 2 {
+		t.Fatalf("ShapeRuns returned %d runs, want 2", len(runs))
+	}
+	if runs[0].Glyphs[0].Face != latin || runs[1].Glyphs[0].Face != latin {
+		t.Fatalf("custom source identities changed unexpectedly: %#v", runs)
+	}
+	if runs[0].Glyphs[0].X != 0 {
+		t.Fatalf("first run X = %v, want 0 after second run shaping", runs[0].Glyphs[0].X)
+	}
+	if runs[1].Glyphs[0].X != 10 {
+		t.Fatalf("second run X = %v, want 10", runs[1].Glyphs[0].X)
+	}
+	if shared[0].X != 0 {
+		t.Fatalf("ShapeRuns mutated the reusable shaper result buffer (X=%v)", shared[0].X)
 	}
 }
 

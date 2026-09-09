@@ -22,6 +22,13 @@ func DrawWithEmoji(dst draw.Image, text string, face Face, x, y float64, col col
 	if text == "" || face == nil {
 		return
 	}
+	if face.Source() == nil {
+		// A fallback face has no single color-font parser. Preserve CPU
+		// fallback visibility instead of dereferencing a nil source; individual
+		// source faces can still be rendered by Draw's composite path.
+		Draw(dst, text, face, x, y, col)
+		return
+	}
 
 	// Check if the font has color tables.
 	parsed := face.Source().Parsed()

@@ -143,20 +143,34 @@ func (r *TextRenderer) RenderGlyph(glyph text.ShapedGlyph, face text.Face) (*Ren
 	config := r.config
 	r.mu.RUnlock()
 
-	// Get the font source and size
-	source := face.Source()
+	// A source-aware shaped glyph owns its local GID. Prefer that owner over
+	// the run face so composite runs do not parse a fallback GID through the
+	// primary font's cmap/outline tables.
+	owner := face
+	if glyph.Face != nil {
+		owner = glyph.Face
+	}
+	if owner == nil {
+		return nil, &text.FontError{Reason: "face is nil"}
+	}
+
+	// Get the font source and size from the owning face.
+	source := owner.Source()
 	if source == nil {
 		return nil, &text.FontError{Reason: "face has no font source"}
 	}
-	size := face.Size()
+	size := owner.Size()
 	parsed := source.Parsed()
+	if parsed == nil {
+		return nil, &text.FontError{Reason: "face has no parsed font"}
+	}
 
 	cache := r.ensureCache()
 	fontID := computeSceneTextFontID(source)
 	sizeKey := computeSizeKey(size)
 
 	// ADR-054: pass variations for variable font gvar deltas.
-	variations := face.Variations()
+	variations := owner.Variations()
 	varHash := text.VariationHash(variations)
 
 	cacheKey := text.OutlineCacheKey{
@@ -205,6 +219,9 @@ func (r *TextRenderer) RenderGlyphs(glyphs []text.ShapedGlyph, face text.Face) (
 	if len(glyphs) == 0 {
 		return nil, nil
 	}
+	if face == nil {
+		return nil, &text.FontError{Reason: "face is nil"}
+	}
 
 	r.mu.RLock()
 	config := r.config
@@ -213,10 +230,18 @@ func (r *TextRenderer) RenderGlyphs(glyphs []text.ShapedGlyph, face text.Face) (
 	// Get the font source and size
 	source := face.Source()
 	if source == nil {
-		return nil, &text.FontError{Reason: "face has no font source"}
+		return r.renderGlyphsWithOwners(glyphs, face)
+	}
+	parsed := source.Parsed()
+	if parsed == nil {
+		return nil, &text.FontError{Reason: "face has no parsed font"}
+	}
+	for i := range glyphs {
+		if glyphs[i].Face != nil && glyphs[i].Face != face {
+			return r.renderGlyphsWithOwners(glyphs, face)
+		}
 	}
 	size := face.Size()
-	parsed := source.Parsed()
 
 	cache := r.ensureCache()
 	fontID := computeSceneTextFontID(source)
@@ -267,6 +292,22 @@ func (r *TextRenderer) RenderGlyphs(glyphs []text.ShapedGlyph, face text.Face) (
 		rendered[i] = rg
 	}
 
+	return rendered, nil
+}
+
+// renderGlyphsWithOwners preserves source identity for composite shaped runs.
+// RenderGlyph performs the owner/source lookup and keeps output order (with
+// nil paths for empty glyphs) while allowing each fallback face to use its own
+// outline cache and variation instance.
+func (r *TextRenderer) renderGlyphsWithOwners(glyphs []text.ShapedGlyph, face text.Face) ([]*RenderedGlyph, error) {
+	rendered := make([]*RenderedGlyph, len(glyphs))
+	for i := range glyphs {
+		glyph, err := r.RenderGlyph(glyphs[i], face)
+		if err != nil {
+			return nil, err
+		}
+		rendered[i] = glyph
+	}
 	return rendered, nil
 }
 

@@ -2,6 +2,7 @@ package text
 
 import (
 	"testing"
+	"unicode"
 )
 
 func TestUnicodeRangeContains(t *testing.T) {
@@ -316,5 +317,27 @@ func TestFilteredFaceWithMultiFace(t *testing.T) {
 
 	if glyphs[0].Rune != 'a' || glyphs[1].Rune != 'b' {
 		t.Errorf("unexpected runes: %q, %q", glyphs[0].Rune, glyphs[1].Rune)
+	}
+}
+
+func TestFilteredFaceFontRunsBoundariesAndSplits(t *testing.T) {
+	if runs := (*FilteredFace)(nil).FontRuns("a"); runs != nil {
+		t.Fatalf("nil receiver FontRuns = %#v, want nil", runs)
+	}
+	if runs := (&FilteredFace{}).FontRuns("a"); runs != nil {
+		t.Fatalf("nil wrapped face FontRuns = %#v, want nil", runs)
+	}
+
+	face := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6, '界': 12})
+	filtered := NewFilteredFace(face, UnicodeRange{Start: 0, End: unicode.MaxRune})
+	runs := filtered.FontRuns("a界")
+	if len(runs) != 2 {
+		t.Fatalf("script split produced %d runs, want 2: %#v", len(runs), runs)
+	}
+	if runs[0].Face != filtered || runs[1].Face != filtered {
+		t.Fatalf("ordinary filtered face ownership not retained: %#v", runs)
+	}
+	if runs[0].IsCJK || !runs[1].IsCJK {
+		t.Fatalf("script classification = (%v, %v), want (false, true)", runs[0].IsCJK, runs[1].IsCJK)
 	}
 }

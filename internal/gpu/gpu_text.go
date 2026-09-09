@@ -112,15 +112,15 @@ func (e *GPUTextEngine) LayoutText(
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if face.Source() == nil {
+		return e.layoutFallbackText(face, s, x, y, color, matrix)
+	}
 
 	logicalSize := face.Size()
 	if logicalSize <= 0 {
 		logicalSize = 16 // fallback: never zero
 	}
 	fontSource := face.Source()
-	if fontSource == nil {
-		return TextBatch{}, fmt.Errorf("MSDF text: face has no FontSource (MultiFace requires ADR-065)")
-	}
 	fontID := computeFontID(fontSource)
 
 	// ADR-054: pass variations for variable font gvar deltas.
@@ -249,6 +249,100 @@ func (e *GPUTextEngine) LayoutText(
 		PxRange:    e.pxRange,
 		AtlasSize:  float32(atlasConfig.Size),
 	}, nil
+}
+
+func (e *GPUTextEngine) layoutFallbackText(
+	face text.Face,
+	s string,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+) (TextBatch, error) {
+	runs, ok := fallbackFontRuns(face, s)
+	if !ok {
+		return TextBatch{}, fmt.Errorf("MSDF text: face has no FontSource (MultiFace requires ADR-065)")
+	}
+	if !fontRunsHaveSources(runs) {
+		return TextBatch{}, fmt.Errorf("MSDF text: fallback face has no FontSource")
+	}
+	// A TextBatch has one atlas binding. Keep all fallback runs in the shared
+	// Latin atlas so the complete string remains one ordered GPU batch (including
+	// mixed-script fallback) rather than silently downgrading the operation to CPU.
+	return e.layoutMultiFaceText(runs, x, y, color, matrix), nil
+}
+
+// layoutMultiFaceText lays out source-aware fallback runs into one MSDF atlas
+// and one ordered batch. A batch can bind only one atlas texture, so fallback
+// runs use the shared Latin atlas here; glyph IDs remain source-qualified by
+// each run's FontID and are never interpreted using another face's parser.
+// e.mu must be held by the caller.
+func (e *GPUTextEngine) layoutMultiFaceText(
+	runs []text.FontRun,
+	x, y float64,
+	color gg.RGBA,
+	matrix gg.Matrix,
+) TextBatch {
+	if len(runs) == 0 {
+		return TextBatch{}
+	}
+
+	activeAtlas := e.atlasManager
+	atlasConfig := activeAtlas.Config()
+	refSize := float64(e.msdfSize)
+	var quads []TextQuad
+	for _, run := range runs {
+		if run.Face == nil {
+			continue
+		}
+		fontSource := run.Face.Source()
+		if fontSource == nil {
+			continue
+		}
+		logicalSize := run.Face.Size()
+		if logicalSize <= 0 {
+			logicalSize = 16
+		}
+		fontID := computeFontID(fontSource)
+		variations := run.Face.Variations()
+		varHash := text.VariationHash(variations)
+		ratio := logicalSize / refSize
+		for glyph := range run.Face.Glyphs(run.Text) {
+			outline, err := e.extractor.ExtractOutlineHintedVar(fontSource.Parsed(), glyph.GID, refSize, text.HintingNone, variations)
+			if err != nil || outline == nil || outline.IsEmpty() {
+				continue
+			}
+			key := msdf.GlyphKey{
+				FontID:        fontID,
+				GlyphID:       uint16(glyph.GID), //nolint:gosec // GlyphID is uint16
+				Size:          int16(e.msdfSize), //nolint:gosec // msdfSize fits int16
+				VariationHash: varHash,
+			}
+			region, err := activeAtlas.Get(key, outline)
+			if err != nil {
+				slogger().Warn("MSDF fallback atlas get failed", "gid", glyph.GID, "err", err)
+				continue
+			}
+			if region.PlaneMaxX <= region.PlaneMinX || region.PlaneMaxY <= region.PlaneMinY {
+				continue
+			}
+			qx0 := float32(x + run.Offset + glyph.X + float64(region.PlaneMinX)*ratio)
+			qx1 := float32(x + run.Offset + glyph.X + float64(region.PlaneMaxX)*ratio)
+			qy0 := float32(y + float64(region.PlaneMinY)*ratio)
+			qy1 := float32(y + float64(region.PlaneMaxY)*ratio)
+			quads = append(quads, TextQuad{X0: qx0, Y0: qy0, X1: qx1, Y1: qy1, U0: region.U0, V0: region.V0, U1: region.U1, V1: region.V1})
+		}
+	}
+	if len(quads) == 0 {
+		return TextBatch{}
+	}
+	return TextBatch{
+		Quads:      quads,
+		Color:      color,
+		Transform:  matrix,
+		AtlasIndex: 0,
+		PxRange:    e.pxRange,
+		AtlasSize:  float32(atlasConfig.Size),
+	}
 }
 
 // cjkAtlasOffset is the index offset for CJK atlas pages.

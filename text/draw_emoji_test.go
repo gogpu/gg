@@ -2,6 +2,7 @@ package text
 
 import (
 	"image"
+	"image/color"
 	"testing"
 
 	"github.com/gogpu/gg/text/emoji"
@@ -16,6 +17,26 @@ func TestBitmapGlyphCache_NewAndSize(t *testing.T) {
 	if cache.Size() != 0 {
 		t.Errorf("Size() = %d, want 0", cache.Size())
 	}
+}
+
+func TestDrawWithEmojiMultiFaceUsesCompositeFallback(t *testing.T) {
+	source, err := NewFontSource(requireTestFont(t))
+	if err != nil {
+		t.Fatalf("NewFontSource: %v", err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	multi, err := NewMultiFace(source.Face(24))
+	if err != nil {
+		t.Fatalf("NewMultiFace: %v", err)
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, 100, 50))
+	DrawWithEmoji(dst, "A", multi, 5, 35, color.Black)
+	for i := 3; i < len(dst.Pix); i += 4 {
+		if dst.Pix[i] != 0 {
+			return
+		}
+	}
+	t.Fatal("DrawWithEmoji dropped MultiFace text")
 }
 
 func TestBitmapGlyphCache_PutAndGet(t *testing.T) {

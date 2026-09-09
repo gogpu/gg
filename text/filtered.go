@@ -119,6 +119,76 @@ func (f *FilteredFace) AppendGlyphs(dst []Glyph, text string) []Glyph {
 	return dst
 }
 
+// FontRuns exposes source-owned runs for a filtered composite face. A
+// FilteredFace wrapping a MultiFace still has no single FontSource, so callers
+// must resolve the nested owner before shaping or GPU rasterization. Runes
+// rejected by the filter are omitted, matching Glyphs and Advance.
+func (f *FilteredFace) FontRuns(text string) []FontRun {
+	if f == nil || text == "" || f.face == nil {
+		return nil
+	}
+
+	var runs []FontRun
+	start := 0
+	var current Face
+	var currentCJK bool
+	var offset float64
+
+	flush := func(end int) {
+		if current == nil || start >= end {
+			return
+		}
+		runText := text[start:end]
+		runs = append(runs, FontRun{
+			Face:   current,
+			Text:   runText,
+			Start:  start,
+			End:    end,
+			Offset: offset,
+			IsCJK:  currentCJK,
+		})
+		offset += current.Advance(runText)
+	}
+
+	for byteIndex, r := range text {
+		owner := f.fontRunFace(r)
+		if owner == nil {
+			flush(byteIndex)
+			current = nil
+			continue
+		}
+		isCJK := IsCJKRune(r)
+		if current == nil {
+			current = owner
+			currentCJK = isCJK
+			start = byteIndex
+			continue
+		}
+		if owner != current || isCJK != currentCJK {
+			flush(byteIndex)
+			start = byteIndex
+			current = owner
+			currentCJK = isCJK
+		}
+	}
+	flush(len(text))
+	return runs
+}
+
+func (f *FilteredFace) fontRunFace(r rune) Face {
+	if f == nil || f.face == nil || !f.inRanges(r) || !f.face.HasGlyph(r) {
+		return nil
+	}
+	switch f.face.(type) {
+	case *MultiFace, *FilteredFace:
+		return resolveFallbackFace(f.face, r)
+	default:
+		// Keep the wrapper for ordinary faces so its range policy remains part
+		// of the run contract; all runes in this run passed the filter.
+		return f
+	}
+}
+
 // Direction implements Face.Direction.
 func (f *FilteredFace) Direction() Direction {
 	return f.face.Direction()
