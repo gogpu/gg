@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.6] - 2026-09-10
+
+### Changed
+
+- **deps:** goffi v0.6.3 → v0.6.4 ([goffi v0.6.4](https://github.com/go-webgpu/goffi/releases/tag/v0.6.4) — `-tags goffi_static` linking profile)
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed
