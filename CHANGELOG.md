@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GPU strokes no longer cancel where they overlap themselves** — both GPU
+  stroke paths (`GPURenderContext.preTessellateStroke` and
+  `VelloAccelerator.StrokePath`) filled the expanded stroke outline with
+  EvenOdd, which cancels every region the outline covers twice. An open stroke
+  covers itself wherever it loops or turns back sharply, so self-crossing lines,
+  tight zigzags and overlapping joins rendered with holes on the GPU and solid
+  on the CPU. Fix: fill the outline NonZero, as `SoftwareRenderer.Stroke` does
+  with the same expander output. Closed outlines are an outer and an inner
+  contour of opposite winding, so rings stay hollow; NonZero also avoids the
+  even-odd invert stencil that misrenders on some drivers (#374). New
+  regression test compares a self-overlapping stroke through the GPU queue
+  with the CPU stroker pixel by pixel. Stroke outlines now go to
+  stencil-then-cover directly: the EvenOdd rule was also what kept them off the
+  convex fast path (#347), whose convexity test still accepts the outline of an
+  open stroke with a corner — the inner join's pivot loop turns the same way as
+  the outer corners — and whose unstenciled fan then filled an L-shaped line as
+  a solid wedge.
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed

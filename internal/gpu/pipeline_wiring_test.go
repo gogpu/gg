@@ -1905,9 +1905,10 @@ func TestStrokePath_DispatchUsesFill(t *testing.T) {
 		t.Fatalf("expected drawCmdStrokePath, got %d", cmd.kind)
 	}
 
-	// preTessellateStroke should have expanded stroke → fill path with EvenOdd.
-	if cmd.paint.FillRule != gg.FillRuleEvenOdd {
-		t.Errorf("FillRule = %d, want EvenOdd (%d)", cmd.paint.FillRule, gg.FillRuleEvenOdd)
+	// preTessellateStroke should have expanded stroke → fill path with NonZero,
+	// the rule SoftwareRenderer.Stroke uses on the same expander output.
+	if cmd.paint.FillRule != gg.FillRuleNonZero {
+		t.Errorf("FillRule = %d, want NonZero (%d)", cmd.paint.FillRule, gg.FillRuleNonZero)
 	}
 
 	// The expanded fill path should have MORE verbs than the original 2-vertex line.

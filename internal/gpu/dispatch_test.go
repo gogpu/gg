@@ -484,7 +484,7 @@ func TestDispatchStrokePath_MatchesAnalyticFiller(t *testing.T) {
 	pmRef := gg.NewPixmap(size, size)
 	srRef := gg.NewSoftwareRenderer(size, size)
 	srRef.SetRasterizerMode(gg.RasterizerAnalytic)
-	refPaint := cmd.paint // same paint (EvenOdd fill rule set by preTessellateStroke)
+	refPaint := cmd.paint // same paint (NonZero fill rule set by preTessellateStroke)
 	if err := srRef.Fill(pmRef, expandedPath, &refPaint); err != nil {
 		t.Fatalf("reference Fill: %v", err)
 	}
