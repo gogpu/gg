@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GPU draws keep their submission order across render tiers** —
+  `buildScissorGroupsFromDraws` grouped consecutive draws by clip only, and a
+  group renders its tiers one after another (SDF shapes, convex paths, stencil
+  paths, images, text). Under one clip every convex fill therefore landed
+  before every stencil fill and every SDF shape, whatever order they were
+  submitted in, which breaks painter's-algorithm scenes: back-to-front 3D
+  surfaces had far faces and grid strokes painted over near ones. Fix: start a
+  new group where the tier changes as well as where the clip does. Runs of one
+  tier stay one group, so flat scenes pay nothing. New regression test checks
+  that convex, stencil, convex under one clip become three ordered groups.
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed

@@ -1305,29 +1305,32 @@ func TestFlushGPU_DrawsConvertToScissorGroups(t *testing.T) {
 	// Build ScissorGroups from per-draw clip state.
 	groups := rc.buildScissorGroupsFromDraws()
 
-	// Both draws have no clip -> single group.
-	if len(groups) != 1 {
-		t.Fatalf("expected 1 ScissorGroup, got %d", len(groups))
+	// Both draws have no clip, but they render in different tiers (SDF,
+	// then convex), so each gets its own group to keep submission order.
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 ScissorGroups, got %d", len(groups))
 	}
 
-	g := groups[0]
-
-	// Shape should be an SDF shape in the group.
-	if len(g.SDFShapes) != 1 {
-		t.Errorf("expected 1 SDFShape, got %d", len(g.SDFShapes))
+	// Shape should be an SDF shape in the first group.
+	if len(groups[0].SDFShapes) != 1 || len(groups[0].ConvexCommands) != 0 {
+		t.Errorf("group 0: expected 1 SDFShape and no ConvexCommand, got %d and %d",
+			len(groups[0].SDFShapes), len(groups[0].ConvexCommands))
 	}
 
-	// Triangle (3 vertices, convex) should be a convex command in the group.
-	if len(g.ConvexCommands) != 1 {
-		t.Errorf("expected 1 ConvexCommand, got %d", len(g.ConvexCommands))
+	// Triangle (3 vertices, convex) should be a convex command in the second.
+	if len(groups[1].ConvexCommands) != 1 || len(groups[1].SDFShapes) != 0 {
+		t.Errorf("group 1: expected 1 ConvexCommand and no SDFShape, got %d and %d",
+			len(groups[1].ConvexCommands), len(groups[1].SDFShapes))
 	}
 
-	// No clip state on the group.
-	if g.Rect != nil {
-		t.Error("expected nil Rect (no clip)")
-	}
-	if g.ClipRRect != nil {
-		t.Error("expected nil ClipRRect (no clip)")
+	// No clip state on either group.
+	for i, g := range groups {
+		if g.Rect != nil {
+			t.Errorf("group %d: expected nil Rect (no clip)", i)
+		}
+		if g.ClipRRect != nil {
+			t.Errorf("group %d: expected nil ClipRRect (no clip)", i)
+		}
 	}
 }
 

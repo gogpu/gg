@@ -1053,6 +1053,7 @@ func (rc *GPURenderContext) buildScissorGroupsFromDraws() []ScissorGroup {
 
 	var groups []ScissorGroup
 	groupStart := 0
+	groupTier := drawTier(&rc.pendingDraws[0])
 
 	for i := 1; i <= len(rc.pendingDraws); i++ {
 		// Detect clip boundary: either end-of-slice or clip changed.
@@ -1060,21 +1061,79 @@ func (rc *GPURenderContext) buildScissorGroupsFromDraws() []ScissorGroup {
 			!drawClipEqual(&rc.pendingDraws[i], &rc.pendingDraws[groupStart])
 		atEnd := i == len(rc.pendingDraws)
 
-		if clipChanged || atEnd {
-			end := i
-			if clipChanged {
-				end = i // commands [groupStart, i) share the same clip
+		// A group renders its tiers one after another — SDF shapes, convex
+		// paths, stencil paths, images, text — so a group holding draws of
+		// two tiers reorders them: every convex fill of a clip would land
+		// under every stencil fill of it, whatever order they came in.
+		// Starting a new group where the tier changes keeps every draw in
+		// submission order, at the cost of more groups only where tiers
+		// alternate. Draws that add nothing to a group never split one.
+		tierChanged := false
+		if i < len(rc.pendingDraws) {
+			t := drawTier(&rc.pendingDraws[i])
+			switch {
+			case groupTier == tierNone:
+				groupTier = t
+			case t != tierNone && t != groupTier:
+				tierChanged = true
 			}
+		}
 
-			// Build one ScissorGroup from draws [groupStart, end).
-			g := rc.drawsToScissorGroup(rc.pendingDraws[groupStart:end])
+		if clipChanged || tierChanged || atEnd {
+			// Build one ScissorGroup from draws [groupStart, i).
+			g := rc.drawsToScissorGroup(rc.pendingDraws[groupStart:i])
 			groups = append(groups, g)
 
 			groupStart = i
+			if i < len(rc.pendingDraws) {
+				groupTier = drawTier(&rc.pendingDraws[i])
+			}
 		}
 	}
 
 	return groups
+}
+
+// renderTier is which list of a ScissorGroup a draw lands in. A group renders
+// its lists one after another, so two draws in one group keep their relative
+// order only if they are in the same list.
+type renderTier uint8
+
+const (
+	tierNone renderTier = iota // contributes nothing to the group (base layer, empty path)
+	tierSDF
+	tierConvex
+	tierStencil
+	tierText
+	tierGlyphMask
+	tierImage
+	tierGPUTexture
+)
+
+// drawTier reports which list of its ScissorGroup a draw will be put in. It
+// mirrors the switch in drawsToScissorGroup, which is what decides.
+func drawTier(cmd *drawCommand) renderTier {
+	switch cmd.kind {
+	case drawCmdFillShape, drawCmdStrokeShape:
+		return tierSDF
+	case drawCmdFillPath, drawCmdStrokePath:
+		switch {
+		case cmd.convexPoints != nil:
+			return tierConvex
+		case cmd.stencilCmd != nil:
+			return tierStencil
+		}
+		return tierNone
+	case drawCmdText:
+		return tierText
+	case drawCmdGlyphMaskText:
+		return tierGlyphMask
+	case drawCmdImage:
+		return tierImage
+	case drawCmdGPUTexture:
+		return tierGPUTexture
+	}
+	return tierNone
 }
 
 // drawsToScissorGroup converts a slice of same-clip drawCommands into a single
