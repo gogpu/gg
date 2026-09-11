@@ -1659,6 +1659,9 @@ func (c *Context) flushGPUAccelerator() {
 // When a mask is active and the accelerator implements MaskAware, the mask
 // is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUFill() error {
+	if !gpuPaintsOneColour(c.paint.IsFillSolid(), c.paint.FillBrush()) {
+		return ErrFallbackToCPU
+	}
 	cleanup, err := c.setupGPUMask()
 	if err != nil {
 		return err
@@ -1679,6 +1682,9 @@ func (c *Context) tryGPUFill() error {
 // When a mask is active and the accelerator implements MaskAware, the mask
 // is uploaded as a GPU texture. Otherwise, falls back to CPU.
 func (c *Context) tryGPUStroke() error {
+	if !gpuPaintsOneColour(c.paint.IsStrokeSolid(), c.paint.StrokeBrush()) {
+		return ErrFallbackToCPU
+	}
 	cleanup, err := c.setupGPUMask()
 	if err != nil {
 		return err
@@ -1693,6 +1699,22 @@ func (c *Context) tryGPUStroke() error {
 	}
 	c.warnGPUFallback("tryGPUStroke")
 	return c.tryGPUOp(a, a.StrokeShape, a.StrokePath, AccelStroke)
+}
+
+// gpuPaintsOneColour reports whether one side of a paint is something the GPU
+// accelerators can draw: a single color.
+//
+// They paint every draw in one color, read from the brush at (0, 0), so a
+// gradient or a pattern would come out as a flat fill of its first color.
+// Such a draw is left to the CPU, which samples the brush per pixel; doFill
+// and doStroke flush pending GPU work before the CPU draws, so the order of
+// draws is kept. A side with no brush at all is the default solid black.
+func gpuPaintsOneColour(solid bool, b Brush) bool {
+	if solid || b == nil {
+		return true
+	}
+	_, ok := b.(SolidBrush)
+	return ok
 }
 
 // setupGPUMask uploads the active alpha mask to the GPU accelerator.
