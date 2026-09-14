@@ -244,7 +244,13 @@ func (sr *StencilRenderer) RenderPath(target gg.GPURenderTarget, path *gg.Path, 
 	}
 
 	// Create GPU buffers and bind groups for the render pass.
-	bufs, err := sr.createRenderBuffers(w, h, fanVerts, tess.CoverQuad(), color)
+	// RenderPath accepts straight alpha; the buffer builder shares the
+	// premultiplied color contract used by queued StencilPathCommands.
+	premul := [4]float32{
+		float32(color.R * color.A), float32(color.G * color.A),
+		float32(color.B * color.A), float32(color.A),
+	}
+	bufs, err := sr.createRenderBuffers(w, h, fanVerts, tess.CoverQuad(), premul)
 	if err != nil {
 		return err
 	}
@@ -268,9 +274,9 @@ func (sr *StencilRenderer) ensureReady(w, h uint32) error {
 }
 
 // createRenderBuffers creates vertex buffers, uniform buffers, and bind groups
-// for a stencil-then-cover render pass.
+// for a stencil-then-cover render pass. color is already premultiplied.
 func (sr *StencilRenderer) createRenderBuffers(
-	w, h uint32, fanVerts []float32, coverQuad [12]float32, color gg.RGBA,
+	w, h uint32, fanVerts []float32, coverQuad [12]float32, color [4]float32,
 ) (*stencilCoverBuffers, error) {
 	b := &stencilCoverBuffers{
 		fanVertexCount: uint32(len(fanVerts) / 2), //nolint:gosec // len/2 fits uint32
@@ -527,21 +533,17 @@ func makeStencilFillUniform(w, h uint32) []byte {
 
 // makeCoverUniform creates the 32-byte uniform buffer for the cover pass.
 // Layout: viewport (vec2<f32>) + padding (vec2<f32>) + color (vec4<f32>, premultiplied alpha).
-func makeCoverUniform(w, h uint32, color gg.RGBA) []byte {
+func makeCoverUniform(w, h uint32, color [4]float32) []byte {
 	buf := make([]byte, coverUniformSize)
 	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(float32(w)))
 	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(float32(h)))
 	// padding bytes 8..15 are zero
 
-	// Premultiply alpha for GPU blending.
-	premulR := float32(color.R * color.A)
-	premulG := float32(color.G * color.A)
-	premulB := float32(color.B * color.A)
-	premulA := float32(color.A)
-	binary.LittleEndian.PutUint32(buf[16:20], math.Float32bits(premulR))
-	binary.LittleEndian.PutUint32(buf[20:24], math.Float32bits(premulG))
-	binary.LittleEndian.PutUint32(buf[24:28], math.Float32bits(premulB))
-	binary.LittleEndian.PutUint32(buf[28:32], math.Float32bits(premulA))
+	// The command already carries premultiplied RGB. Applying alpha here
+	// again would darken every translucent stencil fill and stroke.
+	for i, channel := range color {
+		binary.LittleEndian.PutUint32(buf[16+i*4:20+i*4], math.Float32bits(channel))
+	}
 	return buf
 }
 

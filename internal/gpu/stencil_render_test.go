@@ -274,7 +274,7 @@ func TestMakeStencilFillUniform(t *testing.T) {
 }
 
 func TestMakeCoverUniform(t *testing.T) {
-	color := gg.RGBA{R: 1.0, G: 0.5, B: 0.25, A: 0.8}
+	color := [4]float32{0.8, 0.4, 0.2, 0.8} // already premultiplied
 	buf := makeCoverUniform(1920, 1080, color)
 	if len(buf) != coverUniformSize {
 		t.Fatalf("expected %d bytes, got %d", coverUniformSize, len(buf))

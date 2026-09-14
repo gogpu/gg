@@ -1669,12 +1669,6 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 	result := make([]*stencilCoverBuffers, len(paths))
 	for i := range paths {
 		cmd := &paths[i]
-		color := gg.RGBA{
-			R: float64(cmd.Color[0]),
-			G: float64(cmd.Color[1]),
-			B: float64(cmd.Color[2]),
-			A: float64(cmd.Color[3]),
-		}
 
 		// Destroy old pooled entry and create fresh buffers.
 		// Stencil paths vary wildly per frame (different vertex counts, colors),
@@ -1683,7 +1677,7 @@ func (s *GPURenderSession) buildStencilResourcesBatch(paths []StencilPathCommand
 			s.stencilBufPool[i].destroy()
 			s.stencilBufPool[i] = nil
 		}
-		bufs, err := s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, color)
+		bufs, err := s.stencilRenderer.createRenderBuffers(w, h, cmd.Vertices, cmd.CoverQuad, cmd.Color)
 		if err != nil {
 			// Clean up buffers created in this batch.
 			for j := 0; j < i; j++ {
