@@ -738,6 +738,10 @@ func (eb *EdgeBuilder) VelloLines() []VelloLine {
 
 // addQuad adds quadratic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
+	eb.addQuadRecursive(x0, y0, cx, cy, x1, y1, 0)
+}
+
+func (eb *EdgeBuilder) addQuadRecursive(x0, y0, cx, cy, x1, y1 float32, depth int) {
 	// If flattenCurves is enabled, convert curve to line segments.
 	// Line clipping (clipAndAddLine) handles overflow prevention.
 	if eb.flattenCurves {
@@ -748,6 +752,14 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 	// When using native curve edges, still populate VelloLines for
 	// CoverageFiller (SparseStrips/TileCompute) compatibility.
 	eb.flattenQuadToVelloLines(x0, y0, cx, cy, x1, y1)
+
+	// At large coordinates, float32 midpoints can round back to the input
+	// points, so subdivision cannot reduce the deviation. Match the depth
+	// limit of the flattening routines and emit the chord through line clipping.
+	if depth > 10 {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
 
 	// Deviation-based subdivision for CPU rendering without MSAA.
 	//
@@ -777,8 +789,8 @@ func (eb *EdgeBuilder) addQuad(x0, y0, cx, cy, x1, y1 float32) {
 		my12 := (cy + y1) * 0.5
 		mx := (mx01 + mx12) * 0.5
 		my := (my01 + my12) * 0.5
-		eb.addQuad(x0, y0, mx01, my01, mx, my)
-		eb.addQuad(mx, my, mx12, my12, x1, y1)
+		eb.addQuadRecursive(x0, y0, mx01, my01, mx, my, depth+1)
+		eb.addQuadRecursive(mx, my, mx12, my12, x1, y1, depth+1)
 		return
 	}
 
@@ -929,6 +941,10 @@ func (eb *EdgeBuilder) flattenQuadRecursive(x0, y0, cx, cy, x1, y1, tolerance fl
 
 // addCubic adds cubic curve edges, chopping at Y extrema if needed.
 func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
+	eb.addCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1, 0)
+}
+
+func (eb *EdgeBuilder) addCubicRecursive(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32, depth int) {
 	// If flattenCurves is enabled, convert curve to line segments.
 	// Line clipping (clipAndAddLine) handles overflow prevention.
 	if eb.flattenCurves {
@@ -938,6 +954,13 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 
 	// Populate VelloLines for CoverageFiller compatibility (VelloLines only, no LineEdges).
 	eb.flattenCubicToVelloLines(x0, y0, c1x, c1y, c2x, c2y, x1, y1)
+
+	// As with quadratics, rounding can make a child identical to its parent.
+	// Bound subdivision even when the absolute deviation stays above tolerance.
+	if depth > 10 {
+		eb.addLine(x0, y0, x1, y1)
+		return
+	}
 
 	// Deviation-based subdivision for cubics (same as quad — see comment above).
 	// For cubic, max deviation is at t=1/3 and t=2/3 from the chord.
@@ -966,8 +989,8 @@ func (eb *EdgeBuilder) addCubic(x0, y0, c1x, c1y, c2x, c2y, x1, y1 float32) {
 		m123y := (m12y + m23y) * 0.5
 		mx := (m012x + m123x) * 0.5
 		my := (m012y + m123y) * 0.5
-		eb.addCubic(x0, y0, m01x, m01y, m012x, m012y, mx, my)
-		eb.addCubic(mx, my, m123x, m123y, m23x, m23y, x1, y1)
+		eb.addCubicRecursive(x0, y0, m01x, m01y, m012x, m012y, mx, my, depth+1)
+		eb.addCubicRecursive(mx, my, m123x, m123y, m23x, m23y, x1, y1, depth+1)
 		return
 	}
 
