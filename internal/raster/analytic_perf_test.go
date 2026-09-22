@@ -6,6 +6,52 @@ import (
 	"testing"
 )
 
+func TestEdgesCrossMatchesPairs(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	for n := 0; n < 150; n++ {
+		for trial := 0; trial < 10; trial++ {
+			spans := make([]edgeSpan, n)
+			for i := range spans {
+				x := int32(rng.Intn(20) - 10)
+				y := x
+				if trial%2 == 0 {
+					y = int32(rng.Intn(20) - 10)
+				}
+				spans[i] = edgeSpan{x, y}
+			}
+			want := false
+			for i, a := range spans {
+				for _, b := range spans[i+1:] {
+					if (a.topX < b.topX && a.botX > b.botX) || (a.topX > b.topX && a.botX < b.botX) {
+						want = true
+					}
+				}
+			}
+			if got := edgesCross(spans); got != want {
+				t.Fatalf("n=%d trial=%d: got %v, want %v", n, trial, got, want)
+			}
+		}
+	}
+}
+
+func TestSmallEdgeCrossingDoesNotAllocate(t *testing.T) {
+	eb := NewEdgeBuilder(2)
+	eb.BuildFromPath(makeCirclePath(20, 20, 10), IdentityTransform{})
+	af := NewAnalyticFiller(40, 40)
+	for _, e := range eb.sortedEdgesSlice()[:16] {
+		af.aet.Insert(e.variant)
+	}
+	if af.aet.Len() < 2 || af.aet.Len() > 16 {
+		t.Fatalf("unexpected edge count: %d", af.aet.Len())
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		af.hasEdgeCrossing(20*skFixed1, 21*skFixed1, 4)
+	})
+	if allocs != 0 {
+		t.Fatalf("small crossing check allocated %g times", allocs)
+	}
+}
+
 func TestSetCoverageRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(3))
 	for _, width := range []int{1, 16, 257, 65535, 65536, 131071} {

@@ -4,7 +4,9 @@
 package raster
 
 import (
+	"cmp"
 	"math"
+	"slices"
 )
 
 // Skia AAA (Analytic Anti-Aliasing) trapezoid decomposition algorithm.
@@ -79,6 +81,9 @@ type AnalyticFiller struct {
 	// stripYBuf is a reusable buffer for sub-strip Y boundaries in SkFixed (16.16).
 	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
 	stripYBuf []int32
+
+	// crossBuf is reused for scanlines with many active edges.
+	crossBuf []edgeSpan
 
 	// convexEdgeBuf is a reusable buffer for convex walker edge state.
 	convexEdgeBuf []convexEdge
@@ -994,14 +999,18 @@ func (af *AnalyticFiller) hasEdgeCrossing(yTopFixed, yBotFixed, aaScale int32) b
 	if n < 2 {
 		return false
 	}
-	type xp struct{ topX, botX int32 }
-	var sb [16]xp
-	var ps []xp
+	var sb [16]edgeSpan
 	if n <= len(sb) {
-		ps = sb[:0]
-	} else {
-		ps = make([]xp, 0, n)
+		return edgesCross(af.collectEdgeSpans(sb[:0], yTopFixed, yBotFixed, aaScale))
 	}
+	af.crossBuf = af.collectEdgeSpans(af.crossBuf[:0], yTopFixed, yBotFixed, aaScale)
+	return edgesCross(af.crossBuf)
+}
+
+// collectEdgeSpans appends to dst without retaining it, so small callers can
+// use stack storage while large callers reuse the filler's buffer.
+func (af *AnalyticFiller) collectEdgeSpans(dst []edgeSpan, yTopFixed, yBotFixed, aaScale int32) []edgeSpan {
+	n := af.aet.Len()
 	for i := 0; i < n; i++ {
 		edge := af.aet.EdgeAt(i)
 		line := edge.AsLine()
@@ -1010,18 +1019,85 @@ func (af *AnalyticFiller) hasEdgeCrossing(yTopFixed, yBotFixed, aaScale int32) b
 		}
 		hasPrecise := line.UpperY != 0 || line.LowerY != 0
 		topX, botX := computeEdgeX(line, aaScale, hasPrecise, yTopFixed, yBotFixed)
-		ps = append(ps, xp{topX, botX})
+		dst = append(dst, edgeSpan{topX, botX})
 	}
-	for i := 0; i < len(ps); i++ {
-		for j := i + 1; j < len(ps); j++ {
-			dt := int64(ps[i].topX) - int64(ps[j].topX)
-			db := int64(ps[i].botX) - int64(ps[j].botX)
-			if (dt > 0 && db < 0) || (dt < 0 && db > 0) {
-				return true
+	return dst
+}
+
+// edgeSpan is an edge's X at the top and at the bottom of a strip.
+type edgeSpan struct{ topX, botX int32 }
+
+// edgesCross reports whether two of the edges swap order between the top and
+// the bottom of the strip: one strictly left of the other at the top and
+// strictly right of it at the bottom.
+//
+// A handful of edges is checked pair by pair. A scanline through a long
+// polyline — a time series stroked as one path — crosses hundreds, and there
+// the pairs cost more than the rest of the row together, so the edges are
+// sorted by top X instead: they cross exactly when a bottom X is smaller than
+// the largest bottom X of an edge that starts strictly further left.
+// ps is reordered.
+func edgesCross(ps []edgeSpan) bool {
+	if len(ps) <= 16 {
+		for i := 0; i < len(ps); i++ {
+			for j := i + 1; j < len(ps); j++ {
+				dt := int64(ps[i].topX) - int64(ps[j].topX)
+				db := int64(ps[i].botX) - int64(ps[j].botX)
+				if (dt > 0 && db < 0) || (dt < 0 && db > 0) {
+					return true
+				}
 			}
 		}
+		return false
+	}
+
+	// The active edges come ordered by X (see orderAETByX), so this is
+	// usually a pass over an almost sorted slice.
+	if !insertionSortSpans(ps, 4*len(ps)) {
+		slices.SortFunc(ps, func(a, b edgeSpan) int {
+			if c := cmp.Compare(a.topX, b.topX); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.botX, b.botX)
+		})
+	}
+	// Edges with the same top X never cross each other, so they are taken as
+	// a group: each is compared against the groups before it only.
+	var maxBot int32
+	for i := 0; i < len(ps); {
+		j := i + 1
+		for j < len(ps) && ps[j].topX == ps[i].topX {
+			j++
+		}
+		// Within a group the smallest bottom X comes first.
+		if i > 0 && ps[i].botX < maxBot {
+			return true
+		}
+		if i == 0 || ps[j-1].botX > maxBot {
+			maxBot = ps[j-1].botX
+		}
+		i = j
 	}
 	return false
+}
+
+// insertionSortSpans sorts spans by top X, then bottom X, giving up after
+// budget moves. It reports whether it finished.
+func insertionSortSpans(ps []edgeSpan, budget int) bool {
+	for i := 1; i < len(ps); i++ {
+		key := ps[i]
+		j := i - 1
+		for j >= 0 && (ps[j].topX > key.topX || (ps[j].topX == key.topX && ps[j].botX > key.botX)) {
+			ps[j+1] = ps[j]
+			j--
+			budget--
+		}
+		ps[j+1] = key
+		if budget < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // processSubStripFixed resolves edges and blits trapezoids for a single sub-strip
