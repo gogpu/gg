@@ -67,6 +67,14 @@ type AnalyticFiller struct {
 	// resolvedEdges is a reusable buffer for resolved edge states per sub-strip.
 	resolvedEdges []edgeLineState
 
+	// sortBuf is the merge buffer of sortResolvedEdges.
+	sortBuf []edgeLineState
+
+	// aetKeys, aetPerm and aetBuf are the reusable buffers of orderAETByX.
+	aetKeys []int32
+	aetPerm []int32
+	aetBuf  []aetEntry
+
 	// edgeStates is a persistent per-edge incremental X state, indexed by edgeBuf position.
 	// Matches Skia's fX lifetime: initialized once from origin when the edge enters the AET
 	// (goY slow path), then accumulated incrementally via fX += fDX >> yShift across ALL
@@ -82,7 +90,8 @@ type AnalyticFiller struct {
 	// All Y tracking uses integer SkFixed to match Skia AAA — no float32 intermediary.
 	stripYBuf []int32
 
-	// crossBuf is reused for scanlines with many active edges.
+	// crossBuf is a reusable buffer for hasEdgeCrossing on scanlines that
+	// cross many edges at once.
 	crossBuf []edgeSpan
 
 	// convexEdgeBuf is a reusable buffer for convex walker edge state.
@@ -342,6 +351,8 @@ func (af *AnalyticFiller) processScanlineAAA(
 			af.updateNextNextY(line.UpperY, yFixed)
 		}
 	}
+
+	af.orderAETByX(yFixed, aaScale)
 
 	// Collect fractional Y boundaries from active edges within this pixel row.
 	stripYs := af.collectStripBoundariesFixed(yFixed, yFixedEnd, aaScale)
@@ -649,7 +660,7 @@ func (af *AnalyticFiller) processSubStripIncrementalNoSplit(
 		})
 	}
 
-	sortEdgesByTopX(af.resolvedEdges)
+	af.sortResolvedEdges()
 
 	// Paired-edge walk: Skia AAA pattern (SkScan_AAAPath.cpp:1490-1530).
 	winding := int32(0)
@@ -1081,25 +1092,6 @@ func edgesCross(ps []edgeSpan) bool {
 	return false
 }
 
-// insertionSortSpans sorts spans by top X, then bottom X, giving up after
-// budget moves. It reports whether it finished.
-func insertionSortSpans(ps []edgeSpan, budget int) bool {
-	for i := 1; i < len(ps); i++ {
-		key := ps[i]
-		j := i - 1
-		for j >= 0 && (ps[j].topX > key.topX || (ps[j].topX == key.topX && ps[j].botX > key.botX)) {
-			ps[j+1] = ps[j]
-			j--
-			budget--
-		}
-		ps[j+1] = key
-		if budget < 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // processSubStripFixed resolves edges and blits trapezoids for a single sub-strip
 // within a pixel row. Coverage is added to the existing coverage buffer.
 // All Y parameters are in SkFixed (16.16) — no float32 conversion.
@@ -1135,7 +1127,7 @@ func (af *AnalyticFiller) processSubStripFixed(
 		}
 	}
 
-	sortEdgesByTopX(af.resolvedEdges)
+	af.sortResolvedEdges()
 
 	// Paired-edge walk: Skia AAA pattern (SkScan_AAAPath.cpp:1490-1530).
 	winding := int32(0)
@@ -1239,6 +1231,165 @@ func sortEdgesByTopX(edges []edgeLineState) {
 			break
 		}
 		edges[j+1] = key
+	}
+}
+
+// sortRunEdges is how long a stretch of resolvedEdges sortResolvedEdges
+// leaves to insertion sort before merging.
+const sortRunEdges = 32
+
+// sortResolvedEdges sorts af.resolvedEdges in the order sortEdgesByTopX
+// gives them.
+//
+// A scanline through a long polyline — a time series stroked as one path —
+// crosses hundreds of edges, and insertion sort goes quadratic on them. Those
+// are sorted in runs and merged through a reusable buffer instead: stable, so
+// edges that tie end up exactly where insertion sort would put them.
+func (af *AnalyticFiller) sortResolvedEdges() {
+	e := af.resolvedEdges
+	n := len(e)
+	if n <= sortRunEdges {
+		sortEdgesByTopX(e)
+		return
+	}
+	// The active edges come ordered by X (see orderAETByX), so insertion sort
+	// usually has little to move. Where it would have a lot, it stops and the
+	// merge below finishes: both are stable, so the order is the same.
+	if insertionSortEdges(e, 4*n) {
+		return
+	}
+	if cap(af.sortBuf) < n {
+		af.sortBuf = make([]edgeLineState, n)
+	}
+	for lo := 0; lo < n; lo += sortRunEdges {
+		sortEdgesByTopX(e[lo:min(lo+sortRunEdges, n)])
+	}
+	src, dst := e, af.sortBuf[:n]
+	for width := sortRunEdges; width < n; width *= 2 {
+		for lo := 0; lo < n; lo += 2 * width {
+			mid, hi := min(lo+width, n), min(lo+2*width, n)
+			mergeEdges(dst[lo:hi], src[lo:mid], src[mid:hi])
+		}
+		src, dst = dst, src
+	}
+	if &src[0] != &e[0] {
+		copy(e, src)
+	}
+}
+
+// mergeEdges merges two sorted runs into dst, taking from a on a tie.
+func mergeEdges(dst, a, b []edgeLineState) {
+	i, j := 0, 0
+	for k := range dst {
+		if j >= len(b) || (i < len(a) && !edgeBefore(b[j], a[i])) {
+			dst[k] = a[i]
+			i++
+		} else {
+			dst[k] = b[j]
+			j++
+		}
+	}
+}
+
+// edgeBefore is sortEdgesByTopX's order: top X, then slope.
+func edgeBefore(x, y edgeLineState) bool {
+	if x.topX != y.topX {
+		return x.topX < y.topX
+	}
+	return x.botX-x.topX < y.botX-y.topX
+}
+
+// insertionSortEdges is sortEdgesByTopX that gives up after budget moves. It
+// reports whether it finished; if not, edges is partly sorted, stably.
+func insertionSortEdges(edges []edgeLineState, budget int) bool {
+	for i := 1; i < len(edges); i++ {
+		key := edges[i]
+		j := i - 1
+		for j >= 0 && edgeBefore(key, edges[j]) {
+			edges[j+1] = edges[j]
+			j--
+			budget--
+		}
+		edges[j+1] = key
+		if budget < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// insertionSortSpans sorts spans by top X, then bottom X, giving up after
+// budget moves. It reports whether it finished.
+func insertionSortSpans(ps []edgeSpan, budget int) bool {
+	for i := 1; i < len(ps); i++ {
+		key := ps[i]
+		j := i - 1
+		for j >= 0 && (ps[j].topX > key.topX || (ps[j].topX == key.topX && ps[j].botX > key.botX)) {
+			ps[j+1] = ps[j]
+			j--
+			budget--
+		}
+		ps[j+1] = key
+		if budget < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// orderAETByX puts the active edges in the order of their X at the top of
+// the pixel row.
+//
+// Nothing depends on the order of the AET itself — every walk sorts what it
+// resolves — but the sorts are cheap on input that is nearly in order and
+// quadratic or n log n on input that is not. Edges enter the AET by their top
+// Y, which on a long polyline or a hatching is no order in X at all, and a row
+// crossing hundreds of edges then sorts them from scratch for every sub-strip.
+// Kept in X order, one row barely differs from the next.
+//
+// Only large AETs are reordered; a handful of edges sorts faster than it is
+// reordered. It runs at the start of a row, before the AET-to-state mapping
+// is built, since the mapping goes by AET position.
+func (af *AnalyticFiller) orderAETByX(yFixed, aaScale int32) {
+	edges := af.aet.edges
+	n := len(edges)
+	if n <= sortRunEdges {
+		return
+	}
+
+	keys := af.aetKeys[:0]
+	sorted := true
+	for i := range edges {
+		var x int32
+		if line := edges[i].edge.AsLine(); line != nil {
+			hasPrecise := line.UpperY != 0 || line.LowerY != 0
+			x, _ = computeEdgeX(line, aaScale, hasPrecise, yFixed, yFixed)
+		}
+		if i > 0 && x < keys[i-1] {
+			sorted = false
+		}
+		keys = append(keys, x)
+	}
+	af.aetKeys = keys
+	if sorted {
+		return
+	}
+
+	perm := af.aetPerm[:0]
+	for i := range n {
+		perm = append(perm, int32(i)) //nolint:gosec // AET length fits in int32
+	}
+	slices.SortFunc(perm, func(a, b int32) int {
+		if c := cmp.Compare(keys[a], keys[b]); c != 0 {
+			return c
+		}
+		return cmp.Compare(a, b)
+	})
+	af.aetPerm = perm
+
+	af.aetBuf = append(af.aetBuf[:0], edges...)
+	for i, p := range perm {
+		edges[i] = af.aetBuf[p]
 	}
 }
 

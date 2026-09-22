@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+func TestResolvedEdgesSortMatchesInsertion(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	af := NewAnalyticFiller(100, 100)
+	for n := 0; n < 300; n++ {
+		edges := make([]edgeLineState, n)
+		for i := range edges {
+			edges[i] = edgeLineState{topX: int32(rng.Intn(8)), botX: int32(rng.Intn(8)), dy: int32(i)}
+		}
+		want := slices.Clone(edges)
+		sortEdgesByTopX(want)
+		af.resolvedEdges = edges
+		af.sortResolvedEdges()
+		if !slices.Equal(edges, want) {
+			t.Fatalf("sort differs at n=%d (including stability of ties)", n)
+		}
+	}
+}
+
 func TestEdgesCrossMatchesPairs(t *testing.T) {
 	rng := rand.New(rand.NewSource(2))
 	for n := 0; n < 150; n++ {
