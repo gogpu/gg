@@ -145,6 +145,9 @@ func (s *FontSource) Close() error {
 	defer s.mu.Unlock()
 
 	// Clear data
+	if font, ok := s.parsed.(*ownParsedFont); ok {
+		font.glyphMasks.close()
+	}
 	s.data = nil
 	s.parsed = nil
 
