@@ -164,6 +164,9 @@ func (af *AnalyticFiller) Fill(
 	if eb.IsEmpty() {
 		return
 	}
+	if af.width <= 0 || af.height <= 0 {
+		return
+	}
 
 	bounds := eb.Bounds()
 	aaShift := eb.AAShift()
@@ -1601,33 +1604,7 @@ func (af *AnalyticFiller) safeAddAlpha(x int32, alpha uint8) {
 
 // coverageToRunsFromBuffer converts the uint8 coverage buffer to AlphaRuns.
 func (af *AnalyticFiller) coverageToRunsFromBuffer() {
-	af.alphaRuns.Reset()
-
-	var currentAlpha uint8
-	runStart := 0
-
-	for i := 0; i < af.width; i++ {
-		alpha := af.coverage[i]
-
-		if i == 0 {
-			currentAlpha = alpha
-			continue
-		}
-
-		if alpha != currentAlpha {
-			if currentAlpha > 0 {
-				runLen := i - runStart
-				af.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
-			}
-			currentAlpha = alpha
-			runStart = i
-		}
-	}
-
-	if currentAlpha > 0 {
-		runLen := af.width - runStart
-		af.alphaRuns.AddWithCoverage(runStart, currentAlpha, runLen-1, 0, currentAlpha)
-	}
+	af.alphaRuns.SetCoverage(af.coverage)
 }
 
 // stepCurveSegment advances a curve edge to its next segment.
