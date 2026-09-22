@@ -73,6 +73,30 @@ func (ar *AlphaRuns) Reset() {
 	ar.alpha[0] = 0
 }
 
+// SetCoverage replaces the scanline with one run per stretch of equal
+// coverage, zero included. coverage holds one value per pixel and must be at
+// least as long as the scanline.
+//
+// It writes the runs directly, in one pass. Building them through Add costs a
+// walk from the last full run on every call, and a single pixel of edge
+// coverage does not move that point on — a row through an antialiased line
+// with hundreds of crossings then walks the row hundreds of times.
+func (ar *AlphaRuns) SetCoverage(coverage []uint8) {
+	ar.offset = 0
+	w := ar.width
+	for x := 0; x < w; {
+		a := coverage[x]
+		end := x + 1
+		for end < w && coverage[end] == a && end-x < 65535 {
+			end++
+		}
+		ar.runs[x] = uint16(end - x) //nolint:gosec // bounded by 65535 above
+		ar.alpha[x] = a
+		x = end
+	}
+	ar.runs[w] = 0
+}
+
 // IsEmpty returns true if the scanline contains only a single run of alpha 0.
 func (ar *AlphaRuns) IsEmpty() bool {
 	if ar.runs[0] == 0 {
