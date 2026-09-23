@@ -544,7 +544,10 @@ func (p *DepthClipPipeline) RecordDraw(rp *wgpu.RenderPassEncoder, res *DepthCli
 	rp.SetBindGroup(0, res.bindGroup, nil)
 	rp.SetVertexBuffer(0, res.vertBuf, 0)
 	rp.SetStencilReference(0)
-	rp.Draw(res.vertCount, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{
+		VertexCount:   res.vertCount,
+		InstanceCount: 1,
+	})
 
 	// Phase 2: Cover quad — write depth where stencil != 0, reset stencil to 0.
 	// Only pixels inside the clip path (stencil != 0) receive depth Z=0.0.
@@ -553,7 +556,10 @@ func (p *DepthClipPipeline) RecordDraw(rp *wgpu.RenderPassEncoder, res *DepthCli
 	rp.SetBindGroup(0, res.bindGroup, nil)
 	rp.SetVertexBuffer(0, res.coverBuf, 0)
 	rp.SetStencilReference(0)
-	rp.Draw(res.coverCount, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{
+		VertexCount:   res.coverCount,
+		InstanceCount: 1,
+	})
 }
 
 // Destroy releases all GPU resources held by the depth clip pipeline.

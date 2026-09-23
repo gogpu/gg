@@ -244,7 +244,11 @@ func (cr *ConvexRenderer) RecordDraws(rp *wgpu.RenderPassEncoder, resources *con
 		rp.SetBindGroup(1, clipBG, nil)
 	}
 	rp.SetVertexBuffer(0, resources.vertBuf, 0)
-	rp.Draw(resources.vertCount, 1, resources.firstVertex, 0)
+	rp.Draw(gputypes.DrawArgs{
+		VertexCount:   resources.vertCount,
+		InstanceCount: 1,
+		FirstVertex:   resources.firstVertex,
+	})
 }
 
 // createPipeline compiles the convex render shader and creates the render

@@ -323,7 +323,14 @@ func (p *RenderPassEncoder) SetViewport(x, y, width, height, minDepth, maxDepth 
 
 	// Forward to core pass if available
 	if p.corePass != nil {
-		p.corePass.SetViewport(x, y, width, height, minDepth, maxDepth)
+		p.corePass.SetViewport(gputypes.Viewport{
+			X:        x,
+			Y:        y,
+			Width:    width,
+			Height:   height,
+			MinDepth: minDepth,
+			MaxDepth: maxDepth,
+		})
 	}
 
 	return nil
@@ -350,7 +357,12 @@ func (p *RenderPassEncoder) SetScissorRect(x, y, width, height uint32) error {
 
 	// Forward to core pass if available
 	if p.corePass != nil {
-		p.corePass.SetScissorRect(x, y, width, height)
+		p.corePass.SetScissorRect(gputypes.ScissorRect{
+			X:      x,
+			Y:      y,
+			Width:  width,
+			Height: height,
+		})
 	}
 
 	return nil
@@ -430,7 +442,12 @@ func (p *RenderPassEncoder) Draw(vertexCount, instanceCount, firstVertex, firstI
 
 	// Forward to core pass if available
 	if p.corePass != nil {
-		p.corePass.Draw(vertexCount, instanceCount, firstVertex, firstInstance)
+		p.corePass.Draw(gputypes.DrawArgs{
+			VertexCount:   vertexCount,
+			InstanceCount: instanceCount,
+			FirstVertex:   firstVertex,
+			FirstInstance: firstInstance,
+		})
 	}
 
 	return nil
@@ -460,7 +477,13 @@ func (p *RenderPassEncoder) DrawIndexed(indexCount, instanceCount, firstIndex ui
 
 	// Forward to core pass if available
 	if p.corePass != nil {
-		p.corePass.DrawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance)
+		p.corePass.DrawIndexed(gputypes.DrawIndexedArgs{
+			IndexCount:    indexCount,
+			InstanceCount: instanceCount,
+			FirstIndex:    firstIndex,
+			BaseVertex:    baseVertex,
+			FirstInstance: firstInstance,
+		})
 	}
 
 	return nil

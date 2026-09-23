@@ -486,7 +486,11 @@ func (p *SDFRenderPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *s
 		rp.SetBindGroup(1, clipBG, nil)
 	}
 	rp.SetVertexBuffer(0, resources.vertBuf, 0)
-	rp.Draw(resources.vertCount, 1, resources.firstVertex, 0)
+	rp.Draw(gputypes.DrawArgs{
+		VertexCount:   resources.vertCount,
+		InstanceCount: 1,
+		FirstVertex:   resources.firstVertex,
+	})
 }
 
 // destroyPipeline releases all pipeline resources in reverse creation order.
@@ -553,7 +557,10 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	rp.SetPipeline(p.pipeline)
 	rp.SetBindGroup(0, bindGroup, nil)
 	rp.SetVertexBuffer(0, vertBuf, 0)
-	rp.Draw(vertexCount, 1, 0, 0)
+	rp.Draw(gputypes.DrawArgs{
+		VertexCount:   vertexCount,
+		InstanceCount: 1,
+	})
 	_ = rp.End()
 
 	// VK-LAYOUT-001: After MSAA resolve the texture is in

@@ -22,7 +22,7 @@ func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
 // Returns the device, queue, and a cleanup function.
 func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := noop.API{}
+	api := noop.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("CreateInstance failed: %v", err)

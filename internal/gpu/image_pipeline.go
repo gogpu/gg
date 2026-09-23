@@ -280,7 +280,11 @@ func (p *TexturedQuadPipeline) RecordBlitDraws(rp *wgpu.RenderPassEncoder, res *
 	rp.SetVertexBuffer(0, res.vertBuf, 0)
 	for _, dc := range res.drawCalls {
 		rp.SetBindGroup(0, dc.bindGroup, nil)
-		rp.Draw(6, 1, dc.firstVertex, 0)
+		rp.Draw(gputypes.DrawArgs{
+			VertexCount:   6,
+			InstanceCount: 1,
+			FirstVertex:   dc.firstVertex,
+		})
 	}
 }
 
@@ -385,7 +389,11 @@ func (p *TexturedQuadPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, res *imag
 	rp.SetVertexBuffer(0, res.vertBuf, 0)
 	for _, dc := range res.drawCalls {
 		rp.SetBindGroup(0, dc.bindGroup, nil)
-		rp.Draw(6, 1, dc.firstVertex, 0) //nolint:mnd // 6 vertices per quad (2 triangles)
+		rp.Draw(gputypes.DrawArgs{ //nolint:mnd // 6 vertices per quad (2 triangles)
+			VertexCount:   6,
+			InstanceCount: 1,
+			FirstVertex:   dc.firstVertex,
+		})
 	}
 }
 

@@ -360,7 +360,11 @@ func (p *MSDFTextPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *te
 			continue
 		}
 		rp.SetBindGroup(0, dc.bindGroup, nil)
-		rp.DrawIndexed(dc.indexCount, 1, dc.indexOffset, 0, 0)
+		rp.DrawIndexed(gputypes.DrawIndexedArgs{
+			IndexCount:    dc.indexCount,
+			InstanceCount: 1,
+			FirstIndex:    dc.indexOffset,
+		})
 	}
 }
 

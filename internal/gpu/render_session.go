@@ -538,7 +538,12 @@ func (s *GPURenderSession) ClearScissorRect() {
 // render pass encoder. Call this after BeginRenderPass and before draw calls.
 func (s *GPURenderSession) applyScissorRect(rp *wgpu.RenderPassEncoder) {
 	if s.scissorRect != nil {
-		rp.SetScissorRect(s.scissorRect[0], s.scissorRect[1], s.scissorRect[2], s.scissorRect[3])
+		rp.SetScissorRect(gputypes.ScissorRect{
+			X:      s.scissorRect[0],
+			Y:      s.scissorRect[1],
+			Width:  s.scissorRect[2],
+			Height: s.scissorRect[3],
+		})
 	}
 }
 
@@ -2606,7 +2611,7 @@ func (s *GPURenderSession) encodeSubmitReadback(
 	if rpErr != nil {
 		return fmt.Errorf("begin render pass: %w", rpErr)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 	s.applyScissorRect(rp)
 
 	// Bind no-clip at @group(1) for non-grouped path (no RRect clip).
@@ -2825,7 +2830,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	if rpErr != nil {
 		return fmt.Errorf("begin render pass: %w", rpErr)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 	s.applyScissorRect(rp)
 
 	// Clip bind group is passed to each RecordDraws (must be bound AFTER
@@ -2956,9 +2961,14 @@ func (s *GPURenderSession) recordGroupDraws(rp *wgpu.RenderPassEncoder, gr *grou
 // framebuffer (w x h). When non-nil, the scissor clips to the given rect.
 func (s *GPURenderSession) applyGroupScissor(rp *wgpu.RenderPassEncoder, rect *[4]uint32, w, h uint32) {
 	if rect != nil {
-		rp.SetScissorRect(rect[0], rect[1], rect[2], rect[3])
+		rp.SetScissorRect(gputypes.ScissorRect{
+			X:      rect[0],
+			Y:      rect[1],
+			Width:  rect[2],
+			Height: rect[3],
+		})
 	} else {
-		rp.SetScissorRect(0, 0, w, h)
+		rp.SetScissorRect(gputypes.ScissorRect{Width: w, Height: h})
 	}
 }
 
@@ -2978,7 +2988,7 @@ func (s *GPURenderSession) applyGroupScissorWithDamage(rp *wgpu.RenderPassEncode
 	if !valid {
 		return false
 	}
-	rp.SetScissorRect(x, y, dw, dh)
+	rp.SetScissorRect(gputypes.ScissorRect{X: x, Y: y, Width: dw, Height: dh})
 	return true
 }
 
@@ -3113,11 +3123,11 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 	if rpErr != nil {
 		return fmt.Errorf("begin render pass: %w", rpErr)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 
 	// Base layer: pixmap textured quad drawn FIRST, before all tiers (ADR-015).
 	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
-		rp.SetScissorRect(0, 0, w, h)
+		rp.SetScissorRect(gputypes.ScissorRect{Width: w, Height: h})
 		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
 	}
 
@@ -3242,7 +3252,7 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	if err != nil {
 		return fmt.Errorf("begin blit render pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 
 	// ADR-028: base layer drawn once per damage rect (per-draw dynamic scissor).
 	// Multi-rect: N small scissors. Single rect: 1 scissor. No rects: full surface.
@@ -3250,7 +3260,7 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 		for _, dr := range damageRects {
 			dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, dr)
 			if valid {
-				rp.SetScissorRect(dx, dy, dw, dh)
+				rp.SetScissorRect(gputypes.ScissorRect{X: dx, Y: dy, Width: dw, Height: dh})
 				s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 			}
 		}
@@ -3362,10 +3372,10 @@ func (s *GPURenderSession) encodeGroupedSurfacePass(
 	if err != nil {
 		return fmt.Errorf("begin grouped surface pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 
 	if baseLayerRes != nil && len(baseLayerRes.drawCalls) > 0 {
-		rp.SetScissorRect(0, 0, w, h)
+		rp.SetScissorRect(gputypes.ScissorRect{Width: w, Height: h})
 		s.imagePipeline.RecordDraws(rp, baseLayerRes, s.noClipBindGroup)
 	}
 	for i := range grpRes {
@@ -3428,8 +3438,8 @@ func (s *GPURenderSession) encodeSurfaceCompositePass(
 	if err != nil {
 		return fmt.Errorf("begin surface composite pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
-	rp.SetScissorRect(0, 0, w, h)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
+	rp.SetScissorRect(gputypes.ScissorRect{Width: w, Height: h})
 
 	// Build resources for the legacy path using the composite texture.
 	res, buildErr := s.buildLegacySurfaceCompositeResources(w, h)
@@ -3543,14 +3553,14 @@ func (s *GPURenderSession) encodeBlitToEncoder(
 	if err != nil {
 		return fmt.Errorf("begin shared blit pass: %w", err)
 	}
-	rp.SetViewport(0, 0, float32(w), float32(h), 0, 1)
+	rp.SetViewport(gputypes.Viewport{Width: float32(w), Height: float32(h), MaxDepth: 1})
 
 	// ADR-028: base layer per-rect scissor (same as encodeBlitOnlyPass).
 	if hasDamage {
 		for _, dr := range damageRects {
 			dx, dy, dw, dh, valid := computeDamageScissor(nil, w, h, dr)
 			if valid {
-				rp.SetScissorRect(dx, dy, dw, dh)
+				rp.SetScissorRect(gputypes.ScissorRect{X: dx, Y: dy, Width: dw, Height: dh})
 				s.imagePipeline.RecordBlitDraws(rp, baseLayerRes)
 			}
 		}
