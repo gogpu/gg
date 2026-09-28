@@ -248,7 +248,13 @@ type GPURenderSession struct {
 	// Freeing a command buffer while the GPU is still executing it causes
 	// vkResetCommandPool on an in-flight pool — undefined behavior that
 	// manifests as trail artifacts (stale MSAA resolve content).
-	prevCmdBufs []*wgpu.CommandBuffer
+	//
+	// prevCmdSubIdx records the queue submission index returned by
+	// Queue.Submit for the matching prevCmdBufs entry, so completed
+	// submissions can be identified by comparing against Queue.Poll()
+	// without waiting for the whole queue (WaitIdle).
+	prevCmdBufs    []*wgpu.CommandBuffer
+	prevCmdSubIdx  []uint64
 
 	// frameRendered tracks whether at least one render pass has been
 	// submitted to the surface in the current frame. When true, subsequent
@@ -329,12 +335,7 @@ func (s *GPURenderSession) SetSurfaceTarget(view *wgpu.TextureView, width, heigh
 		// buffer may still reference framebuffers built from these views.
 		if len(s.prevCmdBufs) > 0 {
 			s.drainQueue()
-			for _, cb := range s.prevCmdBufs {
-				if cb != nil {
-					s.device.FreeCommandBuffer(cb)
-				}
-			}
-			s.prevCmdBufs = s.prevCmdBufs[:0]
+			s.drainCompletedAll()
 		}
 		s.releaseSurfaceCompositeBinding()
 		s.textures.destroyTextures()
@@ -381,12 +382,8 @@ func (s *GPURenderSession) BeginFrame() {
 	// flush begins. Freeing them mid-frame would vkResetCommandPool on an
 	// in-flight pool, causing undefined behavior (trail artifacts from
 	// incomplete MSAA resolve).
-	for _, cb := range s.prevCmdBufs {
-		if cb != nil {
-			s.device.FreeCommandBuffer(cb)
-		}
-	}
-	s.prevCmdBufs = s.prevCmdBufs[:0]
+	s.drainCompleted()
+	clearTail(s.pendingDepthClipRelease, len(s.pendingDepthClipRelease))
 
 	// ADR-056: release resources deferred from shared-encoder frames.
 	// By frame boundary, gogpu has submitted the shared encoder and VSync
@@ -1051,12 +1048,7 @@ func (s *GPURenderSession) Destroy() {
 	// WaitIdle guarantees all prior submissions are complete (FIFO queue).
 	if len(s.prevCmdBufs) > 0 {
 		s.drainQueue()
-		for _, cb := range s.prevCmdBufs {
-			if cb != nil {
-				s.device.FreeCommandBuffer(cb)
-			}
-		}
-		s.prevCmdBufs = s.prevCmdBufs[:0]
+		s.drainCompletedAll()
 	}
 	s.destroyPersistentBuffers()
 	s.textures.destroyTextures()
@@ -1069,10 +1061,69 @@ func (s *GPURenderSession) Destroy() {
 
 // drainQueue waits for all prior GPU submissions to complete.
 // Since the GPU queue is FIFO, WaitIdle guarantees all prior submissions are done.
+// Only call this on paths that genuinely need an idle GPU (resource
+// destruction on resize/close); per-frame free relies on drainCompleted.
 func (s *GPURenderSession) drainQueue() {
 	if err := s.device.WaitIdle(); err != nil {
 		slogger().Warn("WaitIdle failed during queue drain", "err", err)
 	}
+}
+
+// drainCompleted frees command buffers whose queue submission the GPU has
+// finished executing, without waiting for the queue to drain. Completion is
+// owned by the HAL queue's completion handlers (Queue.Poll), so this never
+// releases a command buffer whose work is still in flight; entries still in
+// flight are revisited on the next call. Clearing the backing array (clear
+// tail) drops Go pointers otherwise kept alive behind the logical length.
+func (s *GPURenderSession) drainCompleted() {
+	completed := s.queue.Poll()
+	keep := 0
+	for i, cb := range s.prevCmdBufs {
+		if cb != nil && s.prevCmdSubIdx[i] <= completed {
+			s.device.FreeCommandBuffer(cb)
+			continue
+		}
+		if i != keep {
+			s.prevCmdBufs[keep] = cb
+			s.prevCmdSubIdx[keep] = s.prevCmdSubIdx[i]
+		}
+		keep++
+	}
+	clearTail(s.prevCmdBufs, keep)
+	clearTail(s.prevCmdSubIdx, keep)
+	s.prevCmdBufs = s.prevCmdBufs[:keep]
+	s.prevCmdSubIdx = s.prevCmdSubIdx[:keep]
+}
+
+// drainCompletedAll frees every pending command buffer regardless of GPU
+// completion. Callers must have established that the queue is idle (typically
+// right after drainQueue) or be in teardown.
+func (s *GPURenderSession) drainCompletedAll() {
+	for _, cb := range s.prevCmdBufs {
+		if cb != nil {
+			s.device.FreeCommandBuffer(cb)
+		}
+	}
+	clear(s.prevCmdBufs)
+	clear(s.prevCmdSubIdx)
+	s.prevCmdBufs = s.prevCmdBufs[:0]
+	s.prevCmdSubIdx = s.prevCmdSubIdx[:0]
+}
+
+// clearTail zeroes the backing-array tail [n:len] so allocator reuse does not
+// keep stale Go pointers alive behind the logical length.
+func clearTail[T any](s []T, n int) {
+	var zero T
+	for i := n; i < len(s); i++ {
+		s[i] = zero
+	}
+}
+
+// trackSubmittedCommandBuffer records a submitted command buffer together
+// with its queue submission index for later completion-gated release.
+func (s *GPURenderSession) trackSubmittedCommandBuffer(cmdBuf *wgpu.CommandBuffer, subIdx uint64) {
+	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
+	s.prevCmdSubIdx = append(s.prevCmdSubIdx, subIdx)
 }
 
 func (s *GPURenderSession) destroyPersistentBuffers() { //nolint:gocyclo,cyclop,funlen,gocognit // sequential resource cleanup across 6 tiers
@@ -2880,7 +2931,8 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	// manifests as trail artifacts from incomplete MSAA resolve).
 	// All command buffers are freed at the start of the NEXT frame
 	// (BeginFrame) when VSync guarantees the GPU is done.
-	if _, err := s.queue.Submit(cmdBuf); err != nil {
+	subIdx, err := s.queue.Submit(cmdBuf)
+	if err != nil {
 		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
 		// submitted. Without this, the Vulkan command pool entry leaks.
 		s.device.FreeCommandBuffer(cmdBuf)
@@ -2888,7 +2940,7 @@ func (s *GPURenderSession) encodeSubmitSurface(
 	}
 
 	// Keep reference so next frame can free it after GPU is done.
-	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
+	s.trackSubmittedCommandBuffer(cmdBuf, subIdx)
 
 	// Mark that at least one render pass has been submitted this frame.
 	// Subsequent mid-frame MSAA flushes use the composition path to preserve it.
@@ -3282,11 +3334,12 @@ func (s *GPURenderSession) encodeBlitOnlyPass(
 	encoderConsumed = true
 
 	// Do NOT free previous command buffers mid-frame — see encodeSubmitSurface.
-	if _, submitErr := s.queue.Submit(cmdBuf); submitErr != nil {
+	subIdx, submitErr := s.queue.Submit(cmdBuf)
+	if submitErr != nil {
 		s.device.FreeCommandBuffer(cmdBuf)
 		return fmt.Errorf("submit blit: %w", submitErr)
 	}
-	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
+	s.trackSubmittedCommandBuffer(cmdBuf, subIdx)
 	s.frameRendered = true
 	s.lastView = view
 
@@ -3484,7 +3537,8 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	encoderConsumed = true
 
 	// Do NOT free previous command buffers mid-frame — see encodeSubmitSurface.
-	if _, err := s.queue.Submit(cmdBuf); err != nil {
+	subIdx, err := s.queue.Submit(cmdBuf)
+	if err != nil {
 		// BUG-GG-ENCODER-LIFECYCLE-001: free the command buffer that was not
 		// submitted. Without this, the Vulkan command pool entry leaks.
 		s.device.FreeCommandBuffer(cmdBuf)
@@ -3492,7 +3546,7 @@ func (s *GPURenderSession) encodeSubmitSurfaceGrouped(
 	}
 
 	// Keep reference so next frame can free it after GPU is done.
-	s.prevCmdBufs = append(s.prevCmdBufs, cmdBuf)
+	s.trackSubmittedCommandBuffer(cmdBuf, subIdx)
 
 	return nil
 }
