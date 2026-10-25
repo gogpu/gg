@@ -1,8 +1,10 @@
 package text
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -343,4 +345,75 @@ func TestNewFontSourceWithParser(t *testing.T) {
 	t.Logf("Font: %s, Glyphs: %d, UnitsPerEm: %d", parsed.Name(), parsed.NumGlyphs(), parsed.UnitsPerEm())
 	t.Logf("Glyph 'A' index: %d, advance at 24pt: %.2f", idx, advance)
 	t.Logf("Metrics at 24pt: Ascent=%.2f, Descent=%.2f, Height=%.2f", metrics.Ascent, metrics.Descent, metrics.Height())
+}
+
+// NewFontSource documents that data may be reused after the call. The parsed
+// font must therefore read the source's own copy, not the caller's slice.
+func TestNewFontSourceDoesNotAliasCallerData(t *testing.T) {
+	data := append([]byte(nil), requireTestFont(t)...)
+	source, err := NewFontSource(data)
+	if err != nil {
+		t.Fatalf("NewFontSource failed: %v", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	gid := source.Parsed().GlyphIndex('A')
+	if gid == 0 {
+		t.Fatal("expected a glyph for 'A'")
+	}
+	before, err := NewOutlineExtractor().ExtractOutline(source.Parsed(), GlyphID(gid), 24)
+	if err != nil || before == nil || len(before.Segments) == 0 {
+		t.Fatalf("expected an outline for 'A' before reuse: %v", err)
+	}
+
+	clear(data) // the caller reuses its buffer, as the doc comment allows
+
+	if got := source.Parsed().GlyphIndex('A'); got != gid {
+		t.Errorf("GlyphIndex('A') after the caller reused its buffer = %d, want %d", got, gid)
+	}
+	after, err := NewOutlineExtractor().ExtractOutline(source.Parsed(), GlyphID(gid), 24)
+	if err != nil || after == nil || len(after.Segments) != len(before.Segments) {
+		t.Errorf("outline for 'A' changed after the caller reused its buffer: %v", err)
+	}
+}
+
+// NewFontSourceFromFile owns the bytes it reads, so it hands them to the
+// source instead of copying them: one copy of the file, not two. For a 183 MB
+// emoji font the second copy was 183 MB of heap held for the font's lifetime.
+func TestNewFontSourceFromFileKeepsOneCopy(t *testing.T) {
+	data := requireTestFont(t)
+	path := filepath.Join(t.TempDir(), "font.ttf")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFontSourceFromFile(path); err != nil { // parser registry and other one-time setup
+		t.Fatalf("NewFontSourceFromFile failed: %v", err)
+	}
+
+	const loads = 8
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range loads {
+		if _, err := NewFontSourceFromFile(path); err != nil {
+			t.Fatalf("NewFontSourceFromFile failed: %v", err)
+		}
+	}
+	runtime.ReadMemStats(&after)
+
+	perLoad := (after.TotalAlloc - before.TotalAlloc) / loads
+	if limit := uint64(len(data)) * 3 / 2; perLoad > limit {
+		t.Errorf("NewFontSourceFromFile allocated %d bytes for a %d-byte file, want under %d (one copy and the parse)",
+			perLoad, len(data), limit)
+	}
+	t.Logf("%d bytes allocated per load of a %d-byte file", perLoad, len(data))
+}
+
+func TestNewFontSourceFromFileEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.ttf")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFontSourceFromFile(path); !errors.Is(err, ErrEmptyFontData) {
+		t.Errorf("NewFontSourceFromFile(empty file) error = %v, want ErrEmptyFontData", err)
+	}
 }
