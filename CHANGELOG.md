@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`SetAcceleratorMaxSampleCount`**: caps the MSAA sample count of the GPU
+  accelerator. `1` turns multi-sampling off (`strategyNoMSAA`, the path
+  software adapters already take), and `0` restores the default. The optional
+  `SampleCountAware` interface carries it, and `SDFAccelerator` implements it
+  by forwarding to `GPUShared`. An application that draws only glyph-mask text
+  and pixel-aligned rectangles, such as a terminal UI, looks the same without
+  MSAA. Turning it off frees the 4x color and depth/stencil targets: about
+  120 MB of GPU memory for a 2060x1638 window, with screenshots identical
+  byte for byte.
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed

@@ -94,7 +94,7 @@ func TestCreateEncoder_WithNoopDevice(t *testing.T) {
 	rc := s.NewRenderContext()
 	defer rc.Close()
 
-	sc := resolveSampleCount(device)
+	sc := resolveSampleCount(device, 0)
 	rc.session = NewGPURenderSession(device, queue, sc)
 
 	enc := rc.CreateEncoder()
@@ -131,7 +131,7 @@ func TestSubmitEncoder_NilEncoder(t *testing.T) {
 	rc := s.NewRenderContext()
 	defer rc.Close()
 
-	sc := resolveSampleCount(device)
+	sc := resolveSampleCount(device, 0)
 	rc.session = NewGPURenderSession(device, queue, sc)
 
 	err := rc.SubmitEncoder(gpucontext.CommandEncoder{})
@@ -155,7 +155,7 @@ func TestSubmitEncoder_Success(t *testing.T) {
 	rc := s.NewRenderContext()
 	defer rc.Close()
 
-	sc := resolveSampleCount(device)
+	sc := resolveSampleCount(device, 0)
 	rc.session = NewGPURenderSession(device, queue, sc)
 
 	enc := rc.CreateEncoder()
@@ -723,7 +723,7 @@ func TestClose_WithSession(t *testing.T) {
 
 	rc := s.NewRenderContext()
 
-	sc := resolveSampleCount(device)
+	sc := resolveSampleCount(device, 0)
 	rc.session = NewGPURenderSession(device, queue, sc)
 
 	rc.Close()

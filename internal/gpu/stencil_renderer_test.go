@@ -15,7 +15,7 @@ import (
 // work on software backends that reject SampleCount=4.
 func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
 	t.Helper()
-	return resolveSampleCount(device)
+	return resolveSampleCount(device, 0)
 }
 
 // createNoopDevice creates a noop-backed *wgpu.Device and *wgpu.Queue for testing.

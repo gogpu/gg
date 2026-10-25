@@ -104,6 +104,10 @@ type GPUShared struct {
 	// Resolved via resolveSampleCount() which probes the device.
 	sampleCount uint32
 
+	// maxSampleCount caps sampleCount (SetMaxSampleCount); 0 means no cap.
+	// resolveSampleCount applies it when the device is set up.
+	maxSampleCount uint32
+
 	deviceReady    bool              // device available for texture/buffer ops (true on all strategies incl. rasterAtlas)
 	gpuReady       bool              // shape/text rendering pipelines initialized (false on rasterAtlas)
 	softwareMode   bool              // true when software/CPU adapter detected (informational, does not disable GPU)
@@ -235,7 +239,7 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	s.externalDevice = true
 
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
-	s.sampleCount = resolveSampleCount(s.device)
+	s.sampleCount = resolveSampleCount(s.device, s.maxSampleCount)
 
 	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
 	s.strategy = s.detectStrategy()
@@ -343,12 +347,39 @@ func (s *GPUShared) Close() {
 }
 
 // SampleCount returns the resolved MSAA sample count (4 or 1).
-// Returns 4 before GPU initialization (safe default for pipeline descriptors).
+// Returns 4 before GPU initialization (safe default for pipeline descriptors),
+// or 1 when SetMaxSampleCount has capped it.
 func (s *GPUShared) SampleCount() uint32 {
 	if s.sampleCount == 0 {
+		if capsToOneSample(s.maxSampleCount) {
+			return 1
+		}
 		return 4 // default before init
 	}
 	return s.sampleCount
+}
+
+// SetMaxSampleCount caps the MSAA sample count resolved when the device is
+// next set up: by SetDeviceProvider, or by the first standalone
+// initialization. 0 removes the cap. WebGPU guarantees only 1 and 4 samples,
+// so any cap below 4 means 1, which selects strategyNoMSAA.
+//
+// Pipelines and render targets are built for the resolved count. A cap set
+// after the device is ready therefore waits for the next device setup instead
+// of rebuilding them under a frame in flight.
+func (s *GPUShared) SetMaxSampleCount(n uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxSampleCount = n
+	if s.deviceReady && n != 0 && n < s.sampleCount {
+		slogger().Warn("gpu-shared: MSAA cap set after device setup, applies at the next device setup",
+			"cap", n, "current", s.sampleCount)
+	}
+}
+
+// capsToOneSample reports whether a SetMaxSampleCount cap leaves 1x only.
+func capsToOneSample(maxSamples uint32) bool {
+	return maxSamples != 0 && maxSamples < 4
 }
 
 // detectStrategy determines the rendering strategy based on adapter type and
@@ -383,7 +414,14 @@ func (s *GPUShared) detectStrategy() gpuRenderStrategy {
 //
 // The WebGPU spec guarantees sampleCount=4 for standard formats on compliant
 // implementations, but software backends may not be fully compliant.
-func resolveSampleCount(device *wgpu.Device) uint32 {
+//
+// maxSamples is the SetMaxSampleCount cap. A cap below 4 skips the probe: the
+// caller has asked for 1x, which every device supports.
+func resolveSampleCount(device *wgpu.Device, maxSamples uint32) uint32 {
+	if capsToOneSample(maxSamples) {
+		slogger().Info("MSAA capped at 1x by SetMaxSampleCount", "cap", maxSamples)
+		return 1
+	}
 	tex, err := device.CreateTexture(&wgpu.TextureDescriptor{
 		Label:         "msaa_probe",
 		Size:          wgpu.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1},
@@ -475,7 +513,7 @@ func (s *GPUShared) initGPU() error {
 	s.queue = device.Queue()
 
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
-	s.sampleCount = resolveSampleCount(s.device)
+	s.sampleCount = resolveSampleCount(s.device, s.maxSampleCount)
 
 	// Auto-detect rendering strategy (Skia PathRendererStrategy pattern).
 	s.strategy = s.detectStrategy()

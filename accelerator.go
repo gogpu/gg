@@ -152,6 +152,13 @@ type DeviceProviderAware interface {
 	SetDeviceProvider(provider gpucontext.DeviceProvider) error
 }
 
+// SampleCountAware is an optional interface for accelerators that render into
+// multi-sampled (MSAA) targets and can be told to use fewer samples. See
+// [SetAcceleratorMaxSampleCount].
+type SampleCountAware interface {
+	SetMaxSampleCount(n int)
+}
+
 // GPURenderContextProvider is an optional interface for accelerators that
 // support per-context GPU rendering. When the accelerator implements this
 // interface, each gg.Context lazily creates its own GPURenderContext for
@@ -338,6 +345,33 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 		return dpa.SetDeviceProvider(provider)
 	}
 	return nil
+}
+
+// SetAcceleratorMaxSampleCount caps the MSAA sample count of the registered
+// accelerator. 1 turns multi-sampling off, and 0 restores the default, the
+// most the device supports (4). WebGPU guarantees only 1 and 4 samples, so any
+// cap below 4 means 1. If no accelerator is registered or it renders without
+// MSAA, this is a no-op.
+//
+// MSAA smooths the edges of shapes the GPU rasterizes as geometry: curves,
+// diagonals, stroked paths. Text drawn through the glyph mask pipeline and
+// pixel-aligned rectangles look the same without it, so an application that
+// draws only those can turn it off. That frees a 4x color target and a 4x
+// depth/stencil target for every render target. In a window of 2060x1638
+// physical pixels that is about 120 MB of GPU memory.
+//
+// The cap takes effect when the accelerator sets up its device. Call it
+// before [SetAcceleratorDeviceProvider], which in a gogpu application means
+// before the first ggcanvas.New, or before the first GPU draw of a
+// standalone context.
+func SetAcceleratorMaxSampleCount(n int) {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if sca, ok := a.(SampleCountAware); ok {
+		sca.SetMaxSampleCount(n)
+	}
 }
 
 // AcceleratorCanRenderDirect returns true if the registered GPU accelerator
