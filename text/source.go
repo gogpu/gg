@@ -45,7 +45,18 @@ func NewFontSource(data []byte, opts ...SourceOption) (*FontSource, error) {
 	if len(data) == 0 {
 		return nil, ErrEmptyFontData
 	}
+	// The parsed font refers into the bytes it was parsed from, so it must be
+	// given the copy: parsing the caller's slice left the font reading memory
+	// the caller is free to reuse, while the copy sat unread beside it.
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	return newFontSource(dataCopy, opts...)
+}
 
+// newFontSource creates a FontSource that takes ownership of data: the parsed
+// font and the source's own table lookups read it from then on, so the
+// caller must not modify it. len(data) must be non-zero.
+func newFontSource(data []byte, opts ...SourceOption) (*FontSource, error) {
 	// Apply options first to get parser name
 	config := defaultSourceConfig()
 	for _, opt := range opts {
@@ -68,13 +79,9 @@ func NewFontSource(data []byte, opts ...SourceOption) (*FontSource, error) {
 		return nil, err
 	}
 
-	// Copy the data
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-
 	// Create FontSource
 	s := &FontSource{
-		data:   dataCopy,
+		data:   data,
 		parsed: parsed,
 		config: config,
 	}
@@ -93,8 +100,13 @@ func NewFontSourceFromFile(path string, opts ...SourceOption) (*FontSource, erro
 	if err != nil {
 		return nil, fmt.Errorf("text: failed to read font file: %w", err)
 	}
+	if len(data) == 0 {
+		return nil, ErrEmptyFontData
+	}
 
-	return NewFontSource(data, opts...)
+	// Nobody else holds the buffer just read, so the source takes it rather
+	// than a copy: one copy of the file in memory, not two.
+	return newFontSource(data, opts...)
 }
 
 // Face creates a Face at the specified size (in points).
