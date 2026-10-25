@@ -203,6 +203,12 @@ func (a *SDFAccelerator) SetLogger(l *slog.Logger) {
 	a.shared.SetLogger(l)
 }
 
+// SetMaxSampleCount caps the MSAA sample count (gg.SampleCountAware): see
+// GPUShared.SetMaxSampleCount. A negative n is taken as 0, no cap.
+func (a *SDFAccelerator) SetMaxSampleCount(n int) {
+	a.shared.SetMaxSampleCount(uint32(min(max(n, 0), 64))) // #nosec G115 -- clamped to 0..64
+}
+
 // SetDeviceProvider switches the accelerator to use a shared GPU device.
 func (a *SDFAccelerator) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
 	a.mu.Lock()

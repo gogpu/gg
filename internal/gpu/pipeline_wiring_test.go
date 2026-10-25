@@ -589,9 +589,73 @@ func TestResolveSampleCount_NoopDevice(t *testing.T) {
 	device, _, cleanup := createNoopDevice(t)
 	defer cleanup()
 
-	sc := resolveSampleCount(device)
+	sc := resolveSampleCount(device, 0)
 	if sc != 4 {
 		t.Errorf("resolveSampleCount(noop) = %d, want 4", sc)
+	}
+}
+
+// TestResolveSampleCount_Cap verifies that a SetMaxSampleCount cap below 4
+// resolves to 1x without probing, and that 0 or 4 and above leave the probe.
+func TestResolveSampleCount_Cap(t *testing.T) {
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	for _, tt := range []struct{ maxSamples, want uint32 }{
+		{0, 4}, {1, 1}, {2, 1}, {3, 1}, {4, 4}, {8, 4},
+	} {
+		if got := resolveSampleCount(device, tt.maxSamples); got != tt.want {
+			t.Errorf("resolveSampleCount(noop, cap %d) = %d, want %d", tt.maxSamples, got, tt.want)
+		}
+	}
+	// A 1x cap needs no device: it never probes.
+	if got := resolveSampleCount(nil, 1); got != 1 {
+		t.Errorf("resolveSampleCount(nil, cap 1) = %d, want 1", got)
+	}
+}
+
+// TestGPUShared_SetMaxSampleCount verifies that the cap reaches the resolved
+// count and the strategy, and that SampleCount reflects it before init.
+func TestGPUShared_SetMaxSampleCount(t *testing.T) {
+	s := NewGPUShared()
+	defer s.Close()
+
+	s.SetMaxSampleCount(1)
+	if sc := s.SampleCount(); sc != 1 {
+		t.Errorf("SampleCount() before init with cap 1 = %d, want 1", sc)
+	}
+
+	device, _, cleanup := createNoopDevice(t)
+	defer cleanup()
+	s.mu.Lock()
+	s.sampleCount = resolveSampleCount(device, s.maxSampleCount)
+	strategy := s.detectStrategy()
+	s.mu.Unlock()
+	if s.SampleCount() != 1 || strategy != strategyNoMSAA {
+		t.Errorf("with cap 1: SampleCount() = %d, strategy %v; want 1, %v", s.SampleCount(), strategy, strategyNoMSAA)
+	}
+
+	s.SetMaxSampleCount(0)
+	if got := resolveSampleCount(device, s.maxSampleCount); got != 4 {
+		t.Errorf("cap removed: resolved %d, want 4", got)
+	}
+}
+
+// TestSDFAccelerator_SetMaxSampleCount verifies the forwarding to GPUShared,
+// with a negative cap taken as no cap.
+func TestSDFAccelerator_SetMaxSampleCount(t *testing.T) {
+	a := &SDFAccelerator{shared: NewGPUShared()}
+	defer a.shared.Close()
+
+	var _ gg.SampleCountAware = a
+	for _, tt := range []struct {
+		n    int
+		want uint32
+	}{{1, 1}, {4, 4}, {-3, 0}, {0, 0}} {
+		a.SetMaxSampleCount(tt.n)
+		if a.shared.maxSampleCount != tt.want {
+			t.Errorf("SetMaxSampleCount(%d): cap = %d, want %d", tt.n, a.shared.maxSampleCount, tt.want)
+		}
 	}
 }
 

@@ -280,6 +280,36 @@ func TestCloseAcceleratorNoop(t *testing.T) {
 	}
 }
 
+// sampleCountMock is a mockAccelerator that also implements SampleCountAware.
+type sampleCountMock struct {
+	mockAccelerator
+	maxSamples []int
+}
+
+func (m *sampleCountMock) SetMaxSampleCount(n int) { m.maxSamples = append(m.maxSamples, n) }
+
+func TestSetAcceleratorMaxSampleCount(t *testing.T) {
+	resetAccelerator()
+	defer resetAccelerator()
+
+	SetAcceleratorMaxSampleCount(1) // no accelerator: a no-op, not a panic
+
+	if err := RegisterAccelerator(&mockAccelerator{name: "plain"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	SetAcceleratorMaxSampleCount(1) // an accelerator without MSAA: a no-op
+
+	mock := &sampleCountMock{mockAccelerator: mockAccelerator{name: "msaa"}}
+	if err := RegisterAccelerator(mock); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	SetAcceleratorMaxSampleCount(1)
+	SetAcceleratorMaxSampleCount(0)
+	if len(mock.maxSamples) != 2 || mock.maxSamples[0] != 1 || mock.maxSamples[1] != 0 {
+		t.Errorf("SetMaxSampleCount calls = %v, want [1 0]", mock.maxSamples)
+	}
+}
+
 func TestErrFallbackToCPU(t *testing.T) {
 	// Verify ErrFallbackToCPU is usable with errors.Is.
 	wrapped := errors.New("gpu: texture too large")
