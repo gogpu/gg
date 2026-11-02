@@ -17,7 +17,7 @@ import (
 // LoadOpLoad preserves content, scissor clips draws, pixels are verifiable.
 func createSoftwareDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := software.API{}
+	api := software.NewBackend()
 	instance, err := api.CreateInstance(nil)
 	if err != nil {
 		t.Fatalf("software CreateInstance: %v", err)
