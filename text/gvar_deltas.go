@@ -217,53 +217,7 @@ func gvarIUPInterpolate(
 			break
 		}
 
-		// Find first point with a delta in this contour.
-		firstDelta := -1
-		for p := contourStart; p <= end; p++ {
-			if hasDelta[p] {
-				firstDelta = p
-				break
-			}
-		}
-
-		if firstDelta < 0 {
-			// No deltas in this contour — skip.
-			contourStart = end + 1
-			continue
-		}
-
-		// Walk through the contour finding reference point pairs.
-		curDelta := firstDelta
-		nextP := curDelta + 1
-
-		for nextP <= end {
-			if hasDelta[nextP] {
-				// Interpolate the gap between curDelta and nextP.
-				if nextP > curDelta+1 {
-					gvarIUPInterpolateRange(result, outlinePoints, axis,
-						curDelta+1, nextP-1, curDelta, nextP)
-				}
-				curDelta = nextP
-			}
-			nextP++
-		}
-
-		// Handle wrapping: if only one delta point, shift everything.
-		if curDelta == firstDelta {
-			gvarIUPShiftRange(result, curDelta, contourStart, end)
-		} else {
-			// Handle the gap from curDelta to end of contour, wrapping
-			// to firstDelta.
-			if curDelta < end {
-				gvarIUPInterpolateRange(result, outlinePoints, axis,
-					curDelta+1, end, curDelta, firstDelta)
-			}
-			if firstDelta > contourStart {
-				gvarIUPInterpolateRange(result, outlinePoints, axis,
-					contourStart, firstDelta-1, curDelta, firstDelta)
-			}
-		}
-
+		gvarIUPContour(result, hasDelta, outlinePoints, axis, contourStart, end)
 		contourStart = end + 1
 	}
 
@@ -272,6 +226,59 @@ func gvarIUPInterpolate(
 	// phantom points don't belong to any contour.
 
 	return result
+}
+
+// gvarIUPContour infers the deltas of the untouched points of one contour, [contourStart, end], from its points that
+// have explicit deltas (steps 1-5 of gvarIUPInterpolate).
+func gvarIUPContour(
+	result []int32,
+	hasDelta []bool,
+	outlinePoints [][2]int32,
+	axis int,
+	contourStart, end int,
+) {
+	// Find first point with a delta in this contour.
+	firstDelta := -1
+	for p := contourStart; p <= end; p++ {
+		if hasDelta[p] {
+			firstDelta = p
+			break
+		}
+	}
+	if firstDelta < 0 {
+		// No deltas in this contour — skip.
+		return
+	}
+
+	// Walk through the contour finding reference point pairs.
+	curDelta := firstDelta
+	for nextP := curDelta + 1; nextP <= end; nextP++ {
+		if !hasDelta[nextP] {
+			continue
+		}
+		// Interpolate the gap between curDelta and nextP.
+		if nextP > curDelta+1 {
+			gvarIUPInterpolateRange(result, outlinePoints, axis,
+				curDelta+1, nextP-1, curDelta, nextP)
+		}
+		curDelta = nextP
+	}
+
+	// Handle wrapping: if only one delta point, shift everything.
+	if curDelta == firstDelta {
+		gvarIUPShiftRange(result, curDelta, contourStart, end)
+		return
+	}
+	// Handle the gap from curDelta to end of contour, wrapping
+	// to firstDelta.
+	if curDelta < end {
+		gvarIUPInterpolateRange(result, outlinePoints, axis,
+			curDelta+1, end, curDelta, firstDelta)
+	}
+	if firstDelta > contourStart {
+		gvarIUPInterpolateRange(result, outlinePoints, axis,
+			contourStart, firstDelta-1, curDelta, firstDelta)
+	}
 }
 
 // iupShiftRange shifts all points in [start, end] by the delta of refIdx.

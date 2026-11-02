@@ -116,68 +116,68 @@ func alignStrongPoints(pa *hintPointArray, edges []*hintEdge, dim hintDimension)
 			continue
 		}
 
-		u := pt.fontU(dim)  // Font-unit coordinate (float32, matches edge.fpos)
-		ou := pt.origU(dim) // Original scaled, 26.6
-
-		// Is the point before the first edge?
-		firstEdge := edges[0]
-		if u <= firstEdge.fpos {
-			storePoint26dot6(pt, dim, firstEdge.pos-(firstEdge.opos-ou))
+		// u: font-unit coordinate (float32, matches edge.fpos); origU: original scaled, 26.6.
+		if pos, ok := strongPointPos(edges, pt.fontU(dim), pt.origU(dim)); ok {
+			storePoint26dot6(pt, dim, pos)
 			pt.flags |= touchFlag
-			continue
-		}
-
-		// Is the point after the last edge?
-		lastEdge := edges[len(edges)-1]
-		if u >= lastEdge.fpos {
-			storePoint26dot6(pt, dim, lastEdge.pos+(ou-lastEdge.opos))
-			pt.flags |= touchFlag
-			continue
-		}
-
-		// Find enclosing edges and interpolate.
-		// Linear search for small edge counts (most common case).
-		// Note: this is critical for matching FreeType in cases where we have
-		// more than one edge with the same fpos. Linear and binary searches
-		// can produce different results.
-		for j := 0; j < len(edges)-1; j++ {
-			before := edges[j]
-			after := edges[j+1]
-
-			if u == before.fpos {
-				storePoint26dot6(pt, dim, before.pos)
-				pt.flags |= touchFlag
-				break
-			}
-			if u == after.fpos {
-				storePoint26dot6(pt, dim, after.pos)
-				pt.flags |= touchFlag
-				break
-			}
-
-			if u > before.fpos && u < after.fpos { //nolint:nestif // FreeType aflatin.c port
-				// Interpolate using 16.16 fixed-point scale.
-				// Matches skrifa: scale = fixed_div(after.pos - before.pos, after.fpos - before.fpos)
-				// then: result = before.pos + fixed_mul(u - before.fpos, scale)
-				denom := after.fpos - before.fpos
-				if denom == 0 {
-					storePoint26dot6(pt, dim, before.pos)
-				} else {
-					// Use cached scale if available, otherwise compute and cache.
-					scale := before.scale
-					if scale == 0 {
-						scale = fixedDiv26dot6(after.pos-before.pos, int32(denom))
-						before.scale = scale
-						edges[j].scale = scale
-					}
-					fposInt := int32(u - before.fpos) // font unit delta as integer
-					storePoint26dot6(pt, dim, before.pos+fixedMul26dot6(fposInt, scale))
-				}
-				pt.flags |= touchFlag
-				break
-			}
 		}
 	}
+}
+
+// strongPointPos returns the hinted 26.6 position of a strong point at font-unit coordinate u with original scaled
+// position ou, or false when no edge span encloses u. edges must not be empty.
+func strongPointPos(edges []*hintEdge, u float32, ou int32) (int32, bool) {
+	// Is the point before the first edge?
+	firstEdge := edges[0]
+	if u <= firstEdge.fpos {
+		return firstEdge.pos - (firstEdge.opos - ou), true
+	}
+
+	// Is the point after the last edge?
+	lastEdge := edges[len(edges)-1]
+	if u >= lastEdge.fpos {
+		return lastEdge.pos + (ou - lastEdge.opos), true
+	}
+
+	// Find enclosing edges and interpolate.
+	// Linear search for small edge counts (most common case).
+	// Note: this is critical for matching FreeType in cases where we have
+	// more than one edge with the same fpos. Linear and binary searches
+	// can produce different results.
+	for j := 0; j < len(edges)-1; j++ {
+		before := edges[j]
+		after := edges[j+1]
+
+		if u == before.fpos {
+			return before.pos, true
+		}
+		if u == after.fpos {
+			return after.pos, true
+		}
+		if u > before.fpos && u < after.fpos {
+			return interpolateBetweenEdges(before, after, u), true
+		}
+	}
+	return 0, false
+}
+
+// interpolateBetweenEdges interpolates a 26.6 position for font-unit coordinate u inside (before.fpos, after.fpos)
+// using a 16.16 fixed-point scale, cached on before.
+// Matches skrifa: scale = fixed_div(after.pos - before.pos, after.fpos - before.fpos)
+// then: result = before.pos + fixed_mul(u - before.fpos, scale)
+func interpolateBetweenEdges(before, after *hintEdge, u float32) int32 {
+	denom := after.fpos - before.fpos
+	if denom == 0 {
+		return before.pos
+	}
+	// Use cached scale if available, otherwise compute and cache.
+	scale := before.scale
+	if scale == 0 {
+		scale = fixedDiv26dot6(after.pos-before.pos, int32(denom))
+		before.scale = scale
+	}
+	fposInt := int32(u - before.fpos) // font unit delta as integer
+	return before.pos + fixedMul26dot6(fposInt, scale)
 }
 
 // storePoint26dot6 sets the adjusted coordinate for a point (26.6).
