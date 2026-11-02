@@ -377,7 +377,7 @@ func (p *GlyphMaskPipeline) RecordDraws(rp *wgpu.RenderPassEncoder, resources *g
 			continue
 		}
 		rp.SetBindGroup(0, dc.bindGroup, nil)
-		rp.DrawIndexed(dc.indexCount, 1, dc.indexOffset, 0, 0)
+		rp.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: dc.indexCount, InstanceCount: 1, FirstIndex: dc.indexOffset, BaseVertex: 0, FirstInstance: 0})
 	}
 }
 

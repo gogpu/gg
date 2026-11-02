@@ -108,8 +108,8 @@ func TestDamageBlit_LoadOpLoad_PreservesContent(t *testing.T) {
 			StoreOp: gputypes.StoreOpStore,
 		}},
 	})
-	rp2.SetViewport(0, 0, W, H, 0, 1)
-	rp2.SetScissorRect(2, 2, 4, 4)
+	rp2.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: W, Height: H, MinDepth: 0, MaxDepth: 1})
+	rp2.SetScissorRect(gputypes.ScissorRect{X: 2, Y: 2, Width: 4, Height: 4})
 	rp2.End()
 	cmd2, _ := enc2.Finish()
 	queue.Submit(cmd2)
