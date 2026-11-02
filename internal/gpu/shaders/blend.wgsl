@@ -196,12 +196,12 @@ fn blend_soft_light(src: vec3<f32>, dst: vec3<f32>) -> vec3<f32> {
     let d = select(
         sqrt(dst),
         ((16.0 * dst - 12.0) * dst + 4.0) * dst,
-        step(dst, vec3<f32>(0.25))
+        dst <= vec3<f32>(0.25)
     );
     return select(
         dst + (2.0 * src - 1.0) * (d - dst),
         dst - (1.0 - 2.0 * src) * dst * (1.0 - dst),
-        step(src, vec3<f32>(0.5))
+        src <= vec3<f32>(0.5)
     );
 }
 

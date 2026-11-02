@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Soft-light blend shader used a float vector as the `select()` condition** — `blend_soft_light`
+  in `blend.wgsl` passed `step(...)` (a `vec3<f32>`) to `select()`, which WGSL requires to be
+  `bool` or `vecN<bool>`. Rust naga, browsers and naga v0.21.0 reject the shader; older naga
+  backends disagreed on its result (SPIR-V converted with `!= 0`, the HLSL failed under DXC,
+  the DXIL was invalid). The condition is now the equivalent comparison (`dst <= 0.25`,
+  `src <= 0.5`), so the output is unchanged. A test checks every gg shader's `select()`
+  conditions.
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed
