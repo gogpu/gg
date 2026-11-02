@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **gg builds with gogpu v0.54.0 and the current GPU modules** (#531, #535) — gg v0.52.5 required
+  wgpu v0.31.6, gpucontext v0.28.0 and gputypes v0.5.2. gogpu v0.54.0 requires wgpu v0.34.2,
+  gpucontext v0.31.3 and gputypes v0.8.0, and with those gg failed to compile: wgpu v0.34 takes
+  struct arguments for `Draw`, `DrawIndexed`, `SetViewport` and `SetScissorRect`
+  (`gputypes.DrawArgs`, `DrawIndexedArgs`, `Viewport`, `ScissorRect`), and gpucontext v0.31 changed
+  `UpdateRegion`. Every call site is migrated.
+
+- **`ggcanvas` partial upload uses the strided `UpdateRegion`** (#529, @lkmavi) — damaged regions are
+  uploaded with `gpucontext.TextureRegionUpdater.UpdateRegion(region, data, layout)` and
+  `ImageDataLayout{BytesPerRow: width*4}` straight from the pixmap buffer, without the per-region copy.
+
+- **No compute pipelines on adapters without compute shaders** (ADR-071) — the GPU accelerator now
+  checks `DownlevelFlagsComputeShaders` (from the shared `DeviceProvider`, or from the adapter in
+  standalone mode) before creating the Vello compute pipelines. GLES 3.0 and WebGL2 skip them cleanly
+  and use the CPU coverage filler, instead of failing at pipeline creation.
+
 - **Soft-light blend shader used a float vector as the `select()` condition** — `blend_soft_light`
   in `blend.wgsl` passed `step(...)` (a `vec3<f32>`) to `select()`, which WGSL requires to be
   `bool` or `vecN<bool>`. Rust naga, browsers and naga v0.21.0 reject the shader; older naga
@@ -16,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the DXIL was invalid). The condition is now the equivalent comparison (`dst <= 0.25`,
   `src <= 0.5`), so the output is unchanged. A test checks every gg shader's `select()`
   conditions.
+
+### Added
+
+- **`render.NullDeviceHandle` implements `Features()` and `DownlevelCapabilities()`** (#529), as the
+  gpucontext v0.31 `DeviceProvider` requires; both return zero values.
+
+### Changed
+
+- **Dependencies:** wgpu v0.34.6, naga v0.20.5, gpucontext v0.31.3, gputypes v0.8.0
+  (goffi v0.6.8 through wgpu).
 
 ## [0.52.5] - 2026-08-26
 
