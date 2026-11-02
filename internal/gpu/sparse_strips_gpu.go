@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/gogpu/gg/scene"
+	"github.com/gogpu/gpucontext"
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 )
 
@@ -254,17 +256,14 @@ func (h *HybridFineRasterizer) Stats() GPURasterizerStats {
 
 // CheckGPUComputeSupport checks if GPU compute shaders are supported.
 // This can be used to determine if GPU rasterization is viable before
-// creating a rasterizer.
-func CheckGPUComputeSupport(device *wgpu.Device) bool {
-	if device == nil {
+// creating a rasterizer. Queries DownlevelCapabilities for the
+// ComputeShaders flag (GLES 3.0 and WebGL2 do not support compute).
+func CheckGPUComputeSupport(provider gpucontext.DeviceProvider) bool {
+	if provider == nil {
 		return false
 	}
-
-	// TODO: Query device capabilities for compute shader support
-	// For now, assume compute is supported if we have a device
-	// The actual check would query DownlevelCapabilities.Flags
-
-	return true
+	caps := provider.DownlevelCapabilities()
+	return caps.Flags.Contains(gputypes.DownlevelFlagsComputeShaders)
 }
 
 // -----------------------------------------------------------------------------
