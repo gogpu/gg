@@ -5,11 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.52.7] - 2026-11-08
 
 ### Added
 
-- **`SetAcceleratorMaxSampleCount`**: caps the MSAA sample count of the GPU
+- **Font fallback stays on the GPU text path** (#513, #521, thanks @besmpl) — text drawn with a `MultiFace` or
+  `FilteredFace` that mixes fonts used to fall back to CPU rendering, because the GPU paths need glyph IDs from one
+  font. Text is now split into runs by source font before shaping (`MultiFace.FontRuns`, `FilteredFace.FontRuns`,
+  `text.ShapeRuns`), each glyph keeps the face it came from (`ShapedGlyph.Face`), and single-font runs go to the
+  glyph-mask and MSDF pipelines.
+- **`SetAcceleratorMaxSampleCount`** (#547, thanks @sogonov): caps the MSAA sample count of the GPU
   accelerator. `1` turns multi-sampling off (`strategyNoMSAA`, the path
   software adapters already take), and `0` restores the default. The optional
   `SampleCountAware` interface carries it, and `SDFAccelerator` implements it
@@ -40,14 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same GPU device, size and scale, keyed by the provider's stable device/queue/adapter handles. A different size or
   scale keeps its own canvas, and `Draw` follows the window's size from `WindowProvider`. `Render` now reads the
   window provider under the canvas's lifecycle lock, since a concurrent `New` replaces it.
-
-### Added
-
-- **Font fallback stays on the GPU text path** (#513, #521, thanks @besmpl) — text drawn with a `MultiFace` or
-  `FilteredFace` that mixes fonts used to fall back to CPU rendering, because the GPU paths need glyph IDs from one
-  font. Text is now split into runs by source font before shaping (`MultiFace.FontRuns`, `FilteredFace.FontRuns`,
-  `text.ShapeRuns`), each glyph keeps the face it came from (`ShapedGlyph.Face`), and single-font runs go to the
-  glyph-mask and MSDF pipelines.
 
 ### Changed
 

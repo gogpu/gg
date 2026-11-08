@@ -19,9 +19,12 @@
 
 ---
 
-## Current State: v0.52.6
+## Current State: v0.52.7
 
 ✅ **Production-ready** with GPU-accelerated rendering:
+- **Font fallback on the GPU text path** (#513) — text with a mixed-font `MultiFace`/`FilteredFace` is split by source face, each glyph keeps its face, and single-font runs stay on the glyph-mask and MSDF pipelines
+- **Reused ggcanvas** (#496, ADR-064) — `New`/`NewWithScale` return the existing canvas for the same device, size and scale, keyed by the provider's GPU handles
+- **MSAA sample-count cap** (#547) — `SetAcceleratorMaxSampleCount(1)` turns multi-sampling off for apps that do not need it
 - **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs).
 - **SVG vector icon rendering** — RenderToScene with stroke hinting for crisp icons at any size
 - **Skia cubicStroke** — direct cubic offset algorithm for higher-quality stroked curves
