@@ -1486,9 +1486,15 @@ func (c *Context) flushGPUWithView(view gpucontext.TextureView, width, height ui
 
 // FlushGPUWithViewDamage flushes pending GPU operations with damage-aware
 // optimization. When damageRect is non-empty, the compositor uses LoadOpLoad
-// (preserves previous frame) and scissor-clips to the dirty region — only
-// the damaged pixels are re-composited. When damageRect is empty, behaves
-// identically to FlushGPUWithView (full compositor pass).
+// and scissor-clips to the dirty region — only the damaged pixels are
+// re-composited, and everything outside keeps the target's last contents.
+// When damageRect is empty, behaves identically to FlushGPUWithView (full
+// compositor pass).
+//
+// Buffer age: with a swapchain the "last contents" are those of this image,
+// which may be several frames old when the surface rotates images. The caller
+// must union the damage of every frame since this image was last presented
+// (its buffer age); gg does no age accounting.
 //
 // IMPORTANT: damage-aware rendering (LoadOpLoad + scissor) works only on the
 // blit-only compositor path (frames with only DrawGPUTextureBase/DrawGPUTexture

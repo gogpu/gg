@@ -556,17 +556,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	rp.Draw(gputypes.DrawArgs{VertexCount: vertexCount, InstanceCount: 1, FirstVertex: 0, FirstInstance: 0})
 	_ = rp.End()
 
-	// VK-LAYOUT-001: After MSAA resolve the texture is in
-	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
-	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
-	// This is a no-op on Metal, GLES, software, and noop backends.
-	encoder.TransitionTextures([]wgpu.TextureBarrier{{
-		Texture: p.resolveTex,
-		Usage: wgpu.TextureUsageTransition{
-			OldUsage: gputypes.TextureUsageRenderAttachment,
-			NewUsage: gputypes.TextureUsageCopySrc,
-		},
-	}})
+	// No manual barrier before the copy: wgpu's tracker transitions the resolve texture (wgpu ≥ v0.34.6).
 
 	// Copy resolve texture to staging buffer for readback.
 	rowPitch := readbackRowPitch(w)

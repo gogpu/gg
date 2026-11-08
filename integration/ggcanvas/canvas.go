@@ -688,12 +688,16 @@ func (c *Canvas) renderDirectToTarget(
 }
 
 // RenderDirectWithDamage renders canvas content to a surface view with a damage
-// rect hint. Only the damaged region is re-rendered; the rest preserves the
-// previous frame (LoadOpLoad + scissor). This enables per-boundary incremental
-// updates without full-frame re-render.
+// rect hint. Only the damaged region is re-rendered; the rest keeps the
+// surface image's last contents (LoadOpLoad + scissor). This enables
+// per-boundary incremental updates without full-frame re-render.
 //
 // Use when only a subset of GPU content changed (e.g., a single RepaintBoundary
 // item in a compositor). Pass image.Rectangle{} for full-frame render.
+//
+// The image's last contents may be several frames old when the swapchain
+// rotates images, so damage must be the union over the image's buffer age;
+// the caller tracks it, gg does not.
 func (c *Canvas) RenderDirectWithDamage(surfaceView gpucontext.TextureView, width, height uint32, damage image.Rectangle) error {
 	if c.closed {
 		return ErrCanvasClosed
@@ -713,7 +717,8 @@ func (c *Canvas) RenderDirectWithDamage(surfaceView gpucontext.TextureView, widt
 
 // RenderDirectWithDamageRects renders with multiple damage rects (ADR-028).
 // Each rect gets its own scissor — per-draw dynamic scissor for distant dirty
-// regions. Falls back to single-rect behavior when len(rects) <= 1.
+// regions. Falls back to single-rect behavior when len(rects) <= 1. The same
+// buffer-age contract as RenderDirectWithDamage applies.
 func (c *Canvas) RenderDirectWithDamageRects(surfaceView gpucontext.TextureView, width, height uint32, rects []image.Rectangle) error {
 	if c.closed {
 		return ErrCanvasClosed

@@ -2643,17 +2643,8 @@ func (s *GPURenderSession) encodeSubmitReadback(
 		slogger().Warn("render pass End failed", "err", endErr)
 	}
 
-	// VK-LAYOUT-001: After MSAA resolve the texture is in
-	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
-	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
-	// This is a no-op on Metal, GLES, software, and noop backends.
-	encoder.TransitionTextures([]wgpu.TextureBarrier{{
-		Texture: s.textures.resolveTex,
-		Usage: wgpu.TextureUsageTransition{
-			OldUsage: gputypes.TextureUsageRenderAttachment,
-			NewUsage: gputypes.TextureUsageCopySrc,
-		},
-	}})
+	// No manual barrier before the copy: since wgpu v0.34.6 CopyTextureToBuffer records its own CopySrc usage in
+	// the tracker and transitions the resolve texture (Rust wgpu-core copy_texture_to_buffer parity).
 
 	// Mark encoder as consumed before handing to copySubmitAndReadback,
 	// which calls Finish() internally.
@@ -2705,18 +2696,8 @@ func (s *GPURenderSession) copySubmitAndReadback(
 		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
 
-	// Transition resolve texture back to RenderAttachment so the next frame's
-	// render pass End() can transition from RENDER_TARGET → RESOLVE_DEST.
-	// Without this, the texture remains in COPY_SOURCE and the next resolve
-	// barrier (which expects RENDER_TARGET) would be invalid on DX12.
-	encoder.TransitionTextures([]wgpu.TextureBarrier{{
-		Texture: s.textures.resolveTex,
-		Usage: wgpu.TextureUsageTransition{
-			OldUsage: gputypes.TextureUsageCopySrc,
-			NewUsage: gputypes.TextureUsageRenderAttachment,
-		},
-	}})
-
+	// The tracker also moves the resolve texture back to its render-attachment state when the next pass uses it,
+	// so no manual transition back is needed (wgpu ≥ v0.34.6).
 	cmdBuf, err := encoder.Finish()
 	if err != nil {
 		return fmt.Errorf("end encoding: %w", err)
@@ -3117,16 +3098,7 @@ func (s *GPURenderSession) encodeSubmitReadbackGrouped(
 		slogger().Warn("render pass End failed", "err", endErr)
 	}
 
-	// VK-LAYOUT-001: After MSAA resolve the texture is in
-	// COLOR_ATTACHMENT_OPTIMAL layout. CopyTextureToBuffer requires
-	// TRANSFER_SRC_OPTIMAL. Insert an explicit barrier to transition.
-	encoder.TransitionTextures([]wgpu.TextureBarrier{{
-		Texture: s.textures.resolveTex,
-		Usage: wgpu.TextureUsageTransition{
-			OldUsage: gputypes.TextureUsageRenderAttachment,
-			NewUsage: gputypes.TextureUsageCopySrc,
-		},
-	}})
+	// No manual barrier before the copy: wgpu's tracker transitions the resolve texture (wgpu ≥ v0.34.6).
 
 	// Mark encoder as consumed before handing to copySubmitAndReadback,
 	// which calls Finish() internally.
