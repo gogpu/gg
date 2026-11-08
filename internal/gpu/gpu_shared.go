@@ -371,7 +371,8 @@ func (s *GPUShared) SampleCount() uint32 {
 // SetMaxSampleCount caps the MSAA sample count resolved when the device is
 // next set up: by SetDeviceProvider, or by the first standalone
 // initialization. 0 removes the cap. WebGPU guarantees only 1 and 4 samples,
-// so any cap below 4 means 1, which selects strategyNoMSAA.
+// so any cap below 4 means 1, which selects strategyNoMSAA, and a cap of 4 or
+// more leaves the probed count.
 //
 // Pipelines and render targets are built for the resolved count. A cap set
 // after the device is ready therefore waits for the next device setup instead

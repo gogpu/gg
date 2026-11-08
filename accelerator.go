@@ -348,17 +348,20 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 }
 
 // SetAcceleratorMaxSampleCount caps the MSAA sample count of the registered
-// accelerator. 1 turns multi-sampling off, and 0 restores the default, the
-// most the device supports (4). WebGPU guarantees only 1 and 4 samples, so any
-// cap below 4 means 1. If no accelerator is registered or it renders without
+// accelerator. 0 means no cap: the default, the most the device supports (4).
+// WebGPU guarantees only 1 and 4 samples, so a cap of 1, 2 or 3 turns
+// multi-sampling off, and a cap of 4 or more leaves the default. A negative
+// cap counts as 0. If no accelerator is registered or it renders without
 // MSAA, this is a no-op.
 //
-// MSAA smooths the edges of shapes the GPU rasterizes as geometry: curves,
-// diagonals, stroked paths. Text drawn through the glyph mask pipeline and
-// pixel-aligned rectangles look the same without it, so an application that
-// draws only those can turn it off. That frees a 4x color target and a 4x
-// depth/stencil target for every render target. In a window of 2060x1638
-// physical pixels that is about 120 MB of GPU memory.
+// At 1x, the draws that go through the stencil-and-cover path lose their
+// antialiasing: non-convex paths and strokes, and clips to arbitrary paths.
+// Circles, ellipses and rounded rectangles (SDF) and convex polygons
+// antialias in the shader, and glyph-mask and MSDF text does not use MSAA,
+// so they look the same. An application that draws only those can turn MSAA
+// off. That frees a 4x color target and a 4x depth/stencil target for every
+// render target. In a window of 2060x1638 physical pixels that is about
+// 120 MB of GPU memory.
 //
 // The cap takes effect when the accelerator sets up its device. Call it
 // before [SetAcceleratorDeviceProvider], which in a gogpu application means
