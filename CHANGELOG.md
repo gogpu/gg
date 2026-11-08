@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Arbitrary-path clips draw their content in gogpu windows** — with a circle, star or any other non-rectangular
+  clip, nothing inside the clip was drawn when gg rendered into a window (`examples/clip_path`). On that path the
+  frame is recorded into gogpu's command encoder, and gg dropped the pass that marks the clip region in the depth
+  buffer while the clipped content still tested against it. Offscreen rendering with readback was not affected. A
+  GPU readback test now renders through a shared encoder as well.
+
 ## [0.52.6] - 2026-11-08
 
 ### Security

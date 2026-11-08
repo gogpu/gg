@@ -942,6 +942,11 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 	// ADR-056: with a shared encoder, submit happens AFTER this function returns.
 	// Releasing bind groups here would destroy them before the GPU uses them.
 	// Defer to BeginFrame() where VSync guarantees GPU completion.
+	//
+	// The group keeps its depthClipRes: recordGroupDraws below records the clip's
+	// depth pass from it. Clearing it here dropped that pass on the shared-encoder
+	// path (every gogpu window) while the content still tested against the depth
+	// buffer, so nothing inside the clip was drawn (P1-GPU-042).
 	if sharedEncoder == nil {
 		defer s.releaseDepthClipResources(grpRes)
 		defer s.releasePendingBindGroups()
@@ -949,7 +954,6 @@ func (s *GPURenderSession) RenderFrameGrouped(target gg.GPURenderTarget, groups 
 		for i := range grpRes {
 			if grpRes[i].depthClipRes != nil {
 				s.pendingDepthClipRelease = append(s.pendingDepthClipRelease, grpRes[i].depthClipRes)
-				grpRes[i].depthClipRes = nil
 			}
 		}
 	}
