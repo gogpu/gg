@@ -1,14 +1,47 @@
-# gg — GoGPU Ecosystem
+# gg
 
-> Part of the GoGPU Pure Go GPU Computing Ecosystem.
+> Pure Go 2D graphics library: immediate-mode drawing (paths, shapes, strokes, gradients, images, text) on a CPU
+> rasterizer core, with optional GPU acceleration through gogpu/wgpu (in a gogpu app: the backend gogpu picks, e.g.
+> Vulkan, DX12, Metal, GLES; standalone: Vulkan for now). The API
+> has two styles over one context: stateful (`SetColor`, `Fill`) and per-call paint. Also: a retained scene graph,
+> 29 blend modes, layers and alpha masks, a Pure Go font stack (TrueType and CFF, variable fonts, OpenType shaping,
+> hinting, MSDF and glyph-mask GPU text), an SVG renderer, and a recording system for PDF/SVG export. CPU rendering
+> needs no GPU; `import _ "github.com/gogpu/gg/gpu"` turns on the GPU accelerator. Go 1.25+, zero CGO. Pre-1.0: the
+> API may change before v1.0.
 
 ## Docs
 
-- [API Reference](https://pkg.go.dev/github.com/gogpu/gg)
-- [AGENTS.md](https://github.com/gogpu/gg/blob/main/AGENTS.md): AI agent instructions
-- [README](https://github.com/gogpu/gg/blob/main/README.md): Human-readable overview
+- [API Reference](https://pkg.go.dev/github.com/gogpu/gg): package documentation
+- [README](https://github.com/gogpu/gg/blob/main/README.md): overview, install, quick start
+- [AGENTS.md](https://github.com/gogpu/gg/blob/main/AGENTS.md): instructions for AI agents using gg
+- [ARCHITECTURE](https://github.com/gogpu/gg/blob/main/docs/ARCHITECTURE.md): CPU core, GPU accelerator tiers, text and scene pipelines
+- [CHANGELOG](https://github.com/gogpu/gg/blob/main/CHANGELOG.md): release history
+- [ROADMAP](https://github.com/gogpu/gg/blob/main/ROADMAP.md): plans toward v1.0
+- [CONTRIBUTING](https://github.com/gogpu/gg/blob/main/CONTRIBUTING.md): how to contribute
+
+## Packages
+
+- [gg](https://pkg.go.dev/github.com/gogpu/gg): drawing context, paths, paint, pixmaps
+- [gg/text](https://pkg.go.dev/github.com/gogpu/gg/text): fonts, shaping, layout
+- [gg/scene](https://pkg.go.dev/github.com/gogpu/gg/scene): retained-mode scene graph
+- [gg/svg](https://pkg.go.dev/github.com/gogpu/gg/svg): SVG parsing and rendering
+- [gg/recording](https://pkg.go.dev/github.com/gogpu/gg/recording): command recording for vector export
+- [gg/gpu](https://pkg.go.dev/github.com/gogpu/gg/gpu): opt-in GPU accelerator registration
+- [gg/integration/ggcanvas](https://pkg.go.dev/github.com/gogpu/gg/integration/ggcanvas): drawing into a gogpu window
+
+## Examples
+
+- [examples](https://github.com/gogpu/gg/tree/main/examples): all examples
+- [basic](https://github.com/gogpu/gg/tree/main/examples/basic): shapes on the CPU, saved to PNG
+- [text](https://github.com/gogpu/gg/tree/main/examples/text): font loading and text rendering
+- [gogpu_integration](https://github.com/gogpu/gg/tree/main/examples/gogpu_integration): GPU-accelerated drawing in a gogpu window
+
+## Related
+
+- [gg-pdf](https://github.com/gogpu/gg-pdf): PDF export backend for gg/recording
+- [gg-svg](https://github.com/gogpu/gg-svg): SVG export backend for gg/recording
 
 ## Ecosystem
 
-- [GoGPU Ecosystem](https://github.com/gogpu/gogpu/blob/main/AGENTS.md): Full ecosystem map
-- [Open Collective](https://opencollective.com/gogpu): Support development
+- [GoGPU ecosystem](https://gogpu.dev/llms.txt): map of all modules
+- [Open Collective](https://opencollective.com/gogpu): support development
