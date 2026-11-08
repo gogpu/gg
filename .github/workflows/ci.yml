@@ -3,13 +3,16 @@ name: CI
 # CI Strategy:
 # - Tests run on Linux, macOS, and Windows (cross-platform 2D library)
 # - Go 1.25+ required (matches go.mod requirement)
-# - Pure Go via goffi (requires CGO_ENABLED=0 for build/lint)
-# - Race detector requires CGO_ENABLED=1, so tests use -tags nogpu
+# - CGO_ENABLED=0: the build users ship is pure Go (goffi's fakecgo path)
+# - Race detection: the toolchain's -race with CGO_ENABLED=1 on that step only
 #
 # Branch Strategy (GitHub Flow):
 # - main branch: Production-ready code
 # - Feature branches: Tested via pull_request trigger
-# - Pull requests: Must pass all checks before merge
+# - Pull requests: Must pass all checks before merge ("Required checks" below)
+
+env:
+  CGO_ENABLED: "0"
 
 on:
   push:
@@ -19,13 +22,14 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   # Build verification - Cross-platform
   build:
     name: Build - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    env:
-      CGO_ENABLED: 0
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -33,10 +37,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
@@ -57,9 +61,6 @@ jobs:
       run: go build ./cmd/ggdemo
 
   # Unit tests - Cross-platform
-  # Tests use CGO_ENABLED=1 with -tags nogpu to enable the standard race detector.
-  # GPU code (which requires goffi/CGO_ENABLED=0) is excluded via build tag;
-  # compilation is verified by the build job above.
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -70,10 +71,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: ${{ matrix.go-version }}
         cache: true
@@ -83,13 +84,27 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      env:
-        CGO_ENABLED: 0
       run: go vet ./...
 
-    - name: Run tests with race detector
+    # The build users ship: CGO_ENABLED=0, GPU code included, so goffi runs its
+    # fakecgo path and the GPU packages run against wgpu's software and noop
+    # backends.
+    - name: Run tests
       shell: bash
-      run: go test -v -race -tags nogpu -coverprofile=coverage.txt -covermode=atomic ./...
+      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
+
+    # Race detection uses the toolchain's -race (ThreadSanitizer, needs cgo).
+    # A pure-Go detector in the runtime is proposed in golang/go#76786; an external
+    # source-level instrumenter can't see the runtime, the standard library or
+    # dependencies, so we don't use one in CI.
+    # With CGO_ENABLED=1 goffi links the real runtime/cgo instead of its fakecgo,
+    # so this step tests that path, not the one above. A non-std cgo package in
+    # the test binary would fail to link here on Linux (goffi#72).
+    - name: Run tests with the race detector
+      shell: bash
+      env:
+        CGO_ENABLED: "1"
+      run: go test -race -count=1 ./...
 
     - name: Verify coverage file
       if: matrix.os == 'ubuntu-latest'
@@ -98,7 +113,7 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.txt
@@ -113,15 +128,13 @@ jobs:
   gpu-golden:
     name: GPU Golden Tests (Mesa/lavapipe)
     runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: 0
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -162,23 +175,69 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: 0
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
 
+    # The pinned golangci-lint (version and sha256 live in the action) comes
+    # from the Actions cache, so lint does not depend on GitHub Releases being
+    # reachable on every run; on 2026-11-08 the release download URL returned
+    # 504 for over an hour. Bump golangci-lint in gogpu/.github, then move this
+    # pin. Keep lint-targets on the same commit.
+    - name: Set up golangci-lint
+      uses: gogpu/.github/actions/setup-golangci-lint@cdb7bd4a5bd3852541a05f0fa1fa92b09d1ee732 # main 2026-11-08, golangci-lint v2.15.0
+
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v8
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
-        version: latest
+        install-mode: none
+        args: --timeout=5m
+
+  # Lint for the other desktop targets. golangci-lint type-checks only the
+  # files the target's build compiles, so the darwin and windows files are
+  # never linted by the Linux job above. The code is pure Go (CGO_ENABLED=0),
+  # so GOOS/GOARCH on a Linux runner select exactly those files, with no need
+  # for slower macOS or Windows runners. A file that does not type-check makes
+  # golangci-lint exit non-zero, so a broken target cannot pass as "0 issues".
+  # One GOARCH per GOOS is enough: no file in the module is arch-specific, and
+  # none is built for js/wasm.
+  lint-targets:
+    name: Lint - ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+    - name: Set up Go
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Set up golangci-lint
+      uses: gogpu/.github/actions/setup-golangci-lint@cdb7bd4a5bd3852541a05f0fa1fa92b09d1ee732 # main 2026-11-08, golangci-lint v2.15.0
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      with:
+        install-mode: none
         args: --timeout=5m
 
   # Code formatting check
@@ -188,10 +247,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
@@ -209,27 +268,27 @@ jobs:
 
   # Dependency freshness check
   # Uses go-mod-outdated (https://github.com/psampaz/go-mod-outdated)
+  # Non-blocking: reports outdated deps as warnings, does not fail CI
   deps:
     name: Dependencies
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
       with:
         go-version: '1.25'
         cache: true
 
-    - name: Install go-mod-outdated
-      run: go install github.com/psampaz/go-mod-outdated@latest
-
+    # go-mod-outdated is pinned in tools/go.mod (checksums in tools/go.sum,
+    # updated by Dependabot), never installed @latest.
     - name: Check direct dependencies for updates
       run: |
         echo "## Direct Dependencies with Updates"
-        OUTDATED=$(go list -u -m -json all 2>/dev/null | go-mod-outdated -update -direct || true)
+        OUTDATED=$(go list -u -m -json all 2>/dev/null | go tool -modfile=tools/go.mod go-mod-outdated -update -direct || true)
         if [ -n "$OUTDATED" ]; then
           echo "$OUTDATED"
           echo "::warning::Some direct dependencies have updates available"
@@ -269,8 +328,9 @@ jobs:
     - name: Verify go.mod is tidy
       run: |
         go mod tidy
-        if ! git diff --exit-code go.mod go.sum; then
-          echo "::error::go.mod/go.sum are not tidy — run 'go mod tidy' and commit"
+        go -C tools mod tidy
+        if ! git diff --exit-code go.mod go.sum tools/go.mod tools/go.sum; then
+          echo "::error::go.mod/go.sum or tools/go.mod/go.sum are not tidy — run 'go mod tidy' (and in tools/) and commit"
           exit 1
         fi
 
@@ -285,3 +345,27 @@ jobs:
           fi
         done
         exit $FOUND
+
+  # The one check the main-protection ruleset requires. Every job that must
+  # pass goes into needs, so adding a job or a matrix entry never touches the
+  # ruleset. if: always() and the explicit result check are both needed: a job
+  # skipped because a job it needs failed or was cancelled counts as passed
+  # for a required check, so without them a red PR could go green.
+  required:
+    name: Required checks
+    if: always()
+    needs: [build, test, gpu-golden, lint, lint-targets, formatting, deps]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Every required job succeeded
+      env:
+        RESULTS: ${{ join(needs.*.result, ' ') }}
+      run: |
+        echo "results: $RESULTS"
+        for r in $RESULTS; do
+          if [ "$r" != success ]; then
+            echo "::error::a required job ended with: $r"
+            exit 1
+          fi
+        done
