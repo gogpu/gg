@@ -215,19 +215,23 @@ func (p *GlyphMaskPipeline) ensureSharedResources() error {
 	// Create sampler for R8 atlas textures.
 	// Nearest filtering: glyph masks are CPU-rasterized at exact device pixel size
 	// with subpixel hinting. Linear filtering would blur the already-hinted bitmaps.
-	sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
-		Label:        "glyph_mask_sampler",
-		AddressModeU: gputypes.AddressModeClampToEdge,
-		AddressModeV: gputypes.AddressModeClampToEdge,
-		AddressModeW: gputypes.AddressModeClampToEdge,
-		MagFilter:    gputypes.FilterModeNearest,
-		MinFilter:    gputypes.FilterModeNearest,
-		MipmapFilter: gputypes.FilterModeNearest,
-	})
-	if err != nil {
-		return fmt.Errorf("create glyph_mask sampler: %w", err)
+	// The sampler does not depend on the clip layout: a recreate after the clip
+	// layout arrives keeps it instead of leaking it (P2-GPU-039).
+	if p.sampler == nil {
+		sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
+			Label:        "glyph_mask_sampler",
+			AddressModeU: gputypes.AddressModeClampToEdge,
+			AddressModeV: gputypes.AddressModeClampToEdge,
+			AddressModeW: gputypes.AddressModeClampToEdge,
+			MagFilter:    gputypes.FilterModeNearest,
+			MinFilter:    gputypes.FilterModeNearest,
+			MipmapFilter: gputypes.FilterModeNearest,
+		})
+		if err != nil {
+			return fmt.Errorf("create glyph_mask sampler: %w", err)
+		}
+		p.sampler = sampler
 	}
-	p.sampler = sampler
 
 	return nil
 }

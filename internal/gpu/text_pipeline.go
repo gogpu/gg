@@ -193,21 +193,25 @@ func (p *MSDFTextPipeline) createPipeline() error {
 	p.pipeLayoutHasClip = hasClip
 
 	// Create sampler for MSDF textures (linear filtering for smooth
-	// distance field interpolation).
-	sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
-		Label:        "msdf_text_sampler",
-		AddressModeU: gputypes.AddressModeClampToEdge,
-		AddressModeV: gputypes.AddressModeClampToEdge,
-		AddressModeW: gputypes.AddressModeClampToEdge,
-		MagFilter:    gputypes.FilterModeLinear,
-		MinFilter:    gputypes.FilterModeLinear,
-		MipmapFilter: gputypes.FilterModeLinear,
-		Anisotropy:   4, // reduces blurring at small text sizes
-	})
-	if err != nil {
-		return fmt.Errorf("create msdf_text sampler: %w", err)
+	// distance field interpolation). The sampler does not depend on the clip
+	// layout, so a pipeline recreated when the clip layout arrives keeps it;
+	// creating a new one here leaked the old one (P2-GPU-039).
+	if p.sampler == nil {
+		sampler, err := p.device.CreateSampler(&wgpu.SamplerDescriptor{
+			Label:        "msdf_text_sampler",
+			AddressModeU: gputypes.AddressModeClampToEdge,
+			AddressModeV: gputypes.AddressModeClampToEdge,
+			AddressModeW: gputypes.AddressModeClampToEdge,
+			MagFilter:    gputypes.FilterModeLinear,
+			MinFilter:    gputypes.FilterModeLinear,
+			MipmapFilter: gputypes.FilterModeLinear,
+			Anisotropy:   4, // reduces blurring at small text sizes
+		})
+		if err != nil {
+			return fmt.Errorf("create msdf_text sampler: %w", err)
+		}
+		p.sampler = sampler
 	}
-	p.sampler = sampler
 
 	premulBlend := gputypes.BlendStatePremultiplied()
 	pipeline, err := p.device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
