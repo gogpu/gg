@@ -123,7 +123,7 @@ func (m *MultiFace) FaceForRune(r rune) Face {
 // offsets, allowing GPU consumers to rasterize each source independently and
 // append quads without dropping shaped positions or leaving the GPU path.
 func (m *MultiFace) FontRuns(text string) []FontRun {
-	if text == "" || len(m.faces) == 0 {
+	if m == nil || text == "" || len(m.faces) == 0 {
 		return nil
 	}
 
@@ -167,16 +167,6 @@ func (m *MultiFace) FontRuns(text string) []FontRun {
 	}
 	flush(len(text))
 	return runs
-}
-
-// ShapeRuns is the method form of [ShapeRuns] for callers that already hold a
-// MultiFace. Every returned ShapedRun carries the source Face used to produce
-// its glyph IDs.
-func (m *MultiFace) ShapeRuns(text string) []ShapedRun {
-	if m == nil || text == "" {
-		return nil
-	}
-	return shapeMultiFaceRuns(text, m, GetShaper())
 }
 
 // Glyphs implements Face.Glyphs.

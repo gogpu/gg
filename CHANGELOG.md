@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scale keeps its own canvas, and `Draw` follows the window's size from `WindowProvider`. `Render` now reads the
   window provider under the canvas's lifecycle lock, since a concurrent `New` replaces it.
 
+### Added
+
+- **Font fallback stays on the GPU text path** (#513, #521, thanks @besmpl) — text drawn with a `MultiFace` or
+  `FilteredFace` that mixes fonts used to fall back to CPU rendering, because the GPU paths need glyph IDs from one
+  font. Text is now split into runs by source font before shaping (`MultiFace.FontRuns`, `FilteredFace.FontRuns`,
+  `text.ShapeRuns`), each glyph keeps the face it came from (`ShapedGlyph.Face`), and single-font runs go to the
+  glyph-mask and MSDF pipelines.
+
 ## [0.52.6] - 2026-11-08
 
 ### Security
