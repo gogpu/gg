@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.6] - 2026-11-08
+
+### Security
+
+- **naga v0.21.4** — gg compiles its shaders with naga, and naga before v0.21.3 could overflow the stack on deeply
+  nested WGSL (GHSA-887q-cf99-367r). gg only parses its own embedded shaders, so gg itself is not exposed, but
+  `govulncheck` flags the reachable parser; this release requires the fixed naga.
+
 ### Fixed
 
 - **gg builds with gogpu v0.54.0 and the current GPU modules** (#531, #535) — gg v0.52.5 required
@@ -30,8 +38,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bool` or `vecN<bool>`. Rust naga, browsers and naga v0.21.0 reject the shader; older naga
   backends disagreed on its result (SPIR-V converted with `!= 0`, the HLSL failed under DXC,
   the DXIL was invalid). The condition is now the equivalent comparison (`dst <= 0.25`,
-  `src <= 0.5`), so the output is unchanged. A test checks every gg shader's `select()`
-  conditions.
+  `src <= 0.5`), so the output is unchanged. A test parses and validates every gg shader with
+  naga, whose validator now enforces the rule.
+
+- **Standalone stencil and SDF readback padded to 256-byte rows** — `CopyTextureToBuffer` needs `BytesPerRow` to be
+  a multiple of 256, which wgpu checks since v0.34.7. The standalone `StencilRenderer.RenderPath` and SDF pipeline
+  readback helpers used `width*4` and failed for widths that are not a multiple of 64 pixels. The frame rendering
+  path already padded its rows and was not affected. Both helpers now pad the rows and strip the padding after the
+  copy, and tests cover both at an unaligned width.
+
+- **Translucent `image.RGBA` drew too dark** (#532, @kivutar) — Go's `image.RGBA` is premultiplied, but
+  `FromStdImage` stored it as straight RGBA, so the alpha was applied twice. It is kept as premultiplied now, and
+  other image types go through `NRGBAModel`.
+
+- **Damage-path docs state the buffer-age contract** — `FlushGPUWithViewDamage`, `RenderDirectWithDamage` and
+  `RenderDirectWithDamageRects` keep the target image's own last contents outside the damage rect. With a rotating
+  swapchain that image can be several frames old, so the caller unions the damage over the image's age.
 
 ### Added
 
@@ -40,8 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dependencies:** wgpu v0.34.6, naga v0.20.5, gpucontext v0.31.3, gputypes v0.8.0
-  (goffi v0.6.8 through wgpu).
+- **Dependencies:** wgpu v0.34.9, naga v0.21.4, gpucontext v0.31.3, gputypes v0.8.2, golang.org/x/image v0.45.0,
+  golang.org/x/text v0.41.0 (the newest releases that keep the Go 1.25 minimum; later ones require Go 1.26).
+
+- **Readback no longer issues manual texture barriers** — wgpu v0.34.6+ transitions textures for copies itself, so
+  the explicit `TransitionTextures` calls around the MSAA resolve readback are gone.
 
 ## [0.52.5] - 2026-08-26
 
