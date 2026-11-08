@@ -95,9 +95,6 @@ func TestShapeRunsSourceAndBoundaryPaths(t *testing.T) {
 		t.Fatalf("empty shaper ShapeRuns = %#v, want nil", runs)
 	}
 
-	if runs := shapeMultiFaceRuns("x", nil, original); runs != nil {
-		t.Fatalf("nil multi shape = %#v, want nil", runs)
-	}
 	if runs := shapeFontRuns("x", nil, original); runs != nil {
 		t.Fatalf("empty font runs = %#v, want nil", runs)
 	}

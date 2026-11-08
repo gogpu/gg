@@ -340,11 +340,11 @@ func TestMultiFaceSourceAwareBoundaryCases(t *testing.T) {
 	if runs := zero.FontRuns("x"); runs != nil {
 		t.Fatalf("zero-value FontRuns = %#v, want nil", runs)
 	}
-	if runs := zero.ShapeRuns("x"); runs != nil {
-		t.Fatalf("zero-value ShapeRuns = %#v, want nil", runs)
+	if runs := ShapeRuns("x", &zero); runs != nil {
+		t.Fatalf("ShapeRuns(zero-value MultiFace) = %#v, want nil", runs)
 	}
-	if runs := (*MultiFace)(nil).ShapeRuns("x"); runs != nil {
-		t.Fatalf("nil ShapeRuns = %#v, want nil", runs)
+	if runs := ShapeRuns("x", (*MultiFace)(nil)); runs != nil {
+		t.Fatalf("ShapeRuns(nil *MultiFace) = %#v, want nil", runs)
 	}
 
 	latin := newMockFace(12, DirectionLTR, map[rune]float64{'a': 6})

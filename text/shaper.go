@@ -86,18 +86,10 @@ func ShapeRuns(text string, face Face) []ShapedRun {
 	return []ShapedRun{newShapedRun(face, glyphs, face.Direction())}
 }
 
-// shapeMultiFaceRuns shapes each contiguous source run with the active
-// shaper. Keeping shaping inside each run preserves GSUB/GPOS output and
-// avoids interpreting a glyph ID from one font in another font's namespace.
-func shapeMultiFaceRuns(input string, multi *MultiFace, shaper Shaper) []ShapedRun {
-	if multi == nil {
-		return nil
-	}
-	return shapeFontRuns(input, multi.FontRuns(input), shaper)
-}
-
 // shapeFontRuns shapes source-aware fallback runs produced by a composite
-// face. Run.Start is a byte offset, while ShapedGlyph.Cluster is a rune
+// face, each contiguous source run on its own. Keeping shaping inside each run
+// preserves GSUB/GPOS output and avoids interpreting a glyph ID from one font
+// in another font's namespace. Run.Start is a byte offset, while ShapedGlyph.Cluster is a rune
 // index, so convert each run's start explicitly before applying the offset.
 func shapeFontRuns(input string, runs []FontRun, shaper Shaper) []ShapedRun {
 	if shaper == nil {
