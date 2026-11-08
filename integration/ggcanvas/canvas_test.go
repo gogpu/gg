@@ -56,6 +56,7 @@ func newMockProvider() *mockProvider {
 }
 
 func TestNewWithScaleUsesPlatformFontSmoothing(t *testing.T) {
+	resetCanvasCache(t)
 	gg.CloseAccelerator()
 	accelerator := &textPreferenceAccelerator{
 		renderTargetCaptureAccelerator: &renderTargetCaptureAccelerator{},
@@ -137,6 +138,7 @@ func TestNewWithScaleUsesPlatformFontSmoothing(t *testing.T) {
 }
 
 func TestDrawRefreshesChangedPlatformFontSmoothing(t *testing.T) {
+	resetCanvasCache(t)
 	gg.CloseAccelerator()
 	accelerator := &textPreferenceAccelerator{
 		renderTargetCaptureAccelerator: &renderTargetCaptureAccelerator{},
@@ -290,6 +292,7 @@ func (m *mockDrawContext) Renderer() any {
 
 // TestNew tests canvas creation.
 func TestNew(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 
 	tests := []struct {
@@ -375,6 +378,7 @@ func TestNew(t *testing.T) {
 
 // TestMustNew tests panic behavior.
 func TestMustNew(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 
 	t.Run("success", func(t *testing.T) {
@@ -405,6 +409,7 @@ func TestMustNew(t *testing.T) {
 
 // TestCanvasContext tests context access.
 func TestCanvasContext(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 200, 200)
 	if err != nil {
@@ -425,6 +430,7 @@ func TestCanvasContext(t *testing.T) {
 
 // TestCanvasResize tests resize functionality.
 func TestCanvasResize(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -471,6 +477,7 @@ func TestCanvasResize(t *testing.T) {
 
 // TestCanvasDirtyTracking tests the dirty flag behavior.
 func TestCanvasDirtyTracking(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -493,6 +500,7 @@ func TestCanvasDirtyTracking(t *testing.T) {
 
 // TestCanvasFlush tests the flush operation.
 func TestCanvasFlush(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -531,6 +539,7 @@ func TestCanvasFlush(t *testing.T) {
 
 // TestCanvasClose tests cleanup behavior.
 func TestCanvasClose(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -569,6 +578,7 @@ func TestCanvasClose(t *testing.T) {
 
 // TestRenderTo tests the RenderTo integration.
 func TestRenderTo(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -609,6 +619,7 @@ func TestRenderTo(t *testing.T) {
 
 // TestRenderToPosition tests positioned rendering.
 func TestRenderToPosition(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -630,6 +641,7 @@ func TestRenderToPosition(t *testing.T) {
 
 // TestRenderToNilRenderer tests error handling when renderer returns nil.
 func TestRenderToNilRenderer(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -647,6 +659,7 @@ func TestRenderToNilRenderer(t *testing.T) {
 
 // TestRenderOptions tests default options.
 func TestRenderOptions(t *testing.T) {
+	resetCanvasCache(t)
 	opts := DefaultRenderOptions()
 
 	if opts.X != 0 || opts.Y != 0 {
@@ -665,6 +678,7 @@ func TestRenderOptions(t *testing.T) {
 
 // TestTextureReuse tests that texture is reused across renders.
 func TestTextureReuse(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -698,6 +712,7 @@ func TestTextureReuse(t *testing.T) {
 
 // TestTextureUpdateOnDirty tests that texture is updated when dirty.
 func TestTextureUpdateOnDirty(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -733,6 +748,7 @@ func TestTextureUpdateOnDirty(t *testing.T) {
 
 // TestMarkDirtyRegion tests dirty region accumulation.
 func TestMarkDirtyRegion(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -773,6 +789,7 @@ func TestMarkDirtyRegion(t *testing.T) {
 // TestMarkDirtySetsFullCanvasRect verifies that MarkDirty (full invalidation)
 // sets dirtyRect to the full canvas dimensions so LastDamage() returns correct bounds.
 func TestMarkDirtySetsFullCanvasRect(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -798,6 +815,7 @@ func TestMarkDirtySetsFullCanvasRect(t *testing.T) {
 // TestFlushPartialUpload verifies that Flush uses UpdateRegion when a dirty
 // rect is set and the texture supports it.
 func TestFlushPartialUpload(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -855,6 +873,7 @@ func TestFlushPartialUpload(t *testing.T) {
 // TestFlushFullUploadWhenNoDirtyRect verifies that MarkDirty() (without region)
 // causes a full upload even when the texture supports region updates.
 func TestFlushFullUploadWhenNoDirtyRect(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -888,6 +907,7 @@ func TestFlushFullUploadWhenNoDirtyRect(t *testing.T) {
 // TestFlushFullUploadWhenRegionCoversEntirePixmap verifies that a dirty rect
 // covering the entire pixmap falls back to full upload (no wasted copy).
 func TestFlushFullUploadWhenRegionCoversEntirePixmap(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -921,6 +941,7 @@ func TestFlushFullUploadWhenRegionCoversEntirePixmap(t *testing.T) {
 // TestFlushClampsDirtyRectToPixmap verifies that a dirty rect extending
 // beyond the pixmap is clamped to the actual pixmap dimensions.
 func TestFlushClampsDirtyRectToPixmap(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -958,6 +979,7 @@ func TestFlushClampsDirtyRectToPixmap(t *testing.T) {
 
 // TestFlushPixmap tests the pixmap-only flush (no GPU readback).
 func TestFlushPixmap(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -992,6 +1014,7 @@ func TestFlushPixmap(t *testing.T) {
 
 // TestFlushPixmapOnClosedCanvas verifies FlushPixmap fails on closed canvas.
 func TestFlushPixmapOnClosedCanvas(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1008,6 +1031,7 @@ func TestFlushPixmapOnClosedCanvas(t *testing.T) {
 // TestFlushAndFlushPixmapConsistency verifies Flush and FlushPixmap produce
 // identical textures when no GPU shapes are pending (regression test).
 func TestFlushAndFlushPixmapConsistency(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 
 	c1, err := New(provider, 80, 60)
@@ -1065,6 +1089,7 @@ func TestFlushAndFlushPixmapConsistency(t *testing.T) {
 
 // TestFlushPixmapPartialUpload verifies FlushPixmap respects dirty regions.
 func TestFlushPixmapPartialUpload(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1102,6 +1127,7 @@ func TestFlushPixmapPartialUpload(t *testing.T) {
 
 // TestExtractRegion verifies the pixel extraction helper.
 func TestExtractRegion(t *testing.T) {
+	resetCanvasCache(t)
 	const w, h = 4, 4
 	const bpp = 4
 
@@ -1172,6 +1198,7 @@ func TestExtractRegion(t *testing.T) {
 
 // TestPixmapTextureView_BeforeFlush returns nil before any flush.
 func TestPixmapTextureView_BeforeFlush(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1187,6 +1214,7 @@ func TestPixmapTextureView_BeforeFlush(t *testing.T) {
 // TestPixmapTextureView_PendingTexture returns zero-value for pendingTexture
 // (not yet promoted to real GPU texture).
 func TestPixmapTextureView_PendingTexture(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1204,6 +1232,7 @@ func TestPixmapTextureView_PendingTexture(t *testing.T) {
 
 // TestPixmapTextureView_PromotedTexture returns view after texture promotion.
 func TestPixmapTextureView_PromotedTexture(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1291,6 +1320,7 @@ func (m *mockRenderTargetNoDamage) PresentTexture(tex any) error {
 }
 
 func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1330,6 +1360,7 @@ func TestSetPresentDamage_ForwardedOnRender(t *testing.T) {
 }
 
 func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1356,6 +1387,7 @@ func TestSetPresentDamage_FallbackToFrameDamage(t *testing.T) {
 }
 
 func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1388,6 +1420,7 @@ func TestSetPresentDamage_UnionsWithFrameDamage(t *testing.T) {
 }
 
 func TestSetPresentDamage_FirstFrameFullWindow(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1415,6 +1448,7 @@ func TestSetPresentDamage_FirstFrameFullWindow(t *testing.T) {
 }
 
 func TestSetPresentDamage_NoDamageSource(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1435,6 +1469,7 @@ func TestSetPresentDamage_NoDamageSource(t *testing.T) {
 }
 
 func TestSetPresentDamage_ClearedAfterForward(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1475,6 +1510,7 @@ func (m *mockRenderTargetWithCreator) TextureCreator() gpucontext.TextureCreator
 // TestRender_RegistersDamageSource verifies that Render() auto-registers "gg"
 // as a damage source when the RenderTarget supports RegisterDamageSource.
 func TestRender_RegistersDamageSource(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1504,6 +1540,7 @@ func TestRender_RegistersDamageSource(t *testing.T) {
 // TestRender_NoDamageRegistration verifies that Render() works correctly when
 // the RenderTarget does not support damage source registration.
 func TestRender_NoDamageRegistration(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1538,6 +1575,7 @@ func (m *renderMockNoDamageWithCreator) TextureCreator() gpucontext.TextureCreat
 
 // TestPixmapTextureView_ClosedCanvas returns nil on closed canvas.
 func TestPixmapTextureView_ClosedCanvas(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 50, 50)
 	if err != nil {
@@ -1576,6 +1614,7 @@ func (m *mockHiDPIProvider) RequestRedraw()       { m.NullWindowProvider.Request
 // Root cause: v0.45.4 changed MarkDirty to use c.ctx.Width()/Height() (logical)
 // instead of c.ctx.PixelWidth()/PixelHeight() (physical).
 func TestMarkDirty_HiDPI_UsesPhysicalDimensions(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockHiDPIProvider(2.0)
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -1608,6 +1647,7 @@ func TestMarkDirty_HiDPI_UsesPhysicalDimensions(t *testing.T) {
 //
 // Regression test for gg#308.
 func TestFlush_HiDPI_FullUploadAfterMarkDirty(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockHiDPIProvider(2.0)
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -1655,6 +1695,7 @@ func TestFlush_HiDPI_FullUploadAfterMarkDirty(t *testing.T) {
 // TestMarkDirtyRegion_HiDPI_PartialUpload verifies that MarkDirtyRegion with
 // physical pixel coordinates produces a correct partial upload on HiDPI canvas.
 func TestMarkDirtyRegion_HiDPI_PartialUpload(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockHiDPIProvider(2.0)
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -1690,6 +1731,7 @@ func TestMarkDirtyRegion_HiDPI_PartialUpload(t *testing.T) {
 // --- warnIfPhysicalDimensions tests ---
 
 func TestWarnIfPhysicalDimensions_DetectsPhysical(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 1600, 1200, 2.0)
@@ -1700,6 +1742,7 @@ func TestWarnIfPhysicalDimensions_DetectsPhysical(t *testing.T) {
 }
 
 func TestWarnIfPhysicalDimensions_NoWarnForLogical(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 800, 600, 2.0)
@@ -1710,6 +1753,7 @@ func TestWarnIfPhysicalDimensions_NoWarnForLogical(t *testing.T) {
 }
 
 func TestWarnIfPhysicalDimensions_NoWarnScale1(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 1.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 800, 600, 1.0)
@@ -1720,6 +1764,7 @@ func TestWarnIfPhysicalDimensions_NoWarnScale1(t *testing.T) {
 }
 
 func TestWarnIfPhysicalDimensions_NoWarnZeroSize(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 0, H: 0, SF: 2.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 1600, 1200, 2.0)
@@ -1730,6 +1775,7 @@ func TestWarnIfPhysicalDimensions_NoWarnZeroSize(t *testing.T) {
 }
 
 func TestWarnIfPhysicalDimensions_Scale3(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 400, H: 300, SF: 3.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 1200, 900, 3.0)
@@ -1740,6 +1786,7 @@ func TestWarnIfPhysicalDimensions_Scale3(t *testing.T) {
 }
 
 func TestWarnIfPhysicalDimensions_SlightlyLargerNoWarn(t *testing.T) {
+	resetCanvasCache(t)
 	wp := gpucontext.NullWindowProvider{W: 800, H: 600, SF: 2.0}
 	logged := captureWarning(func() {
 		warnIfPhysicalDimensions(wp, 1000, 700, 2.0)
@@ -1787,6 +1834,7 @@ func (h *warningDetector) WithGroup(name string) slog.Handler {
 // --- Draw() per-frame state reset tests (ADR-032, gg#328) ---
 
 func TestDraw_ResetsMatrix(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	canvas, err := New(provider, 50, 50)
 	if err != nil {
@@ -1808,6 +1856,7 @@ func TestDraw_ResetsMatrix(t *testing.T) {
 }
 
 func TestDraw_ResetsPath(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	canvas, err := New(provider, 50, 50)
 	if err != nil {
@@ -1828,6 +1877,7 @@ func TestDraw_ResetsPath(t *testing.T) {
 }
 
 func TestDraw_PreservesFont(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	canvas, err := New(provider, 50, 50)
 	if err != nil {
@@ -1850,6 +1900,7 @@ func TestDraw_PreservesFont(t *testing.T) {
 }
 
 func TestDraw_UnwindsPush(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	canvas, err := New(provider, 50, 50)
 	if err != nil {
@@ -1871,6 +1922,7 @@ func TestDraw_UnwindsPush(t *testing.T) {
 }
 
 func TestDraw_MultipleFramesStable(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	canvas, err := New(provider, 100, 100)
 	if err != nil {

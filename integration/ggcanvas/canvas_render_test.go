@@ -139,6 +139,7 @@ func (a *renderTargetCaptureAccelerator) CanRenderDirect() bool { return true }
 // TestRender_NotDirty_Noop verifies that Render returns nil without presenting
 // when the canvas is not dirty.
 func TestRender_NotDirty_Noop(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -161,6 +162,7 @@ func TestRender_NotDirty_Noop(t *testing.T) {
 // TestRender_Closed_ReturnsError verifies that Render returns ErrCanvasClosed
 // when the canvas is closed.
 func TestRender_Closed_ReturnsError(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 100, 100)
 	if err != nil {
@@ -176,6 +178,7 @@ func TestRender_Closed_ReturnsError(t *testing.T) {
 }
 
 func TestRender_PreserveContentForwardedToGPU(t *testing.T) {
+	resetCanvasCache(t)
 	gg.CloseAccelerator()
 	accelerator := &renderTargetCaptureAccelerator{}
 	if err := gg.RegisterAccelerator(accelerator); err != nil {
@@ -235,6 +238,7 @@ func TestRender_PreserveContentForwardedToGPU(t *testing.T) {
 }
 
 func TestRender_BorrowsCommandEncoderFromTarget(t *testing.T) {
+	resetCanvasCache(t)
 	gg.CloseAccelerator()
 	accelerator := &renderTargetCaptureAccelerator{}
 	if err := gg.RegisterAccelerator(accelerator); err != nil {
@@ -266,6 +270,7 @@ func TestRender_BorrowsCommandEncoderFromTarget(t *testing.T) {
 }
 
 func TestRender_SamplesContentAfterBorrowingEncoder(t *testing.T) {
+	resetCanvasCache(t)
 	gg.CloseAccelerator()
 	accelerator := &renderTargetCaptureAccelerator{}
 	if err := gg.RegisterAccelerator(accelerator); err != nil {
@@ -299,6 +304,7 @@ func TestRender_SamplesContentAfterBorrowingEncoder(t *testing.T) {
 // TestRender_SurfacePixelWriter_Success verifies that when WriteSurfacePixels
 // succeeds, Render sets dirty=false and does NOT call PresentTexture.
 func TestRender_SurfacePixelWriter_Success(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 10, 10)
 	if err != nil {
@@ -328,6 +334,7 @@ func TestRender_SurfacePixelWriter_Success(t *testing.T) {
 // WriteSurfacePixels returns an error, Render falls through to the universal
 // path and calls PresentTexture.
 func TestRender_SurfacePixelWriter_Error_FallsThrough(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 10, 10)
 	if err != nil {
@@ -358,6 +365,7 @@ func TestRender_SurfacePixelWriter_Error_FallsThrough(t *testing.T) {
 // TestRender_UniversalPath verifies the universal path: Flush -> PresentTexture.
 // No SurfaceView, no PixelWriter -> goes through Flush + promoteIfPending.
 func TestRender_UniversalPath(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 10, 10)
 	if err != nil {
@@ -382,6 +390,7 @@ func TestRender_UniversalPath(t *testing.T) {
 // optimization. WritePixels writes full pixmap to DIB, blitDamageRectsToWindow
 // BitBlts only changed areas.
 func TestRender_DamageRectsForwardedOnPixelUpload(t *testing.T) {
+	resetCanvasCache(t)
 	provider := newMockProvider()
 	c, err := New(provider, 10, 10)
 	if err != nil {
