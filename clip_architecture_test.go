@@ -210,6 +210,59 @@ func TestClipMask_RectOnly_NoMask(t *testing.T) {
 	}
 }
 
+func TestApplyClipToPaint_ReusesMaskAcrossSavedClipState(t *testing.T) {
+	if AcceleratorCanRenderDirect() {
+		t.Skip("pre-rasterized masks are only used by CPU dispatch")
+	}
+
+	dc := NewContext(200, 200)
+	dc.ClipRoundRect(20, 30, 100, 80, 10)
+	dc.applyClipToPaint()
+	first := dc.paint.ClipMask
+	if len(first) == 0 {
+		t.Fatal("first rounded clip did not produce a mask")
+	}
+	dc.clearClipFromPaint()
+
+	dc.applyClipToPaint()
+	second := dc.paint.ClipMask
+	if len(second) == 0 || &first[0] != &second[0] {
+		t.Fatal("unchanged rounded clip did not reuse its mask")
+	}
+	dc.clearClipFromPaint()
+
+	dc.Push()
+	dc.ClipRoundRect(25, 35, 40, 30, 5)
+	dc.applyClipToPaint()
+	nested := dc.paint.ClipMask
+	if len(nested) == 0 || &first[0] == &nested[0] {
+		t.Fatal("nested clip did not receive an independent mask")
+	}
+	dc.clearClipFromPaint()
+	dc.Pop()
+
+	dc.applyClipToPaint()
+	restored := dc.paint.ClipMask
+	if len(restored) == 0 || &first[0] != &restored[0] {
+		t.Fatal("restored clip state did not recover its cached mask")
+	}
+	dc.clearClipFromPaint()
+}
+
+func BenchmarkApplyClipToPaint_CachedRoundedClip(b *testing.B) {
+	dc := NewContext(800, 600)
+	dc.ClipRoundRect(10, 10, 780, 580, 8)
+	dc.applyClipToPaint() // Populate the cache outside the timed loop.
+	dc.clearClipFromPaint()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		dc.applyClipToPaint()
+		dc.clearClipFromPaint()
+	}
+}
+
 // TestClipMask_OutOfBounds verifies correct handling of mask lookups for
 // pixels outside the mask bounds.
 func TestClipMask_OutOfBounds(t *testing.T) {
