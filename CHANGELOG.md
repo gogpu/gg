@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Translucent fills and strokes on the GPU stencil path render at full strength again** (#540, thanks @timzifer) —
+  the renderer stores premultiplied colour for the stencil-then-cover pass and the cover uniform multiplied by alpha
+  a second time, so translucent geometry came out as `alpha²·colour` over the background: darker and grayer than
+  the CPU output. Opaque colours were unaffected, which is why it depended on what was drawn.
+- **`FontSource` keeps one copy of its data** (#546, thanks @sogonov) — `NewFontSource` documented that the caller's
+  slice may be reused, but it parsed the caller's slice and stored a copy that nothing read: reusing the buffer broke
+  the font, and every source held its file twice. It now parses the copy, and `NewFontSourceFromFile` hands over the
+  buffer it just read instead of copying it.
 - **Arbitrary-path clips draw their content in gogpu windows** — with a circle, star or any other non-rectangular
   clip, nothing inside the clip was drawn when gg rendered into a window (`examples/clip_path`). On that path the
   frame is recorded into gogpu's command encoder, and gg dropped the pass that marks the clip region in the depth
@@ -40,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   font. Text is now split into runs by source font before shaping (`MultiFace.FontRuns`, `FilteredFace.FontRuns`,
   `text.ShapeRuns`), each glyph keeps the face it came from (`ShapedGlyph.Face`), and single-font runs go to the
   glyph-mask and MSDF pipelines.
+
+### Changed
+
+- **Dependencies:** wgpu v0.34.10, naga v0.21.5, gpucontext v0.31.3, gputypes v0.8.2, go-webgpu/goffi v0.6.8,
+  go-webgpu/webgpu v0.5.5. wgpu v0.34.10 releases resources before they are submitted, refcounts samplers and holds
+  them from bind groups, keeps a texture alive from its view, and holds the Vulkan dynamic buffer types in the
+  descriptor pool; naga v0.21.5 carries the security fixes of the v0.21 line. The `go` line stays 1.25.0.
 
 ## [0.52.6] - 2026-11-08
 
