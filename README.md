@@ -40,7 +40,7 @@
 |----------|--------------|
 | **Rendering** | Immediate and retained mode, seven-tier GPU acceleration (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask), per-context GPU isolation (Skia GrContext pattern), scene GPU auto-select, Skia AAA pixel-perfect rasterizer, **pixel-perfect mode** (`SetAntiAlias(false)` — dedicated NoAAFiller, Skia/Cairo/tiny-skia pattern), CPU fallback |
 | **Shapes** | Rectangles, circles, ellipses, arcs, bezier curves, polygons, stars |
-| **Text** | **Pure Go font stack** (own cmap/hmtx/GSUB/GPOS/gvar/avar/CFF1 parsers, TrueType bytecode interpreter — skrifa golden parity 624/624 diff=0), **variable font support** (`WithVariations` — weight/width/slant axes, own gvar/HVAR interpolation), MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks — GPU + CPU), **per-glyph rendering** (fractional advances, Skia linearMetrics pattern), **OpenType font features** (`WithFeatures(TabularNums, NoLigatures)` — own GSUB/GPOS shaper, 5-10x faster than HarfBuzz), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (enterprise auto-hinter + TrueType bytecode interpreter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
+| **Text** | **Pure Go font stack** (own cmap/hmtx/GSUB/GPOS/gvar/avar/CFF1 parsers, TrueType bytecode interpreter and auto-hinter checked against skrifa golden data), **variable font support** (`WithVariations` — weight/width/slant axes, own gvar/HVAR interpolation), MSDF + glyph mask dual-strategy rendering, TextMode auto-selection, **text stroke/outline** (StrokeString + TextPath, Skia/Cairo/HTML5 pattern), **aliased text** (TextModeAliased, Skia kAlias binary masks — GPU + CPU), **per-glyph rendering** (fractional advances, Skia linearMetrics pattern), **OpenType font features** (`WithFeatures(TabularNums, NoLigatures)` — own GSUB/GPOS shaper, 5-10x faster than HarfBuzz), DPI-aware HiDPI text, **ClearType LCD auto-detection** (Windows SPI + registry, macOS grayscale, Linux Xft/Wayland), **CJK script-aware rendering** (ADR-027: per-script hinting, exact-size rasterization, dual MSDF atlas 64/128px), font hinting (enterprise auto-hinter + TrueType bytecode interpreter), transform-aware CPU text (scale/rotate/shear), glyph outline caching, emoji support, bidirectional text, scene text via TagText glyph references (shape-once, Skia drawTextBlob pattern), atlas zoom resilience (size buckets + frame-based compaction) |
 | **Compositing** | 29 blend modes (Porter-Duff, Advanced, HSL), layer isolation, alpha masks, zero-readback compositor (non-MSAA blit fast path, **HiDPI-aware damage tracking** (logical→physical scaling for OS compositor), damage-aware multi-rect sub-region updates, per-draw dynamic scissor ADR-028) |
 | **Images** | 7 pixel formats, PNG/JPEG/WebP I/O, mipmaps, affine transforms |
 | **SVG** | Full SVG renderer (`gg/svg`): parse + render SVG XML with color override for theming, **retained scene lowering** (`RenderToScene` — resolution-independent vector icons via scene graph), **thin stroke hinting** (pixel-grid snapping for crisp small icons), SVG path data parser (`ParseSVGPath`), transform-aware `FillPath`/`StrokePath` |
@@ -132,8 +132,8 @@ per-edge heap allocations.
 
 | Algorithm | Tiles | Best For |
 |-----------|-------|----------|
-| **AnalyticFiller** (Skia AAA) | — | Simple paths, small shapes (< 32px). Forward-diff curve edges (Skia `updateQuadratic`/`updateCubic`). Pixel-perfect with Chrome/Android. |
-| **AnalyticFiller Convex** | — | Convex shapes (rect, circle, triangle). 1.6x faster, kSnapDigit X snapping. |
+| **AnalyticFiller** (Skia AAA) | — | Simple paths, small shapes (< 32px). Forward-diff curve edges (Skia `updateQuadratic`/`updateCubic`). Coverage identical to Skia's AAA code, built from source, on the regression shapes. |
+| **AnalyticFiller Convex** | — | Convex shapes (rect, circle, triangle). Faster convex walk, kSnapDigit X snapping. |
 | **SparseStrips** | 4×4 | Complex paths, CPU/SIMD workloads |
 | **TileCompute** | 16×16 | Extreme complexity (10K+ segments) |
 
@@ -161,8 +161,8 @@ dc.Fill()                        // no gray edge pixels
 dc.SetAntiAlias(true)           // back to smooth AA
 ```
 
-Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern) — ~2-3× faster
-than analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
+Uses a dedicated integer scanline rasterizer (Skia/tiny-skia pattern), cheaper than
+analytic AA. Works on both CPU and GPU (all backends). Text AA is independent
 (controlled via `SetTextMode`).
 
 ### Text Stroke & Outline
@@ -283,7 +283,7 @@ dc := gg.NewContext(800, 600, gg.WithPixmap(pm))
 
 | Component | Location | Description |
 |-----------|----------|-------------|
-| **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (pixel-perfect port of Chrome/Android rasterizer). General + convex fast path. Forward-diff curve edges with deviation-based subdivision (ADR-063), value-type `QuadraticEdge`/`CubicEdge` (zero per-edge heap allocs). |
+| **CPU Raster** | `internal/raster/` | Skia AAA analytic anti-aliasing (a port of Skia's analytic rasterizer, coverage-identical to it on the regression shapes). General + convex fast path. Forward-diff curve edges with deviation-based subdivision (ADR-063), value-type `QuadraticEdge`/`CubicEdge` (zero per-edge heap allocs). |
 | **Tile Rasterizers** | `internal/gpu/` (4×4), `internal/gpu/tilecompute/` (16×16) | SparseStrips + TileCompute, both ported from Vello |
 | **GPU Accelerator** | `internal/gpu` | Seven-tier GPU pipeline (SDF, Convex, Stencil+Cover, Textured Quad, MSDF Text, Compute, Glyph Mask) |
 | **Scene Text** | `scene/` | TagText glyph references (ADR-022): shape once at recording, resolve at render via DrawShapedGlyphs → Tier 6/4. Atlas zoom resilience (Skia size buckets). |
@@ -569,18 +569,18 @@ dc := gg.NewContext(512, 512) // dc = drawing context
 
 ## Performance
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| sRGB to Linear | 0.16ns | 260x faster than math.Pow |
-| LayerCache.Get | 90ns | Thread-safe LRU |
-| DirtyRegion.Mark | 10.9ns | Lock-free atomic |
-| MSDF lookup | <10ns | Zero-allocation |
-| Path iteration | 23ns | SOA Iterate(), 0 allocs |
-| FillRect 100×100 | 520µs | **0 allocs** (zero-alloc pipeline) |
-| FillCircle r100 | 1.7ms | **0 allocs** (zero-alloc pipeline) |
-| StrokePath 10seg | 219ns | **0 allocs** (scratch path reuse, Skia pattern) |
-| SetRGB/SetRGBA | <1ns | **0 allocs** (inline solidColor, ADR-036) |
-| Gradient ColorAt | 33ns | 0 allocs (pre-sorted stops) |
+The hot drawing paths allocate nothing per call. Timings depend on the machine, so measure them on yours with the
+benchmark named in each row (`go test -run '^$' -bench <name> -benchmem ./...`).
+
+| Operation | Allocations | Benchmark |
+|-----------|-------------|-----------|
+| FillRect (10×10 … 1000×1000) | 0 allocs | `BenchmarkDraw_FillRect` |
+| FillCircle (r10 … r500) | 0 allocs | `BenchmarkDraw_FillCircle` |
+| StrokePath (10 … 100 segments) | 0 allocs (scratch path reuse, Skia pattern) | `BenchmarkDraw_StrokePath` |
+| Path iteration | 0 allocs (SOA `Iterate()`) | `BenchmarkPathIterate` |
+| sRGB → linear | 0 allocs (lookup table, ~100× faster than `math.Pow`) | `BenchmarkSRGBToLinear_AllValues` |
+| DirtyRegion.Mark | 0 allocs (lock-free atomic) | `BenchmarkDirtyRegion_Mark` |
+| LayerCache.Get | 0 allocs (thread-safe LRU) | `BenchmarkLayerCache_Get_Hit` |
 
 ## Debugging
 

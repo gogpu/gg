@@ -19,10 +19,10 @@
 
 ---
 
-## Current State: v0.51.0
+## Current State: v0.52.6
 
 ✅ **Production-ready** with GPU-accelerated rendering:
-- **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs). 30% faster on small paths
+- **Forward-diff curve edges** (ADR-063) — Skia AAA forward-diff pipeline (updateQuadratic/updateCubic) with deviation-based subdivision. Value-type curve edges (zero per-edge heap allocs).
 - **SVG vector icon rendering** — RenderToScene with stroke hinting for crisp icons at any size
 - **Skia cubicStroke** — direct cubic offset algorithm for higher-quality stroked curves
 - **Hairline rasterizer** — Skia/tiny-skia pattern for thin strokes (device-pixel width ≤ 1.0)
@@ -194,7 +194,7 @@
 - [x] Blit-only fix, type-safe GPU handles (ADR-018), overlay fix, 14 enterprise tests
 
 ### Pre-1.0.0 — Public API Freeze Blockers
-- [ ] **API-001: GPU handle API shape** — generics `Handle[Tag]` vs plain structs (ADR-018 follow-up). Must decide before 1.0.0 — changing after = breaking. See `docs/dev/kanban/0-backlog/API-001-gpu-handle-generics-vs-struct.md`
+- [ ] **API-001: GPU handle API shape** — generics `Handle[Tag]` vs plain structs (ADR-018 follow-up). Must decide before 1.0.0 — changing after = breaking.
 - [ ] **API-002: Eliminate remaining `any`** — `face any` in DrawText (circular dep), `Canvas.texture any` (internal), `PresentTexture(tex any)` (cross-package token)
 - [ ] **API-003: Public API review** — full audit of exported types, methods, interfaces before freeze
 
