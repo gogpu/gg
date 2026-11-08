@@ -84,8 +84,7 @@ func TestDamageBlit_LoadOpLoad_PreservesContent(t *testing.T) {
 	defer view.Release()
 
 	// Frame 1: LoadOpClear red — fills entire 8x8.
-	enc1, _ := device.CreateCommandEncoder(nil)
-	rp1, _ := enc1.BeginRenderPass(&wgpu.RenderPassDescriptor{
+	submitPass(t, device, queue, &wgpu.RenderPassDescriptor{
 		Label: "frame1-clear",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:       view,
@@ -93,32 +92,23 @@ func TestDamageBlit_LoadOpLoad_PreservesContent(t *testing.T) {
 			StoreOp:    gputypes.StoreOpStore,
 			ClearValue: gputypes.Color{R: 1, G: 0, B: 0, A: 1},
 		}},
-	})
-	rp1.End()
-	cmd1, _ := enc1.Finish()
-	queue.Submit(cmd1)
+	}, nil)
 
 	// Frame 2: LoadOpLoad + scissor (2,2,4,4). No draws — just preserve.
-	enc2, _ := device.CreateCommandEncoder(nil)
-	rp2, _ := enc2.BeginRenderPass(&wgpu.RenderPassDescriptor{
+	submitPass(t, device, queue, &wgpu.RenderPassDescriptor{
 		Label: "frame2-damage",
 		ColorAttachments: []wgpu.RenderPassColorAttachment{{
 			View:    view,
 			LoadOp:  gputypes.LoadOpLoad,
 			StoreOp: gputypes.StoreOpStore,
 		}},
+	}, func(rp *wgpu.RenderPassEncoder) {
+		rp.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: W, Height: H, MinDepth: 0, MaxDepth: 1})
+		rp.SetScissorRect(gputypes.ScissorRect{X: 2, Y: 2, Width: 4, Height: 4})
 	})
-	rp2.SetViewport(gputypes.Viewport{X: 0, Y: 0, Width: W, Height: H, MinDepth: 0, MaxDepth: 1})
-	rp2.SetScissorRect(gputypes.ScissorRect{X: 2, Y: 2, Width: 4, Height: 4})
-	rp2.End()
-	cmd2, _ := enc2.Finish()
-	queue.Submit(cmd2)
 
 	// Readback pixels.
 	data := readbackTexture(t, device, queue, tex, W, H)
-	if data == nil {
-		t.Skip("readback not available")
-	}
 
 	// ALL pixels should be red (LoadOpLoad preserves frame 1 content,
 	// scissor + no draws = no changes anywhere).
@@ -166,49 +156,84 @@ func TestDamageBlit_NBufferAccumulation(t *testing.T) {
 
 // --- Helpers ---
 
+// submitPass records one render pass (fn may be nil), finishes and submits it, failing the test on any error.
+func submitPass(t *testing.T, device *wgpu.Device, queue *wgpu.Queue, desc *wgpu.RenderPassDescriptor, fn func(*wgpu.RenderPassEncoder)) {
+	t.Helper()
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("%s: CreateCommandEncoder: %v", desc.Label, err)
+	}
+	rp, err := enc.BeginRenderPass(desc)
+	if err != nil {
+		t.Fatalf("%s: BeginRenderPass: %v", desc.Label, err)
+	}
+	if fn != nil {
+		fn(rp)
+	}
+	if err := rp.End(); err != nil {
+		t.Fatalf("%s: End: %v", desc.Label, err)
+	}
+	cmd, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("%s: Finish: %v", desc.Label, err)
+	}
+	if _, err := queue.Submit(cmd); err != nil {
+		t.Fatalf("%s: Submit: %v", desc.Label, err)
+	}
+}
+
 func readbackTexture(t *testing.T, device *wgpu.Device, queue *wgpu.Queue, tex *wgpu.Texture, w, h int) []byte {
 	t.Helper()
-	bufSize := uint64(w * h * 4)
+	// Every failure here is fatal: a readback that silently returned nil once let this test skip while the copy
+	// was invalid (unaligned BytesPerRow, P1-GPU-037).
+	pitch := readbackRowPitch(uint32(w))
+	bufSize := uint64(pitch) * uint64(h)
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "readback",
 		Size:  bufSize,
 		Usage: wgpu.BufferUsageCopyDst | wgpu.BufferUsageMapRead,
 	})
 	if err != nil {
-		t.Logf("CreateBuffer for readback: %v", err)
-		return nil
+		t.Fatalf("CreateBuffer for readback: %v", err)
 	}
 	defer buf.Release()
 
-	enc, _ := device.CreateCommandEncoder(nil)
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
 	regions := []wgpu.BufferTextureCopy{{
 		TextureBase: wgpu.ImageCopyTexture{Texture: tex},
 		BufferLayout: wgpu.ImageDataLayout{
 			Offset:       0,
-			BytesPerRow:  uint32(w * 4),
+			BytesPerRow:  pitch,
 			RowsPerImage: uint32(h),
 		},
 		Size: wgpu.Extent3D{Width: uint32(w), Height: uint32(h), DepthOrArrayLayers: 1},
 	}}
 	enc.CopyTextureToBuffer(tex, buf, regions)
-	cmd, _ := enc.Finish()
-	queue.Submit(cmd)
+	cmd, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish readback encoder: %v", err)
+	}
+	if _, err := queue.Submit(cmd); err != nil {
+		t.Fatalf("Submit readback: %v", err)
+	}
 
 	// Map buffer synchronously (software backend resolves instantly).
 	if err := buf.Map(context.Background(), wgpu.MapModeRead, 0, bufSize); err != nil {
-		t.Logf("Buffer.Map failed: %v", err)
-		return nil
+		t.Fatalf("Buffer.Map: %v", err)
 	}
 
 	mr, err := buf.MappedRange(0, bufSize)
 	if err != nil {
-		t.Logf("MappedRange: %v", err)
-		return nil
+		t.Fatalf("MappedRange: %v", err)
 	}
-	result := make([]byte, len(mr.Bytes()))
-	copy(result, mr.Bytes())
+	result := unpadRows(append([]byte(nil), mr.Bytes()...), uint32(w), uint32(h), pitch)
 	mr.Release()
-	buf.Unmap()
+	if err := buf.Unmap(); err != nil {
+		t.Fatalf("Unmap: %v", err)
+	}
 	return result
 }
 

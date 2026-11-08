@@ -643,6 +643,26 @@ func TestSDFRenderPipelineRenderShapesEmpty(t *testing.T) {
 	}
 }
 
+// TestSDFRenderPipelineRenderShapesUnalignedWidth renders through the readback path at a width whose w*4 is not a
+// multiple of 256. The copy must use a padded BytesPerRow, or wgpu rejects it and Finish fails (P1-GPU-037).
+func TestSDFRenderPipelineRenderShapesUnalignedWidth(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	p := NewSDFRenderPipeline(device, queue, 4)
+	defer p.Destroy()
+
+	const w, h = 100, 40 // 100*4 = 400 bytes per row
+	target := gg.GPURenderTarget{Width: w, Height: h, Data: make([]uint8, w*h*4), Stride: w * 4}
+	shapes := []SDFRenderShape{{
+		Kind: 0, CenterX: 50, CenterY: 20, Param1: 15, Param2: 15,
+		ColorR: 1, ColorA: 1,
+	}}
+	if err := p.RenderShapes(target, shapes); err != nil {
+		t.Fatalf("RenderShapes at width %d: %v", w, err)
+	}
+}
+
 func TestSDFRenderPipelineEnsureReady(t *testing.T) {
 	device, queue, cleanup := createNoopDevice(t)
 	defer cleanup()

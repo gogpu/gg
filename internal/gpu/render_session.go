@@ -2686,9 +2686,7 @@ func (s *GPURenderSession) copySubmitAndReadback(
 
 	// Copy resolve texture to staging buffer for CPU readback.
 	// WebGPU (and DX12) requires BytesPerRow aligned to 256 bytes.
-	bytesPerRow := w * 4
-	const copyPitchAlignment = 256
-	alignedBytesPerRow := (bytesPerRow + copyPitchAlignment - 1) &^ (copyPitchAlignment - 1)
+	alignedBytesPerRow := readbackRowPitch(w)
 	stagingBufSize := uint64(alignedBytesPerRow) * uint64(h)
 
 	stagingBuf, err := s.device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2752,19 +2750,7 @@ func (s *GPURenderSession) copySubmitAndReadback(
 	// Compositing (Porter-Duff "over") preserves existing pixmap content where
 	// the GPU rendered transparent pixels. This is essential when Flush() is
 	// called multiple times per frame (e.g., before each CPU text draw).
-	if alignedBytesPerRow == bytesPerRow {
-		// No padding — fast path.
-		compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
-	} else {
-		// Strip per-row padding from aligned readback data, then composite.
-		tight := make([]byte, uint64(bytesPerRow)*uint64(h))
-		for row := uint32(0); row < h; row++ {
-			srcOff := int(row) * int(alignedBytesPerRow)
-			dstOff := int(row) * int(bytesPerRow)
-			copy(tight[dstOff:dstOff+int(bytesPerRow)], readback[srcOff:srcOff+int(bytesPerRow)])
-		}
-		compositeBGRAOverRGBA(tight, target.Data, target.Width*target.Height)
-	}
+	compositeBGRAOverRGBA(unpadRows(readback, w, h, alignedBytesPerRow), target.Data, target.Width*target.Height)
 	return nil
 }
 
