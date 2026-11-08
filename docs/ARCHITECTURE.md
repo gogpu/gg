@@ -327,7 +327,7 @@ dc.DrawString(s, x, y)
 | Y-flip (`y - outlineY`) | TrueType/PostScript (Y-up) → screen (Y-down) | Industry standard for font outline conversion |
 | All glyphs in one Path | `scene/text.go:ToCompositePath` | Single fill call, more efficient than per-glyph |
 | FillRuleNonZero | Font outline convention | Standard winding rule for TrueType/OpenType contours |
-| MultiFace fallback | `Source() == nil` → bitmap | Graceful degradation for composite faces |
+| MultiFace fallback | Split by source face before shaping (`text.ShapeRuns`) | Each run keeps its own face, so single-font runs stay on the GPU glyph-mask and MSDF paths instead of falling back to bitmap |
 | Lazy OutlineExtractor | GC-managed lifecycle | No changes to `NewContext()` or `Close()` |
 
 ### Key Files
