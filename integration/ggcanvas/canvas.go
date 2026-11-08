@@ -946,7 +946,13 @@ type SurfacePixelWriter interface {
 //	canvas.Draw(func(cc *gg.Context) { ... })
 //	canvas.Render(dc) // dc is *gogpu.Context
 func (c *Canvas) Render(dc RenderTarget) error {
-	if c.closed {
+	// New hands a cached canvas to each fresh provider wrapper and rewrites
+	// windowProvider under lifecycleMu, possibly from another goroutine. Read
+	// both fields under the same lock; SetDeviceScale below takes it itself.
+	c.lifecycleMu.Lock()
+	closed, windowProvider := c.closed, c.windowProvider
+	c.lifecycleMu.Unlock()
+	if closed {
 		return ErrCanvasClosed
 	}
 
@@ -979,8 +985,8 @@ func (c *Canvas) Render(dc RenderTarget) error {
 	// ADR-067: compositor wiring moved to renderDirectToTarget (per-frame via GPURenderTarget.Compositor).
 
 	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
-	if c.windowProvider != nil {
-		if newScale := c.windowProvider.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
+	if windowProvider != nil {
+		if newScale := windowProvider.ScaleFactor(); newScale > 0 && newScale != c.ctx.DeviceScale() {
 			c.SetDeviceScale(newScale)
 		}
 	}
