@@ -569,7 +569,8 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	}})
 
 	// Copy resolve texture to staging buffer for readback.
-	pixelBufSize := uint64(w) * uint64(h) * 4
+	rowPitch := readbackRowPitch(w)
+	pixelBufSize := uint64(rowPitch) * uint64(h)
 	stagingBuf, err := p.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "sdf_render_staging",
 		Size:  pixelBufSize,
@@ -582,7 +583,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 	defer stagingBuf.Release()
 
 	encoder.CopyTextureToBuffer(p.resolveTex, stagingBuf, []wgpu.BufferTextureCopy{{
-		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: rowPitch, RowsPerImage: h},
 		TextureBase:  wgpu.ImageCopyTexture{Texture: p.resolveTex, MipLevel: 0},
 		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
@@ -615,7 +616,7 @@ func (p *SDFRenderPipeline) encodeAndReadback(
 		slogger().Warn("unmap failed", "err", err)
 	}
 
-	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
+	compositeBGRAOverRGBA(unpadRows(readback, w, h, rowPitch), target.Data, target.Width*target.Height)
 	return nil
 }
 

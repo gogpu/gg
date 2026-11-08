@@ -405,7 +405,8 @@ func (sr *StencilRenderer) encodeAndReadback(
 	}})
 
 	// Copy resolve texture to staging buffer for CPU readback.
-	pixelBufSize := uint64(w) * uint64(h) * 4
+	rowPitch := readbackRowPitch(w)
+	pixelBufSize := uint64(rowPitch) * uint64(h)
 	stagingBuf, err := sr.device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "stencil_staging", Size: pixelBufSize,
 		Usage: gputypes.BufferUsageMapRead | gputypes.BufferUsageCopyDst,
@@ -417,7 +418,7 @@ func (sr *StencilRenderer) encodeAndReadback(
 	defer stagingBuf.Release()
 
 	encoder.CopyTextureToBuffer(sr.textures.resolveTex, stagingBuf, []wgpu.BufferTextureCopy{{
-		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: w * 4, RowsPerImage: h},
+		BufferLayout: wgpu.ImageDataLayout{Offset: 0, BytesPerRow: rowPitch, RowsPerImage: h},
 		TextureBase:  wgpu.ImageCopyTexture{Texture: sr.textures.resolveTex, MipLevel: 0},
 		Size:         wgpu.Extent3D{Width: w, Height: h, DepthOrArrayLayers: 1},
 	}})
@@ -428,14 +429,14 @@ func (sr *StencilRenderer) encodeAndReadback(
 	}
 	// cmdBuf freed after fence wait
 
-	return sr.submitAndReadback(cmdBuf, stagingBuf, pixelBufSize, target)
+	return sr.submitAndReadback(cmdBuf, stagingBuf, pixelBufSize, w, h, rowPitch, target)
 }
 
 // submitAndReadback submits the command buffer, waits for GPU completion,
 // reads back pixel data, and converts BGRA to RGBA into the target buffer.
 func (sr *StencilRenderer) submitAndReadback(
 	cmdBuf *wgpu.CommandBuffer, stagingBuf *wgpu.Buffer,
-	pixelBufSize uint64, target gg.GPURenderTarget,
+	pixelBufSize uint64, w, h, rowPitch uint32, target gg.GPURenderTarget,
 ) error {
 	if _, err := sr.queue.Submit(cmdBuf); err != nil {
 		return fmt.Errorf("submit: %w", err)
@@ -457,7 +458,7 @@ func (sr *StencilRenderer) submitAndReadback(
 		slogger().Warn("unmap failed", "err", err)
 	}
 
-	compositeBGRAOverRGBA(readback, target.Data, target.Width*target.Height)
+	compositeBGRAOverRGBA(unpadRows(readback, w, h, rowPitch), target.Data, target.Width*target.Height)
 	return nil
 }
 
