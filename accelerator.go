@@ -152,6 +152,13 @@ type DeviceProviderAware interface {
 	SetDeviceProvider(provider gpucontext.DeviceProvider) error
 }
 
+// SampleCountAware is an optional interface for accelerators that render into
+// multi-sampled (MSAA) targets and can be told to use fewer samples. See
+// [SetAcceleratorMaxSampleCount].
+type SampleCountAware interface {
+	SetMaxSampleCount(n int)
+}
+
 // GPURenderContextProvider is an optional interface for accelerators that
 // support per-context GPU rendering. When the accelerator implements this
 // interface, each gg.Context lazily creates its own GPURenderContext for
@@ -338,6 +345,36 @@ func SetAcceleratorDeviceProvider(provider gpucontext.DeviceProvider) error {
 		return dpa.SetDeviceProvider(provider)
 	}
 	return nil
+}
+
+// SetAcceleratorMaxSampleCount caps the MSAA sample count of the registered
+// accelerator. 0 means no cap: the default, the most the device supports (4).
+// WebGPU guarantees only 1 and 4 samples, so a cap of 1, 2 or 3 turns
+// multi-sampling off, and a cap of 4 or more leaves the default. A negative
+// cap counts as 0. If no accelerator is registered or it renders without
+// MSAA, this is a no-op.
+//
+// At 1x, the draws that go through the stencil-and-cover path lose their
+// antialiasing: non-convex paths and strokes, and clips to arbitrary paths.
+// Circles, ellipses and rounded rectangles (SDF) and convex polygons
+// antialias in the shader, and glyph-mask and MSDF text does not use MSAA,
+// so they look the same. An application that draws only those can turn MSAA
+// off. That frees a 4x color target and a 4x depth/stencil target for every
+// render target. In a window of 2060x1638 physical pixels that is about
+// 120 MB of GPU memory.
+//
+// The cap takes effect when the accelerator sets up its device. Call it
+// before [SetAcceleratorDeviceProvider], which in a gogpu application means
+// before the first ggcanvas.New, or before the first GPU draw of a
+// standalone context.
+func SetAcceleratorMaxSampleCount(n int) {
+	a := Accelerator()
+	if a == nil {
+		return
+	}
+	if sca, ok := a.(SampleCountAware); ok {
+		sca.SetMaxSampleCount(n)
+	}
 }
 
 // AcceleratorCanRenderDirect returns true if the registered GPU accelerator
