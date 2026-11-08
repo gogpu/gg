@@ -54,6 +54,10 @@ func (p valueProvider) SurfaceFormat() gputypes.TextureFormat { return p.format 
 func (valueProvider) AdapterInfo() gpucontext.AdapterInfo {
 	return gpucontext.AdapterInfo{Type: gpucontext.AdapterTypeUnknown}
 }
+func (valueProvider) Features() gputypes.Features { return 0 }
+func (valueProvider) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return gputypes.DownlevelCapabilities{}
+}
 
 type closeValueProvider struct {
 	valueProvider
@@ -645,6 +649,49 @@ func TestRender_TracksWindowScaleChange(t *testing.T) {
 	}
 	if target.writtenW != 64 || target.writtenH != 48 {
 		t.Fatalf("rendered physical size = %dx%d, want 64x48", target.writtenW, target.writtenH)
+	}
+}
+
+// TestRender_ConcurrentCacheHitRewritesWindowProvider runs Render while New hands the same cached canvas to fresh
+// provider wrappers, which rewrites its windowProvider under lifecycleMu. Render must read the window provider under
+// the same lock; under -race an unlocked read is reported here.
+func TestRender_ConcurrentCacheHitRewritesWindowProvider(t *testing.T) {
+	resetCanvasCache(t)
+	device, queue, adapter := new(int), new(int), new(int)
+	wrapper := func() *stableProvider {
+		return newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
+	}
+	c, err := New(wrapper(), 32, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	const rounds = 200
+	done := make(chan error, 1)
+	go func() {
+		for range rounds {
+			got, err := New(wrapper(), 32, 24)
+			if err != nil {
+				done <- err
+				return
+			}
+			if got != c {
+				done <- errors.New("New with the same handles and size returned a different canvas")
+				return
+			}
+		}
+		done <- nil
+	}()
+	target := &renderMockPixelWriter{}
+	for range rounds {
+		if err := c.Render(target); err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		c.MarkDirty()
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

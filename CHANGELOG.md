@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frame is recorded into gogpu's command encoder, and gg dropped the pass that marks the clip region in the depth
   buffer while the clipped content still tested against it. Offscreen rendering with readback was not affected. A
   GPU readback test now renders through a shared encoder as well.
+- **`ggcanvas.New` reuses the canvas instead of allocating one per frame** (#484, #496, thanks @besmpl) —
+  applications that take a fresh `GPUContextProvider` wrapper every frame and call `ggcanvas.New` with it got a new
+  canvas, context and texture pipeline each time. `New` and `NewWithScale` now return the existing canvas for the
+  same GPU device, size and scale, keyed by the provider's stable device/queue/adapter handles. A different size or
+  scale keeps its own canvas, and `Draw` follows the window's size from `WindowProvider`. `Render` now reads the
+  window provider under the canvas's lifecycle lock, since a concurrent `New` replaces it.
 
 ## [0.52.6] - 2026-11-08
 
