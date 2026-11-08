@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path already padded its rows and was not affected. Both helpers now pad the rows and strip the padding after the
   copy, and tests cover both at an unaligned width.
 
+- **Text pipelines leaked a sampler when the clip layout arrived after first use** — the MSDF and glyph-mask
+  pipelines are rebuilt once the clip bind layout is set, and the rebuild created a new sampler over the old one,
+  which then outlived the device (Vulkan validation: `VUID-vkDestroyDevice-device-05137` on close). The sampler does
+  not depend on the clip layout and is now kept across the rebuild.
+
 - **Translucent `image.RGBA` drew too dark** (#532, @kivutar) — Go's `image.RGBA` is premultiplied, but
   `FromStdImage` stored it as straight RGBA, so the alpha was applied twice. It is kept as premultiplied now, and
   other image types go through `NRGBAModel`.
