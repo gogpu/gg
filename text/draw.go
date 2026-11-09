@@ -72,6 +72,7 @@ func drawGlyphs(
 	x, y float64,
 	col color.Color,
 	rasterize glyphRasterizeFunc,
+	mode glyphRasterMode,
 ) {
 	if vars := sf.Variations(); len(vars) > 0 {
 		drawGlyphsVariable(dst, sf, text, x, y, col, vars, rasterModeAA)
@@ -88,10 +89,9 @@ func drawGlyphs(
 	// (grid-fitted by TT interpreter) disagrees with the cursor advance
 	// (raw hmtx), causing letters to merge or gap at certain sizes.
 	var ttCache *ttHintCache
-	if hinting != HintingNone {
-		if ownFont, ok := parsed.(*ownParsedFont); ok {
-			ttCache = ownFont.loadTTHintCache()
-		}
+	ownFont, cacheable := parsed.(*ownParsedFont)
+	if hinting != HintingNone && cacheable {
+		ttCache = ownFont.loadTTHintCache()
 	}
 
 	rast := NewGlyphMaskRasterizer()
@@ -115,7 +115,16 @@ func drawGlyphs(
 		subpixelX := glyphX - intX
 		subpixelY := glyphY - intY
 
-		result, err := rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+		var result *GlyphMaskResult
+		var err error
+		if cacheable {
+			key := glyphMaskKey{glyph.GID, ppem, subpixelX, subpixelY, hinting, mode}
+			result, err = ownFont.glyphMasks.get(key, func() (*GlyphMaskResult, error) {
+				return rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+			})
+		} else {
+			result, err = rasterize(rast, parsed, glyph.GID, ppem, subpixelX, subpixelY, hinting)
+		}
 		if err != nil || result == nil {
 			advanceX += hintedOrRawAdvance(ttCache, glyph, ppem)
 			continue
@@ -304,7 +313,7 @@ func rasterizeAliasedGlyph(
 // HintingNone advances (ADR-039), while outline rasterization still uses
 // the face's configured hinting for crisp stems.
 func drawSourceFace(dst draw.Image, text string, sf *sourceFace, x, y float64, col color.Color) {
-	drawGlyphs(dst, sf, text, x, y, col, rasterizeHintedGlyph)
+	drawGlyphs(dst, sf, text, x, y, col, rasterizeHintedGlyph, rasterModeAA)
 }
 
 // drawMultiFace renders text using a MultiFace, selecting the appropriate font for each rune.

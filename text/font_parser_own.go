@@ -69,6 +69,9 @@ func (p *ownParser) ParseIndex(data []byte, index int) (ParsedFont, error) {
 
 // ownParsedFont implements ParsedFont with direct binary parsing.
 type ownParsedFont struct {
+	// CPU masks belong to this font and cannot keep it alive globally.
+	glyphMasks glyphMaskCache
+
 	rawData []byte            // raw font file bytes
 	tables  map[string][]byte // raw table data keyed by tag
 
