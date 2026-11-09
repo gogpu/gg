@@ -119,6 +119,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Readback no longer issues manual texture barriers** — wgpu v0.34.6+ transitions textures for copies itself, so
   the explicit `TransitionTextures` calls around the MSAA resolve readback are gone.
 
+### Fixed
+
+- **Gradient fills and strokes no longer come out flat on the GPU** — the GPU
+  tiers paint every draw in one colour, read from the brush at (0, 0), so a
+  linear gradient handed to them rendered as a solid block of its first stop
+  (a colour bar became one colour). `tryGPUFill`/`tryGPUStroke` now leave any
+  paint side that is not a single colour to the CPU, which samples the brush
+  per pixel; pending GPU work is flushed first, so draw order is kept. Solid
+  draws are unaffected.
+
 ## [0.52.5] - 2026-08-26
 
 ### Fixed
