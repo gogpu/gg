@@ -36,9 +36,14 @@ func TestEdgeBuilderCurveSubdivisionTerminates(t *testing.T) {
 				t.Run(tc.name+"/"+sign+"/"+clip, func(t *testing.T) {
 					if os.Getenv("GG_CURVE_SUBDIVISION_CHILD") != t.Name() {
 						runCurveSubdivisionChild(t)
-						return
+						// Child-process counters are not in the parent's coverprofile.
+						// Replay only after the identical input has terminated safely.
+						if testing.CoverMode() == "" {
+							return
+						}
+					} else {
+						debug.SetMaxStack(1 << 20)
 					}
-					debug.SetMaxStack(1 << 20)
 					points := append([]float32(nil), tc.points...)
 					if sign == "negative" {
 						for i := range points {
@@ -100,9 +105,13 @@ func TestEdgeBuilderLargeCurvesPreserveClippedFill(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if os.Getenv("GG_CURVE_SUBDIVISION_CHILD") != t.Name() {
 				runCurveSubdivisionChild(t)
-				return
+				// Record coverage in the parent after the bounded child passes.
+				if testing.CoverMode() == "" {
+					return
+				}
+			} else {
+				debug.SetMaxStack(1 << 20)
 			}
-			debug.SetMaxStack(1 << 20)
 			eb := NewEdgeBuilder(2)
 			eb.SetFlattenCurves(false)
 			eb.SetClipRect(&Rect{MinX: -2, MinY: -2, MaxX: 102, MaxY: 102})
