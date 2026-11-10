@@ -535,6 +535,24 @@ func (rc *GPURenderContext) QueueGlyphMask(target gg.GPURenderTarget, batch Glyp
 	rc.hasPendingTarget = true
 }
 
+// deviceUsable reports whether a device can actually be had, initializing one
+// if that has not been tried yet.
+//
+// It asks for deviceReady rather than gpuReady, which is what the queueing
+// operations need: under strategyRasterAtlas the shape pipelines are
+// deliberately absent and Flush dispatches the queue on the CPU, so a queued
+// draw still reaches the buffer. What must not happen is queueing with no
+// device at all, where nothing will dispatch it.
+func (rc *GPURenderContext) deviceUsable() bool {
+	rc.shared.mu.Lock()
+	defer rc.shared.mu.Unlock()
+	if rc.shared.deviceReady {
+		return true
+	}
+	err := rc.shared.ensureGPU()
+	return err == nil && rc.shared.deviceReady
+}
+
 // DrawText shapes and queues text for MSDF rendering (Tier 4).
 func (rc *GPURenderContext) DrawText(target gg.GPURenderTarget, face any, s string, x, y float64, color gg.RGBA, matrix gg.Matrix, deviceScale float64) error {
 	textFace, ok := face.(text.Face)
@@ -696,6 +714,11 @@ func (rc *GPURenderContext) drawShapedGlyphMaskText(target gg.GPURenderTarget, f
 // The path is cloned at queue time so the caller can reuse or mutate it.
 // At Flush time, the path is dispatched to either GPU (convex/stencil) or CPU.
 func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	// An empty draw needs neither a device nor a CPU fallback.
+	if path.NumVerbs() == 0 {
+		return nil
+	}
+
 	rc.sceneStats.PathCount++
 	rc.sceneStats.ShapeCount++
 
@@ -708,6 +731,16 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 			va.SetAntiAlias(rc.antiAlias)
 			return va.FillPath(target, path, paint)
 		}
+	}
+
+	// Refuse the work while no device can be had, rather than queueing it.
+	// A draw accepted here is drawn by nothing else: doFill and doStroke treat
+	// a nil return as "the GPU has it" and skip the software rasterizer, so a
+	// failure discovered later — at Flush, where ensureGPU is called today —
+	// loses the geometry silently. DrawText already checks before it queues;
+	// these four did not.
+	if !rc.deviceUsable() {
+		return gg.ErrFallbackToCPU
 	}
 
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
@@ -741,6 +774,11 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 // StrokePath queues a stroked path as a backend-agnostic draw command (ADR-051).
 // Dashed strokes fall back to CPU. The path is cloned at queue time.
 func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	// Check before dash fallback and compute routing as well as device setup.
+	if path.NumVerbs() == 0 {
+		return nil
+	}
+
 	if paint.IsDashed() {
 		return gg.ErrFallbackToCPU
 	}
@@ -759,8 +797,14 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 		}
 	}
 
-	if path.NumVerbs() == 0 {
-		return nil
+	// Refuse the work while no device can be had, rather than queueing it.
+	// A draw accepted here is drawn by nothing else: doFill and doStroke treat
+	// a nil return as "the GPU has it" and skip the software rasterizer, so a
+	// failure discovered later — at Flush, where ensureGPU is called today —
+	// loses the geometry silently. DrawText already checks before it queues;
+	// these four did not.
+	if !rc.deviceUsable() {
+		return gg.ErrFallbackToCPU
 	}
 
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
@@ -808,6 +852,16 @@ func (rc *GPURenderContext) FillShape(target gg.GPURenderTarget, shape gg.Detect
 		}
 	}
 
+	// Refuse the work while no device can be had, rather than queueing it.
+	// A draw accepted here is drawn by nothing else: doFill and doStroke treat
+	// a nil return as "the GPU has it" and skip the software rasterizer, so a
+	// failure discovered later — at Flush, where ensureGPU is called today —
+	// loses the geometry silently. DrawText already checks before it queues;
+	// these four did not.
+	if !rc.deviceUsable() {
+		return gg.ErrFallbackToCPU
+	}
+
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
 		if err := rc.Flush(rc.pendingTarget); err != nil {
 			return err
@@ -850,6 +904,16 @@ func (rc *GPURenderContext) StrokeShape(target gg.GPURenderTarget, shape gg.Dete
 			va.SetAntiAlias(rc.antiAlias)
 			return va.StrokeShape(target, shape, paint)
 		}
+	}
+
+	// Refuse the work while no device can be had, rather than queueing it.
+	// A draw accepted here is drawn by nothing else: doFill and doStroke treat
+	// a nil return as "the GPU has it" and skip the software rasterizer, so a
+	// failure discovered later — at Flush, where ensureGPU is called today —
+	// loses the geometry silently. DrawText already checks before it queues;
+	// these four did not.
+	if !rc.deviceUsable() {
+		return gg.ErrFallbackToCPU
 	}
 
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
