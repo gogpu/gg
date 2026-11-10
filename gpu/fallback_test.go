@@ -3,6 +3,7 @@
 package gpu_test
 
 import (
+	"errors"
 	"image"
 	"testing"
 
@@ -22,6 +23,8 @@ import (
 // The property is the one the package documents: with the accelerator
 // registered, a chart still renders. It holds on hardware too, where the draw
 // goes to the GPU and comes back.
+// CI runs this package without the nogpu tag, including the fallback on runners
+// without an adapter; the selected backend is allowed to vary by machine.
 func TestAPathIsDrawnWithOrWithoutADevice(t *testing.T) {
 	t.Logf("accelerator registered: %v", gg.Accelerator() != nil)
 
@@ -38,7 +41,7 @@ func TestAPathIsDrawnWithOrWithoutADevice(t *testing.T) {
 		if err := c.Stroke(); err != nil {
 			t.Fatalf("Stroke: %v", err)
 		}
-		if err := c.FlushGPU(); err != nil && err != gg.ErrFallbackToCPU {
+		if err := c.FlushGPU(); err != nil && !errors.Is(err, gg.ErrFallbackToCPU) {
 			t.Fatalf("FlushGPU: %v", err)
 		}
 		return c.Image()
@@ -54,5 +57,5 @@ func TestAPathIsDrawnWithOrWithoutADevice(t *testing.T) {
 			}
 		}
 	}
-	t.Error("the stroked path is not in the buffer: every pixel is the same colour")
+	t.Error("the stroked path is not in the buffer: every pixel is the same color")
 }

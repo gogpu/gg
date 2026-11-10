@@ -714,6 +714,11 @@ func (rc *GPURenderContext) drawShapedGlyphMaskText(target gg.GPURenderTarget, f
 // The path is cloned at queue time so the caller can reuse or mutate it.
 // At Flush time, the path is dispatched to either GPU (convex/stencil) or CPU.
 func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	// An empty draw needs neither a device nor a CPU fallback.
+	if path.NumVerbs() == 0 {
+		return nil
+	}
+
 	rc.sceneStats.PathCount++
 	rc.sceneStats.ShapeCount++
 
@@ -769,6 +774,11 @@ func (rc *GPURenderContext) FillPath(target gg.GPURenderTarget, path *gg.Path, p
 // StrokePath queues a stroked path as a backend-agnostic draw command (ADR-051).
 // Dashed strokes fall back to CPU. The path is cloned at queue time.
 func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path, paint *gg.Paint) error {
+	// Check before dash fallback and compute routing as well as device setup.
+	if path.NumVerbs() == 0 {
+		return nil
+	}
+
 	if paint.IsDashed() {
 		return gg.ErrFallbackToCPU
 	}
@@ -795,10 +805,6 @@ func (rc *GPURenderContext) StrokePath(target gg.GPURenderTarget, path *gg.Path,
 	// these four did not.
 	if !rc.deviceUsable() {
 		return gg.ErrFallbackToCPU
-	}
-
-	if path.NumVerbs() == 0 {
-		return nil
 	}
 
 	if rc.hasPendingTarget && !sameTarget(&rc.pendingTarget, &target) {
