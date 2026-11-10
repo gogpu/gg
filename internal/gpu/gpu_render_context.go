@@ -30,6 +30,7 @@ const (
 	drawCmdImage                                // DrawImage (Phase 2)
 	drawCmdGPUTexture                           // DrawGPUTexture overlay (Phase 2)
 	drawCmdBaseLayer                            // DrawGPUTextureBase, z-order: always first (Phase 2)
+	drawCmdCount                                // Keep last; every command kind needs a tier consistency test.
 )
 
 // drawCommand is a backend-agnostic draw command stored at queue time.
@@ -1115,6 +1116,10 @@ const (
 func drawTier(cmd *drawCommand) renderTier {
 	switch cmd.kind {
 	case drawCmdFillShape, drawCmdStrokeShape:
+		rs, ok := DetectedShapeToRenderShape(cmd.shape, &cmd.paint, cmd.kind == drawCmdStrokeShape)
+		if !ok || rs.ColorA == 0 {
+			return tierNone
+		}
 		return tierSDF
 	case drawCmdFillPath, drawCmdStrokePath:
 		switch {
