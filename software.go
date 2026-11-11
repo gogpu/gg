@@ -1220,7 +1220,10 @@ func (r *SoftwareRenderer) Stroke(pixmap *Pixmap, p *Path, paint *Paint) error {
 	// the expander.go fix (#347), but multi-contour needs scanline.
 	prevMode := r.rasterizerMode
 	r.rasterizerMode = RasterizerAnalytic
-	err := r.Fill(pixmap, r.scratchStrokePath, paint)
+	// Expanded stroke geometry uses winding, regardless of the fill style.
+	strokePaint := *paint
+	strokePaint.FillRule = FillRuleNonZero
+	err := r.Fill(pixmap, r.scratchStrokePath, &strokePaint)
 	r.rasterizerMode = prevMode
 	return err
 }
@@ -1244,6 +1247,7 @@ func (r *SoftwareRenderer) strokeHairline(pixmap *Pixmap, p *Path, paint *Paint,
 	// For general line paths: render as 1px stroke with alpha modulated
 	// by coverage, snapping line centers to pixel centers.
 	hairlinePaint := *paint // shallow copy to preserve original
+	hairlinePaint.FillRule = FillRuleNonZero
 	if coverage < 1.0 {
 		// Modulate paint alpha by coverage (tiny-skia apply_opacity pattern).
 		hairlinePaint.stroke.solidColor.A *= coverage

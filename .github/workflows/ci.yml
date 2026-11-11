@@ -166,7 +166,11 @@ jobs:
         VK_ICD_FILENAMES: "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
       run: |
         echo "=== Running GPU vs CPU golden comparison tests ==="
-        go test -v -count=1 -run 'TestGoldenSoftware' -timeout 5m ./internal/gpu/... || {
+        # Keep native GPU device lifetimes isolated from the other golden tests.
+          go test -tags gpuintegration -v -count=1 -run '^TestGoldenSoftware_StrokeRoundRectStaysHollow$' -timeout 2m ./internal/gpu || {
+            echo "::warning::Stroke GPU regression failed (non-blocking)"
+          }
+          go test -v -count=1 -run 'TestGoldenSoftware' -timeout 5m ./internal/gpu/... || {
           echo "::warning::GPU golden tests failed (non-blocking — software adapter differences expected)"
           exit 0
         }

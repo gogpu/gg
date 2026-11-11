@@ -258,12 +258,13 @@ func (a *VelloAccelerator) StrokePath(target gg.GPURenderTarget, path *gg.Path, 
 	fillPath := gg.NewPath()
 	strokeResultToPath(fillPath, outVerbs, outCoords)
 
-	// EvenOdd correctly handles both stroke topologies:
-	//   - Smooth paths: 2-contour ring, center toggled twice → empty.
-	//   - Sharp paths: V-shape intersections toggled twice → correctly hollow.
-	// Mirrors GPURenderContext.StrokePath. ADR-043, #369, #374.
+	// NonZero, as SoftwareRenderer.Stroke fills the same expander output, and
+	// as GPURenderContext.preTessellateStroke does. EvenOdd cancels every region
+	// the outline covers twice, and an open stroke covers itself wherever it
+	// loops or turns back sharply, which came out as holes. Closed outlines are
+	// an outer and an inner contour of opposite winding, so they stay hollow.
 	strokePaint := *paint
-	strokePaint.FillRule = gg.FillRuleEvenOdd
+	strokePaint.FillRule = gg.FillRuleNonZero
 	return a.FillPath(target, fillPath, &strokePaint)
 }
 
