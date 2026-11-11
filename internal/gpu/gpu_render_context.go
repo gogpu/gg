@@ -1232,8 +1232,8 @@ func (rc *GPURenderContext) preTessellateStroke(cmd *drawCommand) {
 	// covers itself wherever it loops or turns back sharply — a self-crossing
 	// line, a tight zigzag, overlapping joins — so those regions came out as
 	// holes. The expander emits closed outlines as an outer and an inner contour
-	// of opposite winding, so rings stay hollow under NonZero too, and NonZero
-	// avoids the even-odd invert stencil that misrenders on some drivers (#374).
+	// of opposite winding, so rings stay hollow under NonZero too. The stencil
+	// path tracks signed winding with IncrementWrap/DecrementWrap.
 	cmd.paint.FillRule = gg.FillRuleNonZero
 
 	// Stencil-then-cover, never the convex fast path. The convex path draws
