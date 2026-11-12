@@ -57,6 +57,7 @@ type Canvas struct {
 	resizeFn             func(width, height int) error // context resize dependency; lifecycleMu protects replacement
 	provider             gpucontext.DeviceProvider
 	windowProvider       gpucontext.WindowProvider // latest wrapper for dynamic size/scale
+	followsWindow        bool                      // created or resized at the window's size: Draw tracks it
 	texture              any                       // Lazy-created texture (*gogpu.Texture)
 	oldTexture           any                       // Previous texture awaiting deferred destruction
 	dirty                bool                      // Needs GPU upload
@@ -98,9 +99,13 @@ type Canvas struct {
 // gpucontext.PlatformProvider, the OS font smoothing preference is applied.
 // Otherwise ggcanvas leaves the context's text settings unchanged.
 // Use Context() to access and configure the drawing context.
-// Repeated calls with the same logical provider identity, dimensions, and
-// normalized scale return the existing Canvas. Call Close to evict it before
-// creating a replacement.
+//
+// A Canvas created at the provider's window size follows the window: Draw
+// keeps it at the window's logical size, and New at any later window size
+// returns the same Canvas, resized. A Canvas created at another size keeps that
+// size until Resize; repeated calls with the same provider identity,
+// dimensions, and normalized scale return it. Call Close to evict a Canvas
+// before creating a replacement.
 //
 // Returns error if dimensions are invalid or provider is nil.
 func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error) {
@@ -144,8 +149,10 @@ func warnIfPhysicalDimensions(wp gpucontext.WindowProvider, width, height int, s
 // If the provider implements gpucontext.PlatformProvider, its font smoothing
 // preference and compatible subpixel layout are applied to the gg context.
 //
-// Calls with the same provider identity, dimensions, and normalized scale are
-// idempotent; different dimensions or scales retain independent canvases.
+// A Canvas created at the provider's window size follows the window, and calls
+// at the window's current size return it (see New). Other calls with the same
+// provider identity, dimensions, and normalized scale are idempotent; different
+// dimensions or scales retain independent canvases.
 //
 // Example:
 //
@@ -166,10 +173,12 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 	// on each call.  Cache by its stable GPU handles (or, for zero-handle test
 	// providers, by pointer identity) so constructing a canvas in every frame
 	// reuses the existing context and texture pipeline.
-	key, cacheable := cacheKeyFor(provider, width, height, scale)
+	wp, _ := provider.(gpucontext.WindowProvider)
+	followsWindow := windowSized(wp, width, height)
+	key, cacheable := cacheKeyFor(provider, width, height, scale, followsWindow)
 	if cacheable {
 		if cached, ok := lookupCachedCanvas(provider, key); ok {
-			return cached, nil
+			return reuseCachedCanvas(cached, followsWindow, width, height, scale)
 		}
 	}
 
@@ -195,15 +204,14 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 
 	ctx := gg.NewContext(width, height, opts...)
 	c := &Canvas{
-		ctx:      ctx,
-		resizeFn: ctx.Resize,
-		provider: provider,
-		width:    width,
-		height:   height,
-		dirty:    true, // Mark dirty so first Flush creates texture
-	}
-	if wp, ok := provider.(gpucontext.WindowProvider); ok {
-		c.windowProvider = wp
+		ctx:            ctx,
+		resizeFn:       ctx.Resize,
+		provider:       provider,
+		windowProvider: wp,
+		followsWindow:  followsWindow,
+		width:          width,
+		height:         height,
+		dirty:          true, // Mark dirty so first Flush creates texture
 	}
 
 	c.applyPlatformTextSettings()
@@ -226,6 +234,23 @@ func NewWithScale(provider gpucontext.DeviceProvider, width, height int, scale f
 		return finishUncacheableCanvas(c)
 	}
 	return publishCanvas(c, provider, key, width, height, scale)
+}
+
+// reuseCachedCanvas returns a cache hit. A fixed-size hit already matches the
+// request; the window-following Canvas of the device is brought to the
+// window's current size and scale.
+func reuseCachedCanvas(cached *Canvas, followsWindow bool, width, height int, scale float64) (*Canvas, error) {
+	if !followsWindow {
+		return cached, nil
+	}
+	cached.lifecycleMu.Lock()
+	err := cached.resizeLocked(width, height)
+	cached.lifecycleMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	cached.SetDeviceScale(scale)
+	return cached, nil
 }
 
 // finishUncacheableCanvas rejects a synchronous tracker shutdown before a
@@ -534,9 +559,10 @@ func (c *Canvas) MarkDirtyRegion(r image.Rectangle) {
 // Per-frame state (matrix, path, clip, mask) is automatically reset via
 // Push/Pop wrapper (Skia SkAutoCanvasRestore pattern, ADR-032). Configuration
 // state (font, paint color, textMode) persists across frames.
-// If the provider implements gpucontext.WindowProvider, a valid changed
-// logical window size is applied before fn runs. Zero dimensions reported
-// during startup or teardown are ignored.
+// A Canvas that follows the window (created or resized at the provider's
+// window size, see New) gets a valid changed logical window size applied
+// before fn runs. Zero dimensions reported during startup or teardown are
+// ignored. A Canvas of any other size keeps its size.
 func (c *Canvas) Draw(fn func(*gg.Context)) error {
 	c.lifecycleMu.Lock()
 	if c.closed {
@@ -544,11 +570,13 @@ func (c *Canvas) Draw(fn func(*gg.Context)) error {
 		return ErrCanvasClosed
 	}
 	// A gogpu frame often obtains a fresh GPUContextProvider wrapper.  Its
-	// WindowProvider geometry remains the authoritative logical size, so update
-	// the retained gg context before invoking user drawing code.  During startup
-	// and teardown platforms may report zero; keep the existing valid canvas in
-	// that case rather than attempting an invalid resize.
-	if c.windowProvider != nil {
+	// WindowProvider geometry remains the authoritative logical size of a
+	// window-sized canvas, so update the retained gg context before invoking
+	// user drawing code.  A deliberately sized canvas is left alone: the app's
+	// provider reports the primary window's size, which is not the size of a
+	// canvas drawn into another window (P1-CANVAS-006).  During startup and
+	// teardown platforms may report zero; keep the existing valid canvas then.
+	if c.followsWindow && c.windowProvider != nil {
 		if width, height := c.windowProvider.Size(); width > 0 && height > 0 && (width != c.width || height != c.height) {
 			if err := c.resizeLocked(width, height); err != nil {
 				c.lifecycleMu.Unlock()
@@ -617,11 +645,30 @@ func (c *Canvas) IsDirty() bool {
 // Resize changes canvas dimensions.
 // This recreates internal buffers and clears the canvas.
 //
+// Resizing to the provider's current window size makes the canvas follow the
+// window (see New); resizing to any other size makes it keep that size, so
+// Draw does not resize it back.
+//
 // Returns error if dimensions are invalid or canvas is closed.
 func (c *Canvas) Resize(width, height int) error {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	return c.resizeLocked(width, height)
+	if c.closed {
+		return ErrCanvasClosed
+	}
+	followsWindow := windowSized(c.windowProvider, width, height)
+	if followsWindow == c.followsWindow {
+		return c.resizeLocked(width, height)
+	}
+	// The cache key's shape depends on followsWindow: move the entry.
+	c.followsWindow = followsWindow
+	if err := c.resizeLocked(width, height); err != nil {
+		c.followsWindow = !followsWindow
+		c.republishLocked()
+		return err
+	}
+	c.republishLocked()
+	return nil
 }
 
 func (c *Canvas) resizeLocked(width, height int) error {

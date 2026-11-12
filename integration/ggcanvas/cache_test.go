@@ -132,7 +132,7 @@ func TestNew_ReusesStableGPUHandlesAcrossProviderWrappers(t *testing.T) {
 	p1 := newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
 	p2 := newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
 	p1.W, p1.H = 80, 60
-	p2.W, p2.H = 120, 90
+	p2.W, p2.H = 80, 60
 
 	c1, err := NewWithScale(p1, 80, 60, 2)
 	if err != nil {
@@ -142,6 +142,7 @@ func TestNew_ReusesStableGPUHandlesAcrossProviderWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p2.W, p2.H = 120, 90 // the window grows; Draw follows the latest wrapper
 	if c1 != c2 {
 		t.Fatal("provider wrappers with the same GPU handles should reuse the Canvas")
 	}
@@ -186,7 +187,7 @@ func TestNew_ZeroHandleProvidersUsePointerFallback(t *testing.T) {
 
 func TestCacheKeyFor_NilProviderIsUncacheable(t *testing.T) {
 	resetCanvasCache(t)
-	key, cacheable := cacheKeyFor(nil, 40, 30, 2)
+	key, cacheable := cacheKeyFor(nil, 40, 30, 2, false)
 	if cacheable {
 		t.Fatal("nil provider must not produce a cacheable key")
 	}
@@ -285,6 +286,7 @@ func TestResize_RekeysCacheWithoutEvictingOtherGeometry(t *testing.T) {
 func TestDraw_AutoResizeFailureRestoresCache(t *testing.T) {
 	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	p.W, p.H = 80, 60
 	c, err := New(p, 80, 60)
 	if err != nil {
 		t.Fatal(err)
@@ -301,18 +303,27 @@ func TestDraw_AutoResizeFailureRestoresCache(t *testing.T) {
 	if called {
 		t.Fatal("Draw callback ran after the window resize failed")
 	}
-	reused, err := New(p, 80, 60)
+	// The window-following entry still points at c: once the context can
+	// resize again, New at the window size returns c, resized.
+	c.lifecycleMu.Lock()
+	c.resizeFn = c.ctx.Resize
+	c.lifecycleMu.Unlock()
+	reused, err := New(p, 120, 90)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reused != c {
 		t.Fatal("failed resize did not restore the original cache entry")
 	}
+	if w, h := c.Size(); w != 120 || h != 90 {
+		t.Fatalf("Size after New at the window size = %dx%d, want 120x90", w, h)
+	}
 }
 
 func TestDraw_AutoResizesFromWindowProvider(t *testing.T) {
 	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	p.W, p.H = 80, 60
 	c, err := New(p, 80, 60)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +340,7 @@ func TestDraw_AutoResizesFromWindowProvider(t *testing.T) {
 	if gotW, gotH := c.Size(); gotW != 120 || gotH != 90 {
 		t.Fatalf("Size after Draw = %dx%d, want 120x90", gotW, gotH)
 	}
-	// The resized Canvas is rekeyed, while the old geometry can be recreated.
+	// The old geometry, now not the window's, is a separate fixed-size Canvas.
 	old, err := New(p, 80, 60)
 	if err != nil {
 		t.Fatal(err)
@@ -343,6 +354,7 @@ func TestDraw_AutoResizesFromWindowProvider(t *testing.T) {
 func TestDraw_ZeroWindowSizeDoesNotResize(t *testing.T) {
 	resetCanvasCache(t)
 	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	p.W, p.H = 80, 60
 	c, err := New(p, 80, 60)
 	if err != nil {
 		t.Fatal(err)
@@ -491,7 +503,7 @@ func TestNew_TrackerCloseDoesNotPublishClosedCanvas(t *testing.T) {
 	if err == nil || !errors.Is(err, ErrCanvasClosed) {
 		t.Fatalf("tracker-closed construction error = %v, want ErrCanvasClosed", err)
 	}
-	key, cacheable := cacheKeyFor(p, 64, 48, 1)
+	key, cacheable := cacheKeyFor(p, 64, 48, 1, false)
 	if cacheable {
 		if cached, ok := lookupCachedCanvas(p, key); ok || cached != nil {
 			t.Fatal("tracker-closed construction left a stale cache entry")
@@ -749,5 +761,109 @@ func TestNew_ConcurrentDuplicateConstructionPublishesOneWinner(t *testing.T) {
 	}
 	if err := winner.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// liveCanvasCount counts distinct live canvases in the cache.
+func liveCanvasCount() int {
+	canvasCache.Lock()
+	defer canvasCache.Unlock()
+	live := make(map[*Canvas]struct{}, len(canvasCache.entries))
+	for _, c := range canvasCache.entries {
+		if c != nil && !c.closed {
+			live[c] = struct{}{}
+		}
+	}
+	return len(live)
+}
+
+// TestNew_WindowSizedCanvasFollowsWindowAcrossSizes is the #484 pattern during a
+// drag-resize: a fresh provider wrapper and New sized from the window every
+// frame. One Canvas must follow the window instead of one per size (P1-CANVAS-005).
+func TestNew_WindowSizedCanvasFollowsWindowAcrossSizes(t *testing.T) {
+	resetCanvasCache(t)
+	device, queue, adapter := new(int), new(int), new(int)
+	var first *Canvas
+	for i := 0; i < 50; i++ {
+		p := newStableProvider(unsafe.Pointer(device), unsafe.Pointer(queue), unsafe.Pointer(adapter)) //nolint:gosec // opaque test handles
+		p.W, p.H = 200+i, 150+i
+		c, err := New(p, p.W, p.H)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first == nil {
+			first = c
+		}
+		if c != first {
+			t.Fatalf("frame %d: New returned a new Canvas for window size %dx%d", i, p.W, p.H)
+		}
+		if w, h := c.Size(); w != p.W || h != p.H {
+			t.Fatalf("frame %d: Canvas size %dx%d, want the window's %dx%d", i, w, h, p.W, p.H)
+		}
+	}
+	if n := liveCanvasCount(); n != 1 {
+		t.Fatalf("live canvases after 50 window sizes = %d, want 1", n)
+	}
+}
+
+// TestDraw_DeliberatelySizedCanvasKeepsSize: a canvas created at a size other
+// than the provider's window keeps that size; Draw does not resize it to the
+// window (P1-CANVAS-006, a secondary window's canvas on the app provider).
+func TestDraw_DeliberatelySizedCanvasKeepsSize(t *testing.T) {
+	resetCanvasCache(t)
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	p.W, p.H = 600, 400
+	c, err := New(p, 400, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for frame := 0; frame < 3; frame++ {
+		if err := c.Draw(func(dc *gg.Context) {
+			if dc.Width() != 400 || dc.Height() != 300 {
+				t.Errorf("frame %d: Draw context %dx%d, want 400x300", frame, dc.Width(), dc.Height())
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if again, err := New(p, 400, 300); err != nil || again != c {
+		t.Fatalf("New at the canvas's own size = %p, %v; want the same Canvas", again, err)
+	}
+}
+
+// TestDraw_DoesNotUndoExplicitResize: Resize to a size other than the window's
+// is the caller's choice; Draw must not resize it back (P1-CANVAS-006 ping-pong).
+func TestDraw_DoesNotUndoExplicitResize(t *testing.T) {
+	resetCanvasCache(t)
+	p := newStableProvider(unsafe.Pointer(new(int)), unsafe.Pointer(new(int)), unsafe.Pointer(new(int))) //nolint:gosec // opaque test handles
+	p.W, p.H = 600, 400
+	c, err := New(p, 600, 400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Resize(400, 300); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatal(err)
+	}
+	if w, h := c.Size(); w != 400 || h != 300 {
+		t.Fatalf("Size after Resize(400,300)+Draw = %dx%d, want 400x300", w, h)
+	}
+	// Resizing back to the window's size makes it follow the window again.
+	if err := c.Resize(600, 400); err != nil {
+		t.Fatal(err)
+	}
+	p.W, p.H = 640, 480
+	if err := c.Draw(func(*gg.Context) {}); err != nil {
+		t.Fatal(err)
+	}
+	if w, h := c.Size(); w != 640 || h != 480 {
+		t.Fatalf("Size after Resize to window size + window resize = %dx%d, want 640x480", w, h)
+	}
+	if again, err := New(p, 640, 480); err != nil || again != c {
+		t.Fatalf("New at the window size = %p, %v; want the window-following Canvas", again, err)
 	}
 }

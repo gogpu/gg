@@ -28,6 +28,12 @@ type canvasCacheKey struct {
 	providerType reflect.Type
 	providerPtr  uintptr
 
+	// followsWindow marks the one Canvas per device that tracks its provider's
+	// window size. Its key carries no geometry, so a window resize reuses that
+	// Canvas instead of keeping one per size seen (P1-CANVAS-005). A Canvas
+	// created at any other size keeps that size and is keyed by it.
+	followsWindow bool
+
 	width  int
 	height int
 	scale  float64
@@ -51,11 +57,14 @@ func normalizeScale(scale float64) float64 {
 	return scale
 }
 
-func cacheKeyFor(provider gpucontext.DeviceProvider, width, height int, scale float64) (canvasCacheKey, bool) {
-	key := canvasCacheKey{
-		width:  width,
-		height: height,
-		scale:  normalizeScale(scale),
+func cacheKeyFor(provider gpucontext.DeviceProvider, width, height int, scale float64, followsWindow bool) (canvasCacheKey, bool) {
+	key := canvasCacheKey{followsWindow: true}
+	if !followsWindow {
+		key = canvasCacheKey{
+			width:  width,
+			height: height,
+			scale:  normalizeScale(scale),
+		}
 	}
 	if provider == nil {
 		return key, false
@@ -82,7 +91,37 @@ func cacheKeyFor(provider gpucontext.DeviceProvider, width, height int, scale fl
 }
 
 func (c *Canvas) cacheKeyFor(width, height int, scale float64) (canvasCacheKey, bool) {
-	return cacheKeyFor(c.provider, width, height, scale)
+	return cacheKeyFor(c.provider, width, height, scale, c.followsWindow)
+}
+
+// windowSized reports whether width x height is the provider's current logical
+// window size. A Canvas created or resized to it follows the window: Draw keeps
+// it at the window's size. The platform reports 0x0 during startup and
+// teardown; no size matches then.
+func windowSized(wp gpucontext.WindowProvider, width, height int) bool {
+	if wp == nil {
+		return false
+	}
+	w, h := wp.Size()
+	return w > 0 && h > 0 && w == width && h == height
+}
+
+// republishLocked moves c to the cache key of its current geometry and mode.
+// If another live Canvas owns that key, c stays uncached rather than replacing
+// it. The caller holds c.lifecycleMu.
+func (c *Canvas) republishLocked() {
+	key, cacheable := c.cacheKeyFor(c.width, c.height, c.ctx.DeviceScale())
+	canvasCache.Lock()
+	defer canvasCache.Unlock()
+	c.removeFromCanvasCacheLocked()
+	if !cacheable {
+		return
+	}
+	if winner := canvasCache.entries[key]; winner == nil || winner == c {
+		c.cacheKey = key
+		c.cached = true
+		canvasCache.entries[key] = c
+	}
 }
 
 // lookupCachedCanvas returns a live Canvas for key, updating its window

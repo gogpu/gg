@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`ggcanvas.New` keeps one canvas through a window resize** — v0.52.7 said `New` reuses the canvas instead of
+  allocating one per frame, but its cache key included the requested size: an application that calls `New` every
+  frame with the window's size kept one more canvas, with its pixmap and texture, for every size it passed through
+  while the window was dragged. A canvas created at the window's size now follows the window: `New` at the window's
+  current size returns it, resized, and there is one such canvas per GPU device.
+- **`ggcanvas.Canvas.Draw` no longer resizes a canvas to another window's size** — since v0.52.7 `Draw` resized every
+  canvas to the size reported by the provider's `WindowProvider`, which for gogpu's application provider is the
+  primary window. A canvas drawn into a secondary window, or any canvas created at a size of its own, was resized to
+  the primary window's size on every frame, and an application's own `Resize` was undone by the next `Draw`. Only a
+  canvas created or resized at the window's size follows the window now; any other canvas keeps its size.
+
 ## [0.52.7] - 2026-11-08
 
 ### Added
