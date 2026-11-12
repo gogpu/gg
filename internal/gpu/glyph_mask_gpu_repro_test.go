@@ -32,7 +32,7 @@ import (
 //     calls: bound pipeline, vertex/index buffers, the R8 atlas texture
 //     contents, viewport/scissor, and why the fragments are discarded.
 //
-// Output PNG: $GMREPRO_OUT or ./glyph_mask_gpu_repro.png
+// Output PNG: $GMREPRO_OUT, or a file in the test's temporary directory.
 func TestGlyphMaskGPURepro(t *testing.T) {
 	device, queue, cleanup := reproRealDevice(t)
 	defer cleanup()
@@ -120,17 +120,22 @@ func TestGlyphMaskGPURepro(t *testing.T) {
 		t.Fatalf("RenderFrameGrouped: %v", err)
 	}
 
+	// Tests write only to t.TempDir(), which is removed afterwards; set
+	// GMREPRO_OUT to keep the PNG.
 	out := os.Getenv("GMREPRO_OUT")
 	if out == "" {
-		out = "glyph_mask_gpu_repro.png"
+		out = filepath.Join(t.TempDir(), "glyph_mask_gpu_repro.png")
 	}
 	f, err := os.Create(out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	img := &image.RGBA{Pix: data, Stride: W * 4, Rect: image.Rect(0, 0, W, H)}
 	if err := png.Encode(f, img); err != nil {
+		_ = f.Close() // best effort: the encode error is the one reported
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %s — EXPECTED BUG: red circle visible, text MISSING", out)
