@@ -131,7 +131,7 @@ func TestSDFAccelerator_SceneStats_ResetOnFlush(t *testing.T) {
 	// instead of skipping when GG_REQUIRE names the GPU (the ecosystem contract).
 	if err := a.Flush(target); err != nil {
 		if errors.Is(err, gg.ErrFallbackToCPU) {
-			skipUnlessRequiredf(t, "GPU flush fell back to the CPU: %v", err)
+			skipUnlessRequiredf(t, requireGPU, "GPU flush fell back to the CPU: %v", err)
 		}
 		t.Fatalf("Flush: %v", err)
 	}
