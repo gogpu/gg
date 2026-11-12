@@ -590,3 +590,15 @@ func (s *GPUShared) destroyPipelinesLocked() {
 		s.stencilRenderer = nil
 	}
 }
+
+// CheckGPUComputeSupport checks if GPU compute shaders are supported.
+// This can be used to determine if GPU rasterization is viable before
+// creating a rasterizer. Queries DownlevelCapabilities for the
+// ComputeShaders flag (GLES 3.0 and WebGL2 do not support compute).
+func CheckGPUComputeSupport(provider gpucontext.DeviceProvider) bool {
+	if provider == nil {
+		return false
+	}
+	caps := provider.DownlevelCapabilities()
+	return caps.Flags.Contains(gputypes.DownlevelFlagsComputeShaders)
+}
