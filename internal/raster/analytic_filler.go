@@ -352,6 +352,8 @@ func (af *AnalyticFiller) processScanlineAAA(
 		}
 	}
 
+	// Sorting moves each entry's srcIdx with it, preserving edgeStates[srcIdx];
+	// do this before collecting strip boundaries and building position mappings.
 	af.orderAETByX(yFixed, aaScale)
 
 	// Collect fractional Y boundaries from active edges within this pixel row.
