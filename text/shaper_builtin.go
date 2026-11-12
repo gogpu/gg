@@ -84,6 +84,7 @@ func (s *BuiltinShaper) Shape(text string, face Face) []ShapedGlyph {
 			XAdvance: advance,
 			YAdvance: 0,
 			IsCJK:    IsCJKRune(r),
+			Face:     face, // source identity, so Shape need not copy the result to add it
 		})
 
 		x += advance

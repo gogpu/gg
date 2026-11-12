@@ -123,7 +123,13 @@ func (s *OwnShaper) Shape(text string, face Face) []ShapedGlyph {
 	if len(variations) > 0 {
 		varProvider, _ = parsed.(VariableAdvanceProvider)
 	}
-	return buildShapedGlyphs(glyphs, adjustments, sc, size, runes, kernFallback, varProvider, variations)
+	result := buildShapedGlyphs(glyphs, adjustments, sc, size, runes, kernFallback, varProvider, variations)
+	// Record the source face on the fresh result, so Shape and ShapeRuns need not
+	// copy it to annotate it.
+	for i := range result {
+		result[i].Face = face
+	}
+	return result
 }
 
 // ClearCache removes all cached shaping data.
