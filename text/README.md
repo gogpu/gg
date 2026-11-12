@@ -40,7 +40,7 @@ Bidi/Script  Cache    Lines    ┌────┴────┐
 - **Alignment** — Left, Center, Right, Justify (placeholder)
 - **Line wrapping** — At MaxWidth with word boundaries
 - **Line spacing** — Configurable multiplier
-- **Bidi-aware** — Proper RTL/LTR segment ordering
+- **Bidi segmentation** — segments carry their bidi level and direction; RTL runs are not yet reordered into visual order (UAX #9 rule L2), so lines lay out in logical order
 
 ### Unicode Text Wrapping (v0.13.0)
 - **WrapMode enum** — WrapWordChar (default), WrapNone, WrapWord, WrapChar

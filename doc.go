@@ -71,7 +71,8 @@
 //   - TrueType bytecode interpreter (skrifa golden parity)
 //   - MSDF + glyph mask dual-strategy GPU rendering
 //   - ClearType LCD auto-detection, CJK script-aware hinting
-//   - OpenType features, bidirectional text, color emoji
+//   - OpenType features, bidi segmentation (RTL visual reordering not yet
+//     implemented), color emoji
 //
 // # Coordinate System
 //

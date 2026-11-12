@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primary window. A canvas drawn into a secondary window, or any canvas created at a size of its own, was resized to
   the primary window's size on every frame, and an application's own `Resize` was undone by the next `Draw`. Only a
   canvas created or resized at the window's size follows the window now; any other canvas keeps its size.
+- **Built-in shapers record each glyph's source face** — `BuiltinShaper` and `OwnShaper` now set `ShapedGlyph.Face`,
+  so `text.Shape` and `text.ShapeRuns` on a single font no longer copy every result to add it.
+
+### Known limitations
+
+- **Right-to-left text is laid out in logical order.** The text package computes Unicode bidi levels and segment
+  directions, but no shaper or layout step reorders RTL runs into visual order (UAX #9 rule L2): Hebrew or Arabic
+  text is drawn with its first character on the left. The README and package docs used to call this bidirectional
+  text support; they now describe it as bidi segmentation.
+- **Two `ggcanvas` canvases created at the same window size share one canvas.** gogpu hands every window the same
+  provider, whose size is the primary window's, so ggcanvas cannot yet tell two same-size windows apart. This lasts
+  until gogpu exposes a per-window identity.
 
 ## [0.52.7] - 2026-11-08
 
