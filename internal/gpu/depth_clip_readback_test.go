@@ -24,10 +24,11 @@ import (
 // pass, reads the pixels back and checks that content shows inside the clip and nothing outside it (P1-GPU-042:
 // examples/clip_path drew nothing inside its circle and star clips).
 //
-// The test binary registers a real backend only with a ggtest_<backend> build tag (zz_backend_*_test.go). Without an
-// adapter the test skips, unless GG_REQUIRE lists the backend, as CI or a release gate sets it:
+// The test binary gets the platform hardware backends through wgpu's default registration (Vulkan, DX12 and GLES on
+// Windows; Metal on macOS) and requests a Vulkan adapter. Without an adapter the test skips, unless GG_REQUIRE lists
+// the backend, as CI or a release gate sets it:
 //
-//	GG_REQUIRE=vulkan go test -tags ggtest_vulkan -run TestDepthClipReadback ./internal/gpu/
+//	GG_REQUIRE=vulkan go test -run TestDepthClipReadback ./internal/gpu/
 func TestDepthClipReadback(t *testing.T) {
 	accel := newReadbackAccelerator(t)
 

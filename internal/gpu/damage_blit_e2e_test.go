@@ -9,7 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/wgputest"
 )
 
 // createSoftwareDevice creates a software-backed *wgpu.Device for pixel-exact
@@ -17,39 +17,9 @@ import (
 // LoadOpLoad preserves content, scissor clips draws, pixels are verifiable.
 func createSoftwareDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := software.NewBackend()
-	instance, err := api.CreateInstance(nil)
+	device, queue, cleanup, err := wgputest.NewSoftwareDevice()
 	if err != nil {
-		t.Fatalf("software CreateInstance: %v", err)
-	}
-	adapters := instance.EnumerateAdapters(nil)
-	if len(adapters) == 0 {
-		instance.Destroy()
-		t.Fatal("software backend: no adapters")
-	}
-	openDev, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
-	if err != nil {
-		instance.Destroy()
-		t.Fatalf("software Open: %v", err)
-	}
-
-	device, err := wgpu.NewDeviceFromHAL(
-		openDev.Device,
-		openDev.Queue,
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"software-test",
-	)
-	if err != nil {
-		openDev.Device.Destroy()
-		instance.Destroy()
-		t.Fatalf("NewDeviceFromHAL: %v", err)
-	}
-
-	queue := device.Queue()
-	cleanup := func() {
-		device.Release()
-		instance.Destroy()
+		t.Fatalf("wgputest.NewSoftwareDevice: %v", err)
 	}
 	return device, queue, cleanup
 }

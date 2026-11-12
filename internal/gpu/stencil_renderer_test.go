@@ -7,7 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/wgputest"
 )
 
 // testSampleCount probes the device for 4x MSAA support, falling back to 1x.
@@ -22,36 +22,9 @@ func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
 // Returns the device, queue, and a cleanup function.
 func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := noop.NewBackend()
-	instance, err := api.CreateInstance(nil)
+	device, queue, cleanup, err := wgputest.NewNoopDevice()
 	if err != nil {
-		t.Fatalf("CreateInstance failed: %v", err)
-	}
-	adapters := instance.EnumerateAdapters(nil)
-	openDev, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
-	if err != nil {
-		instance.Destroy()
-		t.Fatalf("Open failed: %v", err)
-	}
-
-	device, err := wgpu.NewDeviceFromHAL(
-		openDev.Device,
-		openDev.Queue,
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"noop-test",
-	)
-	if err != nil {
-		openDev.Device.Destroy()
-		instance.Destroy()
-		t.Fatalf("NewDeviceFromHAL failed: %v", err)
-	}
-
-	queue := device.Queue()
-
-	cleanup := func() {
-		device.Release()
-		instance.Destroy()
+		t.Fatalf("wgputest.NewNoopDevice: %v", err)
 	}
 	return device, queue, cleanup
 }

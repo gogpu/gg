@@ -84,7 +84,7 @@ func TestSetDeviceProvider_ComputeGate(t *testing.T) {
 
 // TestInitGPU_ComputeGate checks the same gate on the standalone path, where initGPU reads the adapter's own
 // downlevel capabilities: the Vello accelerator exists exactly when the adapter reports compute shaders. It needs a real
-// adapter (ggtest_<backend> build tag) and skips without one, unless GG_REQUIRE is set.
+// adapter (wgpu registers the platform hardware backends by default) and skips without one, unless GG_REQUIRE is set.
 func TestInitGPU_ComputeGate(t *testing.T) {
 	s := NewGPUShared()
 	defer s.Close()
