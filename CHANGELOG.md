@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canvas created or resized at the window's size follows the window now; any other canvas keeps its size.
 - **Built-in shapers record each glyph's source face** — `BuiltinShaper` and `OwnShaper` now set `ShapedGlyph.Face`,
   so `text.Shape` and `text.ShapeRuns` on a single font no longer copy every result to add it.
+- **The GPU fine stage ends a tile on an unknown command** — in the Vello compute pipeline's fine shader, the `break`
+  meant to stop on an unknown PTCL command left only the `switch`, not the command loop, so such a command made the
+  dispatch loop forever instead of finishing the tile. It now ends the tile, as the CPU fine stage does.
 
 ### Known limitations
 

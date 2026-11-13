@@ -203,6 +203,7 @@ fn main(
     let ptcl_base = tile_ix * PTCL_MAX_PER_TILE;
     let blend_offset = ptcl[ptcl_base];
     var cmd_ix = ptcl_base + 1u;
+    var unknown_cmd = false;
 
     loop {
         let tag = ptcl[cmd_ix];
@@ -302,9 +303,14 @@ fn main(
                 }
             }
             default: {
-                // Unknown command: stop to avoid infinite loop.
-                break;
+                // Unknown command: end this tile, as the CPU fine does. A bare
+                // `break` here would leave only the switch (WGSL § break
+                // statement) and re-read the same tag forever.
+                unknown_cmd = true;
             }
+        }
+        if unknown_cmd {
+            break;
         }
     }
 
