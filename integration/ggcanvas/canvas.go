@@ -102,10 +102,12 @@ type Canvas struct {
 //
 // A Canvas created at the provider's window size follows the window: Draw
 // keeps it at the window's logical size, and New at any later window size
-// returns the same Canvas, resized. A Canvas created at another size keeps that
-// size until Resize; repeated calls with the same provider identity,
-// dimensions, and normalized scale return it. Call Close to evict a Canvas
-// before creating a replacement.
+// returns the same Canvas, resized. A Canvas created while the provider reports
+// 0x0 (during startup) or a size different from the passed one does not follow
+// the window; Resize to the window's current size makes it follow. Any other
+// Canvas keeps its size until Resize; repeated calls with the same provider
+// identity, dimensions, and normalized scale return it. Call Close to evict a
+// Canvas before creating a replacement.
 //
 // Returns error if dimensions are invalid or provider is nil.
 func New(provider gpucontext.DeviceProvider, width, height int) (*Canvas, error) {

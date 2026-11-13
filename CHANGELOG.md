@@ -32,8 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text is drawn with its first character on the left. The README and package docs used to call this bidirectional
   text support; they now describe it as bidi segmentation.
 - **Two `ggcanvas` canvases created at the same window size share one canvas.** gogpu hands every window the same
-  provider, whose size is the primary window's, so ggcanvas cannot yet tell two same-size windows apart. This lasts
-  until gogpu exposes a per-window identity.
+  provider, whose size is the primary window's, so ggcanvas cannot yet tell two same-size windows apart. The same
+  canvas is also keyed without a device scale: calls at the window's size with different scales return one canvas,
+  and the last `SetDeviceScale` sets its scale. This lasts until gogpu exposes a per-window identity.
 
 ## [0.52.7] - 2026-11-08
 
