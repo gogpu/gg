@@ -1,135 +1,80 @@
 //go:build !nogpu
 
-// Package gpu provides a Pure Go GPU-accelerated rendering backend.
+// Package gpu provides the Pure Go GPU accelerator for gg.
 //
-// This is an internal package used by the gg library for GPU rendering.
-// It leverages WebGPU for hardware-accelerated 2D graphics rendering
-// via the gogpu/wgpu Pure Go WebGPU implementation (zero CGO), which supports
-// Vulkan, Metal, and DX12 backends depending on the platform.
+// This is an internal package. GPU rendering is opt-in for library users
+// through the public package github.com/gogpu/gg/gpu, which registers the
+// SDF accelerator and the coverage filler on import.
+//
+// The accelerator builds on the gogpu/wgpu Pure Go WebGPU implementation
+// (zero CGO): Vulkan, Metal, DX12 and OpenGL ES backends, or the software
+// backend where no GPU is available. wgpu registers the platform hardware
+// backends by default; gg's production code imports no HAL backend.
 //
 // # Architecture Overview
 //
-// The gpu backend implements a vello-style GPU rendering pipeline:
+// gg's CPU rasterizer is the core; the GPU is an optional accelerator. When a
+// device is available the accelerator takes over per-tier:
 //
-//	Scene Commands -> Decoder -> HybridPipeline (Flatten -> Coarse -> Fine) -> GPU -> Composite
+//	Context.Fill/Stroke -> SDF shapes, stencil-then-cover, MSDF/glyph-mask text,
+//	                       Vello-style compute (scene-level) -> present
 //
 // Key components:
 //
-//   - Backend: Main entry point for GPU rendering
-//   - GPUSceneRenderer: Scene-to-GPU pipeline with HybridPipeline rasterization
-//   - HybridPipeline: 3-stage path rasterization (Flatten, Coarse, Fine)
-//   - MemoryManager: GPU texture memory with LRU eviction (configurable budget)
-//   - TextureAtlas: Shelf-packing for efficient GPU memory usage
-//   - PipelineCache: Pre-compiled GPU pipelines for all 29 blend modes
-//   - ShaderModules: WGSL compute shaders for tile rasterization and blending
+//   - GPUShared: the process-wide device owner (wgpu device and queue, adapter
+//     capabilities, render strategy) and the factory for render contexts
+//   - GPURenderContext: one frame's encoder, render session and GPU state
+//   - SDF render pipeline, convex polygon renderer and stencil-then-cover
+//     renderer: render-pass tiers for shapes
+//   - MSDF text and glyph-mask pipelines: GPU text tiers
+//   - VelloAccelerator and the tilecompute package: the 9-stage Vello compute
+//     pipeline for scene-level rendering (GPU dispatch plus a CPU reference)
+//   - SparseStrips and TileCompute coverage fillers: CPU tile rasterizers ported
+//     from Vello alongside the GPU pipeline
 //
-// # HybridPipeline (vello-style)
-//
-// Scene rendering uses a 3-stage tile-based pipeline inspired by Linebender's vello:
-//
-//  1. Flatten: Bezier curves are flattened to line segments using Wang's formula
-//  2. Coarse: Line segments are binned into 4x4 pixel tiles with winding info
-//  3. Fine: Each tile's coverage is computed with anti-aliased edges
-//
-// The pipeline automatically selects GPU or CPU execution per stage based on
-// workload size. This hybrid approach provides optimal performance across
-// different path complexities.
+// The render strategy is chosen once from the adapter's capabilities
+// (full MSAA, no-MSAA, or CPU raster with GPU textures only) and never changes.
 //
 // # Blend Modes
 //
-// All 29 standard blend modes are supported via WGSL shaders:
-//
-// Standard modes:
-//   - Normal, Multiply, Screen, Overlay
-//   - Darken, Lighten, ColorDodge, ColorBurn
-//   - HardLight, SoftLight, Difference, Exclusion
-//
-// HSL modes:
-//   - Hue, Saturation, Color, Luminosity
-//
-// Porter-Duff compositing:
-//   - Clear, Copy, Destination
-//   - SourceOver, DestinationOver
-//   - SourceIn, DestinationIn
-//   - SourceOut, DestinationOut
-//   - SourceAtop, DestinationAtop
-//   - Xor, Plus
-//
-// # Usage
-//
-// Create and initialize the gpu backend directly:
-//
-//	b := gpu.NewBackend()
-//	if err := b.Init(); err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer b.Close()
-//
-// # Rendering Scenes
-//
-// Build and render a scene:
-//
-//	builder := scene.NewSceneBuilder()
-//	builder.FillRect(0, 0, 800, 600, scene.SolidBrush(gg.White))
-//	builder.FillCircle(400, 300, 100, scene.SolidBrush(gg.Red))
-//	s := builder.Build()
-//
-//	pm := gg.NewPixmap(800, 600)
-//	if err := b.RenderScene(pm, s); err != nil {
-//	    log.Printf("Render error: %v", err)
-//	}
-//
-// # Memory Management
-//
-// The backend uses an LRU-based memory manager with configurable budget:
-//
-//	config := GPUSceneRendererConfig{
-//	    Width:          1920,
-//	    Height:         1080,
-//	    MaxLayers:      16,
-//	    MemoryBudgetMB: 256,
-//	}
-//
-// When memory budget is exceeded, least-recently-used textures are evicted.
-//
-// # Requirements
-//
-//   - Go 1.25+ (for generic features)
-//   - gogpu/wgpu module (github.com/gogpu/wgpu)
-//   - A GPU that supports Vulkan, Metal, or DX12 (for actual GPU rendering)
-//
-// # Thread Safety
-//
-// Backend and GPUSceneRenderer are safe for concurrent use from multiple
-// goroutines. Internal synchronization is handled via mutexes.
+// All 29 blend modes are supported by the GPU compositing path: the Porter-Duff
+// modes, the separable modes and the HSL modes.
 //
 // # Error Handling
 //
 // Common errors returned by this package:
 //
-//   - ErrNotInitialized: Backend must be initialized before use
-//   - ErrNoGPU: No compatible GPU found
-//   - ErrDeviceLost: GPU device was lost (requires re-initialization)
-//   - ErrNilTarget: Target pixmap is nil
-//   - ErrNilScene: Scene is nil
-//   - ErrRendererClosed: Renderer has been closed
-//   - ErrEmptyScene: Scene contains no draw commands
+//   - ErrNotInitialized: a GPU operation ran before the device was ready
+//   - ErrNoGPU: no compatible GPU adapter was found
+//   - ErrDeviceLost: the GPU device was lost (requires re-initialization)
+//   - ErrNotImplemented: the operation has no GPU path and the caller falls back
+//     to the CPU core
+//   - ErrInvalidDimensions: a zero or oversized extent
+//   - ErrNilTarget, ErrNilScene: a required argument is nil
 //
-// # Benchmarking
+// A GPU tier that cannot handle a draw returns an error the Context treats as
+// a fallback signal; the CPU core always remains correct on its own.
 //
-// Run benchmarks to compare GPU vs Software performance:
+// # Thread Safety
 //
-//	go test -bench=. ./internal/gpu/...
+// GPUShared is safe for concurrent use; a GPURenderContext is owned by the
+// goroutine that records its frame.
+//
+// # Requirements
+//
+//   - gogpu/wgpu (github.com/gogpu/wgpu)
+//   - a platform where the Pure Go backends build (windows, linux, darwin,
+//     android); elsewhere the accelerator reports no adapter and gg stays on
+//     the CPU core
 //
 // # Related Packages
 //
-//   - github.com/gogpu/gg: Core 2D graphics library
-//   - github.com/gogpu/gg/scene: Scene graph and retained mode API
+//   - github.com/gogpu/gg: core 2D graphics library
+//   - github.com/gogpu/gg/scene: scene graph and retained-mode API
 //   - github.com/gogpu/wgpu: Pure Go WebGPU implementation
 //
 // # References
 //
 //   - W3C WebGPU Specification: https://www.w3.org/TR/webgpu/
-//   - gogpu Organization: https://github.com/gogpu
-//   - gogpu/wgpu: https://github.com/gogpu/wgpu
+//   - gogpu organization: https://github.com/gogpu
 package gpu

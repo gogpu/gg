@@ -5,9 +5,10 @@ package gpu
 import (
 	"testing"
 
+	"github.com/gogpu/gg"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/wgputest"
 )
 
 // testSampleCount probes the device for 4x MSAA support, falling back to 1x.
@@ -22,36 +23,9 @@ func testSampleCount(t *testing.T, device *wgpu.Device) uint32 {
 // Returns the device, queue, and a cleanup function.
 func createNoopDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 	t.Helper()
-	api := noop.NewBackend()
-	instance, err := api.CreateInstance(nil)
+	device, queue, cleanup, err := wgputest.NewNoopDevice()
 	if err != nil {
-		t.Fatalf("CreateInstance failed: %v", err)
-	}
-	adapters := instance.EnumerateAdapters(nil)
-	openDev, err := adapters[0].Adapter.Open(0, gputypes.DefaultLimits())
-	if err != nil {
-		instance.Destroy()
-		t.Fatalf("Open failed: %v", err)
-	}
-
-	device, err := wgpu.NewDeviceFromHAL(
-		openDev.Device,
-		openDev.Queue,
-		gputypes.Features(0),
-		gputypes.DefaultLimits(),
-		"noop-test",
-	)
-	if err != nil {
-		openDev.Device.Destroy()
-		instance.Destroy()
-		t.Fatalf("NewDeviceFromHAL failed: %v", err)
-	}
-
-	queue := device.Queue()
-
-	cleanup := func() {
-		device.Release()
-		instance.Destroy()
+		t.Fatalf("wgputest.NewNoopDevice: %v", err)
 	}
 	return device, queue, cleanup
 }
@@ -384,5 +358,43 @@ func TestStencilRendererEnsureAfterDestroy(t *testing.T) {
 
 	if sr.textures.msaaTex == nil || sr.textures.stencilTex == nil || sr.textures.resolveTex == nil {
 		t.Error("expected all textures to be non-nil after re-creation")
+	}
+}
+
+// TestStencilRendererPipelinesWithoutClipLayout covers direct renderer use:
+// no session clip layout is attached, so the cover pipeline must be created
+// with the built-in no-clip @group(1) group instead of an invalid layout
+// (naga rejects an undeclared binding at MSL compile on Metal).
+func TestStencilRendererPipelinesWithoutClipLayout(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
+	sr := NewStencilRenderer(device, queue, 4)
+	defer sr.Destroy()
+
+	if err := sr.createPipelines(); err != nil {
+		t.Fatalf("createPipelines without a clip layout: %v", err)
+	}
+	if sr.fallbackClipBG == nil {
+		t.Fatal("expected the built-in no-clip group to be created")
+	}
+	if sr.coverPipeLayoutHasClip {
+		t.Error("coverPipeLayoutHasClip must stay false without a session layout")
+	}
+
+	// The render/readback path renders through the built-in group.
+	target := gg.GPURenderTarget{
+		Data:   make([]uint8, 16*16*4),
+		Width:  16,
+		Height: 16,
+		Stride: 16 * 4,
+	}
+	path := gg.NewPath()
+	path.MoveTo(2, 2)
+	path.LineTo(14, 2)
+	path.LineTo(8, 14)
+	path.Close()
+	if err := sr.RenderPath(target, path, gg.RGBA{R: 1, G: 0, B: 0, A: 1}, gg.FillRuleNonZero); err != nil {
+		t.Fatalf("RenderPath: %v", err)
 	}
 }
