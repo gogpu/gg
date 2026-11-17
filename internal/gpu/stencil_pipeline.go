@@ -90,11 +90,14 @@ func (sr *StencilRenderer) createPipelines() error { //nolint:funlen // GPU pipe
 	}
 	sr.stencilPipeLayout = stencilPipeLayout
 
-	coverBGLayouts := []*wgpu.BindGroupLayout{sr.uniformLayout}
-	hasClip := sr.clipBindLayout != nil
-	if hasClip {
-		coverBGLayouts = append(coverBGLayouts, sr.clipBindLayout)
+	// The cover shader always declares the @group(1) clip uniform, so the
+	// pipeline layout must always include it (see coverClipLayout).
+	clipLayout, err := sr.coverClipLayout()
+	if err != nil {
+		return err
 	}
+	coverBGLayouts := []*wgpu.BindGroupLayout{sr.uniformLayout, clipLayout}
+	hasClip := sr.clipBindLayout != nil
 	coverPipeLayout, err := sr.device.CreatePipelineLayout(&wgpu.PipelineLayoutDescriptor{
 		Label:            "cover_pipe_layout",
 		BindGroupLayouts: coverBGLayouts,
@@ -503,6 +506,19 @@ func (sr *StencilRenderer) destroyPipelines() {
 	if sr.uniformLayout != nil {
 		sr.uniformLayout.Release()
 		sr.uniformLayout = nil
+	}
+	// Built-in no-clip group, created only for direct renderer use.
+	if sr.fallbackClipBG != nil {
+		sr.fallbackClipBG.Release()
+		sr.fallbackClipBG = nil
+	}
+	if sr.fallbackClipBuf != nil {
+		sr.fallbackClipBuf.Release()
+		sr.fallbackClipBuf = nil
+	}
+	if sr.fallbackClipLayout != nil {
+		sr.fallbackClipLayout.Release()
+		sr.fallbackClipLayout = nil
 	}
 	if sr.coverShader != nil {
 		sr.coverShader.Release()

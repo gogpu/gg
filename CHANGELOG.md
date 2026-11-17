@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HAL devices through wgpu's `wgputest` seam. Dependencies: wgpu v0.35.0, naga v0.22.4, gputypes v0.9.1,
   gpucontext v0.32.0.
 
+### Fixed
+
+- **Standalone GPU initialization on macOS**: the device request is no longer Vulkan-only. Metal is now requested
+  too — the platform set wgpu registers by default — so gg without a device provider uses the GPU on macOS instead
+  of silently falling back to the CPU rasterizer. Windows and Linux keep Vulkan.
+- **Stencil cover pipeline without a session clip layout**: the cover shader always declares the `@group(1)` clip
+  uniform, but the pipeline layout included the group only when the session had attached its shared clip layout.
+  A built-in no-clip group keeps direct renderer use (the render/readback path) valid; naga v0.22+ rejects the
+  mismatch at MSL compile on Metal.
+
 ## [0.52.7] - 2026-11-08
 
 ### Added
