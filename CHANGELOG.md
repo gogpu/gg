@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **wgpu v0.35.0 (ADR-070 package move)**: the GPU path no longer depends on the removed `wgpu/core` package. The
+  dead `gpu.Backend` facade, its stub command encoders and the `GPUSceneRenderer` chain are deleted (about 17.7K
+  lines of legacy wrappers and their tests in `internal/gpu`, no production caller), and the GPU tests build their
+  HAL devices through wgpu's `wgputest` seam. Dependencies: wgpu v0.35.0, naga v0.22.4, gputypes v0.9.1,
+  gpucontext v0.32.0.
+
 ## [0.52.7] - 2026-11-08
 
 ### Added
