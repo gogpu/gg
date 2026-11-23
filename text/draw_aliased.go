@@ -48,7 +48,7 @@ func drawAliasedSourceFace(dst draw.Image, text string, sf *sourceFace, x, y flo
 		return
 	}
 
-	drawGlyphs(dst, sf, text, x, y, col, rasterizeAliasedGlyph)
+	drawGlyphs(dst, sf, text, x, y, col, rasterModeAliased, rasterizeAliasedGlyph)
 }
 
 // drawAliasedComposite walks one rune at a time to preserve the fallback
