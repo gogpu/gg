@@ -438,12 +438,12 @@ func TestVelloComputeGolden(t *testing.T) {
 	// Initialize GPU.
 	accel := &VelloAccelerator{}
 	if err := accel.initGPU(); err != nil {
-		t.Skipf("GPU not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer accel.Close()
 
 	if !accel.CanCompute() {
-		t.Skip("compute pipeline not available")
+		skipUnlessRequiredf(t, requireCompute, "compute pipeline not available")
 	}
 
 	tests := computeGoldenTests()
@@ -483,12 +483,12 @@ func TestVelloComputeGolden(t *testing.T) {
 func TestVelloComputeSmoke(t *testing.T) {
 	accel := &VelloAccelerator{}
 	if err := accel.initGPU(); err != nil {
-		t.Skipf("GPU not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer accel.Close()
 
 	if !accel.CanCompute() {
-		t.Skip("compute pipeline not available")
+		skipUnlessRequiredf(t, requireCompute, "compute pipeline not available")
 	}
 
 	paths := []tilecompute.PathDef{

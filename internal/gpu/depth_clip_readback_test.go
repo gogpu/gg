@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"math"
@@ -341,21 +342,79 @@ func newReadbackAccelerator(t *testing.T) *SDFAccelerator {
 	err := accel.shared.initGPU()
 	accel.shared.mu.Unlock()
 	if err != nil {
-		skipUnlessRequiredf(t, "GPU adapter not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU adapter not available: %v", err)
+	}
+	// This binary imports wgputest, and with it hal/software. Until wgpu v0.35.0 removes the BackendEmpty mask
+	// bypass, a Vulkan-mask request falls back to the software backend on a machine without a Vulkan adapter —
+	// an adapter that is not what GG_REQUIRE=vulkan promises.
+	adapter, err := accel.shared.instance.RequestAdapter(&wgpu.RequestAdapterOptions{
+		PowerPreference: wgpu.PowerPreferenceHighPerformance,
+	})
+	if err != nil {
+		skipUnlessAdapterf(t, err, "GPU adapter not available: %v", err)
+	}
+	if adapter.Info().Backend == gputypes.BackendEmpty {
+		skipUnlessRequiredf(t, requireVulkan, "no Vulkan adapter (the software backend was admitted by the BackendEmpty mask bypass)")
 	}
 	// Software adapters route shapes to the CPU (strategyRasterAtlas, BUG-SW-002): nothing to read back.
 	if !accel.CanAccelerate(gg.AccelCircleSDF) {
-		skipUnlessRequiredf(t, "adapter has no render-pass GPU path (software adapter)")
+		skipUnlessRequiredf(t, requireGPU, "adapter %q has no render-pass GPU path (software-class adapter)", adapter.Info().Name)
 	}
 	return accel
 }
 
-func skipUnlessRequiredf(t *testing.T, format string, args ...any) {
+// GG_REQUIRE names what the machine must provide, as a comma-separated list (the ecosystem <REPO>_REQUIRE
+// contract, gogpu CLAUDE.md §6): CI and release gates list the capabilities they guarantee, so a missing one fails
+// the test instead of skipping it. A requirement the list does not name skips as it does locally.
+const (
+	// requireVulkan: a Vulkan adapter is registered and can be opened.
+	requireVulkan = "vulkan"
+	// requireGPU: the adapter takes the render-pass GPU path (a hardware-class adapter, not a software one).
+	requireGPU = "gpu"
+	// requireCompute: the Vello compute pipeline initializes on the adapter.
+	requireCompute = "compute"
+)
+
+func skipUnlessRequiredf(t *testing.T, requirement, format string, args ...any) {
 	t.Helper()
-	if req := strings.TrimSpace(os.Getenv("GG_REQUIRE")); req != "" {
-		t.Fatalf("GG_REQUIRE=%s: "+format, append([]any{req}, args...)...)
+	for _, req := range strings.Split(os.Getenv("GG_REQUIRE"), ",") {
+		if strings.TrimSpace(req) == requirement {
+			t.Fatalf("GG_REQUIRE=%s: "+format, append([]any{requirement}, args...)...)
+		}
 	}
 	t.Skipf(format, args...)
+}
+
+// skipUnlessAdapterf turns an adapter-request failure into the requirement it breaks.
+// A registered software-class Vulkan adapter (lavapipe, llvmpipe) satisfies "vulkan"
+// but not "gpu": wgpu does not hand a CPU-class adapter to a plain request, so the
+// failure is ErrNoHardwareAdapter and gg routes such an adapter to the CPU raster path
+// (P2-GPU-038). No Vulkan adapter at all breaks "vulkan" itself.
+func skipUnlessAdapterf(t *testing.T, err error, format string, args ...any) {
+	t.Helper()
+	if errors.Is(err, wgpu.ErrNoHardwareAdapter) && hasSoftwareVulkanAdapter() {
+		skipUnlessRequiredf(t, requireGPU, "only a software-class Vulkan adapter is registered: "+format, args...)
+	}
+	skipUnlessRequiredf(t, requireVulkan, format, args...)
+}
+
+// hasSoftwareVulkanAdapter reports whether a Vulkan adapter exists that wgpu refuses
+// to a plain request as software-class. The probe instance carries the Vulkan backend
+// only, so the platform software backend cannot answer it, and ForceFallbackAdapter
+// asks for the CPU-class adapter on purpose.
+func hasSoftwareVulkanAdapter() bool {
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.BackendsVulkan})
+	if err != nil {
+		return false
+	}
+	defer instance.Release()
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	if err != nil || adapter == nil {
+		return false
+	}
+	defer adapter.Release()
+	info := adapter.Info()
+	return info.Backend == gputypes.BackendVulkan && info.DeviceType == gputypes.DeviceTypeCPU
 }
 
 func newWhiteImage(w, h int) *image.RGBA {

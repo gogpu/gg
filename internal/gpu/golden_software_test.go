@@ -202,7 +202,7 @@ func TestGoldenSoftware_GPUvsCPU(t *testing.T) {
 	err := shared.initGPU()
 	shared.mu.Unlock()
 	if err != nil {
-		t.Skipf("GPU not available (expected in CI without hardware): %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer shared.Close()
 
@@ -210,7 +210,7 @@ func TestGoldenSoftware_GPUvsCPU(t *testing.T) {
 	// without requiring window/surface setup (which render-pass pipeline needs).
 	// Full GPU render-pass comparison is covered by TestVelloComputeGolden.
 	if !shared.CanCompute() {
-		t.Skip("GPU compute pipeline not available")
+		skipUnlessRequiredf(t, requireCompute, "GPU compute pipeline not available")
 	}
 
 	t.Log("GPU available — compute pipeline tests run via TestVelloComputeGolden")

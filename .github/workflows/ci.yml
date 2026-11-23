@@ -121,12 +121,11 @@ jobs:
         name: codecov-gg
         fail_ci_if_error: true
 
-  # GPU golden tests - Linux with Mesa software Vulkan (lavapipe)
+  # GPU tests - Linux with Mesa software Vulkan (lavapipe)
   # Follows wgpu CI pattern: install Mesa drivers, run GPU code on llvmpipe.
-  # Tests render same scene on CPU and GPU, compare output (Vello compare pattern).
-  # Non-blocking: failures produce warnings, not CI failures.
+  # Blocking: an adapter-dependent test that skips fails the job (GG_REQUIRE).
   gpu-golden:
-    name: GPU Golden Tests (Mesa/lavapipe)
+    name: GPU Tests (Mesa/lavapipe)
     runs-on: ubuntu-latest
 
     steps:
@@ -155,21 +154,38 @@ jobs:
         echo "=== Mesa libraries ==="
         ldconfig -p | grep -E 'vulkan|mesa' | head -10 || true
 
+    - name: Select the lavapipe ICD
+      run: |
+        # The ICD file name differs between Mesa versions (lvp_icd.json on Mesa 26.x,
+        # lvp_icd.x86_64.json on older images): pin whichever the image installed, and
+        # fail here when none exists instead of running the tests without an adapter.
+        icd=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1)
+        if [ -z "$icd" ]; then
+          echo "::error::no lavapipe ICD found in /usr/share/vulkan/icd.d"
+          exit 1
+        fi
+        echo "lavapipe ICD: $icd"
+        echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+        echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+
     - name: Download dependencies
       run: go mod download
 
-    - name: Run GPU golden tests
+    - name: Run GPU tests on lavapipe
       env:
-        # Force software rendering via lavapipe
+        # Force software rendering via lavapipe; the ICD file is selected above.
         LIBGL_ALWAYS_SOFTWARE: "1"
         MESA_LOADER_DRIVER_OVERRIDE: "lvp"
-        VK_ICD_FILENAMES: "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
+        # The adapter must appear: wgpu registers the platform hardware backends by default, and a run without
+        # one fails these tests instead of skipping them. "gpu" (the render-pass path) and "compute" (the Vello
+        # compute pipeline) stay unlisted until lavapipe is routed to the GPU path and the Vello coarse bind group
+        # fits the 8-storage-buffer default (TASK-GPU-STANDALONE-001); those tests skip here today.
+        GG_REQUIRE: "vulkan"
       run: |
-        echo "=== Running GPU vs CPU golden comparison tests ==="
-        go test -v -count=1 -run 'TestGoldenSoftware' -timeout 5m ./internal/gpu/... || {
-          echo "::warning::GPU golden tests failed (non-blocking — software adapter differences expected)"
-          exit 0
-        }
+        echo "=== Adapter-dependent GPU tests on lavapipe ==="
+        go test -v -count=1 -timeout 10m \
+          -run 'TestDepthClip|TestInitGPU_ComputeGate|TestGoldenSoftware_GPUvsCPU|TestVelloCompute' \
+          ./internal/gpu/
 
   # Linting
   lint:
