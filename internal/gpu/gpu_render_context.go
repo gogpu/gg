@@ -266,11 +266,18 @@ func (rc *GPURenderContext) ClearClipPath() {
 }
 
 // BeginFrame resets per-frame state so the first render pass clears the surface.
+// It also releases command buffers from completed previous-frame submissions on
+// the context's render session. Completion is decided by Queue.Poll (HAL
+// completion handlers), never by a blocking wait: submissions still in flight —
+// including any of this frame's flushes — are freed at a later frame boundary.
 func (rc *GPURenderContext) BeginFrame() {
 	rc.clipRect = nil
 	rc.clipPath = nil
 	rc.frameRendered = false
 	rc.lastView = nil
+	if rc.session != nil {
+		rc.session.drainCompleted()
+	}
 }
 
 // MarkFrameRendered signals that external content has already been rendered
