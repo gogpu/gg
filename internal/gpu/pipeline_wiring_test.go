@@ -125,8 +125,16 @@ func TestSDFAccelerator_SceneStats_ResetOnFlush(t *testing.T) {
 		t.Fatalf("before Flush: ShapeCount = %d, want 1", stats.ShapeCount)
 	}
 
-	// Flush resets stats (via Flush on default context).
-	_ = a.Flush(target)
+	// Flush resets stats (via Flush on default context). Without a GPU adapter
+	// the flush falls back to the CPU and never reaches the reset, so this is
+	// an adapter-dependent path: skip where no adapter exists, and fail
+	// instead of skipping when GG_REQUIRE names the GPU (the ecosystem contract).
+	if err := a.Flush(target); err != nil {
+		if errors.Is(err, gg.ErrFallbackToCPU) {
+			skipUnlessRequiredf(t, "GPU flush fell back to the CPU: %v", err)
+		}
+		t.Fatalf("Flush: %v", err)
+	}
 
 	stats := a.SceneStats()
 	if stats.ShapeCount != 0 {

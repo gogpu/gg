@@ -55,6 +55,15 @@ type StencilRenderer struct {
 	// be recreated to avoid SetBindGroup(1) crashes on AMD/NVIDIA.
 	coverPipeLayoutHasClip bool
 
+	// fallbackClipLayout is the built-in @group(1) clip layout used when no
+	// session layout was attached before createPipelines (direct renderer use,
+	// e.g. the render/readback path). The cover shader always declares the clip
+	// uniform, so a pipeline layout without @group(1) is invalid — naga v0.22+
+	// rejects the mismatch at MSL compile on Metal.
+	fallbackClipLayout *wgpu.BindGroupLayout
+	fallbackClipBuf    *wgpu.Buffer
+	fallbackClipBG     *wgpu.BindGroup
+
 	// Render pipelines.
 	// nonZeroStencilPipeline implements the non-zero winding fill rule:
 	// front faces increment stencil, back faces decrement.
@@ -93,6 +102,73 @@ func NewStencilRenderer(device *wgpu.Device, queue *wgpu.Queue, sampleCount uint
 // session and must not be destroyed by the renderer.
 func (sr *StencilRenderer) SetClipBindLayout(layout *wgpu.BindGroupLayout) {
 	sr.clipBindLayout = layout
+}
+
+// coverClipLayout returns the @group(1) layout the cover pipelines must use:
+// the session-attached layout when present, otherwise the built-in no-clip
+// fallback, created on demand.
+func (sr *StencilRenderer) coverClipLayout() (*wgpu.BindGroupLayout, error) {
+	if sr.clipBindLayout != nil {
+		return sr.clipBindLayout, nil
+	}
+	if err := sr.ensureFallbackClipGroup(); err != nil {
+		return nil, fmt.Errorf("create fallback clip group: %w", err)
+	}
+	return sr.fallbackClipLayout, nil
+}
+
+// ensureFallbackClipGroup creates the built-in @group(1) clip layout with its
+// no-clip uniform and bind group. It is used when no session layout was
+// attached before createPipelines: the cover shader always declares the clip
+// uniform, so every cover pipeline needs the group in its layout, and every
+// cover draw needs a bind group bound at index 1.
+func (sr *StencilRenderer) ensureFallbackClipGroup() error {
+	if sr.fallbackClipBG != nil {
+		return nil
+	}
+	layout, err := sr.device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
+		Label: "stencil_cover_clip_fallback_layout",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{
+				Binding:    0,
+				Visibility: gputypes.ShaderStageFragment,
+				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: clipParamsSize},
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	buf, err := sr.device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "stencil_cover_clip_fallback_uniform",
+		Size:  clipParamsSize,
+		Usage: gputypes.BufferUsageUniform | gputypes.BufferUsageCopyDst,
+	})
+	if err != nil {
+		layout.Release()
+		return err
+	}
+	if err := sr.queue.WriteBuffer(buf, 0, NoClipParams().Bytes()); err != nil {
+		buf.Release()
+		layout.Release()
+		return err
+	}
+	bg, err := sr.device.CreateBindGroup(&wgpu.BindGroupDescriptor{
+		Label:  "stencil_cover_clip_fallback_bind",
+		Layout: layout,
+		Entries: []wgpu.BindGroupEntry{
+			{Binding: 0, Buffer: buf, Offset: 0, Size: clipParamsSize},
+		},
+	})
+	if err != nil {
+		buf.Release()
+		layout.Release()
+		return err
+	}
+	sr.fallbackClipLayout = layout
+	sr.fallbackClipBuf = buf
+	sr.fallbackClipBG = bg
+	return nil
 }
 
 // EnsureTextures creates or recreates the MSAA color, stencil, and resolve textures
@@ -392,6 +468,11 @@ func (sr *StencilRenderer) encodeAndReadback(
 
 	rp.SetPipeline(sr.nonZeroCoverPipeline)
 	rp.SetBindGroup(0, bufs.coverBindGroup, nil)
+	// Direct renderer use has no session clip group; bind the built-in
+	// no-clip group so the cover shader's @group(1) binding is satisfied.
+	if sr.clipBindLayout == nil && sr.fallbackClipBG != nil {
+		rp.SetBindGroup(1, sr.fallbackClipBG, nil)
+	}
 	rp.SetVertexBuffer(0, bufs.coverVertBuf, 0)
 	rp.SetStencilReference(0)
 	rp.Draw(gputypes.DrawArgs{VertexCount: 6, InstanceCount: 1, FirstVertex: 0, FirstInstance: 0})
@@ -506,6 +587,10 @@ func (sr *StencilRenderer) RecordPath(rp *wgpu.RenderPassEncoder, bufs *stencilC
 	rp.SetBindGroup(0, bufs.coverBindGroup, nil)
 	if clipBG != nil {
 		rp.SetBindGroup(1, clipBG, nil)
+	} else if sr.clipBindLayout == nil && sr.fallbackClipBG != nil {
+		// No session layout was attached: the pipelines use the built-in
+		// no-clip @group(1) group, and the binding must be satisfied.
+		rp.SetBindGroup(1, sr.fallbackClipBG, nil)
 	}
 	rp.SetVertexBuffer(0, bufs.coverVertBuf, 0)
 	rp.SetStencilReference(0)
