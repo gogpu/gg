@@ -92,7 +92,7 @@ func TestInitGPU_ComputeGate(t *testing.T) {
 	err := s.initGPU()
 	s.mu.Unlock()
 	if err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU adapter not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU adapter not available: %v", err)
 	}
 
 	adapter, err := s.instance.RequestAdapter(&wgpu.RequestAdapterOptions{

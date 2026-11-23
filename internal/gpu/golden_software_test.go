@@ -202,7 +202,7 @@ func TestGoldenSoftware_GPUvsCPU(t *testing.T) {
 	err := shared.initGPU()
 	shared.mu.Unlock()
 	if err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer shared.Close()
 

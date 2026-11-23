@@ -438,7 +438,7 @@ func TestVelloComputeGolden(t *testing.T) {
 	// Initialize GPU.
 	accel := &VelloAccelerator{}
 	if err := accel.initGPU(); err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer accel.Close()
 
@@ -483,7 +483,7 @@ func TestVelloComputeGolden(t *testing.T) {
 func TestVelloComputeSmoke(t *testing.T) {
 	accel := &VelloAccelerator{}
 	if err := accel.initGPU(); err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU not available: %v", err)
 	}
 	defer accel.Close()
 

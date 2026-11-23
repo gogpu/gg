@@ -154,15 +154,28 @@ jobs:
         echo "=== Mesa libraries ==="
         ldconfig -p | grep -E 'vulkan|mesa' | head -10 || true
 
+    - name: Select the lavapipe ICD
+      run: |
+        # The ICD file name differs between Mesa versions (lvp_icd.json on Mesa 26.x,
+        # lvp_icd.x86_64.json on older images): pin whichever the image installed, and
+        # fail here when none exists instead of running the tests without an adapter.
+        icd=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1)
+        if [ -z "$icd" ]; then
+          echo "::error::no lavapipe ICD found in /usr/share/vulkan/icd.d"
+          exit 1
+        fi
+        echo "lavapipe ICD: $icd"
+        echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+        echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+
     - name: Download dependencies
       run: go mod download
 
     - name: Run GPU tests on lavapipe
       env:
-        # Force software rendering via lavapipe
+        # Force software rendering via lavapipe; the ICD file is selected above.
         LIBGL_ALWAYS_SOFTWARE: "1"
         MESA_LOADER_DRIVER_OVERRIDE: "lvp"
-        VK_ICD_FILENAMES: "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json"
         # The adapter must appear: wgpu registers the platform hardware backends by default, and a run without
         # one fails these tests instead of skipping them. "gpu" (the render-pass path) and "compute" (the Vello
         # compute pipeline) stay unlisted until lavapipe is routed to the GPU path and the Vello coarse bind group

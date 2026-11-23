@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"context"
+	"errors"
 	"image"
 	"image/color"
 	"math"
@@ -341,7 +342,7 @@ func newReadbackAccelerator(t *testing.T) *SDFAccelerator {
 	err := accel.shared.initGPU()
 	accel.shared.mu.Unlock()
 	if err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU adapter not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU adapter not available: %v", err)
 	}
 	// This binary imports wgputest, and with it hal/software. Until wgpu v0.35.0 removes the BackendEmpty mask
 	// bypass, a Vulkan-mask request falls back to the software backend on a machine without a Vulkan adapter —
@@ -350,7 +351,7 @@ func newReadbackAccelerator(t *testing.T) *SDFAccelerator {
 		PowerPreference: wgpu.PowerPreferenceHighPerformance,
 	})
 	if err != nil {
-		skipUnlessRequiredf(t, requireVulkan, "GPU adapter not available: %v", err)
+		skipUnlessAdapterf(t, err, "GPU adapter not available: %v", err)
 	}
 	if adapter.Info().Backend == gputypes.BackendEmpty {
 		skipUnlessRequiredf(t, requireVulkan, "no Vulkan adapter (the software backend was admitted by the BackendEmpty mask bypass)")
@@ -382,6 +383,38 @@ func skipUnlessRequiredf(t *testing.T, requirement, format string, args ...any) 
 		}
 	}
 	t.Skipf(format, args...)
+}
+
+// skipUnlessAdapterf turns an adapter-request failure into the requirement it breaks.
+// A registered software-class Vulkan adapter (lavapipe, llvmpipe) satisfies "vulkan"
+// but not "gpu": wgpu does not hand a CPU-class adapter to a plain request, so the
+// failure is ErrNoHardwareAdapter and gg routes such an adapter to the CPU raster path
+// (P2-GPU-038). No Vulkan adapter at all breaks "vulkan" itself.
+func skipUnlessAdapterf(t *testing.T, err error, format string, args ...any) {
+	t.Helper()
+	if errors.Is(err, wgpu.ErrNoHardwareAdapter) && hasSoftwareVulkanAdapter() {
+		skipUnlessRequiredf(t, requireGPU, "only a software-class Vulkan adapter is registered: "+format, args...)
+	}
+	skipUnlessRequiredf(t, requireVulkan, format, args...)
+}
+
+// hasSoftwareVulkanAdapter reports whether a Vulkan adapter exists that wgpu refuses
+// to a plain request as software-class. The probe instance carries the Vulkan backend
+// only, so the platform software backend cannot answer it, and ForceFallbackAdapter
+// asks for the CPU-class adapter on purpose.
+func hasSoftwareVulkanAdapter() bool {
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.BackendsVulkan})
+	if err != nil {
+		return false
+	}
+	defer instance.Release()
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	if err != nil || adapter == nil {
+		return false
+	}
+	defer adapter.Release()
+	info := adapter.Info()
+	return info.Backend == gputypes.BackendVulkan && info.DeviceType == gputypes.DeviceTypeCPU
 }
 
 func newWhiteImage(w, h int) *image.RGBA {
