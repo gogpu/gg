@@ -16,6 +16,22 @@ import (
 	"github.com/gogpu/wgpu"
 )
 
+// readyShared returns a GPUShared with a usable noop device and deviceReady set,
+// so tests that exercise queueing are deterministic on every machine. Without it
+// they lean on the lazy ensureGPU: where no adapter exists (CI runners) it fails
+// and the queueing operations correctly report the CPU fallback (#534), which
+// TestDrawOperationsRequireReadyDevice pins separately.
+func readyShared(t *testing.T) *GPUShared {
+	t.Helper()
+	device, queue, cleanup := createNoopDevice(t)
+	t.Cleanup(cleanup)
+	s := NewGPUShared()
+	s.device = device
+	s.queue = queue
+	s.deviceReady = true
+	return s
+}
+
 // TestSDFAccelerator_SetPipelineMode verifies pipeline mode is stored.
 func TestSDFAccelerator_SetPipelineMode(t *testing.T) {
 	a := &SDFAccelerator{shared: NewGPUShared()}
@@ -55,7 +71,7 @@ func TestSDFAccelerator_CanCompute_WithVelloNotReady(t *testing.T) {
 // TestSDFAccelerator_SceneStats_Accumulation verifies that FillPath and FillShape
 // increment scene stats via the default context.
 func TestSDFAccelerator_SceneStats_Accumulation(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 	a := &SDFAccelerator{shared: s}
 	target := makeTestTarget(100, 100)
@@ -103,7 +119,7 @@ func TestSDFAccelerator_SceneStats_Accumulation(t *testing.T) {
 // TestSDFAccelerator_SceneStats_ResetOnFlush verifies that Flush resets
 // scene stats for the next frame.
 func TestSDFAccelerator_SceneStats_ResetOnFlush(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 	a := &SDFAccelerator{shared: s}
 	target := makeTestTarget(100, 100)
@@ -190,7 +206,7 @@ func TestSDFAccelerator_ComputeMode_DelegatesToVello(t *testing.T) {
 // operations never go to VelloAccelerator even if it's available.
 func TestSDFAccelerator_RenderPassMode_IgnoresVello(t *testing.T) {
 	vello := &VelloAccelerator{gpuReady: true}
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 	s.velloAccel = vello
 
@@ -285,7 +301,7 @@ func TestSDFAccelerator_Interfaces(t *testing.T) {
 // TestGPURenderContext_Isolation verifies two GPURenderContexts have isolated
 // pending command queues.
 func TestGPURenderContext_Isolation(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 
 	rc1 := s.NewRenderContext()
@@ -506,7 +522,7 @@ func TestGPURenderContext_BaseLayer_DoesNotAffectOtherCounts(t *testing.T) {
 // Regression test for TASK-GG-STROKE-REGRESSION-374: PR #379 changed routing
 // to != PipelineModeRenderPass, breaking GPU-direct stroke rendering in ui.
 func TestStrokeRouting_AutoModeUsesStencil(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 	s.velloAccel = &VelloAccelerator{gpuReady: true}
 	rc := &GPURenderContext{shared: s}
@@ -565,7 +581,7 @@ func TestStrokeRouting_ComputeModeUsesVello(t *testing.T) {
 // in PipelineModeAuto route through stencil, not Vello. Same GPU-direct
 // issue as strokes — Vello ignores target.View.
 func TestEvenOddFillRouting_AutoModeUsesStencil(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	s.gpuReady = true
 	s.velloAccel = &VelloAccelerator{gpuReady: true}
 	rc := &GPURenderContext{shared: s}

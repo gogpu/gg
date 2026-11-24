@@ -680,10 +680,18 @@ func TestFlush_RasterAtlas_NoPending_NoView_IsNoop(t *testing.T) {
 	}
 }
 
-// TestFlush_FullStrategy_NoDevice_FallsBack verifies that Flush on full strategy
-// with no GPU device returns ErrFallbackToCPU.
+// TestFlush_FullStrategy_NoDevice_FallsBack verifies the #534 contract: with no
+// ready device the draw itself reports the CPU fallback instead of queueing, and
+// Flush then has nothing to drop and succeeds. The noop device keeps the result
+// identical on machines with and without an adapter (a lazy ensureGPU would
+// otherwise initialize a real device here and the draw would be accepted).
 func TestFlush_FullStrategy_NoDevice_FallsBack(t *testing.T) {
+	device, queue, cleanup := createNoopDevice(t)
+	defer cleanup()
+
 	s := NewGPUShared()
+	s.device = device
+	s.queue = queue
 	s.strategy = strategyFull
 	s.deviceReady = false
 	s.gpuReady = false
@@ -698,13 +706,14 @@ func TestFlush_FullStrategy_NoDevice_FallsBack(t *testing.T) {
 	paint := gg.NewPaint()
 	paint.SetBrush(gg.Solid(gg.Red))
 
-	if err := rc.FillShape(target, shape, paint); err != nil {
-		t.Fatalf("FillShape: %v", err)
+	if err := rc.FillShape(target, shape, paint); !errors.Is(err, gg.ErrFallbackToCPU) {
+		t.Fatalf("FillShape = %v, want ErrFallbackToCPU", err)
 	}
-
-	err := rc.Flush(target)
-	if err != nil && !errors.Is(err, gg.ErrFallbackToCPU) {
-		t.Errorf("Flush = %v, want ErrFallbackToCPU", err)
+	if len(rc.pendingDraws) != 0 {
+		t.Error("draw queued without a ready device")
+	}
+	if err := rc.Flush(target); err != nil {
+		t.Errorf("Flush after a refused draw = %v, want nil", err)
 	}
 }
 
