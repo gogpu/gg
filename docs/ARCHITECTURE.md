@@ -39,7 +39,7 @@ gg is a 2D graphics library for Go, inspired by HTML5 Canvas API and modern Rust
                                ┌──▼──┐┌──▼──┐┌──▼──┐┌──▼──┐┌──▼──┐
                                │ Vk  ││DX12 ││Metal││GLES ││Soft │
                                └─────┘└─────┘└─────┘└─────┘└─────┘
-                                            wgpu/hal
+           wgpu (public API; backends internal since wgpu ADR-070, internal package migration)
 ```
 
 ## GPU Accelerator (v0.26.0+, Compute v0.30.0)
@@ -469,7 +469,6 @@ gg/
 │   │   └── scene_adapter.go   # Scene to raster bridge
 │   │
 │   ├── gpu/                # GPU rendering pipeline (six-tier) + tile rasterizers
-│   │   ├── backend.go      # GPU backend implementation
 │   │   ├── gpu_shared.go    # GPUShared (global: device, pipelines, engines, TexturePool)
 │   │   ├── gpu_render_context.go # GPURenderContext (per gg.Context: pending ops, clip, frame)
 │   │   ├── gpu_types.go    # Shared types (scissorSegment, extractConvexPolygon)
@@ -494,9 +493,6 @@ gg/
 │   │   ├── vello_tiles.go  # 16x16 tile binning + DDA
 │   │   ├── coarse.go       # Coarse rasterization pass
 │   │   ├── fine.go         # Fine rasterization pass
-│   │   ├── pipeline.go     # Render pipeline management
-│   │   ├── pipeline_cache_core.go  # PipelineCache (FNV-1a)
-│   │   ├── command_encoder.go  # CommandEncoder state machine
 │   │   ├── texture.go      # Texture with lazy default view
 │   │   ├── buffer.go       # Buffer with async mapping
 │   │   ├── text_pipeline.go    # MSDF text rendering pipeline (Tier 4)
@@ -800,6 +796,9 @@ and can render directly to any texture view (surface or offscreen) via `GPURende
 
 Enterprise dirty region tracking — only changed screen areas are redrawn and presented:
 
+> ADR citations carry their repository when the decision lives outside gg (`gogpu ADR-…`); a bare `ADR-NNN`
+> always names a decision in this repository's `docs/dev/architecture/`.
+
 ```
 Level 1: OBJECT DIFF (DamageTracker)
     Per-object bounding box comparison between frames → []image.Rectangle
@@ -809,10 +808,10 @@ Level 2: TILE DIRTY (DirtyRegion)
          ↓
 Level 3: GPU SCISSOR (FlushGPUWithViewDamage)
     LoadOpLoad (preserve gg-internal multi-pass content) + scissor clip to dirty region
-    Cross-renderer preservation (g3d content) is compositor-driven via PreserveContent (ADR-067)
+    Cross-renderer preservation (g3d content) is compositor-driven via PreserveContent (gogpu ADR-067, compositor-owned render target)
          ↓
 Level 4: OS PRESENT (PresentWithDamage)
-    Compositor unions all damage sources (ADR-065) → VK_KHR_incremental_present
+    Compositor unions all damage sources (gogpu ADR-065, damage-rect union) → VK_KHR_incremental_present
 ```
 
 Key components:
@@ -820,10 +819,10 @@ Key components:
 - **`Path.Bounds()`** — incremental bounding box during path construction (Skia `SkPathRef::fBounds` pattern, O(1) per verb)
 - **`Context.FrameDamage()`** — `[]image.Rectangle` list of per-operation damage rects for immediate-mode
 - **Threshold merge** — >16 rects merged to bounding box (Swiss cheese prevention, Wayland compositor pattern)
-- **`DamageReporter`** (ADR-065) — ggcanvas registers as named damage source via `RegisterDamageSource("gg")`, reports per-frame damage through `ReportDamage()`. Compositor unions all sources at present time.
-- **`GOGPU_DEBUG_DAMAGE=overlay`** — per-source colored overlay on damage regions (Chromium `debug_colors.cc` pattern). Pluggable via `DamageOverlayRenderer` (ADR-066).
+- **`DamageReporter`** (gogpu ADR-065, damage-rect union) — ggcanvas registers as named damage source via `RegisterDamageSource("gg")`, reports per-frame damage through `ReportDamage()`. Compositor unions all sources at present time.
+- **`GOGPU_DEBUG_DAMAGE=overlay`** — per-source colored overlay on damage regions (Chromium `debug_colors.cc` pattern). Pluggable via `DamageOverlayRenderer` (gogpu ADR-066, damage debug overlay).
 
-### Compositor Delegation (ADR-067)
+### Compositor Delegation (gogpu ADR-067, compositor-owned render target)
 
 gg is a pure drawing library — surface-level compositor decisions are delegated to gogpu:
 
@@ -835,7 +834,7 @@ gg is a pure drawing library — surface-level compositor decisions are delegate
 - **Per-frame compositor**: `GPURenderTarget.Compositor` provides compositor context each render call
 - **Legacy fallback**: standalone gg without gogpu uses per-frame bind groups and self-managed LoadOp
 
-### Render Mode (ADR-020)
+### Render Mode (gogpu ADR-020, software render mode)
 
 `GOGPU_RENDER_MODE` env var controls 2D rendering path:
 
