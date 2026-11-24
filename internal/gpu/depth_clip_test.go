@@ -469,7 +469,7 @@ func TestDepthLoadOp_AlwaysClear_Regression(t *testing.T) {
 // segments at cleanup), producing 4 segments per fill. buildScissorGroups
 // must correctly assign content to the group that has the clipPath set.
 func TestScissorSegments_CircleClip_MultipleSDFContent(t *testing.T) {
-	s := NewGPUShared()
+	s := readyShared(t)
 	rc := s.NewRenderContext()
 	defer rc.Close()
 

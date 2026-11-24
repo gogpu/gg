@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **GPU path draws no longer vanish when no device can be had**: the four queueing entry points (`FillPath`,
+  `StrokePath`, `FillShape`, `StrokeShape`) now check device readiness before accepting a draw. On a machine
+  without an adapter they report the CPU fallback instead of queueing into a Flush that would drop the work —
+  previously every filled and stroked path disappeared while text still rendered, and no error surfaced.
 - **Standalone GPU initialization on macOS**: the device request is no longer Vulkan-only. Metal is now requested
   too — the platform set wgpu registers by default — so gg without a device provider uses the GPU on macOS instead
   of silently falling back to the CPU rasterizer. Windows and Linux keep Vulkan.

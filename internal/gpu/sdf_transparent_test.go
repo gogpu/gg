@@ -14,7 +14,7 @@ import (
 // via MSAA coverage weighting.
 // Enterprise pattern: Skia nothingToDraw(), Cairo nothing_to_do().
 func TestFillShape_SkipsZeroAlpha(t *testing.T) {
-	shared := NewGPUShared()
+	shared := readyShared(t)
 	rc := shared.NewRenderContext()
 
 	target := gg.GPURenderTarget{Width: 100, Height: 100, Data: make([]byte, 100*100*4), Stride: 400}
@@ -55,7 +55,7 @@ func TestFillShape_SkipsZeroAlpha(t *testing.T) {
 // TestFillShape_KeepsSemiTransparent verifies that shapes with partial
 // alpha (e.g., 0.5) are NOT skipped — only fully transparent (alpha=0).
 func TestFillShape_KeepsSemiTransparent(t *testing.T) {
-	shared := NewGPUShared()
+	shared := readyShared(t)
 	rc := shared.NewRenderContext()
 
 	target := gg.GPURenderTarget{Width: 100, Height: 100, Data: make([]byte, 100*100*4), Stride: 400}
