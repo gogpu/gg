@@ -141,10 +141,10 @@ test(path): add iterator edge case tests
 
 - **Focused:** One feature or fix per PR
 - **Tested:** Include tests for new functionality
-- **Documented:** Update the user-facing docs the change touches (README, package docs, examples). **Don't edit
-  `CHANGELOG.md`** — the maintainer writes the `[Unreleased]` entry when merging, with your credit. Every open PR
-  adding its own entry at the same anchor means a rebase for all of them; put the user-visible summary in the PR
-  description instead.
+- **Documented:** Update the user-facing docs the change touches (README, package docs, examples).
+- **Don't edit `CHANGELOG.md`.** The maintainer writes the entry under `[Unreleased]` with your credit
+  (`(#123, by @you)`) when merging, so entries are written once and in one voice — and no two PRs conflict on the
+  same `[Unreleased]` section. Write the user-visible summary in your PR description instead.
 - **Clean history:** Squash commits if needed
 - **CI passing:** All GitHub Actions checks must pass
 
