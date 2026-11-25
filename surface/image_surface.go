@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"sync/atomic"
 
 	"github.com/gogpu/gg/internal/raster"
 )
@@ -39,7 +40,7 @@ type ImageSurface struct {
 	edgeBuilder *raster.EdgeBuilder
 
 	// closed tracks if Close has been called
-	closed bool
+	closed atomic.Bool
 }
 
 // NewImageSurface creates a new CPU-based surface with the given dimensions.
@@ -88,7 +89,7 @@ func (s *ImageSurface) Height() int {
 
 // Clear fills the entire surface with the given color.
 func (s *ImageSurface) Clear(c color.Color) {
-	if s.closed {
+	if s.closed.Load() {
 		return
 	}
 
@@ -106,7 +107,7 @@ func (s *ImageSurface) Clear(c color.Color) {
 
 // Fill fills the given path using the specified style.
 func (s *ImageSurface) Fill(path *Path, style FillStyle) {
-	if s.closed || path == nil || path.IsEmpty() {
+	if s.closed.Load() || path == nil || path.IsEmpty() {
 		return
 	}
 
@@ -143,7 +144,7 @@ func (s *ImageSurface) Fill(path *Path, style FillStyle) {
 
 // Stroke strokes the given path using the specified style.
 func (s *ImageSurface) Stroke(path *Path, style StrokeStyle) {
-	if s.closed || path == nil || path.IsEmpty() {
+	if s.closed.Load() || path == nil || path.IsEmpty() {
 		return
 	}
 
@@ -177,7 +178,7 @@ func (s *ImageSurface) Stroke(path *Path, style StrokeStyle) {
 
 // DrawImage draws an image at the specified position.
 func (s *ImageSurface) DrawImage(img image.Image, at Point, opts *DrawImageOptions) {
-	if s.closed || img == nil {
+	if s.closed.Load() || img == nil {
 		return
 	}
 
@@ -224,7 +225,7 @@ func (s *ImageSurface) Flush() error {
 
 // Snapshot returns a copy of the current surface contents.
 func (s *ImageSurface) Snapshot() *image.RGBA {
-	if s.closed {
+	if s.closed.Load() {
 		return nil
 	}
 
@@ -235,10 +236,11 @@ func (s *ImageSurface) Snapshot() *image.RGBA {
 
 // Close releases resources associated with the surface.
 func (s *ImageSurface) Close() error {
-	if s.closed {
+	// CompareAndSwap makes Close idempotent under concurrency: exactly one caller
+	// clears the resources, the rest return nil.
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.closed = true
 	s.img = nil
 	s.filler = nil
 	s.edgeBuilder = nil

@@ -8,6 +8,8 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"sync"
+	"sync/atomic"
 
 	"github.com/gogpu/gg/internal/clip"
 	"github.com/gogpu/gg/text"
@@ -79,7 +81,8 @@ type Context struct {
 	// Typed as gpuContextOps (defined in this package) to avoid circular import
 	// with internal/gpu while maintaining type safety.
 	gpuCtx            gpuContextOps
-	gpuFallbackWarned bool // true after first global fallback warning (avoid log spam)
+	gpuCtxMu          sync.RWMutex // guards gpuCtx: lazy creation, reads and Close
+	gpuFallbackWarned bool         // true after first global fallback warning (avoid log spam)
 
 	// Per-frame compositor (ADR-067). Set by ggcanvas.renderDirectToTarget,
 	// included in GPURenderTarget.Compositor for each render call.
@@ -87,7 +90,7 @@ type Context struct {
 	frameCompositor gpucontext.SurfaceCompositor
 
 	// Lifecycle
-	closed bool // Indicates whether Close has been called
+	closed atomic.Bool // set once by Close; concurrent Close calls return nil
 }
 
 type contextClipState struct {
@@ -256,23 +259,28 @@ func NewContextWithScale(width, height int, scale float64) *Context {
 // since it may be shared by other contexts. To release GPU resources
 // at application shutdown, call [CloseAccelerator].
 func (c *Context) Close() error {
-	if c.closed {
+	// CompareAndSwap makes Close idempotent under concurrency: exactly one caller
+	// runs the cleanup body, the rest return nil without touching GPU resources.
+	if !c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	c.closed = true
 
 	// Flush pending GPU operations so queued shapes are not lost.
 	c.flushGPUAccelerator()
 
-	// Close per-context GPU render context if it was created.
-	if c.gpuCtx != nil {
-		type gpuCtxCloser interface {
-			Close()
-		}
-		if closer, ok := c.gpuCtx.(gpuCtxCloser); ok {
+	// Close per-context GPU render context if it was created. The field is
+	// cleared under the lock; the closer runs outside it.
+	type gpuCtxCloser interface {
+		Close()
+	}
+	c.gpuCtxMu.Lock()
+	rc := c.gpuCtx
+	c.gpuCtx = nil
+	c.gpuCtxMu.Unlock()
+	if rc != nil {
+		if closer, ok := rc.(gpuCtxCloser); ok {
 			closer.Close()
 		}
-		c.gpuCtx = nil
 	}
 
 	// Clear path to release memory
@@ -1594,11 +1602,17 @@ type gpuContextAliasedTextOps interface {
 // *gpu.GPURenderContext in internal/gpu consumers.
 func (c *Context) GPURenderContext() any {
 	c.ensureGPUCtx()
+	c.gpuCtxMu.RLock()
+	defer c.gpuCtxMu.RUnlock()
 	return c.gpuCtx
 }
 
 // ensureGPUCtx lazily creates the per-context GPU render context.
 func (c *Context) ensureGPUCtx() {
+	// Double-checked under the write lock: concurrent first use must create one
+	// context, not one per caller with the losers leaking (BUG-RACE-003).
+	c.gpuCtxMu.Lock()
+	defer c.gpuCtxMu.Unlock()
 	if c.gpuCtx != nil {
 		return
 	}
@@ -1624,6 +1638,8 @@ func (c *Context) ensureGPUCtx() {
 // gpuCtxOps returns the per-context GPU ops interface, or nil if unavailable.
 func (c *Context) gpuCtxOps() gpuContextOps {
 	c.ensureGPUCtx()
+	c.gpuCtxMu.RLock()
+	defer c.gpuCtxMu.RUnlock()
 	return c.gpuCtx
 }
 

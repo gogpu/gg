@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"sync/atomic"
 )
 
 // GPUSurface is a GPU-accelerated surface wrapper.
@@ -39,7 +40,7 @@ type GPUSurface struct {
 	width   int
 	height  int
 	backend GPUBackend
-	closed  bool
+	closed  atomic.Bool
 }
 
 // GPUBackend is the interface that GPU implementations must provide.
@@ -102,7 +103,7 @@ func (s *GPUSurface) Height() int {
 
 // Clear fills the entire surface with the given color.
 func (s *GPUSurface) Clear(c color.Color) {
-	if s.closed || s.backend == nil {
+	if s.closed.Load() || s.backend == nil {
 		return
 	}
 	s.backend.Clear(c)
@@ -110,7 +111,7 @@ func (s *GPUSurface) Clear(c color.Color) {
 
 // Fill fills the given path using the specified style.
 func (s *GPUSurface) Fill(path *Path, style FillStyle) {
-	if s.closed || s.backend == nil || path == nil {
+	if s.closed.Load() || s.backend == nil || path == nil {
 		return
 	}
 	s.backend.Fill(path, style)
@@ -118,7 +119,7 @@ func (s *GPUSurface) Fill(path *Path, style FillStyle) {
 
 // Stroke strokes the given path using the specified style.
 func (s *GPUSurface) Stroke(path *Path, style StrokeStyle) {
-	if s.closed || s.backend == nil || path == nil {
+	if s.closed.Load() || s.backend == nil || path == nil {
 		return
 	}
 	s.backend.Stroke(path, style)
@@ -126,7 +127,7 @@ func (s *GPUSurface) Stroke(path *Path, style StrokeStyle) {
 
 // DrawImage draws an image at the specified position.
 func (s *GPUSurface) DrawImage(img image.Image, at Point, opts *DrawImageOptions) {
-	if s.closed || s.backend == nil || img == nil {
+	if s.closed.Load() || s.backend == nil || img == nil {
 		return
 	}
 	s.backend.DrawImage(img, at, opts)
@@ -134,7 +135,7 @@ func (s *GPUSurface) DrawImage(img image.Image, at Point, opts *DrawImageOptions
 
 // Flush ensures all pending operations are complete.
 func (s *GPUSurface) Flush() error {
-	if s.closed || s.backend == nil {
+	if s.closed.Load() || s.backend == nil {
 		return nil
 	}
 	return s.backend.Flush()
@@ -143,7 +144,7 @@ func (s *GPUSurface) Flush() error {
 // Snapshot returns the current surface contents as an image.
 // This performs a GPU readback, which may be slow.
 func (s *GPUSurface) Snapshot() *image.RGBA {
-	if s.closed || s.backend == nil {
+	if s.closed.Load() || s.backend == nil {
 		return nil
 	}
 	img, err := s.backend.Readback()
@@ -155,10 +156,11 @@ func (s *GPUSurface) Snapshot() *image.RGBA {
 
 // Close releases all resources associated with the surface.
 func (s *GPUSurface) Close() error {
-	if s.closed {
+	// CompareAndSwap makes Close idempotent under concurrency: exactly one caller
+	// releases the backend, the rest return nil.
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.closed = true
 
 	if s.backend != nil {
 		return s.backend.Close()
@@ -169,7 +171,7 @@ func (s *GPUSurface) Close() error {
 // Backend returns the underlying GPU backend.
 // Returns nil if the surface is closed.
 func (s *GPUSurface) Backend() GPUBackend {
-	if s.closed {
+	if s.closed.Load() {
 		return nil
 	}
 	return s.backend
