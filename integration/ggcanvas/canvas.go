@@ -830,7 +830,8 @@ func (c *Canvas) renderDirectToTarget(
 		preserveContent = preserver.PreserveContent()
 	}
 
-	// ADR-067: pass compositor per-frame to gg's render target.
+	// gogpu ADR-067 (compositor-owned render target): pass the compositor per-frame
+	// to gg's render target.
 	type compositorProvider interface {
 		Compositor() gpucontext.SurfaceCompositor
 	}
@@ -982,7 +983,8 @@ func (c *Canvas) Render(dc RenderTarget) error {
 		}
 	}
 
-	// ADR-067: compositor wiring moved to renderDirectToTarget (per-frame via GPURenderTarget.Compositor).
+	// gogpu ADR-067 (compositor-owned render target): compositor wiring moved to
+	// renderDirectToTarget (per-frame via GPURenderTarget.Compositor).
 
 	// Auto-detect DPI scale change (ADR-059). Zero overhead when unchanged.
 	if windowProvider != nil {
