@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Concurrent `Close` calls are idempotent**: `Context.Close` and the surface `Close` methods checked a plain
+  flag and then set it, so two callers could both run the cleanup and double-free GPU resources. The flag is
+  atomic with a compare-and-swap now — exactly one caller runs the body, the rest return nil.
+- **The per-context GPU render context is created once**: concurrent first use of a `Context` could create two
+  render contexts and leak one; creation and every read now go through a lock.
 - **GPU path draws no longer vanish when no device can be had**: the four queueing entry points (`FillPath`,
   `StrokePath`, `FillShape`, `StrokeShape`) now check device readiness before accepting a draw. On a machine
   without an adapter they report the CPU fallback instead of queueing into a Flush that would drop the work —
