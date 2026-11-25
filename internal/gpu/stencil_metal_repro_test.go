@@ -62,7 +62,8 @@ func createMetalDevice(t *testing.T) (*wgpu.Device, *wgpu.Queue, func()) {
 // TestMetalStencilCoverMasksToShape is the regression test for the macOS/Metal
 // stencil-then-cover bug (rounded UI rendered as squares, clipped content vanished).
 //
-// Root cause: wgpu/hal/metal/device.go built MTLDepthStencilDescriptor with only
+// Root cause: wgpu's Metal device implementation (hal/metal/device.go before the
+// ADR-070 package move) built MTLDepthStencilDescriptor with only
 // the depth fields and never translated the stencil compare/ops/masks. Metal
 // defaults stencilCompareFunction=Always, so the cover pass's NotEqual(ref 0)
 // test ALWAYS passed and the cover quad flooded the whole path bounding box.

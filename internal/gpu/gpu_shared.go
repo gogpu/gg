@@ -492,9 +492,10 @@ func (s *GPUShared) ensureTextEngine() {
 }
 
 func (s *GPUShared) initGPU() error {
-	// Vulkan where it is registered (Windows, Linux) and Metal on macOS — the
-	// platform set wgpu registers by default. MoltenVK is not built in, so a
-	// Vulkan-only mask leaves standalone gg without an adapter on macOS and
+	// Vulkan where it is registered (Windows, Linux) and Metal on macOS. DX12 and
+	// GLES are not requested here, and the software adapter is not in the mask — it
+	// is reached only through wgpu's own fallback path. MoltenVK is not built in, so
+	// a Vulkan-only mask leaves standalone gg without an adapter on macOS and
 	// silently forces the CPU fallback there.
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
 		Backends: wgpu.BackendsVulkan | wgpu.BackendsMetal,

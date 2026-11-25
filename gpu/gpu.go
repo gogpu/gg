@@ -5,7 +5,7 @@
 //
 // Import this package to enable both GPU-based shape rendering (SDF for circles,
 // rounded rectangles) and adaptive tile-based rasterization for complex paths.
-// The GPU accelerator uses wgpu/hal compute shaders for parallel evaluation.
+// The GPU accelerator drives wgpu compute shaders for parallel evaluation.
 //
 // If GPU initialization fails (no Vulkan/Metal/DX12 available), the
 // registration is silently skipped and rendering falls back to CPU.

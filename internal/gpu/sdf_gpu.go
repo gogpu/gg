@@ -11,7 +11,7 @@ import (
 	"github.com/gogpu/gpucontext"
 )
 
-// SDFAccelerator provides GPU-accelerated rendering using wgpu/hal render
+// SDFAccelerator provides GPU-accelerated rendering using wgpu render
 // pipelines. It implements the gg.GPUAccelerator interface.
 //
 // Internally, SDFAccelerator holds a GPUShared (shared device, pipelines,
