@@ -2,7 +2,7 @@
 
 > Pure Go 2D graphics library: immediate-mode drawing (paths, shapes, strokes, gradients, images, text) on a CPU
 > rasterizer core, with optional GPU acceleration through gogpu/wgpu (in a gogpu app: the backend gogpu picks, e.g.
-> Vulkan, DX12, Metal, GLES; standalone: Vulkan for now). The API
+> Vulkan, DX12, Metal, GLES; standalone: Vulkan, and Metal on macOS). The API
 > has two styles over one context: stateful (`SetColor`, `Fill`) and per-call paint. Also: a retained scene graph,
 > 29 blend modes, layers and alpha masks, a Pure Go font stack (TrueType and CFF, variable fonts, OpenType shaping,
 > hinting, MSDF and glyph-mask GPU text), an SVG renderer, and a recording system for PDF/SVG export. CPU rendering
