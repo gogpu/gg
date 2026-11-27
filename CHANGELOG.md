@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.52.8] - 2026-11-27
 
 ### Changed
 
@@ -17,15 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Native curve subdivision terminates on float32 fixed points** (#541, by @timzifer): the analytic rasterizer
+  subdivided cubics and quadratics against an absolute 0.1 px deviation test with no depth bound. At large
+  coordinates a float32 midpoint can round back to an input point, leaving a child identical to its parent and the
+  deviation never decreasing — a stack overflow that a clip rectangle did not prevent either, because the
+  out-of-bounds guard ran after the recursive branch. Subdivision now carries a depth through the native helpers
+  and emits the remaining chord as a line past depth 10, as the flattening routines already do.
 - **Concurrent `Close` calls are idempotent**: `Context.Close` and the surface `Close` methods checked a plain
   flag and then set it, so two callers could both run the cleanup and double-free GPU resources. The flag is
   atomic with a compare-and-swap now — exactly one caller runs the body, the rest return nil.
 - **The per-context GPU render context is created once**: concurrent first use of a `Context` could create two
   render contexts and leak one; creation and every read now go through a lock.
-- **GPU path draws no longer vanish when no device can be had**: the four queueing entry points (`FillPath`,
-  `StrokePath`, `FillShape`, `StrokeShape`) now check device readiness before accepting a draw. On a machine
-  without an adapter they report the CPU fallback instead of queueing into a Flush that would drop the work —
-  previously every filled and stroked path disappeared while text still rendered, and no error surfaced.
+- **GPU path draws no longer vanish when no device can be had** (#534, by @timzifer): the four queueing entry
+  points (`FillPath`, `StrokePath`, `FillShape`, `StrokeShape`) now check device readiness before accepting a
+  draw. On a machine without an adapter they report the CPU fallback instead of queueing into a Flush that would
+  drop the work — previously every filled and stroked path disappeared while text still rendered, and no error
+  surfaced.
 - **Standalone GPU initialization on macOS**: the device request is no longer Vulkan-only. Metal is now requested
   too — the platform set wgpu registers by default — so gg without a device provider uses the GPU on macOS instead
   of silently falling back to the CPU rasterizer. Windows and Linux keep Vulkan.

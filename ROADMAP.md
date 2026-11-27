@@ -19,9 +19,13 @@
 
 ---
 
-## Current State: v0.52.7
+## Current State: v0.52.8
 
 ✅ **Production-ready** with GPU-accelerated rendering:
+- **wgpu v0.35.6 / ADR-070 adaptation** — the GPU path runs on the current wgpu stack (wgpu v0.35.6, naga v0.22.7, gputypes v0.9.2, gpucontext v0.32.1); about 17.7K lines of legacy wrappers around the removed `wgpu/core` are gone
+- **Bounded curve subdivision** (#541) — the analytic rasterizer can no longer stack-overflow on large float32 coordinates
+- **Draws never vanish without a device** (#534) — path draws report the CPU fallback instead of being silently dropped
+- **Thread-safe Close and GPU context** — idempotent `Close`, one render context per `Context`
 - **Font fallback on the GPU text path** (#513) — text with a mixed-font `MultiFace`/`FilteredFace` is split by source face, each glyph keeps its face, and single-font runs stay on the glyph-mask and MSDF pipelines
 - **Reused ggcanvas** (#496, ADR-064) — `New`/`NewWithScale` return the existing canvas for the same device, size and scale, keyed by the provider's GPU handles
 - **MSAA sample-count cap** (#547) — `SetAcceleratorMaxSampleCount(1)` turns multi-sampling off for apps that do not need it
@@ -113,7 +117,15 @@
 
 ## Current Release
 
-### v0.50.11 — Current
+### v0.52.8 — Current
+- [x] **wgpu v0.35.6 / ADR-070 adaptation** — `wgpu/core` dependency removed, ~17.7K lines of dead wrappers deleted, GPU tests on the `wgputest` seam
+- [x] **Bounded curve subdivision** (#541, @timzifer) — depth-limited native subdivision, no stack overflow at large coordinates
+- [x] **No silent draw loss without a device** (#534, @timzifer) — queueing entry points check device readiness first
+- [x] **Thread safety** — idempotent `Close` (CAS), one GPU render context per `Context`
+- [x] **macOS standalone GPU init** — Metal requested beside Vulkan; stencil cover pipeline valid without a session clip layout
+- [x] **Dependencies** — wgpu v0.35.6, naga v0.22.7, gputypes v0.9.2, gpucontext v0.32.1
+
+### v0.50.11 ✅ Released
 - [x] **Skia AAA forward-diff pipeline** (ADR-063) — updateQuadratic/updateCubic/updateLine ported from Skia, deviation-based curve subdivision
 - [x] **Forward-diff curve edges as default** — 30% faster on small paths, value-type QuadraticEdge/CubicEdge (zero per-edge heap allocs)
 - [x] **SVG vector icon rendering** (#463, #464) — RenderToScene, stroke hinting, scene renderer stroke support
