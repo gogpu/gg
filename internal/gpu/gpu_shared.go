@@ -195,14 +195,13 @@ func (s *GPUShared) SetForceSDF(force bool) {
 // SwiftShader for testing. Capability differences are handled via probing
 // (e.g., MSAA fallback to 1x), not blanket disabling.
 func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error {
+	softwareMode := false
 	if adapter := provider.Adapter(); !adapter.IsNil() {
 		wgpuAdapter := wgpu.AdapterFromHandle(adapter)
 		if wgpuAdapter != nil && wgpuAdapter.Info().DeviceType == gputypes.DeviceTypeCPU {
 			slogger().Info("gpu-shared: software adapter detected — GPU features available, performance may be reduced",
 				"adapter", wgpuAdapter.Info().Name)
-			s.mu.Lock()
-			s.softwareMode = true
-			s.mu.Unlock()
+			softwareMode = true
 		}
 	}
 
@@ -237,6 +236,7 @@ func (s *GPUShared) SetDeviceProvider(provider gpucontext.DeviceProvider) error 
 	s.device = wgpuDev
 	s.queue = wgpuQueue
 	s.externalDevice = true
+	s.softwareMode = softwareMode
 
 	// Probe MSAA support (Skia Graphite pattern: try 4x, fallback to 1x).
 	s.sampleCount = resolveSampleCount(s.device, s.maxSampleCount)
