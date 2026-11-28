@@ -228,7 +228,7 @@ func TestPixelToTileF(t *testing.T) {
 // =============================================================================
 
 func TestNewLineSegment(t *testing.T) {
-	// Test normal segment (Y0 <= Y1)
+	// Test normal segment (Y0 <= Y1). Downward winding is +1.
 	seg := NewLineSegment(10, 20, 30, 40, 1)
 	if seg.Y0 > seg.Y1 {
 		t.Error("Segment should be monotonic: Y0 <= Y1")
@@ -237,13 +237,18 @@ func TestNewLineSegment(t *testing.T) {
 		t.Errorf("Winding = %d, want 1", seg.Winding)
 	}
 
-	// Test reversed segment (Y1 < Y0)
-	seg2 := NewLineSegment(30, 40, 10, 20, 1)
+	// Test reversed segment: coordinates are normalized to Y0 <= Y1, but the
+	// winding keeps describing the original direction (upward, -1). It must
+	// NOT be negated on swap — see NewLineSegment's doc comment.
+	seg2 := NewLineSegment(30, 40, 10, 20, -1)
 	if seg2.Y0 > seg2.Y1 {
 		t.Error("Segment should be normalized: Y0 <= Y1")
 	}
+	if seg2.X0 != 10 || seg2.X1 != 30 {
+		t.Errorf("Coordinates not swapped: X0=%f X1=%f, want 10, 30", seg2.X0, seg2.X1)
+	}
 	if seg2.Winding != -1 {
-		t.Errorf("Reversed segment winding = %d, want -1", seg2.Winding)
+		t.Errorf("Reversed segment winding = %d, want -1 (original direction preserved)", seg2.Winding)
 	}
 }
 
