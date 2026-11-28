@@ -491,10 +491,8 @@ func (p *svgParser) arcToCubics(rx, ry, xRotDeg float64, largeArc, sweep bool, x
 // arcSegmentToCubic converts a single arc segment (<=pi/2) to a cubic Bezier.
 // The arc is on the unit circle from angle a1 to a2, scaled by (rx, ry) and rotated.
 func (p *svgParser) arcSegmentToCubic(cx, cy, rx, ry, cosRot, sinRot, a1, a2 float64) {
-	// Standard cubic Bezier approximation for a circular arc.
-	// alpha = 4 * tan(sweep/4) / 3
-	halfSweep := (a2 - a1) / 2.0
-	alpha := math.Sin(halfSweep) * (math.Sqrt(4+3*math.Tan(halfSweep)*math.Tan(halfSweep)) - 1) / 3.0
+	// Scale the endpoint tangents so the cubic passes through the arc midpoint.
+	alpha := 4 * math.Tan((a2-a1)/4) / 3
 
 	cos1 := math.Cos(a1)
 	sin1 := math.Sin(a1)
