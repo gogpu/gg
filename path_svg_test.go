@@ -454,6 +454,37 @@ func TestParseSVGPath_Arc(t *testing.T) {
 	}
 }
 
+func TestParseSVGPath_ArcMidpoint(t *testing.T) {
+	// Each cubic should pass through the point halfway around its arc.
+	tests := []struct {
+		name string
+		path string
+		want Point
+	}{
+		{"quarter circle", "M1 0 A1 1 0 0 1 0 1", Pt(1/math.Sqrt2, 1/math.Sqrt2)},
+		{"reverse quarter ellipse", "M0 2 a4 2 0 0 0 4 -2", Pt(4/math.Sqrt2, 2/math.Sqrt2)},
+		{"60 degree arc", "M-1 0 A2 2 0 0 1 1 0", Pt(0, math.Sqrt(3)-2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, err := ParseSVGPath(tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			elems := collectVerbs(path)
+			if len(elems) != 2 || elems[0].Verb != MoveTo || elems[1].Verb != CubicTo {
+				t.Fatalf("expected MoveTo followed by CubicTo, got %v", elems)
+			}
+			start, c := elems[0].Coords, elems[1].Coords
+			curve := NewCubicBez(Pt(start[0], start[1]), Pt(c[0], c[1]), Pt(c[2], c[3]), Pt(c[4], c[5]))
+			got := curve.Eval(0.5)
+			if distance := got.Distance(tt.want); math.IsNaN(distance) || distance > 1e-12 {
+				t.Errorf("arc midpoint = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSVGPath_ArcZeroRadius(t *testing.T) {
 	// Zero radius = straight line.
 	p, err := ParseSVGPath("M0,0 A0,0,0,0,1,100,0")
