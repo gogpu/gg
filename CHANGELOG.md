@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dead `gpu.Backend` facade, its stub command encoders and the `GPUSceneRenderer` chain are deleted (about 17.7K
   lines of legacy wrappers and their tests in `internal/gpu`, no production caller), and the GPU tests build their
   HAL devices through wgpu's `wgputest` seam. Dependencies: wgpu v0.35.6, naga v0.22.7, gputypes v0.9.2,
-  gpucontext v0.32.1.
+  gpucontext v0.32.1. An app that also uses gogpu needs **gogpu v0.56.0 or newer** with this release — older
+  versions (e.g. v0.54.1) import the `wgpu/hal/*` packages ADR-070 removed, and `go mod tidy` cannot resolve
+  them alongside gg v0.52.8.
 
 ### Fixed
 
