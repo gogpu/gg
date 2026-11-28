@@ -9,13 +9,18 @@ import (
 // LineSegment represents a monotonic line segment for tile processing.
 // A monotonic segment has consistent Y direction (always going down or up).
 // This simplifies tile intersection calculations.
+//
+// Coordinates are normalized so that Y0 <= Y1; Winding preserves the original
+// direction of the segment (+1 downward, -1 upward).
 type LineSegment struct {
 	// Start point (X0, Y0) and end point (X1, Y1).
 	// For monotonic segments, Y0 <= Y1 (always going down).
 	X0, Y0, X1, Y1 float32
 
-	// Winding direction: +1 for left-to-right, -1 for right-to-left.
-	// Determined by original path direction before monotonic split.
+	// Winding is the direction of the original segment: +1 downward
+	// (Y increasing), -1 upward (Y decreasing). The tile rasterizers use it as
+	// the winding delta contributed where the segment crosses a tile-row top.
+	// Callers derive it from the pre-normalization Y order (flatten.go).
 	Winding int8
 
 	// TileY0, TileY1 are the tile row range this segment spans.
@@ -24,7 +29,14 @@ type LineSegment struct {
 }
 
 // NewLineSegment creates a new line segment, ensuring Y0 <= Y1.
-// The winding is adjusted if the segment is flipped.
+//
+// The winding parameter is the direction of the original segment (+1 downward,
+// -1 upward), as computed from (y0, y1) before normalization. Sorting the
+// endpoints so that Y0 <= Y1 does NOT change the winding: the stored Winding
+// must always describe the original direction, because the tile rasterizers use
+// it as the winding delta. Negating it here as well would flip every upward
+// segment back to downward and make a closed contour's winding never return to
+// zero (NonZero then fills the space between contours).
 func NewLineSegment(x0, y0, x1, y1 float32, winding int8) LineSegment {
 	seg := LineSegment{
 		X0:      x0,
@@ -34,11 +46,11 @@ func NewLineSegment(x0, y0, x1, y1 float32, winding int8) LineSegment {
 		Winding: winding,
 	}
 
-	// Ensure Y0 <= Y1 (monotonic going down)
+	// Ensure Y0 <= Y1 (monotonic going down). Winding is intentionally
+	// preserved: see the doc comment above.
 	if y1 < y0 {
 		seg.X0, seg.X1 = x1, x0
 		seg.Y0, seg.Y1 = y1, y0
-		seg.Winding = -winding
 	}
 
 	// Precompute tile range

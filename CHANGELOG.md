@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **NonZero fills through the tile CPU fillers no longer join separate contours**: the tile-based coverage
+  fillers (`SparseStripsFiller`, `TileComputeFiller`) normalized every flattened segment to a downward
+  direction and negated its winding in the same step, so each segment ended up counting as `+1`; the running
+  NonZero winding never returned to zero, and everything to the right of a closed contour — the gaps between
+  contours included — filled solid. The winding now keeps describing the segment's original direction, so
+  every closed contour resolves to zero. Single complex contours routed to the tile fillers were affected as
+  well (detected shapes such as circles and rounded rectangles escape only because the SDF accelerator
+  handles them first); EvenOdd was unaffected (it reads parity). This is what made rotated or sheared text
+  with anti-aliasing render as a solid bar on the CPU path, where the many glyph contours route to the tile
+  fillers, and it fixes holes and opposite-winding nested contours through those fillers too.
+
 ## [0.52.8] - 2026-11-27
 
 ### Changed
